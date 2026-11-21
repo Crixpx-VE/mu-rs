@@ -52,12 +52,20 @@ fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
     v.try_into().unwrap_or_else(|_| panic!("{what} necesita {N} números"))
 }
 
+/// `Data` junto al ejecutable (versión empaquetada), luego `./Data`, y si no, la de las referencias.
+fn default_data_dir() -> PathBuf {
+    let next_to_exe = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("Data")));
+    [next_to_exe, Some(PathBuf::from("Data"))]
+        .into_iter()
+        .flatten()
+        .find(|p| p.is_dir())
+        .unwrap_or_else(|| PathBuf::from("../referencias/MuMain/src/bin/Data"))
+}
+
 impl Args {
     fn parse() -> Self {
         let mut args = Args {
-            data: std::env::var_os("MU_DATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| PathBuf::from("../referencias/MuMain/src/bin/Data")),
+            data: std::env::var_os("MU_DATA").map(PathBuf::from).unwrap_or_else(default_data_dir),
             world: 1,
             spawn: None,
             walk_to: None,
