@@ -105,6 +105,22 @@ pub fn read_attributes(buf: &[u8]) -> Result<Vec<u16>> {
         .collect())
 }
 
+/// Archivos de textura del suelo de `world` según su índice en las capas del `.map`.
+fn tile_textures(world: u16) -> Vec<(u8, String)> {
+    let mut v = default_tile_textures();
+    // Login (74) y selección de personaje (75): la 10 es `AlphaTile01.Tga` (`MapManager::LoadWorld`).
+    if world == 74 || world == 75 {
+        v[10].1 = "AlphaTile01.ozt".into();
+    }
+    v
+}
+
+/// Índice de textura que el original dibuja con prueba de alfa (`RenderFace`): la 10 en los
+/// Empire Guardian (carpetas 70-73), el login (74) y la selección de personaje (75).
+pub fn alpha_tested_tile(world: u16) -> Option<u8> {
+    (70..=75).contains(&world).then_some(10)
+}
+
 /// Archivos de textura del suelo según su índice en las capas del `.map`.
 fn default_tile_textures() -> Vec<(u8, String)> {
     let mut v: Vec<(u8, String)> = [
@@ -209,7 +225,7 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
         used[t as usize] = true;
     }
     let mut textures: Vec<Option<Texture>> = vec![None; 256];
-    for (index, name) in default_tile_textures() {
+    for (index, name) in tile_textures(world) {
         if used[index as usize] {
             textures[index as usize] = texture::load(&dir, &name).ok();
         }

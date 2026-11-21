@@ -33,7 +33,8 @@ impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameScene::Login), (start_tour, spawn_login_ui))
             .add_systems(FixedUpdate, step_tour.run_if(in_state(GameScene::Login)))
-            .add_systems(Update, (place_camera, login_input).run_if(in_state(GameScene::Login)))
+            .init_resource::<Tuning>()
+            .add_systems(Update, (tune, place_camera, login_input).chain().run_if(in_state(GameScene::Login)))
             .add_systems(OnExit(GameScene::Login), (crate::scene::despawn::<LoginUi>, |mut c: Commands| c.remove_resource::<Tour>()));
     }
 }
@@ -126,6 +127,41 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     commands.insert_resource(t);
 }
 
+/// Ajustes de prueba de la cámara (teclas en el login), para compararla con el cliente original.
+#[derive(Resource, Clone, Copy, PartialEq)]
+struct Tuning {
+    distance: f32,
+    offset: Vec3,
+    pitch: f32,
+}
+
+impl Default for Tuning {
+    fn default() -> Self {
+        Self { distance: 1.0, offset: Vec3::ZERO, pitch: 0.0 }
+    }
+}
+
+/// RePág/AvPág: distancia ×1.1 / ÷1.1 · flechas: mover 50 · Inicio/Fin: altura ±50 ·
+/// Insert/Supr: inclinación ±2.5°. Cada cambio se apunta en el registro.
+fn tune(keys: Res<ButtonInput<KeyCode>>, mut tuning: ResMut<Tuning>) {
+    let before = *tuning;
+    let t = &mut *tuning;
+    let pressed = |k: KeyCode| keys.just_pressed(k);
+    if pressed(KeyCode::PageUp) { t.distance *= 1.1; }
+    if pressed(KeyCode::PageDown) { t.distance /= 1.1; }
+    if pressed(KeyCode::ArrowLeft) { t.offset.x -= 50.0; }
+    if pressed(KeyCode::ArrowRight) { t.offset.x += 50.0; }
+    if pressed(KeyCode::ArrowUp) { t.offset.y += 50.0; }
+    if pressed(KeyCode::ArrowDown) { t.offset.y -= 50.0; }
+    if pressed(KeyCode::Home) { t.offset.z += 50.0; }
+    if pressed(KeyCode::End) { t.offset.z -= 50.0; }
+    if pressed(KeyCode::Insert) { t.pitch += 2.5; }
+    if pressed(KeyCode::Delete) { t.pitch -= 2.5; }
+    if *t != before {
+        info!("login: cámara de prueba: distancia x{:.2}, desplazamiento {:?}, inclinación {:+.1}°", t.distance, t.offset, t.pitch);
+    }
+}
+
 /// Ojo, inclinación y giro de la vista de este tick.
 fn view(t: &Tour) -> (Vec3, f32, f32) {
     let d = BASE_DISTANCE * t.level * 0.1;
@@ -208,11 +244,23 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
 }
 
 /// Coloca la cámara entre el tick anterior y este.
-fn place_camera(tour: Option<Res<Tour>>, fixed: Res<Time<Fixed>>, mut cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>) {
+fn place_camera(
+    tour: Option<Res<Tour>>,
+    tuning: Res<Tuning>,
+    fixed: Res<Time<Fixed>>,
+    mut cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+) {
     let Some(t) = tour else { return };
     let a = fixed.overstep_fraction();
-    let eye = t.prev.0.lerp(t.now.0, a);
-    let pitch = t.prev.1 + (t.now.1 - t.prev.1) * a;
+    let mut eye = t.prev.0.lerp(t.now.0, a);
+    let pitch = t.prev.1 + (t.now.1 - t.prev.1) * a + tuning.pitch;
+    // Ajuste de prueba: la distancia se alarga sobre la diagonal del original.
+    if tuning.distance != 1.0 {
+        let d = BASE_DISTANCE * t.level * 0.1 * (tuning.distance - 1.0);
+        let (s, c) = (-45f32).to_radians().sin_cos();
+        eye += Vec3::new(-s * d, -c * d, 0.0);
+    }
+    eye += tuning.offset;
     let yaw = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
     for (mut tf, mut proj) in &mut cameras {
         *tf = crate::camera::mu_view(eye, pitch, yaw);

@@ -84,7 +84,14 @@ fn spawn_terrain(
                 base_color_texture: Some(image.clone()),
                 unlit: true,
                 cull_mode: None,
-                alpha_mode: if layer == 1 { AlphaMode::Opaque } else { AlphaMode::Blend },
+                alpha_mode: if layer == 2 {
+                    AlphaMode::Blend
+                } else if terrain::alpha_tested_tile(args.world) == Some(index as u8) {
+                    // `RenderFace`: esta textura va con prueba de alfa (rejas, huecos).
+                    AlphaMode::Mask(crate::objects::ALPHA_REF)
+                } else {
+                    AlphaMode::Opaque
+                },
                 depth_bias: if layer == 1 { 0.0 } else { 1.0 },
                 ..default()
             });
