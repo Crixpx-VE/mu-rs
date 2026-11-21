@@ -168,7 +168,8 @@ pub fn render_quads(
             let y = d.center.y + dx * sn + dy * cs;
             Vec3::new(x, y, height(x, y) + d.lift)
         });
-        let uvs = [[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        // Como RenderTerrainAlphaBitmap: V crece hacia +Y.
+        let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         out.entry((d.texture, d.blend)).or_default().quad(corners, uvs, linear(d.color));
     }
 

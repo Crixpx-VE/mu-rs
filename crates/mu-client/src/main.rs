@@ -60,6 +60,8 @@ pub struct Args {
     pub invasion: u8,
     /// Resolución de la ventana solo para esta vez (si no, la guardada o 1024×768).
     pub resolution: Option<(u32, u32)>,
+    /// Lanza todas las habilidades una tras otra (para probar sin teclado).
+    pub skill_test: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -95,6 +97,7 @@ impl Args {
             no_vsync: false,
             invasion: 0,
             resolution: None,
+            skill_test: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -110,6 +113,7 @@ impl Args {
                 "--cam" => args.cam = Some(parse_floats(it.next(), "--cam")),
                 "--zoom" => args.zoom = Some(it.next().expect("--zoom <casillas>").parse().expect("número")),
                 "--sin-vsync" => args.no_vsync = true,
+                "--probar-habilidades" => args.skill_test = true,
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
                     if args.resolution.is_none() {

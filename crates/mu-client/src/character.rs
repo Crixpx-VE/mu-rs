@@ -73,6 +73,8 @@ const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
 /// Lanza una habilidad: animación del personaje y su `AttackTime` en el motor de efectos.
 fn cast_skill(
     keys: Res<ButtonInput<KeyCode>>,
+    args: Res<Args>,
+    mut auto: Local<usize>,
     mut world: ResMut<crate::fx::FxWorld>,
     mut players: Query<(Entity, &mut Player)>,
 ) {
@@ -80,7 +82,14 @@ fn cast_skill(
     if p.casting.is_some() {
         return;
     }
-    let Some(&(_, skill, action, speed)) = SKILL_KEYS.iter().find(|(k, ..)| keys.just_pressed(*k)) else { return };
+    // `--probar-habilidades`: una tras otra, sin teclado.
+    let pressed = if args.skill_test {
+        *auto += 1;
+        Some(&SKILL_KEYS[(*auto - 1) % SKILL_KEYS.len()])
+    } else {
+        SKILL_KEYS.iter().find(|(k, ..)| keys.just_pressed(*k))
+    };
+    let Some(&(_, skill, action, speed)) = pressed else { return };
     p.path.clear();
     p.pos = Vec2::new(p.pos.x.floor() + 0.5, p.pos.y.floor() + 0.5);
     p.action = action;
@@ -229,6 +238,7 @@ fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>
         weapon: Some((WEAPON_MODEL, 0)),
         weapon_bone: RIGHT_HAND_BONE,
         live: true,
+        pos_sword: Vec3::ZERO,
     })
 }
 

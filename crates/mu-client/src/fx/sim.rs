@@ -46,10 +46,15 @@ pub struct Actors {
 #[derive(Component, Clone)]
 pub struct ActorState(pub Actor);
 
-pub fn gather_actors(mut actors: ResMut<Actors>, q: Query<(Entity, &ActorState, Has<crate::character::Player>)>) {
+pub fn gather_actors(mut actors: ResMut<Actors>, world: Res<FxWorld>, q: Query<(Entity, &ActorState, Has<crate::character::Player>)>) {
     actors.map.clear();
     for (e, s, is_hero) in &q {
-        actors.map.insert(e, s.0.clone());
+        let mut a = s.0.clone();
+        // `m_vPosSword`: lo calcula la habilidad en curso del personaje.
+        if let Some(c) = world.casts.iter().find(|c| c.owner == e) {
+            a.pos_sword = c.pos_sword;
+        }
+        actors.map.insert(e, a);
         if is_hero {
             actors.hero = Some(e);
         }
@@ -96,13 +101,13 @@ pub fn tick(
         if let Some(stage) = kind.stage {
             stage(c, &mut ctx);
         }
+        // Como el original: AttackStage, AttackTime += 1 y entonces se mira el límite (mismo tick).
+        c.attack_time += 1;
         if c.attack_time >= LIMIT_ATTACK_TIME {
             if let Some(finish) = kind.finish {
                 finish(c, &mut ctx);
             }
             c.live = false;
-        } else {
-            c.attack_time += 1;
         }
     }
     casts.retain(|c| c.live);

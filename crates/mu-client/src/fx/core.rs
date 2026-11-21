@@ -100,6 +100,8 @@ pub struct Actor {
     /// Hueso de la mano del arma (`LinkBone`).
     pub weapon_bone: usize,
     pub live: bool,
+    /// `m_vPosSword`: punto que calcula la habilidad en curso (p. ej. Death Stab).
+    pub pos_sword: Vec3,
 }
 
 impl Actor {

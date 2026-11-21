@@ -68,6 +68,10 @@ impl FxModels {
         if let Some(&(d, f, t)) = self.table.get(&id) {
             return Some((d.to_string(), f.to_string(), t.to_string()));
         }
+        // Los que el original carga en bucles (el generador no los ve).
+        if (MODEL_STONE1..=MODEL_STONE2).contains(&id) {
+            return Some(("Skill".into(), format!("Stone{:02}.bmd", id - MODEL_STONE1 + 1), "Skill".into()));
+        }
         if (MODEL_ITEM..MODEL_ITEM + 16 * 512).contains(&id) {
             const GROUPS: [&str; 7] = ["Sword", "Axe", "Mace", "Spear", "Bow", "Staff", "Shield"];
             let rel = id - MODEL_ITEM;
@@ -170,7 +174,7 @@ pub fn render_models(
             let (blend, tint, uv) = if d.bright {
                 let l = d.light * d.alpha;
                 (Blend::Glow, Vec4::new(lin(l.x), lin(l.y), lin(l.z), 1.0), Vec2::ZERO)
-            } else if part.texture_index == d.blend_mesh {
+            } else if d.blend_mesh <= -2 || part.texture_index == d.blend_mesh {
                 let l = d.light * d.blend_mesh_light;
                 (Blend::Glow, Vec4::new(lin(l.x), lin(l.y), lin(l.z), 1.0), d.blend_mesh_tex_coord)
             } else {
