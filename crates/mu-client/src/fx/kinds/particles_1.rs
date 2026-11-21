@@ -134,12 +134,12 @@ fn create_effect(p: &mut Particle, ctx: &mut Ctx) {
     p.position.z += (rf(ctx, 200) - 100.0) + 250.0;
 
     match p.sub_type {
+        // Rayo del personaje seleccionado: la rama `PJH_NEW_SERVER_SELECT_MAP` del Main 5.2 (S6),
+        // con ×1.3 (ZzzEffectParticle.cpp:104-116).
         4 => {
             p.gravity = 0.0;
             p.scale = (rf(ctx, 5) + 20.0) * 0.1 * 1.3;
             p.position.x = base.x + (rf(ctx, 80) - 40.0) * 1.3;
-            p.scale = (rf(ctx, 5) + 20.0) * 0.1;
-            p.position.x = base.x + (rf(ctx, 80) - 40.0);
             p.position.z -= 100.0;
         }
         5 => {

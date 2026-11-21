@@ -104,7 +104,7 @@ fn cast_skill(
 
 /// Esqueleto + piezas, compartido por la animación.
 #[derive(Component)]
-struct Skinned {
+pub struct Skinned {
     skeleton: Bmd,
     /// (modelo de la pieza, índice de malla, malla de Bevy que se actualiza)
     parts: Vec<(usize, usize, Handle<Mesh>)>,
@@ -113,34 +113,70 @@ struct Skinned {
     weapon: Option<(Bmd, Vec<(usize, Handle<Mesh>)>)>,
 }
 
-/// Piezas del Dark Knight con la armadura inicial (clase 02).
-const DARK_KNIGHT: [&str; 5] = ["HelmClass02.bmd", "ArmorClass02.bmd", "PantClass02.bmd", "GloveClass02.bmd", "BootClass02.bmd"];
+impl Skinned {
+    /// Pone las piezas y el arma (en la mano o a la espalda) en la pose `action`/`frame` y añade
+    /// sus vértices a la sombra. Devuelve los huesos de esa pose.
+    pub fn pose(
+        &self,
+        action: usize,
+        frame: f32,
+        weapon_on_back: bool,
+        meshes: &mut Assets<Mesh>,
+        sh: &mut crate::shadow::Builder,
+    ) -> Vec<bmd::Mat34> {
+        let bones = self.skeleton.bone_matrices_at(action, frame);
+        for (model, mesh, handle) in &self.parts {
+            let posed = self.models[*model].pose_with(*mesh, &bones);
+            sh.add(&posed.positions);
+            if let Some(mut m) = meshes.get_mut(handle) {
+                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
+                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
+            }
+        }
+        if let Some((w, handles)) = &self.weapon {
+            let wbones = weapon_bones(w, &bones, weapon_on_back);
+            for (i, handle) in handles {
+                let posed = w.pose_with(*i, &wbones);
+                sh.add(&posed.positions);
+                if let Some(mut m) = meshes.get_mut(handle) {
+                    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
+                    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
+                }
+            }
+        }
+        bones
+    }
+}
 
-fn spawn_player(
-    mut commands: Commands,
-    args: Res<Args>,
-    terrain: Option<Res<LoadedTerrain>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    shadow_material: Res<crate::shadow::ShadowMaterial>,
-) {
+/// Un Dark Knight cargado: esqueleto y piezas, las mallas (hijas de la entidad del personaje)
+/// y sus materiales (para darles luz).
+pub struct DarkKnightModel {
+    pub skinned: Skinned,
+    pub children: Vec<(Mesh3d, MeshMaterial3d<crate::model_light::ModelMaterial>)>,
+    pub materials: Vec<Handle<crate::model_light::ModelMaterial>>,
+    /// Huesos de la pose inicial.
+    pub bones: Vec<bmd::Mat34>,
+}
+
+/// Carga `player.bmd`, las piezas del Dark Knight y la espada en la mano, en la pose `action`
+/// (fotograma 0). `None` si falta el esqueleto.
+pub fn load_dark_knight(
+    args: &Args,
+    action: usize,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<crate::model_light::ModelMaterial>,
+    images: &mut Assets<Image>,
+) -> Option<DarkKnightModel> {
     let dir = args.data.join("Player");
     let skeleton = match fs::read(&dir, "player.bmd").and_then(|b| bmd::read(&b)) {
         Ok(s) => s,
         Err(e) => {
             error!("no se pudo cargar player.bmd: {e}");
-            return;
+            return None;
         }
     };
 
-    let start = args.spawn.unwrap_or(if args.world == 1 { [133.0, 127.0] } else { [128.0, 128.0] });
-    let mut pos = Vec2::from_array(start);
-    if let Some(t) = &terrain {
-        pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
-    }
-
-    let bones = skeleton.bone_matrices(action::STOP_MALE, 0);
+    let bones = skeleton.bone_matrices(action, 0);
     let mut models = vec![];
     let mut parts = vec![];
     let mut children = vec![];
@@ -161,7 +197,7 @@ fn spawn_player(
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs);
             let handle = meshes.add(mesh);
-            let material = materials.add(part_material(&dir, &model.meshes[i].texture, &mut images));
+            let material = materials.add(part_material(&dir, &model.meshes[i].texture, images));
             body_materials.push(material.clone());
             children.push((Mesh3d(handle.clone()), MeshMaterial3d(material)));
             parts.push((model_index, i, handle));
@@ -185,7 +221,7 @@ fn spawn_player(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
-            let material = materials.add(part_material(&item_dir, &w.meshes[i].texture, &mut images));
+            let material = materials.add(part_material(&item_dir, &w.meshes[i].texture, images));
             body_materials.push(material.clone());
             children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material)));
             handles.push((i, mesh));
@@ -194,6 +230,32 @@ fn spawn_player(
     });
     if weapon.is_none() {
         warn!("falta el arma Item/{WEAPON_FILE}");
+    }
+    Some(DarkKnightModel { skinned: Skinned { skeleton, parts, models, weapon }, children, materials: body_materials, bones })
+}
+
+/// Piezas del Dark Knight con la armadura inicial (clase 02).
+const DARK_KNIGHT: [&str; 5] = ["HelmClass02.bmd", "ArmorClass02.bmd", "PantClass02.bmd", "GloveClass02.bmd", "BootClass02.bmd"];
+
+fn spawn_player(
+    mut commands: Commands,
+    args: Res<Args>,
+    terrain: Option<Res<LoadedTerrain>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    shadow_material: Res<crate::shadow::ShadowMaterial>,
+) {
+    let Some(DarkKnightModel { skinned, children, materials: body_materials, bones }) =
+        load_dark_knight(&args, action::STOP_MALE, &mut meshes, &mut materials, &mut images)
+    else {
+        return;
+    };
+
+    let start = args.spawn.unwrap_or(if args.world == 1 { [133.0, 127.0] } else { [128.0, 128.0] });
+    let mut pos = Vec2::from_array(start);
+    if let Some(t) = &terrain {
+        pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
     }
 
     let player = Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None };
@@ -205,7 +267,7 @@ fn spawn_player(
         player_transform(&player, terrain.as_deref()),
         Visibility::default(),
         player,
-        Skinned { skeleton, parts, models, weapon },
+        skinned,
         BodyMaterials(body_materials),
         shadow,
         actor,
@@ -487,7 +549,6 @@ fn animate(
                 p.frame = 0.0;
             }
         }
-        let bones = s.skeleton.bone_matrices_at(p.action, p.frame);
         let ground = terrain.as_ref().map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
         let mut sh = crate::shadow::Builder::new(
             terrain.as_deref().map(|t| &t.0),
@@ -495,25 +556,7 @@ fn animate(
             Quat::from_rotation_z(p.facing),
             1.0,
         );
-        for (model, mesh, handle) in &s.parts {
-            let posed = s.models[*model].pose_with(*mesh, &bones);
-            sh.add(&posed.positions);
-            if let Some(mut m) = meshes.get_mut(handle) {
-                m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
-                m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
-            }
-        }
-        if let Some((w, handles)) = &s.weapon {
-            let wbones = weapon_bones(w, &bones, weapon_on_back(&p, terrain.as_deref()));
-            for (i, handle) in handles {
-                let posed = w.pose_with(*i, &wbones);
-                sh.add(&posed.positions);
-                if let Some(mut m) = meshes.get_mut(handle) {
-                    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
-                    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
-                }
-            }
-        }
+        let bones = s.pose(p.action, p.frame, weapon_on_back(&p, terrain.as_deref()), &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         *actor = actor_state(&p, &bones, terrain.as_deref());
     }

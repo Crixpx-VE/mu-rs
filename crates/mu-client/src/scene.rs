@@ -91,10 +91,6 @@ impl LoadStep {
         }
     }
 
-    pub fn loading(&self) -> bool {
-        self.index.is_some()
-    }
-
     fn current(&self) -> Option<Step> {
         self.index.and_then(|i| self.steps.get(i).copied())
     }

@@ -16,23 +16,23 @@
 //! 22.5° hacia arriba), campo de visión de 65° en vertical y alcance `390 · nivel`. El nivel de
 //! distancia se interpola entre el de cada punto." La niebla negra (de MuMain; el original la tiene apagada) va del alcance a ×1.25.
 //!
-//! Por ahora Enter entra al juego (sin servidor todavía).
+//! La interfaz 2D (logo, servidores y ventana de login) está en login_ui.rs.
 
 use bevy::prelude::*;
 
 use crate::Args;
-use crate::scene::{GameScene, LoadStep, load_world};
+use crate::scene::GameScene;
 use crate::terrain::MU_SCALE;
 
 pub struct LoginPlugin;
 
 impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameScene::Login), (start_tour, spawn_login_ui, add_fog))
+        app.add_systems(OnEnter(GameScene::Login), (start_tour, add_fog))
             .add_systems(OnExit(GameScene::Login), restore_camera)
             .add_systems(FixedUpdate, step_tour.run_if(in_state(GameScene::Login)))
-            .add_systems(Update, (place_camera, login_input).run_if(in_state(GameScene::Login)))
-            .add_systems(OnExit(GameScene::Login), (crate::scene::despawn::<LoginUi>, |mut c: Commands| c.remove_resource::<Tour>()));
+            .add_systems(Update, (place_camera, login_music).run_if(in_state(GameScene::Login)))
+            .add_systems(OnExit(GameScene::Login), |mut c: Commands| c.remove_resource::<Tour>());
     }
 }
 
@@ -43,8 +43,6 @@ const MAX_ACCEL: f32 = 100.0;
 const PITCH: f32 = -112.5;
 /// `CameraFOV = 65` (vertical, `gluPerspective`) en el login con el paseo.
 const TOUR_VFOV: f32 = 65.0;
-/// Distancia con la que se mide el rumbo del camino.
-const HEADING_STEP: f32 = 50.0;
 /// Giro del original (`UpdateTourWayPoint`): como mucho 1° por tick y `diferencia / 30`, a los 25 fps
 /// fijos de entonces. En las curvas cerradas tarda (la primera es de unos 117°).
 const MAX_ROTATE: f32 = 1.0;
@@ -210,12 +208,6 @@ fn look_heading(path: &Path, s: f32) -> f32 {
     d.x.atan2(d.y).to_degrees().rem_euclid(360.0)
 }
 
-/// Rumbo de MU (0 = +Y, 90 = +X, como `CreateAngle`) del camino en `s`.
-fn heading(path: &Path, s: f32) -> f32 {
-    let d = path.at(s + HEADING_STEP) - path.at(s);
-    d.x.atan2(d.y).to_degrees().rem_euclid(360.0)
-}
-
 /// Un tick: avanza por la curva a la velocidad del tramo (y espera en los puntos con pausa).
 fn step_tour(tour: Option<ResMut<Tour>>) {
     let Some(mut t) = tour else { return };
@@ -295,31 +287,7 @@ fn restore_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Proje
     }
 }
 
-#[derive(Component)]
-struct LoginUi;
-
-fn spawn_login_ui(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Login"),
-        LoginUi,
-        Text::new("Pulsa Enter para entrar"),
-        TextFont { font_size: bevy::text::FontSize::Px(10.0), ..default() },
-        TextColor(Color::WHITE),
-        TextShadow { offset: Vec2::splat(0.6), color: Color::BLACK },
-        Node { position_type: PositionType::Absolute, bottom: Val::Px(40.0), left: Val::Percent(50.0), margin: UiRect::left(Val::Px(-55.0)), ..default() },
-    ));
-}
-
-fn login_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut args: ResMut<Args>,
-    mut load: ResMut<LoadStep>,
-    mut next: ResMut<NextState<GameScene>>,
-    mut sound: ResMut<crate::sound::SoundQueue>,
-) {
+/// `PlayMp3(MUSIC_LOGIN_THEME)`.
+fn login_music(mut sound: ResMut<crate::sound::SoundQueue>) {
     sound.music("login_theme");
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
-        load_world(&mut args, &mut load, 1, true, GameScene::Game);
-        next.set(GameScene::Loading);
-    }
 }
