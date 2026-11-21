@@ -6,6 +6,7 @@
 
 pub mod connect;
 pub mod packet;
+pub mod simple_modulus;
 pub mod xor;
 
 pub use packet::{PacketHeader, packet_len};
