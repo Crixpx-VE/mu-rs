@@ -45,22 +45,26 @@ impl Plugin for ShadowPlugin {
 #[derive(Resource)]
 pub struct ShadowMaterial(pub Handle<FxMaterial>);
 
-/// La malla de sombra de un modelo (en coordenadas del mundo; se rehace cada fotograma).
+/// La malla de sombra de un modelo (en coordenadas del mundo; se rehace cada fotograma) y su entidad.
 #[derive(Component, Clone)]
-pub struct Shadow(pub Handle<Mesh>);
+pub struct Shadow(pub Handle<Mesh>, pub Entity);
 
 /// Crea la entidad de una sombra vacía y devuelve su malla.
 pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, material: &ShadowMaterial) -> Shadow {
-    let mesh = meshes.add(build(Vec::new()));
-    commands.spawn((
-        Name::new("Sombra"),
-        Mesh3d(mesh.clone()),
-        MeshMaterial3d(material.0.clone()),
-        Transform::default(),
-        // La malla cambia de sitio cada fotograma: su caja inicial no vale.
-        NoFrustumCulling,
-    ));
-    Shadow(mesh)
+    // Un triángulo degenerado y oculta: Bevy avisa de cada malla vacía que sube.
+    let mesh = meshes.add(build(vec![[0.0; 3]; 3]));
+    let entity = commands
+        .spawn((
+            Name::new("Sombra"),
+            Mesh3d(mesh.clone()),
+            MeshMaterial3d(material.0.clone()),
+            Transform::default(),
+            Visibility::Hidden,
+            // La malla cambia de sitio cada fotograma: su caja inicial no vale.
+            NoFrustumCulling,
+        ))
+        .id();
+    Shadow(mesh, entity)
 }
 
 fn build(positions: Vec<[f32; 3]>) -> Mesh {
@@ -100,14 +104,14 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Pone la sombra en su malla.
-    pub fn finish(self, shadow: &Shadow, meshes: &mut Assets<Mesh>) {
-        // Sin sombra y ya vacía: nada que cambiar (no tocar la malla evita volver a subirla).
-        if self.out.is_empty() && meshes.get(&shadow.0).is_some_and(|m| m.count_vertices() == 0) {
-            return;
-        }
-        if let Some(mut m) = meshes.get_mut(&shadow.0) {
+    /// Pone la sombra en su malla y la muestra u oculta (sin nada, se oculta sin tocar la malla).
+    pub fn finish(self, shadow: &Shadow, meshes: &mut Assets<Mesh>, visibility: Option<Mut<Visibility>>) {
+        let visible = !self.out.is_empty();
+        if visible && let Some(mut m) = meshes.get_mut(&shadow.0) {
             *m = build(self.out);
+        }
+        if let Some(mut v) = visibility {
+            v.set_if_neq(if visible { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
 }

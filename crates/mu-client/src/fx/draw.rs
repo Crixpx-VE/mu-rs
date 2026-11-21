@@ -114,7 +114,8 @@ pub fn collect(
 /// Mallas de sprites/estelas/marcas ya creadas, por (textura, mezcla).
 #[derive(Resource, Default)]
 pub struct Batches {
-    map: HashMap<(i32, Blend), (Handle<Mesh>, Handle<FxMaterial>)>,
+    /// (malla, material, entidad) de cada lote de textura + mezcla.
+    map: HashMap<(i32, Blend), (Handle<Mesh>, Handle<FxMaterial>, Entity)>,
 }
 
 #[derive(Default)]
@@ -162,6 +163,7 @@ pub fn render_quads(
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FxMaterial>>,
+    mut visibility: Query<&mut Visibility>,
 ) {
     let Ok(cam) = cameras.single() else { return };
     // Ejes de la pantalla en coordenadas de MU (para los sprites).
@@ -246,14 +248,11 @@ pub fn render_quads(
         }
     }
 
-    // Volcar en las mallas (creando las que falten; las que no se usan se vacían).
-    for (key, (mesh, _)) in batches.map.iter() {
-        if !out.contains_key(key) {
-            if let Some(mut m) = meshes.get_mut(mesh) {
-                if m.count_vertices() > 0 {
-                    *m = empty_mesh();
-                }
-            }
+    // Volcar en las mallas (creando las que falten). Los lotes sin nada este fotograma se ocultan
+    // en vez de vaciarse: Bevy avisa de cada malla vacía que sube.
+    for (key, (_, _, entity)) in batches.map.iter() {
+        if let Ok(mut v) = visibility.get_mut(*entity) {
+            v.set_if_neq(if out.contains_key(key) { Visibility::Inherited } else { Visibility::Hidden });
         }
     }
     for (key, b) in out {
@@ -261,15 +260,15 @@ pub fn render_quads(
             let texture = textures.get(key.0, &mut images).map(|t| t.0);
             let mesh = meshes.add(empty_mesh());
             let material = materials.add(FxMaterial::new(texture, key.1));
-            commands.spawn((
+            let entity = commands.spawn((
                 Name::new(format!("Efectos {} {:?}", key.0, key.1)),
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
                 // La malla cambia cada fotograma: sin recorte por caja (siempre se dibuja).
                 bevy::camera::visibility::NoFrustumCulling,
-            ));
-            (mesh, material)
+            )).id();
+            (mesh, material, entity)
         });
         if let Some(mut m) = meshes.get_mut(&entry.0) {
             let n = b.pos.len();

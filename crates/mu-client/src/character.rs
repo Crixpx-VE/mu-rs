@@ -465,6 +465,7 @@ fn animate(
     mut world: ResMut<crate::fx::FxWorld>,
     mut render_frame: Local<u64>,
     mut q: Query<(Entity, &mut Player, &Skinned, &mut crate::fx::ActorState, &crate::shadow::Shadow)>,
+    mut visibility: Query<&mut Visibility, Without<Player>>,
 ) {
     *render_frame += 1;
     for (entity, mut p, s, mut actor, shadow) in &mut q {
@@ -506,7 +507,7 @@ fn animate(
                 }
             }
         }
-        sh.finish(shadow, &mut meshes);
+        sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         *actor = actor_state(&p, &bones, terrain.as_deref());
     }
 }

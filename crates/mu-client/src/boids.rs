@@ -545,7 +545,8 @@ fn draw_boids(
         let Ok((mut tf, mut vis)) = q.get_mut(body.entity) else { continue };
         if !o.live {
             *vis = Visibility::Hidden;
-            crate::shadow::Builder::new(None, Vec3::ZERO, Quat::IDENTITY, 1.0).finish(&o.shadow, &mut meshes);
+            let v = q.get_mut(o.shadow.1).ok().map(|(_, v)| v);
+            crate::shadow::Builder::new(None, Vec3::ZERO, Quat::IDENTITY, 1.0).finish(&o.shadow, &mut meshes, v);
             continue;
         }
         *vis = Visibility::Inherited;
@@ -574,7 +575,8 @@ fn draw_boids(
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
             }
         }
-        sh.finish(&o.shadow, &mut meshes);
+        let v = q.get_mut(o.shadow.1).ok().map(|(_, v)| v);
+        sh.finish(&o.shadow, &mut meshes, v);
         // Luz: la del suelo bajo el bicho (las mariposas brillan por sí mismas). Los dragones
         // dorados llevan un brillo metálico en el original; aquí, un tono dorado aproximado.
         let color = if o.dragon && o.golden {
