@@ -428,6 +428,7 @@ fn spawn_objects(
     registry: Res<crate::fx::core::Registry>,
     mut fx_world: ResMut<crate::fx::FxWorld>,
     mut login_fades: ResMut<LoginFades>,
+    mut operates: ResMut<crate::operate::Operates>,
 ) {
     // En el login cada objeto se funde por su cuenta según la distancia a la cámara.
     let login = args.world == crate::scene::LOGIN_WORLD;
@@ -445,6 +446,18 @@ fn spawn_objects(
 
     for (index, o) in list.iter().enumerate() {
         let rules = objects::model_rules(args.world, o.kind);
+        // Bancos, sillas y cajas de pose (`CreateOperate`), también los invisibles.
+        let operate = crate::operate::rule(args.world, o.kind).map(|rule| {
+            operates.0.push(crate::operate::Operate {
+                rule,
+                position: Vec3::from_array(o.position),
+                angle: o.angle[2],
+                materials: Vec::new(),
+                light: Vec3::ONE,
+                glow: 0.0,
+            });
+            operates.0.len() - 1
+        });
         let mut fade = login.then(|| LoginFade {
             kind: o.kind,
             position: Vec2::new(o.position[0], o.position[1]),
@@ -580,7 +593,8 @@ fn spawn_objects(
                 additive: part.additive,
                 // Los techos tampoco comparten material: se desvanecen por su cuenta.
                 effect_owner: (effect.is_some() || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
-                instance: fade.is_some().then_some(index),
+                // Los de sentarse tienen material propio: se iluminan con el ratón encima.
+                instance: (fade.is_some() || operate.is_some()).then_some(index),
             };
             let material = match c.materials.get(&key) {
                 Some(m) => m.clone(),
@@ -612,6 +626,13 @@ fn spawn_objects(
             let entity = commands
                 .spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity))
                 .id();
+            if let Some(op) = operate.and_then(|i| operates.0.get_mut(i)) {
+                // Las mallas aditivas no llevan la luz del objeto.
+                if !part.additive {
+                    op.materials.push(material.clone());
+                    op.light = Vec3::from_array(light.map(|v| v as f32 / 15.0));
+                }
+            }
             if let Some(f) = fade.as_mut() {
                 f.parts.push((entity, material, original_mode, part.additive));
             }

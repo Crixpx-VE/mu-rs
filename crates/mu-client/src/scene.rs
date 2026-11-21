@@ -137,6 +137,7 @@ fn unload_world(world: &mut World) {
     world.run_system_cached(crate::effects::reset).ok();
     world.run_system_cached(crate::fx::reset).ok();
     world.run_system_cached(crate::sound::reset).ok();
+    world.run_system_cached(crate::operate::reset).ok();
 }
 
 fn advance_load(

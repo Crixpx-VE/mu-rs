@@ -20,8 +20,16 @@ use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
 
 /// Animaciones de `player.bmd` (enum `PLAYER_*` del original).
 pub mod action {
+    use crate::fx::tables::ids;
     pub const STOP_MALE: usize = 1;
     pub const WALK_MALE: usize = 15;
+    pub const SIT1: usize = ids::PLAYER_SIT1 as usize;
+    pub const HEALING1: usize = ids::PLAYER_HEALING1 as usize;
+    pub const POSE1: usize = ids::PLAYER_POSE1 as usize;
+    /// `PLAYER_SIT1..=PLAYER_POSE_FEMALE1`: sentado, curándose o apoyado (se queda así hasta moverse).
+    pub fn resting(a: usize) -> bool {
+        (SIT1..=ids::PLAYER_POSE_FEMALE1 as usize).contains(&a)
+    }
 }
 
 /// Casillas por segundo al caminar.
@@ -29,12 +37,30 @@ const WALK_SPEED: f32 = 3.6;
 /// Fotogramas de animación por segundo.
 const ANIM_FPS: f32 = 8.0;
 
+/// Velocidad de la animación (`PlaySpeed` de ZzzOpenData.cpp ≈354 × 25 ticks por segundo):
+/// sentarse y apoyarse 0.4, curarse 0.2.
+fn action_fps(a: usize) -> f32 {
+    use crate::fx::tables::ids;
+    let ticks = crate::fx::sim::TICKS_PER_SECOND;
+    if a == action::HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 as usize {
+        0.2 * ticks
+    } else if action::resting(a) {
+        0.4 * ticks
+    } else {
+        ANIM_FPS
+    }
+}
+
+/// El ratón manda al personaje (para ordenar los sistemas que leen lo que hay bajo el ratón).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HeroInput;
+
 pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
-            .add_systems(Update, (scripted_walk, click_to_move, cast_skill, walk, animate, light_body).chain());
+            .add_systems(Update, (scripted_walk, hero_input.in_set(HeroInput), cast_skill, walk, animate, light_body).chain());
     }
 }
 
@@ -50,6 +76,8 @@ pub struct Player {
     pub frame: f32,
     /// Haciendo una habilidad: su animación manda hasta que acaba (fotogramas por segundo).
     pub casting: Option<f32>,
+    /// `MOVEMENT_OPERATE`: va hacia este objeto de sentarse (índice en `Operates`).
+    pub operate: Option<usize>,
 }
 
 /// Habilidades del Dark Knight en las teclas (sin servidor todavía: se lanzan en el sitio):
@@ -258,7 +286,8 @@ fn spawn_player(
         pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
     }
 
-    let player = Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None };
+    let player =
+        Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None, operate: None };
     let actor = actor_state(&player, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
     let mut e = commands.spawn((
@@ -436,35 +465,146 @@ fn light_body(
     }
 }
 
-/// Clic izquierdo en el suelo → buscar camino hasta esa casilla.
-fn click_to_move(
+/// `MouseUpdateTime` / `MouseUpdateTimeMax` / `MouseLButtonPush` del original, en ticks de 25 Hz.
+#[derive(Default)]
+struct MouseTimer {
+    time: u32,
+    max: u32,
+    /// `MouseLButtonPush`: clic sin atender (se pierde al soltar el botón).
+    push: bool,
+    /// El botón se apretó en la zona de juego (no sobre la barra o una ventana).
+    held: bool,
+    /// Fracción de tick acumulada.
+    acc: f32,
+}
+
+/// `PathFinding2` → `GetPath`: el camino se corta a `MAX_PATH_FIND` (15) casillas contando la de
+/// salida; con el botón apretado se vuelve a pedir y sigue.
+const MAX_PATH_FIND: usize = 15;
+
+/// Camino de `from` a `to` (con la casilla de salida), si hay y tiene más de una casilla.
+fn hero_path(t: &mu_data::terrain::Terrain, from: (usize, usize), to: (usize, usize)) -> Option<Vec<(usize, usize)>> {
+    let mut p = path::find_path(from, to, |x, y| t.walkable(x, y), 20_000)?;
+    p.truncate(MAX_PATH_FIND);
+    (p.len() > 1).then_some(p)
+}
+
+/// `SendMove`: el tiempo hasta atender otro clic depende de lo largo del camino.
+fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTimer) {
+    timer.max = match path.len() {
+        0..=2 => 0,
+        3 => 5,
+        n => 10 + (n as u32 - 2) * 3,
+    };
+    player.path = path.into_iter().skip(1).collect();
+}
+
+/// El ratón en el juego (`MoveHero`, ZzzInterface.cpp ≈7340-7636), una vez por tick:
+/// - Cada vez que `MouseUpdateTime` llega a `MouseUpdateTimeMax`, el clic (o el botón mantenido)
+///   vuelve a mandar al personaje hacia donde apunta el ratón: mantener el botón lo hace seguir
+///   al ratón.
+/// - Sobre un objeto de sentarse (y quieto), va hasta él (`MOVEMENT_OPERATE`).
+/// - En el suelo, `DontMove` (cursor `CursorDontMove`) si la casilla no tiene suelo, es agua...
+///   (atributo ≥ `TW_NOGROUND` sin `TW_ACTION` ni `TW_HEIGHT`).
+fn hero_input(
+    time: Res<Time>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     terrain: Option<Res<LoadedTerrain>>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
+    operates: Res<crate::operate::Operates>,
+    mut pointer: ResMut<crate::operate::Pointer>,
+    mut timer: Local<MouseTimer>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
     mut players: Query<&mut Player>,
 ) {
-    // Un clic en la interfaz no es para caminar.
-    if !buttons.just_pressed(MouseButton::Left) || over_ui.0 {
-        return;
+    use mu_data::terrain::attr;
+    let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
+    if buttons.just_pressed(MouseButton::Left) && !over_ui.0 {
+        timer.push = true;
+        timer.held = true;
     }
-    let (Some(t), Ok(window), Ok((camera, cam_tf)), Ok(mut player)) =
-        (terrain, windows.single(), cameras.single(), players.single_mut())
-    else {
-        return;
-    };
-    if player.casting.is_some() {
-        return;
+    if !buttons.pressed(MouseButton::Left) {
+        timer.push = false;
+        timer.held = false;
     }
-    let Some(cursor) = window.cursor_position() else { return };
-    let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
-    let Some(hit) = raycast_terrain(&t.0, ray) else { return };
+    let ray = windows.single().ok().zip(cameras.single().ok()).and_then(|(w, (camera, tf))| {
+        let ray = camera.viewport_to_world(tf, w.cursor_position()?).ok()?;
+        Some(ray)
+    });
 
-    let from = (player.pos.x as usize, player.pos.y as usize);
-    let to = (hit.x as usize, hit.y as usize);
-    if let Some(p) = path::find_path(from, to, |x, y| t.0.walkable(x, y), 20_000) {
-        player.path = p.into_iter().skip(1).collect();
+    timer.acc += time.delta_secs() * crate::fx::sim::TICKS_PER_SECOND;
+    // Tras un parón no se recuperan más de unos pocos ticks.
+    timer.acc = timer.acc.min(3.0);
+    while timer.acc >= 1.0 {
+        timer.acc -= 1.0;
+        let mut success = false;
+        if timer.time >= timer.max {
+            if timer.push {
+                timer.push = false;
+                success = true;
+            }
+            if timer.held {
+                success = true;
+            }
+        }
+        // Ni sobre la interfaz (`MouseOnWindow`) ni mientras hace una habilidad.
+        if success && !over_ui.0 && player.casting.is_none() {
+            timer.time = 0;
+            let here = (player.pos.x as usize, player.pos.y as usize);
+            let moving = !player.path.is_empty();
+            if let Some((i, op)) = pointer.operate.and_then(|i| operates.0.get(i).map(|o| (i, o))) {
+                // `wall == TW_HEIGHT || wall < TW_CHARACTER`, y solo estando quieto.
+                let (tx, ty) = op.tile();
+                let wall = t.0.attribute(tx.max(0) as usize, ty.max(0) as usize);
+                if (wall == attr::HEIGHT || wall < attr::CHARACTER) && !moving {
+                    player.operate = Some(i);
+                    match hero_path(&t.0, here, (tx as usize, ty as usize)) {
+                        Some(p) => send_move(&mut player, p, &mut timer),
+                        None => operate_action(&mut player, op, &mut sound),
+                    }
+                }
+            } else if let Some(hit) = ray.and_then(|r| raycast_terrain(&t.0, r)) {
+                let to = (hit.x.max(0.0) as usize, hit.y.max(0.0) as usize);
+                let a = t.0.attribute(to.0, to.1);
+                pointer.dont_move = a >= attr::NO_GROUND && a & attr::ACTION == 0 && a & attr::HEIGHT == 0;
+                if let Some(p) = (here != to || !moving).then(|| hero_path(&t.0, here, to)).flatten() {
+                    player.operate = None;
+                    send_move(&mut player, p, &mut timer);
+                }
+            }
+        }
+        timer.time += 1;
+    }
+}
+
+/// `Action` con `MOVEMENT_OPERATE` (ZzzInterface.cpp ≈3587): a una casilla o menos del objeto se
+/// sienta, se apoya o se cura, mirando hacia donde mira el objeto si toca, con `SOUND_DROP_ITEM01`
+/// (salvo al curarse).
+fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crate::sound::SoundQueue) {
+    use crate::operate::Act;
+    let (tx, ty) = op.tile();
+    let (hx, hy) = (p.pos.x as i32, p.pos.y as i32);
+    if (hx - tx).abs().max((hy - ty).abs()) > 1 {
+        return;
+    }
+    if op.rule.face && op.rule.act != Act::Nothing {
+        p.facing = op.angle.to_radians();
+    }
+    let action = match op.rule.act {
+        Act::Sit => Some(action::SIT1),
+        Act::Pose => Some(action::POSE1),
+        Act::Healing => Some(action::HEALING1),
+        Act::Nothing => None,
+    };
+    if let Some(a) = action {
+        p.action = a;
+        p.frame = 0.0;
+    }
+    if op.rule.act != Act::Healing {
+        p.path.clear();
+        sound.play_object("SOUND_DROP_ITEM01");
     }
 }
 
@@ -491,8 +631,15 @@ fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Option<Vec2> {
     None
 }
 
-fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut Player, &mut Transform)>) {
+fn walk(
+    time: Res<Time>,
+    terrain: Option<Res<LoadedTerrain>>,
+    operates: Res<crate::operate::Operates>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
+    mut q: Query<(&mut Player, &mut Transform)>,
+) {
     for (mut p, mut tf) in &mut q {
+        let had_path = !p.path.is_empty();
         let mut budget = WALK_SPEED * time.delta_secs();
         while budget > 0.0 {
             let Some(&(nx, ny)) = p.path.front() else { break };
@@ -512,10 +659,23 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
                 budget = 0.0;
             }
         }
-        let action = if p.path.is_empty() { action::STOP_MALE } else { action::WALK_MALE };
+        // Sentado o apoyado sigue así hasta que vuelve a caminar.
+        let action = if !p.path.is_empty() {
+            action::WALK_MALE
+        } else if action::resting(p.action) {
+            p.action
+        } else {
+            action::STOP_MALE
+        };
         if p.casting.is_none() && action != p.action {
             p.action = action;
             p.frame = 0.0;
+        }
+        // Llegó al objeto de sentarse (`MovePath` acaba → `Action`).
+        if had_path && p.path.is_empty() && p.casting.is_none() {
+            if let Some(op) = p.operate.take().and_then(|i| operates.0.get(i)) {
+                operate_action(&mut p, op, &mut sound);
+            }
         }
         *tf = player_transform(&p, terrain.as_deref());
     }
@@ -536,7 +696,7 @@ fn animate(
     for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
-        p.frame += p.casting.unwrap_or(ANIM_FPS) * time.delta_secs();
+        p.frame += p.casting.unwrap_or_else(|| action_fps(p.action)) * time.delta_secs();
         if p.action == action::WALK_MALE {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }

@@ -40,6 +40,7 @@ mod login_ui;
 mod mainframe;
 mod model_light;
 mod objects;
+mod operate;
 mod options;
 mod settings;
 mod shadow;
@@ -225,6 +226,6 @@ fn main() {
             camera::FlyCameraPlugin,
         ))
         .add_plugins(fonts::FontsPlugin)
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
         .run();
 }

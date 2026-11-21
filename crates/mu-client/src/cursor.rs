@@ -5,8 +5,12 @@
 //! punta 2 unidades a la izquierda y arriba del ratón (`MouseX − 2, MouseY − 2`). Con el botón
 //! izquierdo apretado se ve `CursorPush.tga` (la última rama de `RenderCursor`).
 //!
-//! De las demás ramas, las que dependen de lo que hay bajo el ratón (objeto del suelo, NPC,
-//! asiento, monstruo atacable, reparar...) llegarán con esas cosas; de momento no hay ninguna.
+//! - Sobre un objeto de sentarse (`SelectedOperate`): `CursorSitDown`, o `CursorLeanAgainst` en las
+//!   cajas de pose de Lorencia, Dungeon y Devias y en la fuente de Noria.
+//! - Con el botón apretado, si el último clic en el suelo fue a una casilla sin suelo o de agua
+//!   (`DontMove`): `CursorDontMove`.
+//!
+//! Las ramas de objeto del suelo, NPC, monstruo atacable y reparar llegarán con esas cosas.
 //! El original solo lo dibuja en el login, la selección de personaje y el juego; aquí también en
 //! el título y la carga para que no se quede la pantalla sin cursor.
 //!
@@ -39,6 +43,12 @@ struct CursorImages {
     normal: Handle<Image>,
     /// `BITMAP_CURSOR+1`: con el botón izquierdo apretado.
     push: Handle<Image>,
+    /// `BITMAP_CURSOR+6`.
+    lean: Handle<Image>,
+    /// `BITMAP_CURSOR+7`.
+    sit: Handle<Image>,
+    /// `BITMAP_CURSOR+8`.
+    dont_move: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -62,7 +72,10 @@ fn spawn_cursor(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
         GlobalZIndex(i32::MAX),
         Visibility::Hidden,
     ));
-    commands.insert_resource(CursorImages { normal, push });
+    let lean = load("CursorLeanAgainst.tga");
+    let sit = load("CursorSitDown.tga");
+    let dont_move = load("CursorDontMove.tga");
+    commands.insert_resource(CursorImages { normal, push, lean, sit, dont_move });
 }
 
 /// El del sistema no se ve dentro de la ventana.
@@ -79,6 +92,8 @@ fn place_cursor(
     scale: Res<UiScale>,
     mouse: Res<ButtonInput<MouseButton>>,
     images: Option<Res<CursorImages>>,
+    pointer: Res<crate::operate::Pointer>,
+    operates: Res<crate::operate::Operates>,
     mut q: Query<(&mut Node, &mut ImageNode, &mut Visibility), With<MuCursor>>,
 ) {
     let Ok((mut node, mut img, mut vis)) = q.single_mut() else { return };
@@ -96,8 +111,15 @@ fn place_cursor(
         node.top = top;
     }
     if let Some(images) = images {
-        // `MouseLButton`: CursorPush mientras el botón izquierdo está apretado.
-        let want = if mouse.pressed(MouseButton::Left) { &images.push } else { &images.normal };
+        // Mismo orden que `RenderCursor`: objeto de sentarse; si no, CursorPush (o CursorDontMove)
+        // mientras el botón izquierdo está apretado.
+        let want = match pointer.operate_cursor(&operates) {
+            Some(true) => &images.lean,
+            Some(false) => &images.sit,
+            None if !mouse.pressed(MouseButton::Left) => &images.normal,
+            None if pointer.dont_move => &images.dont_move,
+            None => &images.push,
+        };
         if img.image != *want {
             img.image = want.clone();
         }
