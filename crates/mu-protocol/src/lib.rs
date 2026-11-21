@@ -5,6 +5,8 @@
 //! Referencia: `referencias/OpenMU/src/Network/Packets/**/*.xml` (licencia MIT).
 
 pub mod connect;
+pub mod crypto;
+pub mod game;
 pub mod packet;
 pub mod simple_modulus;
 pub mod xor;

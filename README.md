@@ -7,7 +7,7 @@ Cliente y servidor de MU Online (Season 6) escritos desde cero en Rust.
 | Crate | Qué es | Estado |
 |---|---|---|
 | `mu-data` | Lectores de los archivos del cliente: terreno (`.map`, `.att`, `.OZB`), texturas (`.OZJ`, `.OZT`), modelos (`.bmd`), objetos del mapa (`.obj`), búsqueda de caminos | Funciona con los datos S6 |
-| `mu-protocol` | Protocolo de red compartido por cliente y servidor: paquetes C1–C4, Xor32, Xor3, SimpleModulus, mensajes del Connect Server | Verificado contra un paquete real del cliente oficial |
+| `mu-protocol` | Protocolo de red compartido por cliente y servidor: paquetes C1–C4, Xor32, Xor3, SimpleModulus, Connect Server, entrada y login del Game Server | Cifrado verificado contra un paquete real del cliente oficial; login sin probar aún contra un servidor real |
 | `mu-client` | El juego (Bevy 0.20): mapa con objetos, personaje animado que camina con clic | Sin red todavía |
 | `mu-connect` | Connect Server: lista de servidores y redirección al Game Server | Funciona; probado con tests TCP de punta a punta |
 | `mu-server` | Game Server | Vacío (mientras tanto, OpenMU) |
@@ -40,6 +40,16 @@ cargo run -p mu-connect -- --listen 0.0.0.0:44405 --server 0=IP_PUBLICA:55901
 ```
 
 Por defecto solo escucha en local. Abrirlo a la red es una decisión explícita (`--listen 0.0.0.0:...`).
+
+## Probar el login contra un servidor
+
+```
+cargo run -p mu-protocol --example login -- test0 test0 [127.0.0.1:44405]
+```
+
+Hace el recorrido completo del cliente: Connect Server → lista → Game Server → saludo → login cifrado
+(Xor3 + Xor32 + SimpleModulus) → lista de personajes. Con OpenMU funcionando, debería responder `Okay`
+(OpenMU crea las cuentas de prueba `test0`…`test9`, contraseña igual al usuario).
 
 ## Tests
 
