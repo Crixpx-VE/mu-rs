@@ -13,11 +13,8 @@
 //! - el ángulo de la cámara gira hacia el rumbo como mucho 1° por tick (diferencia / 30);
 //! - el nivel de distancia se interpola entre el del punto anterior y el del siguiente.
 //!
-//! Y la vista, como el S6 original (`MoveMainCamera`; la versión de MuMain de referencia quitó el
-//! cálculo de la altura y lo compensa con ajustes a ojo, que no se usan aquí):
-//! - ojo = recorrido + `AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)`, con `D = 1100 · nivel · 0.1`;
-//! - altura = -300 (la del recorrido) - 100 + D - 150;
-//! - mira con inclinación -112.5° (22.5° hacia arriba) y giro = ángulo del recorrido.
+//! Y la vista (ver [`view`]): la de MuMain, con FOV de 90° en horizontal, niebla negra y alcance
+//! de 3995, mirando 17.5° hacia abajo en la dirección del recorrido.
 //!
 //! Por ahora Enter entra al juego (sin servidor todavía).
 
@@ -35,8 +32,7 @@ impl Plugin for LoginPlugin {
         app.add_systems(OnEnter(GameScene::Login), (start_tour, spawn_login_ui, add_fog))
             .add_systems(OnExit(GameScene::Login), restore_camera)
             .add_systems(FixedUpdate, step_tour.run_if(in_state(GameScene::Login)))
-            .init_resource::<Tuning>()
-            .add_systems(Update, (tune, place_camera, login_input).chain().run_if(in_state(GameScene::Login)))
+            .add_systems(Update, (place_camera, login_input).run_if(in_state(GameScene::Login)))
             .add_systems(OnExit(GameScene::Login), (crate::scene::despawn::<LoginUi>, |mut c: Commands| c.remove_resource::<Tour>()));
     }
 }
@@ -52,10 +48,6 @@ const MAX_ROTATE: f32 = 1.0;
 const TOUR_Z: f32 = -300.0;
 /// `TOUR_BASE_DISTANCE`.
 const BASE_DISTANCE: f32 = 1100.0;
-/// En el modo de paseo el original baja la cámara 100 (`temp = (0, 0, -100)`) y luego, como en el
-/// juego, le suma `distancia - 150`.
-const TOUR_DROP: f32 = 100.0;
-const HEIGHT_OFFSET: f32 = 150.0;
 /// `SetAngleFrustum(-112.5)`.
 const FRUSTUM_ANGLE: f32 = -112.5;
 /// MuMain: `LoginSceneCameraDefaults` y `RENDER_TERRAIN_DIST` (alcance; la niebla va de ahí a ×1.25).
@@ -85,6 +77,8 @@ struct Tour {
     tour: Vec3,
     angle: f32,
     target_angle: f32,
+    /// Rumbo del primer tramo (referencia del desplazamiento de la cámara).
+    ref_angle: f32,
     level: f32,
     /// Estado del tick anterior y de este (recorrido, nivel de distancia, ángulo), para interpolar.
     prev: (Vec3, f32, f32),
@@ -127,78 +121,27 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     let tour = start.pos.extend(TOUR_Z);
     let dir = (target.pos - start.pos).normalize_or_zero();
     let angle = create_angle(0.0, 0.0, dir.x, -dir.y);
-    let mut t = Tour { points, index: 0, delay: 0, current, tour, angle, target_angle: angle, level: start.distance, prev: (Vec3::ZERO, 0.0, 0.0), now: (Vec3::ZERO, 0.0, 0.0) };
+    let mut t = Tour { points, index: 0, delay: 0, current, tour, angle, target_angle: angle, ref_angle: angle, level: start.distance, prev: (Vec3::ZERO, 0.0, 0.0), now: (Vec3::ZERO, 0.0, 0.0) };
     t.now = (t.tour, t.level, t.angle);
     t.prev = t.now;
     commands.insert_resource(t);
 }
 
-/// Postura de la cámara: la de MuMain o la del S6 original reconstruida (`F5` cambia).
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Pose {
-    /// MuMain: ajuste (-300, 650, 950) al recorrido, altura fija 650, inclinación -72.5°, giro -5°.
-    MuMain,
-    /// S6 original (código que MuMain dejó sin usar): altura -300 - 100 + D - 150, inclinación
-    /// -112.5° (mira hacia arriba), sin ajustes. No está comprobada contra el cliente real.
-    Legacy,
-}
-
-/// Ajustes de prueba de la cámara (teclas en el login), para compararla con el cliente original.
-#[derive(Resource, Clone, Copy, PartialEq)]
-struct Tuning {
-    pose: Pose,
-    distance: f32,
-    offset: Vec3,
-    pitch: f32,
-}
-
-impl Default for Tuning {
-    fn default() -> Self {
-        Self { pose: Pose::MuMain, distance: 1.0, offset: Vec3::ZERO, pitch: 0.0 }
-    }
-}
-
-/// RePág/AvPág: distancia ×1.1 / ÷1.1 · flechas: mover 50 · Inicio/Fin: altura ±50 ·
-/// Insert/Supr: inclinación ±2.5°. Cada cambio se apunta en el registro.
-fn tune(keys: Res<ButtonInput<KeyCode>>, mut tuning: ResMut<Tuning>) {
-    let before = *tuning;
-    let t = &mut *tuning;
-    let pressed = |k: KeyCode| keys.just_pressed(k);
-    if pressed(KeyCode::PageUp) { t.distance *= 1.1; }
-    if pressed(KeyCode::PageDown) { t.distance /= 1.1; }
-    if pressed(KeyCode::ArrowLeft) { t.offset.x -= 50.0; }
-    if pressed(KeyCode::ArrowRight) { t.offset.x += 50.0; }
-    if pressed(KeyCode::ArrowUp) { t.offset.y += 50.0; }
-    if pressed(KeyCode::ArrowDown) { t.offset.y -= 50.0; }
-    if pressed(KeyCode::Home) { t.offset.z += 50.0; }
-    if pressed(KeyCode::End) { t.offset.z -= 50.0; }
-    if pressed(KeyCode::Insert) { t.pitch += 2.5; }
-    if pressed(KeyCode::Delete) { t.pitch -= 2.5; }
-    if pressed(KeyCode::F5) { t.pose = if t.pose == Pose::MuMain { Pose::Legacy } else { Pose::MuMain }; }
-    if *t != before {
-        info!("login: cámara de prueba: postura {:?}, distancia x{:.2}, desplazamiento {:?}, inclinación {:+.1}°", t.pose, t.distance, t.offset, t.pitch);
-    }
-}
-
-/// Ojo, inclinación, giro y alcance de la vista (`CalculateCameraPosition` + `SetCameraAngle`).
-fn view(pose: Pose, tour: Vec3, level: f32, angle: f32) -> (Vec3, f32, f32, f32) {
+/// Ojo, inclinación, giro y alcance de la vista (`CalculateCameraPosition` + `SetCameraAngle` de MuMain).
+///
+/// MuMain pone la cámara en `recorrido + AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0) + (-300, 650)`, un
+/// desplazamiento fijo en el mundo: en las curvas la cámara se sale del recorrido. Aquí ese mismo
+/// desplazamiento gira con el rumbo, tomando como referencia el del primer tramo (donde se ve igual).
+fn view(tour: Vec3, level: f32, angle: f32, ref_angle: f32) -> (Vec3, f32, f32, f32) {
     let d = BASE_DISTANCE * level * 0.1;
-    // `AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)`.
     let (s, c) = (-45f32).to_radians().sin_cos();
-    let mut eye = tour + Vec3::new(-s * d, -c * d, 0.0);
-    match pose {
-        Pose::MuMain => {
-            eye += MUMAIN_OFFSET;
-            eye.z = TOUR_Z + MUMAIN_OFFSET.z;
-            (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
-        }
-        Pose::Legacy => {
-            eye.z = TOUR_Z - TOUR_DROP + d - HEIGHT_OFFSET;
-            (eye, FRUSTUM_ANGLE, angle, 390.0 * level)
-        }
-    }
+    let w = Vec2::new(-s * d, -c * d) + MUMAIN_OFFSET.truncate();
+    // Giro en el sentido de los ángulos de MU (0 = +Y, 90 = +X).
+    let (rs, rc) = (angle - ref_angle).to_radians().sin_cos();
+    let w = Vec2::new(w.x * rc + w.y * rs, -w.x * rs + w.y * rc);
+    let eye = (tour.truncate() + w).extend(TOUR_Z + MUMAIN_OFFSET.z);
+    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
 }
-
 fn signed_delta(from: f32, to: f32) -> f32 {
     let d = to.rem_euclid(360.0) - from.rem_euclid(360.0);
     if d > 180.0 {
@@ -272,7 +215,6 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
 /// Coloca la cámara entre el tick anterior y este.
 fn place_camera(
     tour: Option<Res<Tour>>,
-    tuning: Res<Tuning>,
     fixed: Res<Time<Fixed>>,
     mut cameras: Query<(&mut Transform, &mut Projection, Option<&mut DistanceFog>), With<Camera3d>>,
 ) {
@@ -281,15 +223,7 @@ fn place_camera(
     let tour_pos = t.prev.0.lerp(t.now.0, a);
     let level = t.prev.1 + (t.now.1 - t.prev.1) * a;
     let angle = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
-    let (mut eye, pitch, yaw, far) = view(tuning.pose, tour_pos, level, angle);
-    let pitch = pitch + tuning.pitch;
-    // Ajuste de prueba: la distancia se alarga sobre la diagonal del original.
-    if tuning.distance != 1.0 {
-        let d = BASE_DISTANCE * level * 0.1 * (tuning.distance - 1.0);
-        let (s, c) = (-45f32).to_radians().sin_cos();
-        eye += Vec3::new(-s * d, -c * d, 0.0);
-    }
-    eye += tuning.offset;
+    let (eye, pitch, yaw, far) = view(tour_pos, level, angle, t.ref_angle);
     let vfov = 2.0 * ((TOUR_HFOV * 0.5).to_radians().tan() / (4.0 / 3.0)).atan();
     for (mut tf, mut proj, fog) in &mut cameras {
         *tf = crate::camera::mu_view(eye, pitch, yaw);

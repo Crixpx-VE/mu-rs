@@ -22,6 +22,7 @@ impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameScene>()
             .init_resource::<LoadStep>()
+            .init_resource::<TitleClock>()
             .add_systems(Startup, start)
             .add_systems(OnEnter(GameScene::Title), spawn_title)
             .add_systems(Update, update_title_gauge.run_if(in_state(GameScene::Title)))
@@ -139,7 +140,7 @@ fn advance_load(
     mut next: ResMut<NextState<GameScene>>,
     args: Res<Args>,
     scene: Res<State<GameScene>>,
-    time: Res<Time<Real>>,
+    clock: Res<TitleClock>,
 ) {
     let Some(i) = load.index else { return };
     if args.hold_title && *scene.get() == GameScene::Title && i + 1 >= load.steps.len() / 2 {
@@ -147,7 +148,7 @@ fn advance_load(
     }
     // El título se ve al menos `TITLE_SECS`: su barra no pasa de lo que lleva de tiempo. Mientras
     // espera, el índice queda pasado el último paso (que no se repite).
-    if *scene.get() == GameScene::Title && i + 1 >= load.steps.len() && time.elapsed_secs() < TITLE_SECS {
+    if *scene.get() == GameScene::Title && i + 1 >= load.steps.len() && clock.elapsed < TITLE_SECS {
         load.index = Some(load.steps.len());
         return;
     }
@@ -274,8 +275,23 @@ fn spawn_title(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asset
     });
 }
 
-fn update_title_gauge(load: Res<LoadStep>, time: Res<Time<Real>>, mut q: Query<&mut Node, With<TitleGauge>>) {
-    let shown = load.progress().min(time.elapsed_secs() / TITLE_SECS).clamp(0.0, 1.0);
+/// Tiempo que lleva en pantalla el título (desde su primer fotograma, no desde que se abrió el programa).
+#[derive(Resource, Default)]
+pub struct TitleClock {
+    start: Option<f32>,
+    elapsed: f32,
+}
+
+fn update_title_gauge(
+    load: Res<LoadStep>,
+    time: Res<Time<Real>>,
+    mut clock: ResMut<TitleClock>,
+    mut q: Query<&mut Node, With<TitleGauge>>,
+) {
+    let now = time.elapsed_secs();
+    let start = *clock.start.get_or_insert(now);
+    clock.elapsed = now - start;
+    let shown = load.progress().min(clock.elapsed / TITLE_SECS).clamp(0.0, 1.0);
     for mut n in &mut q {
         n.width = Val::Px(656.0 * 0.8 * shown);
     }
