@@ -1,27 +1,24 @@
-//! Pantalla de login: el mapa 74 recorrido por la cámara de paseo del original (`CCameraMove` en
-//! modo tour, `DefaultCamera` con `IsTourMode`), con la música `login_theme`.
+//! Pantalla de login: el mapa 74 recorrido por una cámara de paseo, con la música `login_theme`.
 //!
-//! El recorrido sale de `Data/World74/CWScript74.cws`: firma `CWS\0`, número de puntos (u32) y
-//! por punto 28 bytes: índice (i32), x, y, z (f32), pausa en ticks (i32), velocidad (f32) y
-//! nivel de distancia (f32). Va por los puntos en bucle, a 25 ticks por segundo, y se dibuja
-//! interpolado entre ticks.
+//! El recorrido es el del original: los puntos de `Data/World74/CWScript74.cws` (firma `CWS\0`,
+//! número de puntos u32 y por punto 28 bytes: índice i32, x, y, z f32, pausa en ticks i32,
+//! velocidad f32 y nivel de distancia f32), en bucle y a la velocidad de cada punto.
 //!
-//! Lo que hace cada tick (`UpdateTourWayPoint`):
-//! - avanza hacia el punto siguiente su velocidad (entre 0.1 y 100) y, al llegar, pasa al otro;
-//! - a menos de 300 del punto (o del anterior) el rumbo se mezcla con el del tramo siguiente
-//!   (o el anterior) para girar suave;
-//! - el ángulo de la cámara gira hacia el rumbo como mucho 1° por tick (diferencia / 30);
-//! - el nivel de distancia se interpola entre el del punto anterior y el del siguiente.
+//! El movimiento es moderno: en vez de ir en línea recta de punto a punto y girar con retraso
+//! (`CCameraMove::UpdateTourWayPoint`, que además saca la cámara del centro de los pasillos en
+//! las curvas), la cámara va por una curva suave (Catmull-Rom centrípeta) que pasa por todos los
+//! puntos, siempre por el centro del pasillo, y mira a un punto algo más adelante de la curva:
+//! empieza a girar antes de cada esquina y nunca da tirones. Se calcula a 25 ticks por segundo y
+//! se dibuja interpolado, igual a cualquier fps.
 //!
-//! Y la vista (ver [`view`]): la de MuMain, con FOV de 90° en horizontal, niebla negra y alcance
-//! de 3995, mirando 17.5° hacia abajo en la dirección del recorrido.
+//! De MuMain se conservan la altura del ojo (650), la inclinación (17.5° hacia abajo), el campo de
+//! visión del login (90° en horizontal), el alcance (3995) y la niebla negra.
 //!
 //! Por ahora Enter entra al juego (sin servidor todavía).
 
 use bevy::prelude::*;
 
 use crate::Args;
-use crate::fx::core::create_angle;
 use crate::scene::{GameScene, LoadStep, load_world};
 use crate::terrain::MU_SCALE;
 
@@ -37,55 +34,116 @@ impl Plugin for LoginPlugin {
     }
 }
 
-/// `kTourBlendDistance`.
-const BLEND_DISTANCE: f32 = 300.0;
-/// `kMinTourAccel` / `kMaxTourAccel`.
+/// `kMinTourAccel` / `kMaxTourAccel`: velocidad por tick.
 const MIN_ACCEL: f32 = 0.1;
 const MAX_ACCEL: f32 = 100.0;
-/// Giro de la cámara (`kTourMaxRotateSpeed` 1° y `diferencia / 30`): MuMain lo aplica una vez por
-/// fotograma, sin ajustarlo a los fps. Aquí va por tick (25 por segundo) con lo que da MuMain a 60 fps:
-/// como mucho 2.4° por tick y `diferencia / 12.5`.
-const MAX_ROTATE: f32 = 1.0 * 60.0 / 25.0;
-const ROTATE_DIVISOR: f32 = 30.0 * 25.0 / 60.0;
-/// `kTourCameraZPosition`.
-const TOUR_Z: f32 = -300.0;
-/// `TOUR_BASE_DISTANCE`.
-const BASE_DISTANCE: f32 = 1100.0;
-/// `SetAngleFrustum(-112.5)`.
-const FRUSTUM_ANGLE: f32 = -112.5;
-/// MuMain: `LoginSceneCameraDefaults` y `RENDER_TERRAIN_DIST` (alcance; la niebla va de ahí a ×1.25).
-const MUMAIN_OFFSET: Vec3 = Vec3::new(-300.0, 650.0, 950.0);
-const MUMAIN_PITCH: f32 = 40.0;
-const MUMAIN_YAW: f32 = -5.0;
-const MUMAIN_FAR: f32 = 3995.0;
-/// FOV del paseo: 90° en horizontal a 4:3 (`CameraConfig::ForLoginScene`) → 73.74° en vertical.
+/// Altura del ojo: la de MuMain (-300 + 950).
+const EYE_HEIGHT: f32 = 650.0;
+/// Inclinación de MuMain (-112.5° + 40°): 17.5° hacia abajo.
+const PITCH: f32 = -72.5;
+/// Alcance de la vista (`RENDER_TERRAIN_DIST`); la niebla va de ahí a ×1.25.
+const VIEW_FAR: f32 = 3995.0;
+/// FOV del login: 90° en horizontal a 4:3 (`CameraConfig::ForLoginScene`) → 73.74° en vertical.
 const TOUR_HFOV: f32 = 90.0;
+/// La cámara mira a este punto de la curva por delante de ella (unidades de MU).
+const LOOK_AHEAD: f32 = 600.0;
+/// Muestras por tramo para medir la curva.
+const SAMPLES: usize = 64;
 
 #[derive(Clone, Copy)]
 struct Waypoint {
     pos: Vec2,
     delay: i32,
     accel: f32,
-    distance: f32,
+}
+
+/// La curva cerrada que pasa por los puntos, medida por longitud.
+struct Path {
+    points: Vec<Waypoint>,
+    /// Longitud acumulada al principio de cada tramo (`len[i]` = inicio del tramo i → i+1) y total.
+    starts: Vec<f32>,
+    total: f32,
+    /// Por tramo: (t, longitud acumulada desde el inicio del tramo) de cada muestra.
+    tables: Vec<Vec<(f32, f32)>>,
+}
+
+impl Path {
+    fn new(points: Vec<Waypoint>) -> Self {
+        let n = points.len();
+        let mut starts = Vec::with_capacity(n);
+        let mut tables = Vec::with_capacity(n);
+        let mut total = 0.0;
+        for i in 0..n {
+            starts.push(total);
+            let mut table = vec![(0.0, 0.0)];
+            let mut acc = 0.0;
+            let mut last = segment_point(&points, i, 0.0);
+            for k in 1..=SAMPLES {
+                let t = k as f32 / SAMPLES as f32;
+                let p = segment_point(&points, i, t);
+                acc += (p - last).length();
+                table.push((t, acc));
+                last = p;
+            }
+            total += acc;
+            tables.push(table);
+        }
+        Self { points, starts, total, tables }
+    }
+
+    /// Tramo y parámetro `t` a la distancia `s` del principio de la curva.
+    fn locate(&self, s: f32) -> (usize, f32) {
+        let s = s.rem_euclid(self.total.max(1.0));
+        let i = self.starts.partition_point(|&st| st <= s).saturating_sub(1);
+        let local = s - self.starts[i];
+        let table = &self.tables[i];
+        let k = table.partition_point(|&(_, d)| d <= local).clamp(1, table.len() - 1);
+        let ((t0, d0), (t1, d1)) = (table[k - 1], table[k]);
+        let f = if d1 > d0 { (local - d0) / (d1 - d0) } else { 0.0 };
+        (i, t0 + (t1 - t0) * f)
+    }
+
+    fn at(&self, s: f32) -> Vec2 {
+        let (i, t) = self.locate(s);
+        segment_point(&self.points, i, t)
+    }
+
+    /// Velocidad en `s`: la del punto al que va el tramo (`targetWaypoint->fCameraMoveAccel`).
+    fn speed(&self, s: f32) -> f32 {
+        let (i, _) = self.locate(s);
+        self.points[(i + 1) % self.points.len()].accel.clamp(MIN_ACCEL, MAX_ACCEL)
+    }
+}
+
+/// Catmull-Rom centrípeta del tramo `i` → `i+1` (bucle cerrado), `t` de 0 a 1.
+fn segment_point(points: &[Waypoint], i: usize, t: f32) -> Vec2 {
+    let n = points.len();
+    let p = |k: usize| points[k % n].pos;
+    let (p0, p1, p2, p3) = (p(i + n - 1), p(i), p(i + 1), p(i + 2));
+    // Nudos con alfa 0.5 (no se pasa de las esquinas como la uniforme).
+    let knot = |a: Vec2, b: Vec2| (a - b).length().sqrt().max(1e-3);
+    let (t0, t1) = (0.0, knot(p0, p1));
+    let t2 = t1 + knot(p1, p2);
+    let t3 = t2 + knot(p2, p3);
+    let u = t1 + (t2 - t1) * t;
+    let a1 = p0 * ((t1 - u) / (t1 - t0)) + p1 * ((u - t0) / (t1 - t0));
+    let a2 = p1 * ((t2 - u) / (t2 - t1)) + p2 * ((u - t1) / (t2 - t1));
+    let a3 = p2 * ((t3 - u) / (t3 - t2)) + p3 * ((u - t2) / (t3 - t2));
+    let b1 = a1 * ((t2 - u) / (t2 - t0)) + a2 * ((u - t0) / (t2 - t0));
+    let b2 = a2 * ((t3 - u) / (t3 - t1)) + a3 * ((u - t1) / (t3 - t1));
+    b1 * ((t2 - u) / (t2 - t1)) + b2 * ((u - t1) / (t2 - t1))
 }
 
 #[derive(Resource)]
 struct Tour {
-    points: Vec<Waypoint>,
-    /// Índice del punto al que va.
-    index: usize,
-    delay: i32,
-    /// `m_CurrentCameraPos` (va por los puntos) y `m_vTourCameraPos` (lo que sigue la vista).
-    current: Vec2,
-    tour: Vec3,
-    angle: f32,
-    target_angle: f32,
-    /// Rumbo del primer tramo (referencia del desplazamiento de la cámara).
-    ref_angle: f32,
-    level: f32,
-    /// Estado del tick anterior y de este (recorrido, nivel de distancia, ángulo), para interpolar.
-    prev: (Vec3, f32, f32),
-    now: (Vec3, f32, f32),
+    path: Path,
+    /// Distancia recorrida por la curva, en este tick y en el anterior (para interpolar).
+    s: f32,
+    prev_s: f32,
+    /// Pausa en el punto al que se llegó (ticks que quedan).
+    wait: i32,
+    /// Tramo del último punto pasado (para las pausas).
+    segment: usize,
 }
 
 fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
@@ -98,118 +156,48 @@ fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
     (0..n)
         .map(|i| {
             let o = 8 + i * 28;
-            Some(Waypoint {
-                pos: Vec2::new(f32_at(o + 4)?, f32_at(o + 8)?),
-                delay: u32_at(o + 16)? as i32,
-                accel: f32_at(o + 20)?,
-                distance: f32_at(o + 24)?,
-            })
+            Some(Waypoint { pos: Vec2::new(f32_at(o + 4)?, f32_at(o + 8)?), delay: u32_at(o + 16)? as i32, accel: f32_at(o + 20)? })
         })
         .collect()
 }
 
-/// `PlayCameraWalk` + `SetTourMode(TRUE, FALSE, 0)`.
+/// Empieza en el último punto, yendo hacia el primero (`SetTourMode(TRUE, FALSE, 0)`).
 fn start_tour(mut commands: Commands, args: Res<Args>) {
     let file = format!("CWScript{}.cws", args.world);
     let points = mu_data::fs::read(&args.data.join(format!("World{}", args.world)), &file)
         .ok()
         .and_then(|b| read_script(&b))
-        .filter(|p| p.len() > 1);
+        .filter(|p| p.len() > 2);
     let Some(points) = points else {
         warn!("login: sin recorrido de cámara ({file})");
         return;
     };
-    let (start, target) = (points[points.len() - 1], points[0]);
-    let current = start.pos;
-    let tour = start.pos.extend(TOUR_Z);
-    let dir = (target.pos - start.pos).normalize_or_zero();
-    let angle = create_angle(0.0, 0.0, dir.x, -dir.y);
-    let mut t = Tour { points, index: 0, delay: 0, current, tour, angle, target_angle: angle, ref_angle: angle, level: start.distance, prev: (Vec3::ZERO, 0.0, 0.0), now: (Vec3::ZERO, 0.0, 0.0) };
-    t.now = (t.current.extend(TOUR_Z), t.level, t.angle);
-    t.prev = t.now;
-    commands.insert_resource(t);
+    let n = points.len();
+    let path = Path::new(points);
+    let s = path.starts[n - 1];
+    commands.insert_resource(Tour { path, s, prev_s: s, wait: 0, segment: n - 1 });
 }
 
-/// Ojo, inclinación, giro y alcance de la vista: los de MuMain (`DefaultCamera` en modo paseo).
-///
-/// `ojo = recorrido + (-300, 650) + AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)` (un desplazamiento fijo en el
-/// mundo), altura -300 + 950 = 650, inclinación -112.5° + 40° = -72.5° y giro = ángulo - 5°.
-fn view(tour: Vec3, level: f32, angle: f32) -> (Vec3, f32, f32, f32) {
-    let d = BASE_DISTANCE * level * 0.1;
-    let (s, c) = (-45f32).to_radians().sin_cos();
-    let eye = (tour.truncate() + Vec2::new(-s * d, -c * d) + MUMAIN_OFFSET.truncate()).extend(TOUR_Z + MUMAIN_OFFSET.z);
-    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
-}
-fn signed_delta(from: f32, to: f32) -> f32 {
-    let d = to.rem_euclid(360.0) - from.rem_euclid(360.0);
-    if d > 180.0 {
-        d - 360.0
-    } else if d < -180.0 {
-        d + 360.0
-    } else {
-        d
-    }
-}
-
-/// `UpdateTourWayPoint`, un tick.
+/// Un tick: avanza por la curva a la velocidad del tramo (y espera en los puntos con pausa).
 fn step_tour(tour: Option<ResMut<Tour>>) {
     let Some(mut t) = tour else { return };
     let t = &mut *t;
-    t.prev = t.now;
-    let n = t.points.len();
-    loop {
-        let target = t.points[t.index];
-        let origin = t.points[(t.index + n - 1) % n];
-        let target_acc = target.accel.clamp(MIN_ACCEL, MAX_ACCEL);
-        if t.delay >= target.delay {
-            let to_target = target.pos - t.current;
-            let to_origin = origin.pos - t.current;
-            let (dist_target, dist_origin) = (to_target.length(), to_origin.length());
-            let forward = to_target.normalize_or_zero();
-            let mut dir = forward;
-            if dist_target <= BLEND_DISTANCE {
-                let next = t.points[(t.index + 1) % n];
-                let seg = next.pos - target.pos;
-                if seg.length() > f32::EPSILON {
-                    let rate = dist_target / BLEND_DISTANCE * 0.5 + 0.5;
-                    dir = (seg.normalize() * (1.0 - rate) + forward * rate).normalize_or_zero();
-                }
-            } else if dist_origin <= BLEND_DISTANCE {
-                let prev = t.points[(t.index + n - 2) % n];
-                let seg = origin.pos - prev.pos;
-                if seg.length() > f32::EPSILON {
-                    let rate = dist_origin / BLEND_DISTANCE * 0.5 + 0.5;
-                    dir = (seg.normalize() * (1.0 - rate) + forward * rate).normalize_or_zero();
-                }
-            }
-            // Llegó al punto: al siguiente (en el mismo tick).
-            if dist_target <= target_acc {
-                t.index = (t.index + 1) % n;
-                t.delay = 0;
-                continue;
-            }
-            if dist_target > 5.0 && dist_origin > 5.0 {
-                t.target_angle = create_angle(0.0, 0.0, dir.x, -dir.y);
-            }
-            let delta = signed_delta(t.angle, t.target_angle);
-            let step = (delta.abs() / ROTATE_DIVISOR).clamp(0.0, MAX_ROTATE);
-            t.angle = if delta.abs() <= step { t.target_angle.rem_euclid(360.0) } else { (t.angle + step * delta.signum()).rem_euclid(360.0) };
-            t.current += forward * target_acc;
-            t.tour += (dir * target_acc).extend(0.0);
-            t.tour.z = TOUR_Z;
-            let total = dist_origin + dist_target;
-            t.level = if total > f32::EPSILON {
-                origin.distance * dist_target / total + target.distance * dist_origin / total
-            } else {
-                target.distance
-            };
-        }
-        t.delay += 1;
-        break;
+    t.prev_s = t.s;
+    if t.wait > 0 {
+        t.wait -= 1;
+        return;
     }
-    // La vista va por el recorrido exacto (`current`): el camino suavizado del original (`tour`) se
-    // desvía unas 135 unidades por vuelta y no se corrige nunca. Las curvas las suaviza el giro.
-    t.now = (t.current.extend(TOUR_Z), t.level, t.angle);
+    let speed = t.path.speed(t.s);
+    t.s += speed;
+    if t.s >= t.path.total {
+        t.s -= t.path.total;
+        t.prev_s -= t.path.total;
+    }
+    let (segment, _) = t.path.locate(t.s);
+    if segment != t.segment {
+        t.segment = segment;
+        t.wait = t.path.points[segment].delay.max(0);
+    }
 }
 
 /// Coloca la cámara entre el tick anterior y este.
@@ -219,27 +207,26 @@ fn place_camera(
     mut cameras: Query<(&mut Transform, &mut Projection, Option<&mut DistanceFog>), With<Camera3d>>,
 ) {
     let Some(t) = tour else { return };
-    let a = fixed.overstep_fraction();
-    let tour_pos = t.prev.0.lerp(t.now.0, a);
-    let level = t.prev.1 + (t.now.1 - t.prev.1) * a;
-    let angle = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
-    let (eye, pitch, yaw, far) = view(tour_pos, level, angle);
+    let s = t.prev_s + (t.s - t.prev_s) * fixed.overstep_fraction();
+    let eye = t.path.at(s);
+    let ahead = t.path.at(s + LOOK_AHEAD) - eye;
+    // Rumbo de MU (0 = +Y, 90 = +X), el mismo que da `CreateAngle`.
+    let yaw = ahead.x.atan2(ahead.y).to_degrees();
     let vfov = 2.0 * ((TOUR_HFOV * 0.5).to_radians().tan() / (4.0 / 3.0)).atan();
     for (mut tf, mut proj, fog) in &mut cameras {
-        *tf = crate::camera::mu_view(eye, pitch, yaw);
+        *tf = crate::camera::mu_view(eye.extend(EYE_HEIGHT), PITCH, yaw);
         if let Projection::Perspective(p) = &mut *proj {
             // `gluPerspective(fov, aspecto, near 100, far × 1.4)`.
             p.fov = vfov;
             p.near = 100.0 / MU_SCALE;
-            p.far = far * 1.4 / MU_SCALE;
+            p.far = VIEW_FAR * 1.4 / MU_SCALE;
         }
         if let Some(mut fog) = fog {
             // Niebla lineal negra de `far` a `far × 1.25`.
-            fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
+            fog.falloff = bevy::pbr::FogFalloff::Linear { start: VIEW_FAR / MU_SCALE, end: VIEW_FAR * 1.25 / MU_SCALE };
         }
     }
 }
-
 /// Niebla negra del login (`FogEnable = true`; la distancia la pone `place_camera`).
 fn add_fog(mut commands: Commands, cameras: Query<Entity, With<Camera3d>>) {
     for e in &cameras {
