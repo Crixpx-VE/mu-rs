@@ -239,6 +239,10 @@ fn build_layer_mesh(
     for y in area[1]..area[3] {
         for x in area[0]..area[2] {
             let i = y * SIZE + x;
+            // `RenderTerrainTile`: las casillas `TW_NOGROUND` no se dibujan.
+            if t.attribute(x, y) & terrain::attr::NO_GROUND != 0 {
+                continue;
+            }
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             let alpha = corners.map(|(cx, cy)| m.alpha[cy * SIZE + cx] as f32 / 255.0);
 

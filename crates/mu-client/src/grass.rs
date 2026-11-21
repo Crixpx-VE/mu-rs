@@ -143,6 +143,10 @@ fn build_grass(
             if m.layer1[y * SIZE + x] != texture {
                 continue;
             }
+            // Sin suelo (`TW_NOGROUND`): ni terreno ni hierba.
+            if t.attribute(x, y) & mu_data::terrain::attr::NO_GROUND != 0 {
+                continue;
+            }
             // Solo casillas sin mezcla con la segunda capa.
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             if corners.iter().any(|&(cx, cy)| m.alpha[cy * SIZE + cx] > 0) {
