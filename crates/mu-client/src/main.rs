@@ -132,6 +132,22 @@ impl Args {
     }
 }
 
+/// Color de fondo de cada mapa (`SetWorldClearColor`, en `SceneManager.cpp`): bytes / 256.
+fn world_clear_color(world: u16) -> Color {
+    let rgb8 = |r: u8, g: u8, b: u8| Color::srgb(r as f32 / 256.0, g as f32 / 256.0, b as f32 / 256.0);
+    // `WorldActive` del original: nuestro número de mapa menos uno.
+    match world as i32 - 1 {
+        0 => rgb8(10, 20, 14),                // Lorencia: verde oscuro
+        2 => rgb8(0, 0, 10),                  // Devias: azul marino casi negro
+        10 => rgb8(3, 25, 44),                // Heaven: azul
+        24..=29 | 36 => rgb8(30, 40, 40),     // Kalima: turquesa oscuro
+        45..=50 => rgb8(9, 8, 33),            // Cursed Temple: morado oscuro
+        51 => rgb8(178, 178, 178),            // Elbeland: gris
+        65 => rgb8(148, 179, 223),            // Doppelganger: azul claro
+        _ => Color::BLACK,                    // el resto, Dungeon incluido: negro
+    }
+}
+
 fn main() {
     let args = Args::parse();
     let title = format!("MU Rust - World{}", args.world);
@@ -139,7 +155,7 @@ fn main() {
     let headless = args.screenshot.is_some();
 
     let mut app = App::new();
-    app.insert_resource(ClearColor(Color::srgb(0.45, 0.6, 0.8)));
+    app.insert_resource(ClearColor(world_clear_color(args.world)));
     if headless {
         // Modo captura: sin ventana. La cámara dibuja en una imagen en memoria
         // (funciona aunque no haya pantalla, p. ej. sesión remota desconectada).
