@@ -157,7 +157,7 @@ pub fn render_quads(
     frame: Res<FrameDraw>,
     fixed: Res<Time<Fixed>>,
     terrain: Option<Res<LoadedTerrain>>,
-    cameras: Query<&Transform, With<Camera3d>>,
+    cameras: Query<&Transform, (With<Camera3d>, With<IsDefaultUiCamera>)>,
     mut batches: ResMut<Batches>,
     mut textures: ResMut<FxTextures>,
     mut images: ResMut<Assets<Image>>,

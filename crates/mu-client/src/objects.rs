@@ -199,7 +199,7 @@ fn light_login_objects(
 
 fn fade_login_objects(
     time: Res<Time>,
-    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    cameras: Query<&GlobalTransform, (With<Camera3d>, With<IsDefaultUiCamera>)>,
     mut fades: ResMut<LoginFades>,
     mut fx_world: ResMut<crate::fx::FxWorld>,
     mut materials: ResMut<Assets<ModelMaterial>>,

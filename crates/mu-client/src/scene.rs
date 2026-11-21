@@ -169,7 +169,11 @@ fn advance_load(
 
 /// Al arrancar: con `--world` directo al juego; si no, título y luego login.
 fn start(mut args: ResMut<Args>, mut load: ResMut<LoadStep>, mut next: ResMut<NextState<GameScene>>) {
-    if args.direct {
+    if args.direct && args.world == CHARACTER_WORLD {
+        // `--world 75`: directo a la selección de personaje.
+        load_world(&mut args, &mut load, CHARACTER_WORLD, false, GameScene::CharacterSelect);
+        next.set(GameScene::Loading);
+    } else if args.direct {
         let world = args.world;
         load_world(&mut args, &mut load, world, true, GameScene::Game);
         next.set(GameScene::Loading);

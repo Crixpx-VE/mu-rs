@@ -23,6 +23,7 @@
 //! F9 = invasión de dragones (apagada → rojos → dorados) · F7/F8 = volumen de efectos/música ·
 //! Esc = menú de sistema (con las opciones; en el juego también desde el botón de menú de la barra).
 
+mod account;
 mod boids;
 mod camera;
 mod character;

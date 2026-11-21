@@ -44,6 +44,10 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialKey, UiMateri
 
 use crate::Args;
 use crate::scene::{GameScene, LoadStep};
+
+/// Ventanas de la selección de personaje (crear personaje, borrar, los mensajes de esa pantalla).
+#[path = "login_ui_char.rs"]
+mod character;
 use crate::sound::SoundQueue;
 use crate::terrain::to_bevy_image;
 
@@ -52,19 +56,30 @@ pub struct LoginUiPlugin;
 impl Plugin for LoginUiPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "login_logo.wesl");
+        let ui_scene = || in_state(GameScene::Login).or_else(in_state(GameScene::CharacterSelect));
+        let leave = |mut c: Commands| {
+            c.remove_resource::<LoginUi>();
+            c.remove_resource::<LoginTextures>();
+        };
         app.add_plugins(UiMaterialPlugin::<LogoMaterial>::default())
             .add_systems(OnEnter(GameScene::Login), spawn_login_ui)
-            .add_systems(
-                OnExit(GameScene::Login),
-                (crate::scene::despawn::<LoginUiRoot>, |mut c: Commands| {
-                    c.remove_resource::<LoginUi>();
-                    c.remove_resource::<LoginTextures>();
-                }),
-            )
+            .add_systems(OnExit(GameScene::Login), (crate::scene::despawn::<LoginUiRoot>, leave))
+            // En la selección de personaje, el mismo gestor (`CUIMng::CreateCharacterScene`).
+            .add_systems(OnEnter(GameScene::CharacterSelect), character::spawn_character_ui)
+            .add_systems(OnExit(GameScene::CharacterSelect), (crate::scene::despawn::<LoginUiRoot>, leave))
             // Tab es de las cajas de texto: que no llegue al cambio de cámara (camera.rs).
-            .add_systems(PreUpdate, keep_tab.after(bevy::input::InputSystems).run_if(in_state(GameScene::Login)))
+            .add_systems(PreUpdate, keep_tab.after(bevy::input::InputSystems).run_if(ui_scene()))
             .add_systems(FixedUpdate, logo_tick.run_if(in_state(GameScene::Login)))
-            .add_systems(Update, (update_ui, draw_windows, draw_logo).chain().run_if(in_state(GameScene::Login)))
+            .add_systems(Update, (update_ui, draw_windows).chain().after(crate::charselect::CharSelectSystems).run_if(ui_scene()))
+            .add_systems(Update, draw_logo.after(draw_windows).run_if(in_state(GameScene::Login)))
+            .add_systems(
+                Update,
+                (
+                    character::before_update.after(crate::charselect::CharSelectSystems).before(update_ui),
+                    character::after_update.after(update_ui),
+                )
+                    .run_if(in_state(GameScene::CharacterSelect)),
+            )
             // La música de los créditos pisa la del login (login.rs la pide cada fotograma).
             .add_systems(
                 PostUpdate,
@@ -204,6 +219,7 @@ const TEXT_ACCOUNT: &str = "Account"; // 450
 const TEXT_PASSWORD: &str = "Password"; // 451
 const TEXT_EXIT_GAME: &str = "Exit Game"; // 381
 const TEXT_OPTION: &str = "Option"; // 385
+const TEXT_SELECT_SERVER: &str = "Select Server"; // 382
 const TEXT_CLOSE: &str = "Close"; // 388
 const TEXT_AUTO_ATTACK: &str = "Automatic Attack"; // 386
 const TEXT_WHISPER: &str = "Beep sound for whispering"; // 387
@@ -337,8 +353,10 @@ fn msg_rect(s: Screen) -> IRect {
     IRect::new((s.w - MSG_W) / 2, (s.h - MSG_H) / 2, MSG_W, MSG_H)
 }
 
-fn sys_rect(s: Screen) -> IRect {
-    IRect::new((s.w - SYS_W) / 2, (s.h - SYS_H) / 2, SYS_W, SYS_H)
+/// `CSysMenuWin` centrado: `SetLine(6)` en el login y `SetLine(10)` en la selección de personaje.
+fn sys_rect_for(s: Screen, scene: UiScene) -> IRect {
+    let h = if scene == UiScene::Character { 64 + 43 + 8 * 10 } else { SYS_H };
+    IRect::new((s.w - SYS_W) / 2, (s.h - h) / 2, SYS_W, h)
 }
 
 /// `CWinEx` de `COptionWin`, centrado (OptionWin.cpp:75-76).
@@ -388,10 +406,25 @@ enum Win {
     Option,
     Credit,
     Msg,
+    /// `CCharMakeWin` (selección de personaje).
+    CharMake,
+}
+
+/// Escena del gestor (`UIM_SCENE_LOGIN` / `UIM_SCENE_CHARACTER`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum UiScene {
+    Login,
+    Character,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Btn {
+    /// "Select Server" del menú de sistema (solo en la selección de personaje).
+    SysServerSelect,
+    /// Clase de la ventana de crear.
+    Job(crate::account::Class),
+    MakeOk,
+    MakeCancel,
     Menu,
     Credit,
     /// Botón de grupo por su posición (`m_iBtnPos`).
@@ -739,14 +772,22 @@ fn load_credits(data: &std::path::Path) -> Vec<CreditItem> {
 enum Field {
     Id,
     Pass,
+    /// Nombre del personaje nuevo.
+    CharName,
+    /// Contraseña para borrar.
+    DelPass,
 }
 
-/// `MSG_WIN_TYPE` (sin `MWT_BTN_BOTH` ni `MWT_STR_INPUT`, que son de la selección de personaje).
+/// `MSG_WIN_TYPE`.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 enum MsgKind {
     None,
     Cancel,
     Ok,
+    /// `MWT_BTN_BOTH`: OK y Cancel.
+    Both,
+    /// `MWT_STR_INPUT`: caja de contraseña, OK y Cancel.
+    Input,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -755,6 +796,17 @@ enum MsgCode {
     InputId,
     InputPassword,
     GameEndCountdown,
+    // Selección de personaje (MsgWin.cpp).
+    MinLength,
+    IdSpaceError,
+    SpecialName,
+    DeleteGuildWarning,
+    DeleteConfirm,
+    DeleteResident,
+    DeleteSuccess,
+    ResidentWrong,
+    CreateFail,
+    CreateFail2,
 }
 
 struct Message {
@@ -902,6 +954,8 @@ enum Outcome {
     Enter(String),
     /// Fin de la cuenta atrás de "Exit Game".
     Exit,
+    /// "Select Server" desde la selección de personaje: de vuelta al login.
+    ServerSelect,
 }
 
 #[derive(Resource)]
@@ -955,6 +1009,21 @@ struct LoginUi {
     set_music: Option<u8>,
     sliders: [Slider; SLD_MAX],
     credits: Credits,
+
+    scene: UiScene,
+    /// Ventana de crear: el nombre, la clase elegida (`m_nSelJob`) y cuántas veces se ha elegido
+    /// una (la vista previa vuelve a empezar).
+    char_name: TextBox,
+    job: crate::account::Class,
+    job_picks: u32,
+    /// Contraseña para borrar un personaje (`MWT_STR_INPUT`).
+    del_pass: TextBox,
+    /// Lo que cuenta charselect.rs: la cuenta, cuántos personajes tiene y el elegido.
+    account: String,
+    char_count: usize,
+    char_selected: Option<(usize, String, u8)>,
+    /// Para charselect.rs (personaje creado o borrado).
+    scene_events: Vec<crate::charselect::SceneEvent>,
 }
 
 impl LoginUi {
@@ -991,11 +1060,24 @@ impl LoginUi {
             set_music: None,
             sliders: SLD_RANGE.map(Slider::new),
             credits: Credits::new(credits),
+            scene: UiScene::Login,
+            char_name: TextBox::new("", crate::account::MAX_NAME, false),
+            job: crate::account::Class::Knight,
+            job_picks: 0,
+            del_pass: TextBox::new("", MAX_PASSWORD, true),
+            account: String::new(),
+            char_count: 0,
+            char_selected: None,
+            scene_events: Vec::new(),
         };
         ui.update_display();
         // Sin servidor: la lista llega enseguida (`ReceiveServerList`).
         ui.server_list_received();
         ui
+    }
+
+    fn sys_rect(&self, s: Screen) -> IRect {
+        sys_rect_for(s, self.scene)
     }
 
     fn is_shown(&self, w: Win) -> bool {
@@ -1081,6 +1163,25 @@ impl LoginUi {
                 self.exit_clock = 0.0;
                 (MsgKind::None, countdown_text(self.exit_count))
             }
+            // `GlobalText` 390, 1715, 391, 1654, 1712, 1713, 1714, 401, 1716 y 396.
+            MsgCode::MinLength => (MsgKind::Ok, "Type more than 4 letters".into()),
+            MsgCode::IdSpaceError => (MsgKind::Ok, "It contains prohibited words.".into()),
+            MsgCode::SpecialName => (MsgKind::Ok, "Cannot use symbols.".into()),
+            MsgCode::DeleteGuildWarning => (MsgKind::Ok, "You can't delete the character that belongs to the guild".into()),
+            MsgCode::DeleteConfirm => {
+                let name = self.char_selected.as_ref().map_or(String::new(), |s| s.1.clone());
+                (MsgKind::Both, format!("Would you like to delete {name} character?"))
+            }
+            MsgCode::DeleteResident => {
+                // `InitResidentNumInput`: la caja vacía y con el foco.
+                self.del_pass = TextBox::new("", MAX_PASSWORD, true);
+                self.give_focus(Field::DelPass, false);
+                (MsgKind::Input, "Please enter your WEBZEN.COM password.".into())
+            }
+            MsgCode::DeleteSuccess => (MsgKind::Ok, "Character was deleted successfully.".into()),
+            MsgCode::ResidentWrong => (MsgKind::Ok, "The password you have entered is incorrect.".into()),
+            MsgCode::CreateFail => (MsgKind::Ok, "Incorrect character name was entered or same character name exists.".into()),
+            MsgCode::CreateFail2 => (MsgKind::Ok, "No more characters can be created.".into()),
         };
         self.msg = Message { code: Some(code), kind, lines: separate_lines(&text) };
         self.show_win(Win::Msg);
@@ -1099,6 +1200,8 @@ impl LoginUi {
         match field {
             Field::Id => &mut self.id,
             Field::Pass => &mut self.pass,
+            Field::CharName => &mut self.char_name,
+            Field::DelPass => &mut self.del_pass,
         }
     }
 
@@ -1106,6 +1209,8 @@ impl LoginUi {
         match field {
             Field::Id => &self.id,
             Field::Pass => &self.pass,
+            Field::CharName => &self.char_name,
+            Field::DelPass => &self.del_pass,
         }
     }
 
@@ -1162,21 +1267,32 @@ impl LoginUi {
                 match self.msg.kind {
                     MsgKind::Ok => out.push(ok(149)),
                     MsgKind::Cancel => out.push(cancel(149)),
+                    MsgKind::Both => {
+                        out.push(ok(98));
+                        out.push(cancel(200));
+                    }
+                    MsgKind::Input => {
+                        out.push(ok(209));
+                        out.push(cancel(264));
+                    }
                     MsgKind::None => {}
                 }
             }
+            Win::CharMake => self.char_make_buttons(s, &mut out),
             Win::SysMenu => {
                 // `CSysMenuWin::SetPosition` (SysMenuWin.cpp:83-96). "Select Server" está
-                // deshabilitado en el login y sin fotograma de deshabilitado: no se dibuja.
-                let r = sys_rect(s);
+                // deshabilitado en el login y sin fotograma de deshabilitado: no se dibuja; en la
+                // selección de personaje están los cuatro.
+                let r = self.sys_rect(s);
                 let x = r.x + (SYS_W - 108) / 2;
                 let gap = 4 + 30;
                 let close_y = r.y + r.h - 52;
-                for (id, y, text) in [
-                    (Btn::SysExit, r.y + 33, TEXT_EXIT_GAME),
-                    (Btn::SysOption, close_y - gap, TEXT_OPTION),
-                    (Btn::SysClose, close_y, TEXT_CLOSE),
-                ] {
+                let mut list = vec![(Btn::SysExit, r.y + 33, TEXT_EXIT_GAME)];
+                if self.scene == UiScene::Character {
+                    list.push((Btn::SysServerSelect, r.y + 33 + gap, TEXT_SELECT_SERVER));
+                }
+                list.extend([(Btn::SysOption, close_y - gap, TEXT_OPTION), (Btn::SysClose, close_y, TEXT_CLOSE)]);
+                for (id, y, text) in list {
                     out.push(ButtonDef {
                         id,
                         rect: IRect::new(x, y, 108, 30),
@@ -1255,7 +1371,7 @@ impl LoginUi {
             Win::MainBar => bar_rect(s),
             Win::ServerSel => ssw_rect(s),
             Win::Login => login_rect(s),
-            Win::SysMenu | Win::Option | Win::Credit | Win::Msg => IRect::new(0, 0, s.w, s.h),
+            Win::SysMenu | Win::Option | Win::Credit | Win::Msg | Win::CharMake => IRect::new(0, 0, s.w, s.h),
         }
     }
 
@@ -1325,13 +1441,31 @@ impl LoginUi {
             if w == Win::Login {
                 self.login_while_shown(s, input);
             }
+            // La caja de la ventana de crear y la de la contraseña para borrar.
+            if (w == Win::CharMake && self.is_active(w)) || (w == Win::Msg && self.msg.kind == MsgKind::Input) {
+                self.type_keys(input);
+            }
             if self.is_active(w) {
                 self.while_active(w, &clicks, input);
             }
         }
 
+        // `NewMoveCharacterScene` (ZzzScene.cpp:940-1027): Esc abre el menú de sistema si no hay
+        // otra ventana delante.
+        if self.scene == UiScene::Character {
+            if input.esc
+                && !(self.is_shown(Win::Msg)
+                    || self.is_shown(Win::CharMake)
+                    || self.is_shown(Win::SysMenu)
+                    || self.is_shown(Win::Option))
+                && self.sys_flag
+            {
+                self.sounds += 1;
+                self.show_win(Win::SysMenu);
+            }
+        }
         // `NewMoveLogInScene` (ZzzScene.cpp:1254-1267): Esc abre el menú de sistema desde la lista.
-        if input.esc
+        else if input.esc
             && !(self.is_shown(Win::Msg)
                 || self.is_shown(Win::Login)
                 || self.is_shown(Win::SysMenu)
@@ -1448,6 +1582,10 @@ impl LoginUi {
                 // SysMenuWin.cpp:120-153.
                 if clicks.contains(&Btn::SysExit) {
                     self.popup(MsgCode::GameEndCountdown);
+                } else if clicks.contains(&Btn::SysServerSelect) {
+                    // `SendRequestLogOut(2)` → `ReceiveLogOut`: de vuelta a la lista de servidores.
+                    self.hide_win(Win::SysMenu);
+                    self.outcome = Some(Outcome::ServerSelect);
                 } else if clicks.contains(&Btn::SysOption) {
                     self.hide_win(Win::SysMenu);
                     self.show_win(Win::Option);
@@ -1461,6 +1599,7 @@ impl LoginUi {
                 }
             }
             Win::Option => self.option_while_active(clicks, input),
+            Win::CharMake => self.char_make_while_active(clicks, input),
             Win::Credit => {
                 // CreditWin.cpp:155-169.
                 if clicks.contains(&Btn::CreditClose) {
@@ -1572,6 +1711,9 @@ impl LoginUi {
                 self.show_win(Win::Login);
                 self.give_focus(Field::Pass, true);
             }
+            Some(MsgCode::DeleteConfirm) => self.popup(MsgCode::DeleteResident),
+            Some(MsgCode::DeleteResident) => self.request_delete(),
+            Some(MsgCode::CreateFail | MsgCode::CreateFail2) => self.show_char_make(),
             _ => {}
         }
     }
@@ -1596,6 +1738,11 @@ impl LoginUi {
                 }
             }
         }
+        self.type_keys(input);
+    }
+
+    /// Teclas para la caja con el foco (`edit` de Windows).
+    fn type_keys(&mut self, input: &FrameInput) {
         for key in &input.keys {
             let Some(field) = self.focus else { return };
             let b = self.field_mut(field);
@@ -1625,9 +1772,12 @@ impl LoginUi {
                     b.move_to(n);
                 }
                 Key::Tab => {
-                    // `SetTabTarget`: la otra caja, con todo seleccionado.
-                    let other = if field == Field::Id { Field::Pass } else { Field::Id };
-                    self.give_focus(other, true);
+                    // `SetTabTarget`: la otra caja, con todo seleccionado (solo en el login).
+                    match field {
+                        Field::Id => self.give_focus(Field::Pass, true),
+                        Field::Pass => self.give_focus(Field::Id, true),
+                        _ => continue,
+                    }
                 }
                 _ => continue,
             }
@@ -1790,6 +1940,10 @@ fn update_ui(
         Some(Outcome::Exit) => {
             exit.write(AppExit::Success);
         }
+        Some(Outcome::ServerSelect) => {
+            crate::scene::load_world(&mut args, &mut load, crate::scene::LOGIN_WORLD, false, GameScene::Login);
+            next.set(GameScene::Loading);
+        }
         None => {}
     }
 }
@@ -1824,10 +1978,18 @@ enum Tex {
     CreditLogo,
     /// Ilustración de los créditos (`ILLUST`), se carga cuando hace falta (`LoadIllust`).
     Illust(u8),
+    /// Caja de la contraseña de borrar (`BITMAP_MSG_WIN_INPUT`).
+    MsgInput,
+    /// Fondo del nombre en la ventana de crear (`BITMAP_LOG_IN` de la selección).
+    CharId,
+    /// Vista previa de la ventana de crear (la imagen la pone charselect.rs).
+    Preview,
 }
 
 impl Tex {
-    const ALL: [Tex; 24] = [
+    const ALL: [Tex; 26] = [
+        Tex::MsgInput,
+        Tex::CharId,
         Tex::GroupBtn,
         Tex::ServerBtn,
         Tex::ServerGauge,
@@ -1882,6 +2044,9 @@ impl Tex {
             Tex::CloseBtn => "message_close_b_all.tga",
             Tex::CreditLogo => "cr_mu_lo.tga",
             Tex::Illust(i) => ILLUST[i as usize % ILLUST.len()],
+            Tex::MsgInput => "delete_secret_number.tga",
+            Tex::CharId => "cha_id.tga",
+            Tex::Preview => "",
         }
     }
 }
@@ -2151,7 +2316,7 @@ impl LoginUi {
                 Win::SysMenu => {
                     out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
                     // `CWinEx`: piedra repetida dentro (a 3 px del borde), cabecera, pie y laterales.
-                    let r = sys_rect(s);
+                    let r = self.sys_rect(s);
                     let side = r.h - 64 - 43;
                     out.push(tiled(Tex::SysStone, IRect::new(r.x + 3, r.y + 3, r.w - 6, r.h - 6)));
                     out.push(image(Tex::SysTop, IRect::new(r.x, r.y, 213, 64)));
@@ -2189,11 +2354,36 @@ impl LoginUi {
                             });
                         }
                     }
+                    if self.msg.kind == MsgKind::Input {
+                        // `m_sprInput` (171×23) y la caja de la contraseña a (+10, +8) de él.
+                        let r = IRect::new(m.x + 32, m.y + 72 + 4, 171, 23);
+                        out.push(image(Tex::MsgInput, r));
+                        out.push(self.input_item(s, Field::DelPass, Vec2::new(s.snap_x((r.x + 10) as f32), s.snap_y((r.y + 8) as f32))));
+                    }
                     self.push_buttons(s, w, &mut out);
                 }
+                Win::CharMake => self.push_char_make(s, &mut out),
             }
         }
         out
+    }
+
+    /// Caja de texto `field` con el texto empezando en `origin`.
+    fn input_item(&self, s: Screen, field: Field, origin: Vec2) -> Item {
+        let b = self.field(field);
+        let shown = b.shown();
+        let caret_at = shown.char_indices().nth(b.caret).map_or(shown.len(), |(i, _)| i);
+        let focused = self.focus == Some(field);
+        Item::Input {
+            x: origin.x,
+            y: origin.y,
+            w: INPUT_W * s.rate_x(),
+            h: INPUT_H * s.rate_y(),
+            before: shown[..caret_at].to_string(),
+            after: shown[caret_at..].to_string(),
+            selected: focused && b.select_all,
+            caret: focused && (self.caret_clock % CARET_PERIOD) < CARET_PERIOD / 2.0,
+        }
     }
 
     fn push_buttons(&self, s: Screen, w: Win, out: &mut Vec<Item>) {

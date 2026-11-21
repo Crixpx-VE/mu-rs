@@ -80,12 +80,14 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
         // no hace falta repartir luces por zonas de pantalla ("clustering").
         // (`None` falla en Bevy 0.20 con una textura de tamaño cero; `Single` es lo mínimo.)
         bevy::light::cluster::ClusterConfig::Single,
+        // La interfaz va en esta cámara aunque haya otras (la vista previa de crear personaje).
+        IsDefaultUiCamera,
     ));
 
     if args.screenshot.is_some() {
         // 4:3 como las resoluciones del juego, y con la interfaz dibujada en la captura.
         let image = images.add(Image::new_target_texture(1024, 768, TextureFormat::Rgba8UnormSrgb, None));
-        cam.insert((RenderTarget::Image(image.clone().into()), IsDefaultUiCamera));
+        cam.insert(RenderTarget::Image(image.clone().into()));
         commands.insert_resource(bevy::ui::UiScale(768.0 / 480.0));
         commands.insert_resource(OffscreenTarget(image));
     }

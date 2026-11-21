@@ -37,18 +37,50 @@ const WALK_SPEED: f32 = 3.6;
 /// Fotogramas de animación por segundo.
 const ANIM_FPS: f32 = 8.0;
 
-/// Velocidad de la animación (`PlaySpeed` de ZzzOpenData.cpp ≈354 × 25 ticks por segundo):
-/// sentarse y apoyarse 0.4, curarse 0.2.
-fn action_fps(a: usize) -> f32 {
+/// `SetPlayerStop` sin arma (o en zona segura): la Elfa `STOP_FEMALE`, la Summoner
+/// `STOP_SUMMONER` y el resto `STOP_MALE`; con la espada en la mano fuera de zona segura, el Dark
+/// Knight `STOP_SWORD`.
+pub fn stop_action(class: crate::account::Class, sword_in_hand: bool) -> usize {
+    use crate::account::Class;
     use crate::fx::tables::ids;
-    let ticks = crate::fx::sim::TICKS_PER_SECOND;
-    if a == action::HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 as usize {
-        0.2 * ticks
-    } else if action::resting(a) {
-        0.4 * ticks
-    } else {
-        ANIM_FPS
+    match class {
+        Class::Knight if sword_in_hand => ids::PLAYER_STOP_SWORD as usize,
+        Class::Elf => ids::PLAYER_STOP_FEMALE as usize,
+        Class::Summoner => ids::PLAYER_STOP_SUMMONER as usize,
+        _ => action::STOP_MALE,
     }
+}
+
+/// `SetPlayerWalk` sin arma: `WALK_FEMALE` las mujeres y `WALK_MALE` el resto.
+pub fn walk_action(class: crate::account::Class) -> usize {
+    if class.female() { crate::fx::tables::ids::PLAYER_WALK_FEMALE as usize } else { action::WALK_MALE }
+}
+
+/// `PlaySpeed` (fotogramas por tick de 25 Hz) de las animaciones que usan la selección y el juego
+/// (ZzzOpenData.cpp ≈330-361; `SetPlayerWalk` pone 0.33 a las de caminar).
+pub fn play_speed(a: usize) -> f32 {
+    use crate::fx::tables::ids;
+    let a = a as i32;
+    if a == ids::PLAYER_STOP_SWORD {
+        0.26
+    } else if a == ids::PLAYER_STOP_SUMMONER {
+        0.24
+    } else if (ids::PLAYER_STOP_MALE..=ids::PLAYER_STOP_RIDE_WEAPON).contains(&a) {
+        0.28
+    } else if (ids::PLAYER_WALK_MALE..=ids::PLAYER_WALK_CROSSBOW).contains(&a) {
+        0.33
+    } else if a == ids::PLAYER_HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 {
+        0.2
+    } else if action::resting(a as usize) {
+        0.4
+    } else {
+        ANIM_FPS / crate::fx::sim::TICKS_PER_SECOND
+    }
+}
+
+/// Velocidad de la animación en fotogramas por segundo.
+fn action_fps(a: usize) -> f32 {
+    play_speed(a) * crate::fx::sim::TICKS_PER_SECOND
 }
 
 /// El ratón manda al personaje (para ordenar los sistemas que leen lo que hay bajo el ratón).
@@ -78,6 +110,10 @@ pub struct Player {
     pub casting: Option<f32>,
     /// `MOVEMENT_OPERATE`: va hacia este objeto de sentarse (índice en `Operates`).
     pub operate: Option<usize>,
+    pub class: crate::account::Class,
+    /// Animaciones de parado y de caminar de su clase.
+    pub stop: usize,
+    pub walk: usize,
 }
 
 /// Habilidades del Dark Knight en las teclas (sin servidor todavía: se lanzan en el sitio):
@@ -107,7 +143,8 @@ fn cast_skill(
     mut players: Query<(Entity, &mut Player)>,
 ) {
     let Ok((entity, mut p)) = players.single_mut() else { return };
-    if p.casting.is_some() {
+    // Las habilidades de las teclas son las del Dark Knight.
+    if p.casting.is_some() || p.class != crate::account::Class::Knight {
         return;
     }
     // `--probar-habilidades`: una tras otra, sin teclado.
@@ -176,9 +213,9 @@ impl Skinned {
     }
 }
 
-/// Un Dark Knight cargado: esqueleto y piezas, las mallas (hijas de la entidad del personaje)
+/// Un personaje cargado: esqueleto y piezas, las mallas (hijas de la entidad del personaje)
 /// y sus materiales (para darles luz).
-pub struct DarkKnightModel {
+pub struct CharacterModel {
     pub skinned: Skinned,
     pub children: Vec<(Mesh3d, MeshMaterial3d<crate::model_light::ModelMaterial>)>,
     pub materials: Vec<Handle<crate::model_light::ModelMaterial>>,
@@ -186,15 +223,17 @@ pub struct DarkKnightModel {
     pub bones: Vec<bmd::Mat34>,
 }
 
-/// Carga `player.bmd`, las piezas del Dark Knight y la espada en la mano, en la pose `action`
-/// (fotograma 0). `None` si falta el esqueleto.
-pub fn load_dark_knight(
+/// Carga `player.bmd` y las piezas sin equipo de la clase (`{Helm,Armor,Pant,Glove,Boot}ClassNN`),
+/// en la pose `action` (fotograma 0); el Dark Knight, con la espada en la mano. `None` si falta
+/// el esqueleto.
+pub fn load_character(
     args: &Args,
+    class: crate::account::Class,
     action: usize,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<crate::model_light::ModelMaterial>,
     images: &mut Assets<Image>,
-) -> Option<DarkKnightModel> {
+) -> Option<CharacterModel> {
     let dir = args.data.join("Player");
     let skeleton = match fs::read(&dir, "player.bmd").and_then(|b| bmd::read(&b)) {
         Ok(s) => s,
@@ -209,7 +248,8 @@ pub fn load_dark_knight(
     let mut parts = vec![];
     let mut children = vec![];
     let mut body_materials = vec![];
-    for name in DARK_KNIGHT {
+    for part in BODY_PARTS {
+        let name = &format!("{part}Class{:02}.bmd", class.skin_file());
         let Ok(model) = fs::read(&dir, name).and_then(|b| bmd::read(&b)) else {
             warn!("falta la pieza {name}");
             continue;
@@ -235,7 +275,8 @@ pub fn load_dark_knight(
 
     // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true).
     let item_dir = args.data.join("Item");
-    let weapon = fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok().map(|w| {
+    let knight = class == crate::account::Class::Knight;
+    let weapon = knight.then(|| fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok()).flatten().map(|w| {
         let wbones = weapon_bones(&w, &bones, false);
         let mut handles = vec![];
         for i in 0..w.meshes.len() {
@@ -256,14 +297,14 @@ pub fn load_dark_knight(
         }
         (w, handles)
     });
-    if weapon.is_none() {
+    if knight && weapon.is_none() {
         warn!("falta el arma Item/{WEAPON_FILE}");
     }
-    Some(DarkKnightModel { skinned: Skinned { skeleton, parts, models, weapon }, children, materials: body_materials, bones })
+    Some(CharacterModel { skinned: Skinned { skeleton, parts, models, weapon }, children, materials: body_materials, bones })
 }
 
-/// Piezas del Dark Knight con la armadura inicial (clase 02).
-const DARK_KNIGHT: [&str; 5] = ["HelmClass02.bmd", "ArmorClass02.bmd", "PantClass02.bmd", "GloveClass02.bmd", "BootClass02.bmd"];
+/// Piezas del cuerpo sin equipo (`BodyPart[BODYPART_HELM..BOOTS]`).
+const BODY_PARTS: [&str; 5] = ["Helm", "Armor", "Pant", "Glove", "Boot"];
 
 fn spawn_player(
     mut commands: Commands,
@@ -273,9 +314,15 @@ fn spawn_player(
     mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
+    hero: Option<Res<crate::account::Hero>>,
 ) {
-    let Some(DarkKnightModel { skinned, children, materials: body_materials, bones }) =
-        load_dark_knight(&args, action::STOP_MALE, &mut meshes, &mut materials, &mut images)
+    let class = hero.map_or(crate::account::Class::Knight, |h| {
+        info!("entra {} ({} nivel {})", h.name, h.class.name(), h.level);
+        h.class
+    });
+    let (stop, walk) = (stop_action(class, false), walk_action(class));
+    let Some(CharacterModel { skinned, children, materials: body_materials, bones }) =
+        load_character(&args, class, stop, &mut meshes, &mut materials, &mut images)
     else {
         return;
     };
@@ -286,8 +333,18 @@ fn spawn_player(
         pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
     }
 
-    let player =
-        Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None, operate: None };
+    let player = Player {
+        pos,
+        path: VecDeque::new(),
+        facing: 0.0,
+        action: stop,
+        frame: 0.0,
+        casting: None,
+        operate: None,
+        class,
+        stop,
+        walk,
+    };
     let actor = actor_state(&player, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
     let mut e = commands.spawn((
@@ -415,7 +472,7 @@ fn scripted_walk(
     }
 }
 
-fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> crate::model_light::ModelMaterial {
+pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> crate::model_light::ModelMaterial {
     let tex = texture::load(dir, &bmd::texture_file_name(texture_name)).ok();
     // Igual que los objetos: prueba de alfa y profundidad, como el original.
     let alpha_mode = match tex.as_ref().map(|t| t.alpha_kind()) {
@@ -661,11 +718,11 @@ fn walk(
         }
         // Sentado o apoyado sigue así hasta que vuelve a caminar.
         let action = if !p.path.is_empty() {
-            action::WALK_MALE
+            p.walk
         } else if action::resting(p.action) {
             p.action
         } else {
-            action::STOP_MALE
+            p.stop
         };
         if p.casting.is_none() && action != p.action {
             p.action = action;
@@ -697,7 +754,7 @@ fn animate(
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
         p.frame += p.casting.unwrap_or_else(|| action_fps(p.action)) * time.delta_secs();
-        if p.action == action::WALK_MALE {
+        if p.action == p.walk {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }
         // La habilidad termina al acabar su animación: vuelve a estar quieto.
@@ -705,7 +762,7 @@ fn animate(
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
             if p.frame >= frames - 1.0 {
                 p.casting = None;
-                p.action = action::STOP_MALE;
+                p.action = p.stop;
                 p.frame = 0.0;
             }
         }
