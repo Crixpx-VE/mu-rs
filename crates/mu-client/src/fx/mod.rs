@@ -38,6 +38,9 @@ impl Plugin for FxPlugin {
         let mut registry = core::Registry::default();
         kinds::register_all(&mut registry);
         app.add_plugins(material::FxMaterialPlugin)
+            // La lógica del original va a 25 ticks por segundo (`REFERENCE_FPS`): todo lo que usa
+            // `FixedUpdate` (efectos, habilidades, pájaros...) depende de esto. Bevy trae 64 por defecto.
+            .insert_resource(Time::<Fixed>::from_hz(sim::TICKS_PER_SECOND as f64))
             .insert_resource(registry)
             .init_resource::<sim::FxWorld>()
             .init_resource::<sim::Actors>()
