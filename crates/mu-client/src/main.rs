@@ -53,6 +53,7 @@ mod shadow;
 mod scene;
 mod sound;
 mod terrain;
+mod water_terrain;
 
 use std::path::PathBuf;
 
@@ -241,6 +242,6 @@ fn main() {
         .add_plugins(fonts::FontsPlugin)
         .add_plugins(overlay::OverlayPlugin)
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
-        .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin))
+        .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin, water_terrain::WaterTerrainPlugin))
         .run();
 }

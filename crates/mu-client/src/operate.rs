@@ -104,6 +104,14 @@ pub fn rule(world: u16, kind: i16) -> Option<Rule> {
         52 if k == 103 => r(Act::Sit, true, false, BOX),
         // Loren Market (`GMUnitedMarketPlace`): caja de pose de 100×100×160.
         80 if k == 67 => r(Act::Pose, true, false, Vec3::new(100.0, 100.0, 160.0)),
+        // `GMUnitedMarketPlace::CreateObject` no mira el mapa: en todos los que caen en el `default`
+        // de `CreateObject` (todos menos Lorencia, Dungeon, Devias, Noria, Atlans, Tarkan y el login,
+        // ZzzObject.cpp:4676-4912) el tipo 67 es también una caja de 100×100×160. Ahí `Action` no
+        // tiene caso: camina hasta ella, se para y suena `SOUND_DROP_ITEM01`.
+        // Chaos Castle no llega a la cadena: `CreateChaosCastleObject` devuelve antes.
+        w if k == 67 && !matches!(w, 1 | 2 | 3 | 4 | 8 | 9 | 74 | 75 | 19..=24 | 54) => {
+            r(Act::Nothing, false, false, Vec3::new(100.0, 100.0, 160.0))
+        }
         _ => None,
     }
 }

@@ -6,6 +6,9 @@
 //!   (`ZzzEffectFireLeave.cpp:88-116`).
 //! - Sombra negra en el suelo de Blood Castle 28/29: `RenderObject` (`ZzzObject.cpp:1059-1076`) +
 //!   `BMD::RenderBodyShadow` (`ZzzBMD.cpp:2190-2241`).
+//! - Hierba que flota en el mar de Kalima (15, 29, 32): `CheckGrass` y la altura del agua
+//!   (`RenderHellasVisual`, `GMHellas.cpp:452-466`; ver `water_terrain.rs`).
+//! - Land of Trials 27, que sube y baja (`MoveHuntingGroundObject`, `GMHuntingGround.cpp:91-96`).
 //!
 //! Lo de `MoveObject` va a 25 ticks por segundo; al dibujar se interpola entre los dos últimos.
 
@@ -41,9 +44,17 @@ pub struct Mover {
     prev_angle: Vec3,
     scale: f32,
     entities: Vec<Entity>,
+    /// `o->Timer` (Land of Trials 27).
+    timer: f32,
 }
 
 impl Mover {
+    /// Con el `o->Timer` que le dio `CreateObject`.
+    pub fn with_timer(mut self, timer: f32) -> Self {
+        self.timer = timer;
+        self
+    }
+
     pub fn new(motion: Motion, o: &MapObject, entities: Vec<Entity>) -> Self {
         let mut angle = Vec3::from_array(o.angle);
         let mut head_angle = Vec3::ZERO;
@@ -64,8 +75,19 @@ impl Mover {
             prev_angle: angle,
             scale: o.scale,
             entities,
+            timer: 0.0,
         }
     }
+}
+
+/// Un tick de la hierba de Kalima: `CheckGrass` (x, y; la altura va en cada fotograma).
+fn kalima_float_tick(m: &mut Mover, hero: Option<Vec2>, action: usize) {
+    let Some(hero) = hero else { return };
+    let mut direction = m.direction.truncate();
+    let mut position = m.position.truncate();
+    crate::water_terrain::check_grass(&mut direction, &mut position, hero, crate::water_terrain::check_grass_walking(action));
+    m.direction = direction.extend(0.0);
+    m.position = position.extend(m.position.z);
 }
 
 /// `TurnAngle2(angle, a, d)` (`ZzzAI.cpp:75-97`): gira `angle` hacia `a` de `d` en `d` grados.
@@ -193,6 +215,9 @@ pub fn move_objects(
     let player = players.single().ok();
     let hero = player.map(|p| p.pos * MU_SCALE);
     let walking = player.is_some_and(|p| is_walking(p.action));
+    let action = player.map_or(0, |p| p.action);
+    // `WorldTime` (ms).
+    let world_time = crate::terrain::world_ms(&time) as f32;
     let tick_len = 1.0 / objects::TICKS_PER_SECOND;
     movers.1 += time.delta_secs();
     let mut ticks = 0;
@@ -210,6 +235,14 @@ pub fn move_objects(
                 Motion::SwingDoor | Motion::SlidingDoor => door_tick(m, hero),
                 Motion::Skull => skull_tick(m, hero, walking),
                 Motion::SledDog => None,
+                Motion::KalimaFloat => {
+                    kalima_float_tick(m, hero, action);
+                    None
+                }
+                Motion::HuntingGroundVibrate => {
+                    m.position.z += (m.timer + world_time * 0.0024).sin() * 0.3;
+                    None
+                }
             };
             match sound {
                 Some(s @ "SOUND_BONE2") => sounds.play_object(s),
@@ -217,7 +250,13 @@ pub fn move_objects(
                 None => {}
             }
         }
-        let position = m.prev_position.lerp(m.position, between);
+        let mut position = m.prev_position.lerp(m.position, between);
+        if m.motion == Motion::KalimaFloat
+            && let Some(h) = crate::water_terrain::height_at(position.x, position.y, world_time)
+        {
+            // `o->Position[2] = GetWaterTerrain(x, y) + 180` en cada fotograma.
+            position.z = h + 180.0;
+        }
         // Las puertas giran por el camino corto (`TurnAngle2` da la vuelta por 0/360).
         let dz = (m.angle.z - m.prev_angle.z + 540.0).rem_euclid(360.0) - 180.0;
         let mut angle = m.prev_angle.lerp(m.angle, between);

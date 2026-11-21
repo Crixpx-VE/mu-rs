@@ -218,13 +218,31 @@ impl Terrain {
     }
 }
 
-/// Carga el terreno de `data_dir/World{world}`.
+/// Carpeta de datos (`WorldN` / `ObjectN`) de un mapa (número de carpeta = `WorldActive` + 1):
+/// todos los niveles de Blood Castle usan los del primero, igual que Chaos Castle, Kalima e
+/// Illusion Temple (`iMapWorld` de MapManager.cpp:1132-1149 y 1238-1255).
+pub fn data_world(world: u16) -> u16 {
+    match world {
+        // Blood Castle 1-7 (`WD_11`-`WD_17`) y 8 (`WD_52`).
+        12..=18 | 53 => 12,
+        // Chaos Castle 1-6 (`WD_18`-`WD_23`) y 7 (`WD_53`).
+        19..=24 | 54 => 19,
+        // Kalima 1-6 (`WD_24`-`WD_29`) y 7 (`WD_36`).
+        25..=30 | 37 => 25,
+        // Illusion Temple 1-6 (`WD_45`-`WD_50`): `WD_45CURSEDTEMPLE_LV1 + 2`.
+        46..=51 => 47,
+        w => w,
+    }
+}
+
+/// Carga el terreno de `data_dir/World{world}` (con la carpeta de [`data_world`]).
 pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
-    let dir = fs::find(data_dir, &format!("World{world}"))
-        .ok_or_else(|| Error::NotFound(data_dir.join(format!("World{world}"))))?;
+    let folder = data_world(world);
+    let dir = fs::find(data_dir, &format!("World{folder}"))
+        .ok_or_else(|| Error::NotFound(data_dir.join(format!("World{folder}"))))?;
 
     let heights = read_heights(&fs::read(&dir, "TerrainHeight.OZB")?)?;
-    let mapping = read_mapping(&fs::read(&dir, &format!("EncTerrain{world}.map"))?)?;
+    let mapping = read_mapping(&fs::read(&dir, &format!("EncTerrain{folder}.map"))?)?;
 
     // Si falta el mapa de luz, todo blanco (como el original).
     let base_light: Vec<[f32; 3]> = match texture::load(&dir, "TerrainLight.OZJ") {
@@ -255,7 +273,7 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
         }
     }
 
-    let attributes = fs::read(&dir, &format!("EncTerrain{world}.att"))
+    let attributes = fs::read(&dir, &format!("EncTerrain{folder}.att"))
         .and_then(|b| read_attributes(&b))
         .unwrap_or_else(|_| vec![0; CELLS]);
 
@@ -299,6 +317,17 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn carpetas_de_datos() {
+        // Blood Castle 3, Chaos Castle 7, Kalima 7 e Illusion Temple 1 van a la carpeta del primero.
+        assert_eq!(data_world(14), 12);
+        assert_eq!(data_world(54), 19);
+        assert_eq!(data_world(37), 25);
+        assert_eq!(data_world(46), 47);
+        assert_eq!(data_world(1), 1);
+        assert_eq!(data_world(52), 52);
+    }
 
     #[test]
     fn texturas_del_suelo_por_mapa() {

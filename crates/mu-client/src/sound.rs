@@ -190,6 +190,10 @@ fn setup(mut commands: Commands, args: Res<Args>) {
     // Los sonidos de los monstruos están en sus propios datos en MuMain (`MonsterSetup`): el del
     // dragón de la invasión (`Monster32`, el toro de la tabla original) va aquí.
     table.entry("SOUND_MONSTER_BULLATTACK1".into()).or_insert(("Data/Sound/mBullAttack1.wav".into(), 2));
+    // Las cascadas de Kalima (`MapManager.cpp`: `LoadWaveFile(SOUND_KALIMA_WATER_FALL, ..., 3)`), que la
+    // tabla de MuMain no trae. Un canal: `PlayBuffer` (DSplaysound.cpp:422-454) nunca pasa del canal 0,
+    // así que pedirlo en cada tick mientras suena no lo vuelve a empezar.
+    table.entry("SOUND_KALIMA_WATER_FALL".into()).or_insert(("Data/Sound/aKalimaWaterFall.wav".into(), 1));
     let level = |key: &str| {
         crate::settings::saved_value(key).and_then(|v| v.parse::<u8>().ok()).filter(|v| *v <= MAX_VOLUME).unwrap_or(DEFAULT_VOLUME)
     };

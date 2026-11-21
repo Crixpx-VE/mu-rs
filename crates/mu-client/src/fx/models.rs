@@ -72,8 +72,14 @@ impl FxModels {
         // Modelos de objetos de mapa que usan los efectos (`OpenWorldModels` / `MapManager`).
         let fixed = match id {
             MODEL_WARP..=MODEL_WARP3 => Some(("Npc", format!("warp{:02}.bmd", id - MODEL_WARP + 1))),
+            // Raklion (`MapManager.cpp:769-774`): los mismos modelos con otro número.
+            MODEL_WARP4..=MODEL_WARP6 => Some(("Npc", format!("warp{:02}.bmd", id - MODEL_WARP4 + 1))),
             MODEL_DUNGEON_STONE01 => Some(("Object2", "DungeonStone01.bmd".into())),
             MODEL_CLOUD => Some(("Object11", "cloud.bmd".into())),
+            // `CreateEffect(9)` de Kalima: el modelo 9 del mapa (`Object25`, igual en las 7 Kalima).
+            MODEL_KALIMA_FALLING_STONE => Some(("Object25", "Object10.bmd".into())),
+            // `MapManager.cpp:293-294` (y otros mapas): `Object1\Butterfly01`.
+            MODEL_BUTTERFLY01 => Some(("Object1", "Butterfly01.bmd".into())),
             _ => None,
         };
         if let Some((dir, file)) = fixed {

@@ -33,8 +33,8 @@ use bevy::math::Affine2;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use mu_data::bmd::TextureScript;
-use mu_data::objects::render::{Bitmap, ChromeMode, LookBlend, LookColor, MeshInfo, MeshLook, ObjectDraw, Saw};
-use mu_data::objects::{Glow, Motion};
+use mu_data::objects::render::{Bitmap, BodyWave, ChromeMode, LookBlend, LookColor, MeshInfo, MeshLook, ObjectDraw, Saw};
+use mu_data::objects::{Glow, LightAdd, Motion};
 use mu_data::terrain::SIZE;
 use mu_data::texture::AlphaKind;
 use mu_data::{bmd, fs, objects, texture};
@@ -55,6 +55,8 @@ impl Plugin for ObjectsPlugin {
             .init_resource::<LoginFades>()
             .init_resource::<movers::Movers>()
             .init_resource::<movers::BodyShadows>()
+            .init_resource::<FxFollowers>()
+            .add_systems(Update, follow_fx_objects)
             .add_systems(Update, spawn_objects.run_if(crate::scene::load_step(crate::scene::Step::Objects)))
             .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects, light_login_objects))
             .add_systems(Update, (movers::move_objects, movers::update_shadows.after(animate_objects)));
@@ -119,7 +121,9 @@ pub fn reset(
     mut login: ResMut<LoginFades>,
     mut movers: ResMut<movers::Movers>,
     mut shadows: ResMut<movers::BodyShadows>,
+    mut followers: ResMut<FxFollowers>,
 ) {
+    followers.0.clear();
     anims.0.clear();
     mats.0.clear();
     *roofs = Roofs::default();
@@ -341,6 +345,46 @@ struct AnimatedModel {
     bones: Vec<bmd::Mat34>,
     /// Perro del trineo de Devias (un grupo propio por perro).
     sled_dog: Option<SledDog>,
+    /// Objetos con `ModelRules::fx_animation` (un grupo propio por objeto): la acción y el fotograma
+    /// los lleva su código de efectos en `FxWorld::map_objects[i]` (ver [`fx_anim`]).
+    fx: Option<usize>,
+}
+
+/// Campos libres de `fx::core::MapObject::user` con los que el código de efectos de un objeto con
+/// `ModelRules::fx_animation` le dice a este módulo qué dibujar (los escribe en cada tick).
+pub mod fx_anim {
+    /// `o->AnimationFrame` al acabar el tick.
+    pub const FRAME: usize = 0;
+    /// `o->CurrentAction` (si no existe en el modelo, `BMD::Animation` usa la 0).
+    pub const ACTION: usize = 1;
+    /// `o->AnimationFrame` del tick anterior (para interpolar entre ticks).
+    pub const PREV_FRAME: usize = 2;
+}
+
+/// Entidades de los objetos con `ModelRules::fx_animation`: siguen la posición de su
+/// `FxWorld::map_objects[i]` (p. ej. la luz que sube y baja de Refuge, tipo 84).
+#[derive(Resource, Default)]
+pub struct FxFollowers(Vec<(usize, Vec<Entity>, Vec3)>);
+
+fn follow_fx_objects(
+    fx_world: Res<crate::fx::FxWorld>,
+    mut followers: ResMut<FxFollowers>,
+    mut transforms: Query<&mut Transform>,
+) {
+    let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
+    for (i, entities, shown) in followers.0.iter_mut() {
+        let Some(m) = fx_world.map_objects.get(*i) else { continue };
+        if m.position == *shown {
+            continue;
+        }
+        *shown = m.position;
+        let translation = to_bevy * m.position / MU_SCALE;
+        for e in entities.iter() {
+            if let Ok(mut t) = transforms.get_mut(*e) {
+                t.translation = translation;
+            }
+        }
+    }
 }
 
 /// `RenderObjectVisual`, Devias 103 (`ZzzObject.cpp:2824-2831`): en el último fotograma de la acción,
@@ -362,6 +406,14 @@ struct AnimatedMaterial {
     glow_srgb: bool,
     /// `BlendMeshTexCoordU/V`.
     wave: Option<[Saw; 2]>,
+    /// Malla `BlendMesh` fuera del login: `glColor3f(BodyLight · BlendMeshLight)` va en el tinte (que
+    /// el sombreador limita a [0, 1] como OpenGL), con la luz del suelo y el `o->Light` del objeto.
+    tint: Option<([f32; 3], Option<LightAdd>)>,
+    /// `BodyLight` que cambia con el tiempo ([`BodyWave`]): la onda, la luz del objeto, su `o->Timer`
+    /// y si la malla va iluminada por la normal (si no, es el color plano).
+    body: Option<(BodyWave, [f32; 3], f32, bool)>,
+    /// Textura animada (`BITMAP_WATER + WaterTextureNumber`): un fotograma por tick.
+    frames: Vec<Handle<Image>>,
 }
 
 /// `BlendMeshLight` como color del material (el original multiplica en sRGB).
@@ -369,11 +421,33 @@ fn glow_color(g: f32, srgb: bool) -> Color {
     if srgb { Color::srgb(g, g, g) } else { Color::linear_rgb(g, g, g) }
 }
 
-fn animate_objects(time: Res<Time>, mut anims: ResMut<AnimatedModels>, mut meshes: ResMut<Assets<Mesh>>) {
+fn animate_objects(
+    time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
+    fx_world: Res<crate::fx::FxWorld>,
+    mut anims: ResMut<AnimatedModels>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
     let dt = time.delta_secs();
     let tick_len = 1.0 / objects::TICKS_PER_SECOND;
     for a in &mut anims.0 {
-        a.frame += a.fps * dt;
+        if let Some(i) = a.fx {
+            // Lo que dejó el código de efectos en el último tick, interpolado hacia el siguiente
+            // (salvo cuando vuelve atrás: vuelta de la animación o `SetAction`).
+            let Some(m) = fx_world.map_objects.get(i) else { continue };
+            let (prev, cur) = (m.user[fx_anim::PREV_FRAME], m.user[fx_anim::FRAME]);
+            let t = fixed.overstep_fraction();
+            let frame = if cur >= prev { prev + (cur - prev) * t } else { cur };
+            let action = m.user[fx_anim::ACTION].max(0.0) as usize;
+            let action = if action < a.model.actions.len() { action } else { 0 };
+            if a.action == action && a.frame == frame {
+                continue;
+            }
+            a.action = action;
+            a.frame = frame;
+        } else {
+            a.frame += a.fps * dt;
+        }
         if let Some(dog) = a.sled_dog.as_mut() {
             let frames = a.model.actions.get(a.action).map_or(1, |x| x.frames.max(1)) as f32;
             a.frame = a.frame.rem_euclid(frames);
@@ -423,11 +497,40 @@ fn animate_materials(
             Some(Glow::Flicker { min, max }) => new_tick.then(|| min + (max - min) * random(&mut rng)),
             Some(Glow::Pulse { freq, amp, base }) => Some((t * freq).sin() * amp + base),
         };
-        if glow.is_none() && a.wave.is_none() {
+        // `o->Light` que cambia con el tiempo (se suma a la luz del suelo).
+        let moving_light = a.tint.is_some_and(|(_, add)| matches!(add, Some(LightAdd::Wave { .. })));
+        // `WaterTextureNumber`: avanza uno por tick, de 0 a 31.
+        let frame = (!a.frames.is_empty()).then(|| (time.elapsed_secs_f64() * objects::TICKS_PER_SECOND as f64) as usize % a.frames.len());
+        let new_frame = frame.is_some() && new_tick;
+        // La `BodyLight` que late, una vez por tick como el original (hay cientos de objetos con fase
+        // propia en Land of Trials: cambiarlos en cada fotograma no se notaría y costaría).
+        let body = a.body.filter(|_| new_tick);
+        if glow.is_none() && a.wave.is_none() && !moving_light && body.is_none() && !new_frame {
             continue;
         }
         let Some(mut m) = materials.get_mut(&a.handle) else { continue };
-        if let Some(g) = glow {
+        if let Some((w, object, timer, lit)) = body {
+            let l = w.light(object, world_time, timer);
+            if lit {
+                m.extension.light = Vec4::new(l[0], l[1], l[2], 1.0);
+            } else {
+                m.extension.params.tint = Vec4::new(l[0], l[1], l[2], 1.0);
+            }
+        }
+        if let Some(f) = frame.filter(|_| new_frame) {
+            m.base.base_color_texture = Some(a.frames[f].clone());
+        }
+        if let Some((body, add)) = a.tint {
+            if glow.is_some() || moving_light {
+                let g = glow.unwrap_or(match a.glow {
+                    Some(Glow::Steady(g)) => g,
+                    _ => 1.0,
+                });
+                let add = add.map_or([0.0; 3], |l| l.at(world_time));
+                let c = [0, 1, 2].map(|k| (body[k] + add[k]) * g);
+                m.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
+            }
+        } else if let Some(g) = glow {
             m.base.base_color = glow_color(g, a.glow_srgb);
         }
         if let Some([u, v]) = a.wave {
@@ -490,18 +593,26 @@ struct Caches {
     models: HashMap<(PathBuf, u32, Option<usize>), (Vec<ModelPart>, Option<usize>)>,
     images: HashMap<PathBuf, Option<(Handle<Image>, AlphaKind)>>,
     bitmaps: HashMap<Bitmap, Option<Handle<Image>>>,
+    /// Los fotogramas de las texturas animadas (`BITMAP_WATER`).
+    frames: HashMap<Bitmap, Vec<Handle<Image>>>,
     materials: HashMap<MaterialKey, Handle<ModelMaterial>>,
 }
 
 /// Carga una textura global (`BITMAP_CHROME`...) con el filtro y el modo de repetición del original.
 fn load_bitmap(data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
-    let rel = Path::new(b.path());
+    load_frame(data, b, 0, images)
+}
+
+/// El fotograma `i` de una textura global (el único, salvo en las animadas: [`Bitmap::frame_path`]).
+fn load_frame(data: &Path, b: Bitmap, i: usize, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+    let path = b.frame_path(i);
+    let rel = Path::new(&path);
     let mut dir = data.to_path_buf();
     for part in rel.parent()?.iter() {
         dir = fs::find(&dir, part.to_str()?)?;
     }
     let name = bmd::texture_file_name(rel.file_name()?.to_str()?);
-    let t = texture::load(&dir, &name).map_err(|e| warn!("{}: {e}", b.path())).ok()?;
+    let t = texture::load(&dir, &name).map_err(|e| warn!("{path}: {e}")).ok()?;
     let mut image = to_bevy_image(&t);
     let filter = if b.nearest() { ImageFilterMode::Nearest } else { ImageFilterMode::Linear };
     let address = if b.clamp() { ImageAddressMode::ClampToEdge } else { ImageAddressMode::Repeat };
@@ -532,10 +643,11 @@ fn spawn_objects(
     mut fx_world: ResMut<crate::fx::FxWorld>,
     mut login_fades: ResMut<LoginFades>,
     mut operates: ResMut<crate::operate::Operates>,
-    (mut movers, mut shadows, mut fx_materials): (
+    (mut movers, mut shadows, mut fx_materials, mut followers): (
         ResMut<movers::Movers>,
         ResMut<movers::BodyShadows>,
         ResMut<Assets<crate::fx::material::FxMaterial>>,
+        ResMut<FxFollowers>,
     ),
 ) {
     // En el login cada objeto se funde por su cuenta según la distancia a la cámara.
@@ -556,6 +668,8 @@ fn spawn_objects(
 
     for (index, o) in list.iter().enumerate() {
         let rules = objects::model_rules(args.world, o.kind);
+        // `o->Timer` de `CreateObject` (las luces que laten de Land of Trials).
+        let timer = objects::create_timer(args.world, o.kind, index);
         // Bancos, sillas y cajas de pose (`CreateOperate`), también los invisibles.
         let operate = crate::operate::rule(args.world, o.kind).map(|rule| {
             operates.0.push(crate::operate::Operate {
@@ -671,15 +785,17 @@ fn spawn_objects(
             fx.0.push(place(e, Some((model.clone(), fps))));
         }
         let fps_key = (fps * 1000.0).round() as u32;
-        // El perro del trineo cambia de acción por su cuenta: su propio grupo.
-        let own_group = (rules.motion == Some(Motion::SledDog) && fps_key > 0).then_some(index);
+        // Los que llevan la animación desde su código de efectos (`fx_animation`).
+        let fx_driven = (rules.fx_animation && has_fx).then(|| fx_world.map_objects.len() - 1);
+        // El perro del trineo cambia de acción por su cuenta: su propio grupo (y los de `fx_driven`).
+        let own_group = ((rules.motion == Some(Motion::SledDog) || fx_driven.is_some()) && fps_key > 0).then_some(index);
         let (parts, group) = c.models.entry((rel.clone(), fps_key, own_group)).or_insert_with(|| {
             let dir = args.data.join(rel.parent().unwrap_or(Path::new("")));
             let parts = build_parts(&model, &dir, &mut meshes);
             let mut group = None;
             if fps_key > 0 {
                 let handles = parts.iter().map(|p| (p.mesh_index, p.mesh.clone())).collect();
-                let sled_dog = own_group.map(|i| SledDog { tick: 0.0, rng: seeded_rng(i) });
+                let sled_dog = own_group.filter(|_| fx_driven.is_none()).map(|i| SledDog { tick: 0.0, rng: seeded_rng(i) });
                 anims.0.push(AnimatedModel {
                     model: model.clone(),
                     fps,
@@ -688,6 +804,7 @@ fn spawn_objects(
                     parts: handles,
                     bones: model.bone_matrices(0, 0),
                     sled_dog,
+                    fx: fx_driven,
                 });
                 group = Some(anims.0.len() - 1);
             }
@@ -705,8 +822,18 @@ fn spawn_objects(
             .unwrap_or([1.0; 3]);
         // `b->BodyLight` fijo de algunos tipos (en vez de la luz del terreno).
         let light = rules.body_light.map_or(light, |l| [l; 3]);
-        let light = light.map(|v| (v.clamp(0.0, 1.0) * 15.0).round() as u8);
-        let object_light = light.map(|v| v as f32 / 15.0);
+        // Luz del suelo sin `o->Light` (para las mallas cuyo `o->Light` cambia con el tiempo).
+        let ground_light = light;
+        // `BodyLight(o, b)` = luz del suelo + `o->Light` (el fijo; el que cambia lo lleva `animate_materials`).
+        let fixed_add = match rules.light_add {
+            Some(LightAdd::Fixed(l)) => l,
+            _ => [0.0; 3],
+        };
+        let raw_light = [0, 1, 2].map(|k| light[k] + fixed_add[k]);
+        let quantize = |l: [f32; 3]| l.map(|v| (v.clamp(0.0, 1.0) * 15.0).round() / 15.0);
+        let object_light = quantize(raw_light);
+        // `IntensityTransform` fijo: las mallas iluminadas quedan `BodyLight · k` (OpenGL lo limita a 1).
+        let intensity_light = rules.intensity.map(|k| quantize(raw_light.map(|v| v * k)));
 
         let draw = ObjectDraw {
             blend_mesh: rules.additive_mesh.map_or(-1, |m| m as i32),
@@ -734,10 +861,24 @@ fn spawn_objects(
                 has_alpha: own_image.as_ref().is_some_and(|i| i.1 != AlphaKind::Opaque),
             };
             for (pass, look) in objects::render::resolve_all(rules.passes, &draw, &info) {
-                let body = look.light.unwrap_or(object_light);
-                let glow = (look.color == LookColor::BlendLight).then_some(rules.glow);
+                // Con `IntensityTransform` fijo la malla iluminada es de color plano (`BodyLight · k`).
+                let flat_lit = intensity_light.filter(|_| look.color == LookColor::Lit && look.light.is_none());
+                let look = if flat_lit.is_some() { MeshLook { color: LookColor::Flat, ..look } } else { look };
+                let body = flat_lit.unwrap_or(look.light.unwrap_or(object_light));
+                let blend_light = look.color == LookColor::BlendLight;
+                // `BlendMeshLight` de esta llamada (`RenderMesh(..., BlendMesh, fLumi, ...)`) o el del objeto.
+                let glow = blend_light.then(|| rules.passes.get(pass).and_then(|p| p.glow).unwrap_or(rules.glow));
                 let animated_glow = glow.filter(|g| !matches!(g, Glow::Steady(_)));
-                let has_effect = animated_glow.is_some() || look.wave.is_some();
+                // `o->Light` que cambia con el tiempo: solo cuenta en el color plano de la `BlendMesh`.
+                let moving_add = rules.light_add.filter(|l| blend_light && matches!(l, LightAdd::Wave { .. }));
+                let tint = (blend_light && !login_scene).then(|| {
+                    if moving_add.is_some() { (ground_light, moving_add) } else { (body, None) }
+                });
+                let has_effect = animated_glow.is_some() || look.wave.is_some() || moving_add.is_some();
+                // `BodyLight` que cambia con el tiempo y texturas animadas: se animan, pero no hace falta
+                // un material por malla (salvo con `o->Timer`, que es de cada objeto).
+                let body_anim = look.body_wave.map(|w| (w, body, timer, look.color == LookColor::Lit));
+                let animated_texture = look.texture.is_some_and(|b| b.frames() > 1);
                 let source = match (look.textured, look.texture, &part.texture) {
                     (false, _, _) => TextureSource::None,
                     (true, Some(b), _) => TextureSource::Bitmap(b),
@@ -754,7 +895,8 @@ fn spawn_objects(
                     // Los techos tampoco comparten material: se desvanecen por su cuenta.
                     effect_owner: (has_effect || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
                     // Los de sentarse tienen material propio: se iluminan con el ratón encima.
-                    instance: (fade.is_some() || operate.is_some()).then_some(index),
+                    instance: (fade.is_some() || operate.is_some() || look.body_wave.is_some_and(|w| w.timer))
+                        .then_some(index),
                 };
                 let material = match c.materials.get(&key) {
                     Some(m) => m.clone(),
@@ -766,18 +908,34 @@ fn spawn_objects(
                                 c.bitmaps.entry(*b).or_insert_with(|| load_bitmap(&args.data, *b, &mut images)).clone()
                             }
                         };
-                        let mat = object_material(image, &look, body, glow, pass, login_scene);
+                        let mut mat = object_material(image, &look, body, glow, pass, login_scene);
+                        // `glColor4f(..., Alpha)` con `EnableAlphaTest`: mezcla con lo de detrás.
+                        if look.alpha < 0.99 && look.blend == LookBlend::AlphaTest {
+                            mat.base.base_color.set_alpha(look.alpha);
+                            mat.base.alpha_mode = AlphaMode::Blend;
+                        }
                         let original_mode = mat.base.alpha_mode;
                         let m = materials.add(mat);
                         if rules.fade_indoors {
                             roofs.materials.push((m.clone(), original_mode));
                         }
-                        if has_effect {
+                        if has_effect || body_anim.is_some() || animated_texture {
+                            let frames = match look.texture.filter(|_| animated_texture) {
+                                Some(b) => c
+                                    .frames
+                                    .entry(b)
+                                    .or_insert_with(|| (0..b.frames()).filter_map(|i| load_frame(&args.data, b, i, &mut images)).collect())
+                                    .clone(),
+                                None => Vec::new(),
+                            };
                             mat_anims.0.push(AnimatedMaterial {
                                 handle: m.clone(),
-                                glow: animated_glow,
+                                glow: animated_glow.or(glow),
                                 glow_srgb: !login_scene,
                                 wave: look.wave,
+                                tint,
+                                body: body_anim,
+                                frames,
                             });
                         }
                         c.materials.insert(key, m.clone());
@@ -806,8 +964,11 @@ fn spawn_objects(
         if let Some(f) = fade {
             login_fades.objects.push(f);
         }
+        if let Some(i) = fx_driven {
+            followers.0.push((i, entities.clone(), Vec3::from_array(o.position)));
+        }
         if let Some(motion) = rules.motion.filter(|m| *m != Motion::SledDog) {
-            movers.0.push(movers::Mover::new(motion, o, entities));
+            movers.0.push(movers::Mover::new(motion, o, entities).with_timer(timer));
         }
         if let Some(hidden) = rules.body_shadow {
             let ground = terrain.as_ref().map_or(o.position[2], |t| {
@@ -835,16 +996,22 @@ fn spawn_objects(
 
     // Portales que `MapManager.cpp` crea por código (`CreateObject(MODEL_WARP, Pos, (0,0,10))`, z = 0):
     // sus anillos son efectos que crea el código del objeto.
-    let warp = match args.world {
-        3 => Some([53.0 * MU_SCALE + 50.0, 92.0 * MU_SCALE + 20.0]),
-        4 => Some([223.0 * MU_SCALE, 30.0 * MU_SCALE]),
-        _ => None,
+    // Raklion (`MapManager.cpp:782-810`): `MODEL_WARP4` en (171, 24) girado 80° y, en el mapa del jefe,
+    // dos en (169, 24) y (170, 24) girados 85°. El `MODEL_WARP` de (162, 83) de Raklion no crea nada:
+    // su código de `CGM_Raklion::CreateObject` está comentado (GM_Raklion.cpp:58-72).
+    use crate::fx::tables::ids::{MODEL_WARP, MODEL_WARP4};
+    let warps: &[(i32, f32, f32, f32)] = match args.world {
+        3 => &[(MODEL_WARP, 53.0 * MU_SCALE + 50.0, 92.0 * MU_SCALE + 20.0, 10.0)],
+        4 => &[(MODEL_WARP, 223.0 * MU_SCALE, 30.0 * MU_SCALE, 10.0)],
+        58 => &[(MODEL_WARP4, 171.0 * MU_SCALE, 24.0 * MU_SCALE, 80.0)],
+        59 => &[(MODEL_WARP4, 169.0 * MU_SCALE, 24.0 * MU_SCALE, 85.0), (MODEL_WARP4, 170.0 * MU_SCALE, 24.0 * MU_SCALE, 85.0)],
+        _ => &[],
     };
-    if let Some([x, y]) = warp {
+    for &(ty, x, y, angle) in warps {
         fx_world.map_objects.push(crate::fx::core::MapObject {
-            ty: crate::fx::tables::ids::MODEL_WARP,
+            ty,
             position: Vec3::new(x, y, 0.0),
-            angle: Vec3::new(0.0, 0.0, 10.0),
+            angle: Vec3::new(0.0, 0.0, angle),
             scale: 1.0,
             light: Vec3::ZERO,
             model: None,
@@ -940,8 +1107,11 @@ fn object_material(
         Some(Glow::Pulse { amp, base, .. }) => base + amp,
         None => 1.0,
     };
+    // Fuera del login el `BlendMeshLight` de la `BlendMesh` va en el tinte con `BodyLight`
+    // (`glColor3f(BodyLight · BlendMeshLight)`, que OpenGL limita a [0, 1]); en el login, en el color base.
+    let glow_in_tint = look.color == LookColor::BlendLight && !login_scene;
     let base = StandardMaterial {
-        base_color: glow_color(g, !login_scene),
+        base_color: if glow_in_tint { Color::WHITE } else { glow_color(g, !login_scene) },
         base_color_texture: image,
         unlit: true,
         cull_mode: None,
@@ -957,7 +1127,7 @@ fn object_material(
         // `glColor3f(BodyLight · BlendMeshLight)`. En el login y la selección de personaje el brillo
         // lo llevan sus propios sistemas, como antes.
         LookColor::BlendLight if login_scene => ModelLight::unlit(),
-        LookColor::BlendLight => ModelLight::flat(body),
+        LookColor::BlendLight => ModelLight::flat(body.map(|v| v * g)),
     };
     model_material(
         base,

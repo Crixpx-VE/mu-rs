@@ -16,6 +16,10 @@ pub mod skills_dk;
 pub mod objects_1;
 pub mod objects_2;
 pub mod objects_login;
+pub mod objects_elbeland;
+pub mod objects_kalima;
+pub mod objects_kanturu;
+pub mod objects_raklion;
 pub mod fire;
 
 use super::core::Registry;
@@ -36,5 +40,9 @@ pub fn register_all(r: &mut Registry) {
     objects_1::register(r);
     objects_2::register(r);
     objects_login::register(r);
+    objects_elbeland::register(r);
+    objects_kalima::register(r);
+    objects_kanturu::register(r);
+    objects_raklion::register(r);
     fire::register(r);
 }

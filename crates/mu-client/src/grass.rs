@@ -88,8 +88,8 @@ fn no_grass(world: u16) -> bool {
     matches!(world as i32 - 1,
         // Atlans y Doppelganger 3.
         7 | 67
-        // Icarus: no se dibuja el terreno.
-        | 10
+        // Icarus y Kalima 1-7: no se dibuja el terreno (`IsWaterTerrain`, ZzzScene.cpp:2108).
+        | 10 | 24..=29 | 36
         // Blood Castle 1-7 y el de nivel maestro.
         | 11..=17 | 52
         // Chaos Castle 1-6 y el de nivel maestro.

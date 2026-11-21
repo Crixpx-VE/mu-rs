@@ -44,8 +44,15 @@ pub enum Bitmap {
     Chrome6,
     /// `BITMAP_CHROME7`: `Effect\Chrome07.jpg` (`GL_NEAREST`, `GL_CLAMP_TO_EDGE`).
     Chrome7,
+    /// `BITMAP_CHROME8`: `Effect\Chrome08.jpg` (`GL_LINEAR`, `GL_CLAMP_TO_EDGE`), que cargan Raklion
+    /// y otros mapas (`MapManager.cpp:753`, `:759`).
+    Chrome8,
     /// `BITMAP_SHINY`: `Effect\Shiny01.jpg` (`GL_LINEAR`, `GL_CLAMP_TO_EDGE`; `ZzzOpenData.cpp:5085`).
     Shiny,
+    /// `BITMAP_WATER + WaterTextureNumber`: las 32 cáusticas `Object8\wt00-31.jpg` (`GL_LINEAR`,
+    /// `GL_REPEAT`; `MapManager.cpp:1041-1053`), una por tick (`WaterTextureNumber++`, ZzzScene.cpp:2315).
+    /// [`Bitmap::path`] es la primera; las demás, [`Bitmap::frame_path`].
+    Water,
     /// Otra textura que carga el mapa (p. ej. `BITMAP_CHROME+2` = `Object9\sand01.jpg` en Tarkan,
     /// `MapManager.cpp:150`): ruta relativa a `Data` y si es `GL_NEAREST` + `GL_CLAMP_TO_EDGE`.
     File { path: &'static str, nearest_clamp: bool },
@@ -60,8 +67,23 @@ impl Bitmap {
             Bitmap::Chrome3 => "Effect/Chrome03.jpg",
             Bitmap::Chrome6 => "Effect/Chrome06.jpg",
             Bitmap::Chrome7 => "Effect/Chrome07.jpg",
+            Bitmap::Chrome8 => "Effect/Chrome08.jpg",
             Bitmap::Shiny => "Effect/Shiny01.jpg",
+            Bitmap::Water => "Object8/wt00.jpg",
             Bitmap::File { path, .. } => path,
+        }
+    }
+
+    /// Fotogramas de una textura animada (`BITMAP_WATER`: 32); 1 el resto.
+    pub fn frames(self) -> usize {
+        if self == Bitmap::Water { WATER_FRAMES } else { 1 }
+    }
+
+    /// Ruta del fotograma `i` (`Object8\wt{i:02}.jpg` del agua; la de siempre para el resto).
+    pub fn frame_path(self, i: usize) -> String {
+        match self {
+            Bitmap::Water => format!("Object8/wt{:02}.jpg", i % WATER_FRAMES),
+            _ => self.path().to_string(),
         }
     }
 
@@ -70,12 +92,41 @@ impl Bitmap {
         match self {
             Bitmap::Chrome2 | Bitmap::Chrome3 | Bitmap::Chrome6 | Bitmap::Chrome7 => true,
             Bitmap::File { nearest_clamp, .. } => nearest_clamp,
-            Bitmap::Chrome | Bitmap::Shiny => false,
+            Bitmap::Chrome | Bitmap::Chrome8 | Bitmap::Shiny | Bitmap::Water => false,
         }
     }
 
     pub fn clamp(self) -> bool {
-        self.nearest() || self == Bitmap::Shiny
+        self.nearest() || matches!(self, Bitmap::Shiny | Bitmap::Chrome8)
+    }
+}
+
+/// `BITMAP_WATER` .. `BITMAP_WATER + 31`.
+pub const WATER_FRAMES: usize = 32;
+
+/// `b->BodyLight` que cambia con el tiempo durante una pasada: `v = sin(Timer + WorldTime · freq_ms) ·
+/// amp + base`, y `BodyLight = (v, v, v)` o, con `relative`, `BodyLight · v` (la luz del suelo).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BodyWave {
+    pub freq_ms: f32,
+    pub amp: f32,
+    pub base: f32,
+    pub relative: bool,
+    /// Suma el `o->Timer` del objeto (cada objeto, su fase; si no, `Timer = 0`).
+    pub timer: bool,
+}
+
+impl BodyWave {
+    /// El factor `v` con `WorldTime` en ms y el `o->Timer` del objeto.
+    pub fn at(self, world_time: f32, timer: f32) -> f32 {
+        let t = if self.timer { timer } else { 0.0 };
+        (t + world_time * self.freq_ms).sin() * self.amp + self.base
+    }
+
+    /// `b->BodyLight` con la luz del objeto `object`.
+    pub fn light(self, object: [f32; 3], world_time: f32, timer: f32) -> [f32; 3] {
+        let v = self.at(world_time, timer);
+        if self.relative { object.map(|c| c * v) } else { [v; 3] }
     }
 }
 
@@ -195,12 +246,46 @@ pub struct Pass {
     pub blend_mesh: Option<i32>,
     /// El parámetro `BlendMeshTexCoordU/V` (`None` = los de `o`, [`super::ModelRules::tex_coord`]).
     pub tex_coord: Option<[Saw; 2]>,
+    /// El parámetro `BlendMeshLight` de esta llamada (`None` = el de `o`, [`super::ModelRules::glow`]),
+    /// p. ej. `RenderBody(RENDER_TEXTURE, o->Alpha, 0, fLumi, ...)`.
+    pub glow: Option<super::Glow>,
+    /// El parámetro `Alpha` de la llamada (`None` = `o->Alpha`, 1). Con `RENDER_TEXTURE` y menos de
+    /// 0.99, `EnableAlphaTest` y `glColor4f(..., Alpha)` (`ZzzBMD.cpp:1201-1204`, 1272-1280).
+    pub alpha: Option<f32>,
+    /// `b->BodyLight` que cambia con el tiempo (en lugar de [`Pass::light`]).
+    pub body_wave: Option<BodyWave>,
 }
 
 impl Pass {
     /// `RenderBody(flags, ...)`.
     pub const fn body(flags: u32) -> Self {
-        Self { mesh: None, flags, texture: None, light: None, stream_mesh: None, blend_mesh: None, tex_coord: None }
+        Self {
+            mesh: None,
+            flags,
+            texture: None,
+            light: None,
+            stream_mesh: None,
+            blend_mesh: None,
+            tex_coord: None,
+            glow: None,
+            alpha: None,
+            body_wave: None,
+        }
+    }
+    /// `Alpha` de la llamada.
+    pub const fn alpha(mut self, a: f32) -> Self {
+        self.alpha = Some(a);
+        self
+    }
+    /// `BodyLight = (v, v, v)`, `v = sin(WorldTime · freq_ms) · amp + base`.
+    pub const fn body_pulse(mut self, freq_ms: f32, amp: f32, base: f32) -> Self {
+        self.body_wave = Some(BodyWave { freq_ms, amp, base, relative: false, timer: false });
+        self
+    }
+    /// `BodyLight *= v`, `v = sin(Timer? + WorldTime · freq_ms) · amp + base`.
+    pub const fn body_scale_pulse(mut self, freq_ms: f32, amp: f32, base: f32, timer: bool) -> Self {
+        self.body_wave = Some(BodyWave { freq_ms, amp, base, relative: true, timer });
+        self
     }
     /// `RenderMesh(mesh, flags, ...)`.
     pub const fn mesh(mesh: usize, flags: u32) -> Self {
@@ -225,6 +310,15 @@ impl Pass {
     pub const fn tex_coord(mut self, u: Saw, v: Saw) -> Self {
         self.tex_coord = Some([u, v]);
         self
+    }
+    /// `BlendMeshLight` de la llamada.
+    pub const fn glow(mut self, g: super::Glow) -> Self {
+        self.glow = Some(g);
+        self
+    }
+    /// `BlendMeshLight = sin(WorldTime · freq_ms) · amp + base` (frecuencia del original, por ms).
+    pub const fn pulse(self, freq_ms: f32, amp: f32, base: f32) -> Self {
+        self.glow(super::Glow::Pulse { freq: freq_ms * 1000.0, amp, base })
     }
 }
 
@@ -270,6 +364,10 @@ pub struct MeshLook {
     /// `BodyLight` de la pasada (`None` = el del objeto).
     pub light: Option<[f32; 3]>,
     pub blend: LookBlend,
+    /// Alfa del color (`glColor4f`); 1 = opaco.
+    pub alpha: f32,
+    /// `BodyLight` que cambia con el tiempo (manda sobre [`MeshLook::light`]).
+    pub body_wave: Option<BodyWave>,
 }
 
 /// Lo que hace falta saber de una malla para decidir cómo se dibuja.
@@ -332,7 +430,10 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         color,
         light: p.light,
         blend,
+        alpha: p.alpha.unwrap_or(1.0),
+        body_wave: p.body_wave,
     };
+    let translucent = p.alpha.is_some_and(|a| a < 0.99);
 
     if f & COLOR != 0 {
         let blend = if f & BRIGHT != 0 {
@@ -377,7 +478,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
             LookBlend::Add
         } else if f & DARK != 0 {
             LookBlend::Subtract
-        } else if has_alpha {
+        } else if translucent || has_alpha {
             LookBlend::AlphaTest
         } else {
             LookBlend::Opaque

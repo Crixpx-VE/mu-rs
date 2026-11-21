@@ -6,6 +6,11 @@ use crate::reader::Reader;
 use crate::{Error, Result, crypt, fs};
 
 pub mod render;
+mod rules_elbeland;
+mod rules_raklion;
+mod rules_kalima;
+mod rules_kanturu;
+pub use rules_kalima::create_timer;
 
 use render::{Bitmap, Pass, Saw, flags};
 
@@ -50,11 +55,13 @@ pub fn read(buf: &[u8]) -> Result<Vec<MapObject>> {
     Ok(out)
 }
 
-/// Carga los objetos de `data_dir/World{world}/EncTerrain{world}.obj`.
+/// Carga los objetos de `data_dir/World{N}/EncTerrain{N}.obj`, con `N` la carpeta de datos del mapa
+/// (`terrain::data_world`).
 pub fn load(data_dir: &Path, world: u16) -> Result<Vec<MapObject>> {
-    let dir = fs::find(data_dir, &format!("World{world}"))
-        .ok_or_else(|| Error::NotFound(data_dir.join(format!("World{world}"))))?;
-    read(&fs::read(&dir, &format!("EncTerrain{world}.obj"))?)
+    let folder = crate::terrain::data_world(world);
+    let dir = fs::find(data_dir, &format!("World{folder}"))
+        .ok_or_else(|| Error::NotFound(data_dir.join(format!("World{folder}"))))?;
+    read(&fs::read(&dir, &format!("EncTerrain{folder}.obj"))?)
 }
 
 /// Modelos de Lorencia (World1): (primer tipo, nombre, cuántos).
@@ -165,6 +172,34 @@ pub struct ModelRules {
     pub body_shadow: Option<usize>,
     /// Se mueve por su cuenta (puertas, calaveras, el perro del trineo).
     pub motion: Option<Motion>,
+    /// `o->Light` que le pone el código del mapa: `BodyLight(o, b)` (`ZzzObject.cpp:206-234`) es la
+    /// luz del suelo **más** `o->Light` (que en los objetos del mapa empieza en 0).
+    pub light_add: Option<LightAdd>,
+    /// `IntensityTransform` fijo en todos los vértices (en vez de `normal·L · 0.8 + 0.4`): el color
+    /// de las mallas iluminadas queda `BodyLight · k`, plano.
+    pub intensity: Option<f32>,
+    /// La acción, el fotograma y la altura los lleva su código de efectos (`fx::core::MapObject`,
+    /// cada tick): `SetAction` / `CurrentAction` que cambian al azar, animaciones que se paran...
+    /// El objeto tiene su propio grupo de animación.
+    pub fx_animation: bool,
+}
+
+/// `o->Light` que el código de un mapa le pone a un objeto (se suma a la luz del suelo).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum LightAdd {
+    Fixed([f32; 3]),
+    /// Por canal: `sin(WorldTime · freq_ms[c]) · amp + base`.
+    Wave { freq_ms: [f32; 3], amp: f32, base: f32 },
+}
+
+impl LightAdd {
+    /// `o->Light` con `WorldTime` en ms.
+    pub fn at(self, world_time: f32) -> [f32; 3] {
+        match self {
+            LightAdd::Fixed(l) => l,
+            LightAdd::Wave { freq_ms, amp, base } => freq_ms.map(|f| (world_time * f).sin() * amp + base),
+        }
+    }
 }
 
 /// Objetos que `MoveObject` / `RenderObjectVisual` mueven por su cuenta.
@@ -179,6 +214,12 @@ pub enum Motion {
     /// Perro del trineo de Devias: al acabar la animación, 1 de cada 32 veces hace la acción 1
     /// (`RenderObjectVisual`, `ZzzObject.cpp:2824-2831`).
     SledDog,
+    /// Hierba que flota en el mar de Kalima (15, 29, 32): se aparta del personaje (`CheckGrass`) y
+    /// sube y baja con las olas (`GetWaterTerrain + 180`, `GMHellas.cpp:452-466`).
+    KalimaFloat,
+    /// Land of Trials 27: `Position[2] += sin(Timer + WorldTime·0.0024)·0.3` en cada tick
+    /// (`MoveHuntingGroundObject`, `GMHuntingGround.cpp:91-96`).
+    HuntingGroundVibrate,
 }
 
 /// Si la textura de suelo `tile` (capa 1) bajo el personaje es "dentro de una casa"
@@ -205,6 +246,9 @@ impl Default for ModelRules {
             passes: render::DEFAULT_PASSES,
             body_shadow: None,
             motion: None,
+            light_add: None,
+            intensity: None,
+            fx_animation: false,
         }
     }
 }
@@ -267,6 +311,22 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
     let add = ModelRules::add;
     let hidden = ModelRules::hidden;
     let roof = || ModelRules { fade_indoors: true, ..r() };
+    // Elbeland, Swamp of Calmness, Santa Village, Duel Arena y Loren Market.
+    if let Some(rules) = rules_elbeland::rules(world, kind) {
+        return rules;
+    }
+    // Raklion, Vulcanus, Barracks/Refuge de Balgass, Karutan y Chaos Castle.
+    if let Some(rules) = rules_raklion::rules(world, kind) {
+        return rules;
+    }
+    // Kalima 1-7 y Land of Trials.
+    if let Some(rules) = rules_kalima::rules(world, kind) {
+        return rules;
+    }
+    // Aida, Crywolf, Kanturu 1-3 y el mapa de los GM.
+    if let Some(rules) = rules_kanturu::rules(world, kind) {
+        return rules;
+    }
     match (world, kind) {
         // Techos que desaparecen al entrar en la casa.
         (1, 125 | 126) => roof(),                // Lorencia: HouseWall05-06
@@ -482,7 +542,8 @@ pub fn model_path(world: u16, kind: i16) -> Option<PathBuf> {
             LORENCIA_MODELS.iter().find(|&&(first, _, n)| kind >= first && kind < first + n)?;
         Some(PathBuf::from("Object1").join(format!("{name}{:02}.bmd", kind - first + 1)))
     } else {
-        Some(PathBuf::from(format!("Object{world}")).join(format!("Object{:02}.bmd", kind + 1)))
+        let folder = crate::terrain::data_world(world);
+        Some(PathBuf::from(format!("Object{folder}")).join(format!("Object{:02}.bmd", kind + 1)))
     }
 }
 

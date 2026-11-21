@@ -99,9 +99,10 @@ fn caustic_world(world: u16) -> bool {
     matches!(active(world), 7 | 67)
 }
 
-/// Icarus: el original no dibuja el suelo (`RenderTerrain` no se llama, ZzzScene.cpp:2116).
+/// Icarus y Kalima: el original no dibuja el suelo (`RenderTerrain` no se llama, ZzzScene.cpp:2108-2116).
+/// En Kalima (`IsWaterTerrain`) va en su lugar el mar de [`crate::water_terrain`].
 pub fn hidden_terrain(world: u16) -> bool {
-    active(world) == 10
+    active(world) == 10 || crate::water_terrain::is_water_world(world)
 }
 
 /// `WaterMove` (`RenderTerrain`, ZzzLodTerrain.cpp:2589-2602): fracción de textura que ha avanzado el

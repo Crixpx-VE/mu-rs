@@ -814,7 +814,7 @@ fn leaf1_file(w: i32) -> &'static str {
 
 fn load_textures(args: &Args, images: &mut Assets<Image>) -> HashMap<LeafType, Option<(Handle<Image>, u8)>> {
     let w = args.world as i32 - 1;
-    let folder = format!("World{}", args.world);
+    let folder = format!("World{}", mu_data::terrain::data_world(args.world));
     let rain = if w == WD_34CRYWOLF_1ST { "rain011.tga" } else { "rain01.tga" };
     HashMap::from([
         (LeafType::Leaf1, load_texture(&args.data, &folder, leaf1_file(w), true, images)),

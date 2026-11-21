@@ -18,6 +18,8 @@ use super::tables::bitmaps::BITMAPS;
 const MAP_BITMAPS: &[(i32, &str, bool)] = &[
     (super::core::BITMAP_RAIN_CIRCLE, "World1/rain02.tga", false),
     (super::core::BITMAP_RAIN_CIRCLE + 1, "World10/rain03.tga", false),
+    // Barracks y Refuge de Balgass (MapManager.cpp:556, :581): la llama de la columna de fuego.
+    (super::core::BITMAP_FIRE_RED, "Effect/firered.jpg", false),
 ];
 
 #[derive(Resource)]
