@@ -20,13 +20,16 @@
 //!                            mu-launcher.txt, o 1024x768). F10 cambia y guarda.
 //!
 //! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps ·
-//! F9 = invasión de dragones (apagada → rojos → dorados) · F7/F8 = volumen de efectos/música.
+//! F9 = invasión de dragones (apagada → rojos → dorados) · F7/F8 = volumen de efectos/música ·
+//! Esc = menú de sistema (con las opciones; en el juego también desde el botón de menú de la barra).
 
 mod boids;
 mod camera;
 mod character;
 mod charselect;
+mod cursor;
 mod effects;
+mod fonts;
 mod fx;
 mod grass;
 mod hud;
@@ -37,6 +40,7 @@ mod login_ui;
 mod mainframe;
 mod model_light;
 mod objects;
+mod options;
 mod settings;
 mod shadow;
 mod scene;
@@ -220,6 +224,7 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin))
+        .add_plugins(fonts::FontsPlugin)
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin))
         .run();
 }

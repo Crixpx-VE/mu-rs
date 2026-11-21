@@ -439,19 +439,8 @@ fn virtual_size(window: Option<&Window>, scale: f32) -> Vec2 {
     }
 }
 
-/// `g_hFixFont`: Gulim de Windows si está (es la del original); si no, Tahoma o la de Bevy.
-fn load_font(fonts: &mut Assets<Font>) -> FontSource {
-    let dir = std::env::var_os("WINDIR").map(|w| std::path::PathBuf::from(w).join("Fonts"));
-    let read = |name: &str| dir.as_ref().and_then(|d| std::fs::read(d.join(name)).ok());
-    if let Some(bytes) = read("gulim.ttc") {
-        // La colección trae Gulim, GulimChe, Dotum y DotumChe: se pide Gulim por su nombre.
-        let handle = fonts.add(Font::from_bytes(bytes));
-        return FontSource::list([FontSource::family("Gulim"), FontSource::Handle(handle), FontSource::default()]);
-    }
-    if let Some(bytes) = read("tahoma.ttf") {
-        return FontSource::list([FontSource::Handle(fonts.add(Font::from_bytes(bytes))), FontSource::default()]);
-    }
-    warn!("selección de personaje: no está la fuente Gulim; se usa la de Bevy");
+/// La letra de la interfaz (`fonts.rs`: Noto Sans en lugar de la Gulim del original).
+fn load_font(_fonts: &mut Assets<Font>) -> FontSource {
     FontSource::default()
 }
 

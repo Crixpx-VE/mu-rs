@@ -13,6 +13,7 @@
 //! - experiencia: `newui_exbar` estirada en (2,473), 629×4 × progreso;
 //! - botones 30×41 en y=429: tienda 489, personaje 519, inventario 549, amigos 579, menú 609
 //!   (`partCharge1/newui_menu_Bt05/01/02/03/04`, fotogramas normal/encima/abierto cada 41 px);
+//!   el de menú abre el menú de ventanas (options.rs);
 //! - números: `newui_number1.tga`, dígitos de 12×14 (`RenderNumber`).
 
 use bevy::prelude::*;
@@ -337,7 +338,7 @@ fn update_numbers(
 }
 
 /// Cursor en coordenadas de la pantalla virtual 640×480 del original (con la barra centrada).
-fn cursor_virtual(window: &Window) -> Option<Vec2> {
+pub(crate) fn cursor_virtual(window: &Window) -> Option<Vec2> {
     let c = window.cursor_position()?;
     let s = ui_scale(window);
     let x0 = (window.width() - 640.0 * s) / 2.0;
@@ -351,16 +352,44 @@ fn button_rect(i: usize) -> Rect {
     Rect::new(x, FRAME_TOP, x + 30.0, FRAME_TOP + 41.0)
 }
 
+/// Botón de menú (`m_BtnWindow`): el último de la fila.
+const MENU_BUTTON: usize = 4;
+
 /// Fotograma del botón: normal, ratón encima o abierto (como en el original, se comprueba
 /// a mano si el cursor está dentro).
 fn update_buttons(
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
+    mut game_ui: ResMut<crate::options::GameUi>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
     mut q: Query<(&mut HudButton, &mut ImageNode)>,
 ) {
-    let cursor = windows.single().ok().and_then(cursor_virtual);
+    // Con una caja de mensajes abierta, la barra no recibe el ratón.
+    let cursor = windows.single().ok().and_then(cursor_virtual).filter(|_| !game_ui.modal());
     for (mut b, mut img) in &mut q {
         let inside = cursor.is_some_and(|c| button_rect(b.index).contains(c));
+        if b.index == MENU_BUTTON {
+            // `m_BtnWindow` (NewUIMainFrameWindow.cpp:817-821): al soltar encima abre o cierra el
+            // menú de ventanas. Abierto: 2 normal, 3 encima y 2 apretado; cerrado: 0, 1 y 2
+            // (`SetButtonInfo`, NewUIMainFrameWindow.cpp:2700-2717).
+            if inside && mouse.just_released(MouseButton::Left) {
+                game_ui.toggle_window_menu();
+                sound.play("SOUND_CLICK01");
+            }
+            let open = game_ui.window_menu_open();
+            let frame = match (open, inside, mouse.pressed(MouseButton::Left)) {
+                (_, true, true) => 2.0,
+                (true, true, false) => 3.0,
+                (true, false, _) => 2.0,
+                (false, true, false) => 1.0,
+                (false, false, _) => 0.0,
+            };
+            let rect = Rect::new(0.0, frame * 41.0, 30.0, frame * 41.0 + 41.0);
+            if img.rect != Some(rect) {
+                img.rect = Some(rect);
+            }
+            continue;
+        }
         if inside && mouse.just_pressed(MouseButton::Left) {
             // Sin ventanas todavía: solo se marca como abierto o cerrado.
             b.open = !b.open;
@@ -379,13 +408,13 @@ fn update_buttons(
     }
 }
 
-/// El ratón está sobre la barra (un clic ahí no hace caminar).
-fn pointer_over_ui(windows: Query<&Window>, mut over: ResMut<PointerOverUi>) {
+/// El ratón está sobre la barra o sobre una ventana del juego (un clic ahí no hace caminar).
+fn pointer_over_ui(windows: Query<&Window>, game_ui: Res<crate::options::GameUi>, mut over: ResMut<PointerOverUi>) {
     let on_bar = windows
         .single()
         .ok()
         .and_then(cursor_virtual)
-        .is_some_and(|c| c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x));
+        .is_some_and(|c| (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c));
     if over.0 != on_bar {
         over.0 = on_bar;
     }

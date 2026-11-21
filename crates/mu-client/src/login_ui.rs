@@ -5,6 +5,11 @@
 //! - selección de servidor: grupos y servidores con su barra de carga (`CServerSelWin`);
 //! - ventana de login: cuenta, contraseña en asteriscos, OK y Cancel (`CLoginWin`);
 //! - caja de mensajes (`CMsgWin`) y menú de sistema de Esc (`CSysMenuWin`);
+//! - opciones (`COptionWin`) con sus casillas y barras (`CSlider`): el volumen de los efectos y
+//!   el de la música van a sound.rs; el resto se guarda en `options::GameOptions` (sin efecto
+//!   todavía). La barra de la música es añadida: el original solo tiene la de los efectos;
+//! - créditos (`CCreditWin`) con `Data/Local/credit.bmd`, las ilustraciones `im*_*.jpg` que se
+//!   funden y la música `Mutheme`;
 //! - el gestor de ventanas (`CUIMng`): ventana activa, orden de delante a atrás y botones (`CButton`).
 //!
 //! **Coordenadas.** El logo y las líneas de abajo van en la pantalla de 640×480 estirada a la
@@ -59,7 +64,20 @@ impl Plugin for LoginUiPlugin {
             // Tab es de las cajas de texto: que no llegue al cambio de cámara (camera.rs).
             .add_systems(PreUpdate, keep_tab.after(bevy::input::InputSystems).run_if(in_state(GameScene::Login)))
             .add_systems(FixedUpdate, logo_tick.run_if(in_state(GameScene::Login)))
-            .add_systems(Update, (update_ui, draw_windows, draw_logo).chain().run_if(in_state(GameScene::Login)));
+            .add_systems(Update, (update_ui, draw_windows, draw_logo).chain().run_if(in_state(GameScene::Login)))
+            // La música de los créditos pisa la del login (login.rs la pide cada fotograma).
+            .add_systems(
+                PostUpdate,
+                credit_music.before(crate::sound::SoundSystems).run_if(in_state(GameScene::Login)),
+            );
+    }
+}
+
+/// `PlayMp3(MUSIC_MUTHEME)` mientras se ven los créditos (LoginMainWin.cpp:107-116); al
+/// cerrarlos vuelve `login_theme`.
+fn credit_music(ui: Option<Res<LoginUi>>, mut sound: ResMut<SoundQueue>) {
+    if ui.is_some_and(|ui| ui.is_shown(Win::Credit)) {
+        sound.music("Mutheme");
     }
 }
 
@@ -74,7 +92,8 @@ const FIX_FONT: f32 = 12.0;
 /// `g_hFont` a 1024×768: `FontHeight` 14 − 1 = 13 px (Winmain.cpp:1456-1471).
 const FONT: f32 = 13.0;
 /// El original pinta las letras sin suavizar (`NONANTIALIASED_QUALITY`).
-const SMOOTHING: FontSmoothing = FontSmoothing::None;
+/// Suavizado de la letra (el original no lo tenía; con la Noto Sans de `fonts.rs` se ve nítida).
+const SMOOTHING: FontSmoothing = FontSmoothing::AntiAliased;
 
 /// `CServerSelWin` (ServerSelWin.h:26-29, ServerSelWin.cpp:19-22).
 const GROUP_W: i32 = 108;
@@ -111,6 +130,54 @@ const SYS_H: i32 = 64 + 43 + 8 * 6;
 const BAR_BTN_W: i32 = 54;
 const BAR_BTN_H: i32 = 30;
 
+/// `COptionWin` (OptionWin.cpp:35-77): `CWinEx` de 213 de ancho con la cabecera `op2_back1`
+/// (213×65), el pie `op1_back2` (213×43) y `SetLine(30)` lados de 8. Aquí 8 líneas más (64) para
+/// la barra de la música añadida.
+const OPT_W: i32 = 213;
+const OPT_EXTRA: i32 = 8 * 8;
+const OPT_SIDE: i32 = 8 * 30 + OPT_EXTRA;
+const OPT_H: i32 = 65 + 43 + OPT_SIDE;
+/// `OW_BTN_GAP` y `OW_SLD_GAP`.
+const OW_BTN_GAP: i32 = 25;
+const OW_SLD_GAP: i32 = 48;
+/// Casillas de 16×16 (`BITMAP_CHECK_BTN`).
+const CHECK: i32 = 16;
+/// `CSlider`: pulgar de 13×13, fondo de 98×13 y la barra en (3, 3)-(95, 10) (OptionWin.cpp:63-74).
+const SLD_W: i32 = 98;
+const SLD_H: i32 = 13;
+const THUMB: i32 = 13;
+const THUMB_RANGE: i32 = SLD_W - THUMB;
+const GAUGE_RECT: (i32, i32, i32, i32) = (3, 3, 95, 10);
+/// Barras: volumen de los efectos, de la música (añadida) y límite de efectos.
+const SLD_EFFECT_VOL: usize = 0;
+const SLD_MUSIC_VOL: usize = 1;
+const SLD_RENDER_LV: usize = 2;
+const SLD_MAX: usize = 3;
+/// `SetSlideRange`: 9 para el volumen (también el de la música) y 4 para el límite de efectos.
+const SLD_RANGE: [i32; SLD_MAX] = [9, 9, 4];
+/// Con el botón apretado a un lado del pulgar, el original lo mueve un paso por fotograma
+/// (iba a 25): aquí un paso por tick de 25 por segundo.
+const SLD_STEP: f32 = 1.0 / 25.0;
+
+/// `CCreditWin` (CreditWin.cpp:19-26): tiempos en ms.
+const CRW_ILLUST_FADE_TIME: f32 = 2000.0;
+const CRW_ILLUST_SHOW_TIME: f32 = 22000.0;
+const CRW_TEXT_FADE_TIME: f32 = 300.0;
+const CRW_NAME_SHOW_TIME: f32 = 2300.0;
+const CRW_ILLUST_MAX: u8 = 8;
+/// `SCreditItem`: 1 byte de clase y 32 de nombre, 400 en `credit.bmd` (CreditWin.h:20-40).
+const CRW_NAME_MAX: usize = 32;
+const CRW_ITEM_MAX: usize = 400;
+/// `CreateFont(18, ..., FW_BOLD, ...)` a 1024 de ancho (CreditWin.cpp:83-90).
+const CREDIT_FONT: f32 = 18.0;
+/// Las ilustraciones `m_apszIllustPath` (CreditWin.cpp:66-81).
+const ILLUST: [&str; CRW_ILLUST_MAX as usize * 2] = [
+    "im1_1.jpg", "im1_2.jpg", "im2_1.jpg", "im2_2.jpg", "im3_1.jpg", "im3_2.jpg", "im4_1.jpg", "im4_2.jpg",
+    "im5_1.jpg", "im5_2.jpg", "im6_1.jpg", "im6_2.jpg", "im7_1.jpg", "im7_2.jpg", "im8_1.jpg", "im8_2.jpg",
+];
+/// La única línea añadida a los créditos de Webzen: al final, como un nombre más de "THANKS TO".
+const CREDIT_PORT: &str = "Port: crixpx";
+
 /// Máximos de las cajas de texto (`MAX_ID_SIZE`, `MAX_PASSWORD_SIZE`, _define.h).
 const MAX_ID: usize = 10;
 const MAX_PASSWORD: usize = 20;
@@ -138,6 +205,13 @@ const TEXT_PASSWORD: &str = "Password"; // 451
 const TEXT_EXIT_GAME: &str = "Exit Game"; // 381
 const TEXT_OPTION: &str = "Option"; // 385
 const TEXT_CLOSE: &str = "Close"; // 388
+const TEXT_AUTO_ATTACK: &str = "Automatic Attack"; // 386
+const TEXT_WHISPER: &str = "Beep sound for whispering"; // 387
+const TEXT_VOLUME: &str = "Volume"; // 389
+const TEXT_SLIDE_HELP: &str = "Slide Help"; // 919
+const TEXT_EFFECT_LIMIT: &str = "+Effect limitation"; // 1840
+/// La barra añadida de la música (no hay texto para ella en Text_eng.bmd).
+const TEXT_MUSIC: &str = "Music";
 const TEXT_SERVER_FULL: &str = "The server is full"; // 416
 const TEXT_ENTER_ACCOUNT: &str = "Enter your account"; // 403
 const TEXT_ENTER_PASSWORD: &str = "Enter your password"; // 404
@@ -267,6 +341,41 @@ fn sys_rect(s: Screen) -> IRect {
     IRect::new((s.w - SYS_W) / 2, (s.h - SYS_H) / 2, SYS_W, SYS_H)
 }
 
+/// `CWinEx` de `COptionWin`, centrado (OptionWin.cpp:75-76).
+fn opt_rect(s: Screen) -> IRect {
+    IRect::new((s.w - OPT_W) / 2, (s.h - OPT_H) / 2, OPT_W, OPT_H)
+}
+
+/// Casilla `i` (`COptionWin::SetPosition`, OptionWin.cpp:86-105): en x + 52, desde y + 52 cada 41.
+fn check_rect(s: Screen, i: usize) -> IRect {
+    let r = opt_rect(s);
+    IRect::new(r.x + 52, r.y + 52 + i as i32 * (OW_BTN_GAP + CHECK), CHECK, CHECK)
+}
+
+/// Esquina de la barra `i`: 48 por debajo de la última casilla y cada 61.
+fn slider_origin(s: Screen, i: usize) -> IVec2 {
+    let last = check_rect(s, 2);
+    IVec2::new(last.x, last.y + CHECK + OW_SLD_GAP + i as i32 * (OW_SLD_GAP + SLD_H))
+}
+
+/// Botón Close de las opciones, centrado en y + 301 (bajado lo que crece la ventana).
+fn opt_close_rect(s: Screen) -> IRect {
+    let r = opt_rect(s);
+    IRect::new(r.x + (OPT_W - 108) / 2, r.y + 301 + OPT_EXTRA, 108, 30)
+}
+
+/// `CCreditWin::SetPosition` (CreditWin.cpp:107-124): el adorno abajo a la derecha, con el pie a
+/// 527/600 del alto, y el botón de cerrar dentro de él en (122, 63).
+fn credit_deco_rect(s: Screen) -> IRect {
+    let base = (527.0 / 600.0 * s.h as f32) as i32;
+    IRect::new(s.w - 189, base - 103, 189, 103)
+}
+
+fn credit_close_rect(s: Screen) -> IRect {
+    let d = credit_deco_rect(s);
+    IRect::new(d.x + 122, d.y + 63, 54, 30)
+}
+
 // --- Estado ----------------------------------------------------------------------------------------
 
 /// Ventanas del login (las de `CUIMng::CreateLoginScene` que hay de momento).
@@ -276,6 +385,8 @@ enum Win {
     ServerSel,
     Login,
     SysMenu,
+    Option,
+    Credit,
     Msg,
 }
 
@@ -294,6 +405,334 @@ enum Btn {
     SysExit,
     SysOption,
     SysClose,
+    /// Casillas de `COptionWin`: ataque automático, aviso de susurros y ayuda deslizante.
+    OptAutoAttack,
+    OptWhisper,
+    OptSlideHelp,
+    OptClose,
+    /// Pulgar de la barra `i` (`CSlider::m_btnThumb`).
+    OptThumb(usize),
+    CreditClose,
+}
+
+/// `CSlider` horizontal (Slider.cpp). Las posiciones van relativas a la esquina de la barra,
+/// que se recalcula cada fotograma (la ventana puede cambiar de tamaño).
+#[derive(Clone, Debug)]
+struct Slider {
+    /// `m_nSlidePos` y `m_nSlideRange`.
+    pos: i32,
+    range: i32,
+    /// Pulgar: x desde la esquina de la barra.
+    thumb: i32,
+    /// `m_byState`: `SLD_STATE_UP` (1), `SLD_STATE_DN` (2) y `SLD_STATE_THUMB_DRG` (0x10).
+    state: u8,
+    capture: i32,
+    limit: i32,
+    /// Tiempo hasta el siguiente paso con el botón apretado a un lado del pulgar.
+    step_clock: f32,
+}
+
+const SLD_STATE_UP: u8 = 0x01;
+const SLD_STATE_DN: u8 = 0x02;
+const SLD_STATE_THUMB_DRG: u8 = 0x10;
+
+impl Slider {
+    fn new(range: i32) -> Self {
+        Self { pos: 0, range: range.max(1), thumb: 0, state: 0, capture: 0, limit: 0, step_clock: SLD_STEP }
+    }
+
+    fn thumb_at(&self, pos: i32) -> i32 {
+        (THUMB_RANGE as f32 / self.range as f32 * pos as f32) as i32
+    }
+
+    /// `SetThumbPosition`.
+    fn set_thumb(&mut self) {
+        self.thumb = self.thumb_at(self.pos);
+    }
+
+    /// `SetSlidePos`.
+    fn set_pos(&mut self, pos: i32) {
+        self.pos = pos.clamp(0, self.range);
+        self.set_thumb();
+    }
+
+    /// `LineUp`.
+    fn line_up(&mut self) {
+        self.pos -= 1;
+        self.thumb = self.thumb_at(self.pos);
+    }
+
+    /// `LineDown`.
+    fn line_down(&mut self) {
+        self.pos += 1;
+        self.thumb = if self.pos == self.range { THUMB_RANGE } else { self.thumb_at(self.pos) };
+    }
+
+    /// Ancho de la barra de color (`CGaugeBar::SetValue`).
+    fn gauge(&self) -> i32 {
+        self.pos.clamp(0, self.range) * (GAUGE_RECT.2 - GAUGE_RECT.0) / self.range
+    }
+
+    /// `CSlider::Update` con el ratón relativo a la esquina de la barra.
+    fn update(&mut self, cursor: Option<IVec2>, held: bool, up: bool, dt: f32) {
+        if up {
+            self.set_thumb();
+            self.state = 0;
+        }
+        let Some(c) = cursor else { return };
+        let in_y = c.y >= 0 && c.y < SLD_H;
+        let upper = in_y && c.x >= 0 && c.x < self.thumb;
+        let under = in_y && c.x >= self.thumb + THUMB && c.x < SLD_W;
+        if held && (upper || under) {
+            self.step_clock += dt;
+            if self.step_clock >= SLD_STEP {
+                self.step_clock = 0.0;
+                if upper {
+                    self.line_up();
+                    self.state |= SLD_STATE_UP;
+                } else {
+                    self.line_down();
+                    self.state |= SLD_STATE_DN;
+                }
+            }
+        } else {
+            self.step_clock = SLD_STEP;
+        }
+        let on_thumb = in_y && c.x >= self.thumb && c.x < self.thumb + THUMB;
+        if on_thumb && held {
+            self.capture = c.x;
+            self.limit = self.capture - self.thumb;
+            self.state |= SLD_STATE_THUMB_DRG;
+        }
+        if self.state & SLD_STATE_THUMB_DRG != 0 {
+            let thumb = if self.limit < c.x && self.limit + THUMB_RANGE > c.x {
+                let t = self.thumb + c.x - self.capture;
+                self.capture = c.x;
+                t
+            } else if self.limit >= c.x {
+                self.capture = self.limit;
+                0
+            } else {
+                self.capture = self.limit + THUMB_RANGE;
+                THUMB_RANGE
+            };
+            self.thumb = thumb;
+            let per_pos = THUMB_RANGE as f32 / self.range as f32;
+            self.pos = ((self.thumb as f32 + per_pos / 2.0) / per_pos) as i32;
+        }
+    }
+}
+
+/// `SHOW_STATE` de los créditos.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Fade {
+    Hide,
+    In,
+    Show,
+    Out,
+}
+
+/// `SCreditItem`: clase (1 departamento, 2 equipo, 3 nombre) y nombre.
+#[derive(Clone, Debug)]
+struct CreditItem {
+    class: u8,
+    name: String,
+}
+
+/// `CRW_INDEX_*`: departamento, equipo y los nombres.
+const CRW_INDEX_DEPARTMENT: usize = 0;
+const CRW_INDEX_TEAM: usize = 1;
+const CRW_INDEX_NAME: usize = 2;
+const CRW_INDEX_MAX: usize = 6;
+
+/// Estado de `CCreditWin`.
+struct Credits {
+    items: Vec<CreditItem>,
+    illust_state: Fade,
+    illust_clock: f32,
+    illust: u8,
+    illust_alpha: f32,
+    now: usize,
+    name_count: usize,
+    index: [usize; CRW_INDEX_MAX],
+    text_state: [Fade; CRW_INDEX_NAME + 1],
+    text_clock: f32,
+    /// Alfa de las tres franjas negras que tapan las líneas (`CRW_SPR_TXT_HIDE0..2`); empiezan
+    /// tapando y no se reinician al volver a abrir.
+    hide_alpha: [f32; CRW_INDEX_NAME + 1],
+}
+
+impl Credits {
+    fn new(items: Vec<CreditItem>) -> Self {
+        Self {
+            items,
+            illust_state: Fade::Hide,
+            illust_clock: 0.0,
+            illust: 0,
+            illust_alpha: 0.0,
+            now: 0,
+            name_count: 0,
+            index: [0; CRW_INDEX_MAX],
+            text_state: [Fade::Hide; CRW_INDEX_NAME + 1],
+            text_clock: 0.0,
+            hide_alpha: [255.0; CRW_INDEX_NAME + 1],
+        }
+    }
+
+    fn class(&self, i: usize) -> u8 {
+        self.items.get(i).map_or(0, |c| c.class)
+    }
+
+    fn name(&self, slot: usize) -> &str {
+        self.items.get(self.index[slot]).map_or("", |c| c.name.as_str())
+    }
+
+    /// `CCreditWin::Init` (CreditWin.cpp:237-250). Devuelve si hay que cerrar.
+    fn init(&mut self) -> bool {
+        self.illust_state = Fade::In;
+        self.illust_clock = 0.0;
+        self.illust = 0;
+        // `LoadIllust`: las dos nuevas empiezan transparentes.
+        self.illust_alpha = 0.0;
+        self.text_state = [Fade::In; CRW_INDEX_NAME + 1];
+        self.text_clock = 0.0;
+        self.now = 0;
+        self.name_count = 0;
+        self.set_text_index()
+    }
+
+    /// `CCreditWin::SetTextIndex` (CreditWin.cpp:338-370): el siguiente departamento, equipo y
+    /// hasta 4 nombres. Una clase 0 termina los créditos (devuelve si hay que cerrar).
+    ///
+    /// El original cuenta un nombre menos cuando hay 4 seguidos (el cuarto no llegaba a verse);
+    /// aquí se cuentan todos para que no falte ninguno de los créditos.
+    fn set_text_index(&mut self) -> bool {
+        if self.class(self.now) == 0 {
+            return true;
+        }
+        if self.class(self.now) == 1 {
+            self.index[CRW_INDEX_DEPARTMENT] = self.now;
+            self.now += 1;
+        }
+        if self.class(self.now) == 2 {
+            self.index[CRW_INDEX_TEAM] = self.now;
+            self.now += 1;
+        }
+        let mut count = 0;
+        for i in 0..4 {
+            if self.class(self.now) != 3 {
+                break;
+            }
+            self.index[CRW_INDEX_NAME + i] = self.now;
+            self.now += 1;
+            count += 1;
+        }
+        self.name_count = count;
+        false
+    }
+
+    /// `AnimationIllust` (CreditWin.cpp:273-314), `dt` en ms.
+    fn animate_illust(&mut self, dt: f32) {
+        match self.illust_state {
+            Fade::In => {
+                self.illust_alpha += 255.0 * dt / CRW_ILLUST_FADE_TIME;
+                if self.illust_alpha >= 255.0 {
+                    self.illust_state = Fade::Show;
+                    self.illust_alpha = 255.0;
+                }
+            }
+            Fade::Show => {
+                self.illust_clock += dt;
+                if self.illust_clock > CRW_ILLUST_SHOW_TIME {
+                    self.illust_state = Fade::Out;
+                    self.illust_clock = 0.0;
+                }
+            }
+            Fade::Out => {
+                self.illust_alpha -= 255.0 * dt / CRW_ILLUST_FADE_TIME;
+                if self.illust_alpha <= 0.0 {
+                    self.illust_state = Fade::In;
+                    self.illust_alpha = 0.0;
+                    self.illust = (self.illust + 1) % CRW_ILLUST_MAX;
+                }
+            }
+            Fade::Hide => {}
+        }
+    }
+
+    /// `AnimationText` (CreditWin.cpp:372-430): la franja negra se aclara (aparece la línea) o se
+    /// oscurece (desaparece). Devuelve si hay que cerrar.
+    fn animate_text(&mut self, class: usize, dt: f32) -> bool {
+        match self.text_state[class] {
+            Fade::In => {
+                self.hide_alpha[class] -= 255.0 * dt / CRW_TEXT_FADE_TIME;
+                if self.hide_alpha[class] <= 0.0 {
+                    self.text_state[class] = Fade::Show;
+                    self.hide_alpha[class] = 0.0;
+                }
+            }
+            Fade::Show => {
+                if class != CRW_INDEX_NAME {
+                    return false;
+                }
+                self.text_clock += dt;
+                if self.text_clock > CRW_NAME_SHOW_TIME {
+                    self.text_state[CRW_INDEX_NAME] = Fade::Out;
+                    self.text_clock = 0.0;
+                    if self.class(self.now) != 3 {
+                        self.text_state[CRW_INDEX_TEAM] = Fade::Out;
+                        if self.class(self.now) != 2 {
+                            self.text_state[CRW_INDEX_DEPARTMENT] = Fade::Out;
+                        }
+                    }
+                }
+            }
+            Fade::Out => {
+                self.hide_alpha[class] += 255.0 * dt / CRW_TEXT_FADE_TIME;
+                if self.hide_alpha[class] >= 255.0 {
+                    self.text_state[class] = Fade::In;
+                    self.hide_alpha[class] = 255.0;
+                    if class == CRW_INDEX_NAME {
+                        return self.set_text_index();
+                    }
+                }
+            }
+            Fade::Hide => {}
+        }
+        false
+    }
+}
+
+/// `CCreditWin::LoadText` (CreditWin.cpp:318-336): `Data/Local/credit.bmd`, 400 × 33 bytes con
+/// `BuxConvert`, y detrás de lo último que hay la línea propia del port.
+fn load_credits(data: &std::path::Path) -> Vec<CreditItem> {
+    let path = mu_data::fs::find(data, "Local").and_then(|d| mu_data::fs::find(&d, "credit.bmd"));
+    let Some(Ok(mut bytes)) = path.map(std::fs::read) else {
+        warn!("créditos: no está Data/Local/credit.bmd");
+        return Vec::new();
+    };
+    const BUX: [u8; 3] = [0xfc, 0xcf, 0xab];
+    for (i, b) in bytes.iter_mut().enumerate() {
+        *b ^= BUX[i % 3];
+    }
+    let mut items: Vec<CreditItem> = bytes
+        .as_chunks::<{ 1 + CRW_NAME_MAX }>()
+        .0
+        .iter()
+        .take(CRW_ITEM_MAX)
+        .map(|c| {
+            let name = &c[1..];
+            let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+            // Windows-1252 (en inglés no hay más que ASCII).
+            CreditItem { class: c[0], name: name[..end].iter().map(|&b| b as char).collect() }
+        })
+        .collect();
+    // El archivo acaba en relleno (clase 205): ahí termina lo que se enseña. La línea propia va
+    // como un nombre más con el equipo en blanco, igual que "All of WEBZEN STAFF".
+    let end = items.iter().position(|c| !(1..=3).contains(&c.class)).unwrap_or(items.len());
+    items.insert(end, CreditItem { class: 2, name: " ".into() });
+    items.insert(end + 1, CreditItem { class: 3, name: CREDIT_PORT.into() });
+    items
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -506,13 +945,23 @@ struct LoginUi {
     /// Fundido del logo (`g_fMULogoAlpha`) en este tick y en el anterior.
     logo: f32,
     prev_logo: f32,
+
+    /// `g_pOption` (se copia de `options::GameOptions` antes de cada pasada y se devuelve después).
+    opts: crate::options::GameOptions,
+    /// Volumen de los efectos y de la música (sound.rs) y lo que se pide cambiar.
+    sfx: u8,
+    music: u8,
+    set_sfx: Option<u8>,
+    set_music: Option<u8>,
+    sliders: [Slider; SLD_MAX],
+    credits: Credits,
 }
 
 impl LoginUi {
-    fn new(saved_id: &str) -> Self {
+    fn new(saved_id: &str, credits: Vec<CreditItem>) -> Self {
         let mut ui = Self {
-            // Orden de creación (`AddHead`): la última creada queda delante.
-            order: vec![Win::Login, Win::ServerSel, Win::MainBar, Win::SysMenu, Win::Msg],
+            // Orden de creación (`AddHead`, UIMng.cpp:207-252): la última creada queda delante.
+            order: vec![Win::Credit, Win::Login, Win::ServerSel, Win::MainBar, Win::Option, Win::SysMenu, Win::Msg],
             shown: Vec::new(),
             active: false,
             pending_active: false,
@@ -535,6 +984,13 @@ impl LoginUi {
             outcome: None,
             logo: 0.0,
             prev_logo: 0.0,
+            opts: crate::options::GameOptions::default(),
+            sfx: 0,
+            music: 0,
+            set_sfx: None,
+            set_music: None,
+            sliders: SLD_RANGE.map(Slider::new),
+            credits: Credits::new(credits),
         };
         ui.update_display();
         // Sin servidor: la lista llega enseguida (`ReceiveServerList`).
@@ -732,17 +1188,74 @@ impl LoginUi {
                     });
                 }
             }
+            Win::Option => {
+                // Casillas: `Create(16, 16, BITMAP_CHECK_BTN, 2, 0, 0, -1, 1, 1, 1)`: 0 sin marcar
+                // y 1 marcada en los tres estados (OptionWin.cpp:52-56).
+                let checks = [
+                    (Btn::OptAutoAttack, self.opts.auto_attack),
+                    (Btn::OptWhisper, self.opts.whisper_sound),
+                    (Btn::OptSlideHelp, self.opts.slide_help),
+                ];
+                for (i, (id, checked)) in checks.into_iter().enumerate() {
+                    out.push(ButtonDef {
+                        id,
+                        rect: check_rect(s, i),
+                        tex: Tex::CheckBtn,
+                        frames: [0, 0, 0],
+                        check_frame: Some(1),
+                        checked,
+                        text: None,
+                    });
+                }
+                out.push(ButtonDef {
+                    id: Btn::OptClose,
+                    rect: opt_close_rect(s),
+                    tex: Tex::TextBtn,
+                    frames: [0, 2, 1],
+                    check_frame: None,
+                    checked: false,
+                    text: Some((TEXT_CLOSE.to_string(), [BR_GRAY, BR_GRAY, WHITE])),
+                });
+            }
+            Win::Credit => {
+                // `m_btnClose.Create(54, 30, BITMAP_BUTTON+2, 3, 2, 1)`.
+                out.push(ButtonDef::image(Btn::CreditClose, credit_close_rect(s), Tex::CloseBtn));
+            }
         }
         out
     }
 
-    /// `CWin::CursorInWin(WA_ALL)`. La caja de mensajes y el menú de sistema ocupan toda la pantalla.
+    /// Pulgar de la barra `i` (un `CButton` de un fotograma; el `CSlider` lo actualiza y lo dibuja).
+    fn thumb_button(&self, s: Screen, i: usize) -> ButtonDef {
+        let o = slider_origin(s, i);
+        ButtonDef {
+            id: Btn::OptThumb(i),
+            rect: IRect::new(o.x + self.sliders[i].thumb, o.y, THUMB, THUMB),
+            tex: Tex::SliderThumb,
+            frames: [0, 0, 0],
+            check_frame: None,
+            checked: false,
+            text: None,
+        }
+    }
+
+    /// `COptionWin::UpdateDisplay` (OptionWin.cpp:132-139): las barras toman los valores actuales.
+    fn option_display(&mut self) {
+        let values = [self.sfx as i32, self.music as i32, self.opts.render_level as i32];
+        for (slider, v) in self.sliders.iter_mut().zip(values) {
+            slider.set_pos(v);
+            slider.state = 0;
+        }
+    }
+
+    /// `CWin::CursorInWin(WA_ALL)`. La caja de mensajes, el menú de sistema, las opciones y los
+    /// créditos ocupan toda la pantalla (`CWin::Create(ancho, alto)` de la pantalla).
     fn win_rect(s: Screen, w: Win) -> IRect {
         match w {
             Win::MainBar => bar_rect(s),
             Win::ServerSel => ssw_rect(s),
             Win::Login => login_rect(s),
-            Win::SysMenu | Win::Msg => IRect::new(0, 0, s.w, s.h),
+            Win::SysMenu | Win::Option | Win::Credit | Win::Msg => IRect::new(0, 0, s.w, s.h),
         }
     }
 
@@ -819,7 +1332,11 @@ impl LoginUi {
 
         // `NewMoveLogInScene` (ZzzScene.cpp:1254-1267): Esc abre el menú de sistema desde la lista.
         if input.esc
-            && !(self.is_shown(Win::Msg) || self.is_shown(Win::Login) || self.is_shown(Win::SysMenu))
+            && !(self.is_shown(Win::Msg)
+                || self.is_shown(Win::Login)
+                || self.is_shown(Win::SysMenu)
+                || self.is_shown(Win::Option)
+                || self.is_shown(Win::Credit))
             && self.is_shown(Win::MainBar)
             && self.is_shown(Win::ServerSel)
             && self.sys_flag
@@ -842,8 +1359,14 @@ impl LoginUi {
                 if clicks.contains(&Btn::Menu) {
                     self.show_win(Win::SysMenu);
                     self.sys_flag = true;
+                } else if clicks.contains(&Btn::Credit) {
+                    // LoginMainWin.cpp:107-116: los créditos (y su música, `credit_music`). La
+                    // lista de servidores que se pide no se enseña mientras se ven.
+                    self.show_win(Win::Credit);
+                    if self.credits.init() {
+                        self.close_credits();
+                    }
                 }
-                // Credit: los créditos (`CCreditWin`) aún no están hechos.
             }
             Win::ServerSel => {
                 // ServerSelWin.cpp:403-472.
@@ -926,7 +1449,9 @@ impl LoginUi {
                 if clicks.contains(&Btn::SysExit) {
                     self.popup(MsgCode::GameEndCountdown);
                 } else if clicks.contains(&Btn::SysOption) {
-                    // Opciones (`COptionWin`): aún no están hechas.
+                    self.hide_win(Win::SysMenu);
+                    self.show_win(Win::Option);
+                    self.option_display();
                 } else if clicks.contains(&Btn::SysClose) {
                     self.sys_flag = false;
                     self.hide_win(Win::SysMenu);
@@ -935,6 +1460,84 @@ impl LoginUi {
                     self.hide_win(Win::SysMenu);
                 }
             }
+            Win::Option => self.option_while_active(clicks, input),
+            Win::Credit => {
+                // CreditWin.cpp:155-169.
+                if clicks.contains(&Btn::CreditClose) {
+                    self.close_credits();
+                } else if input.esc {
+                    self.sounds += 1;
+                    self.close_credits();
+                    self.sys_flag = false;
+                }
+                if !self.is_shown(Win::Credit) {
+                    return;
+                }
+                let dt = input.dt * 1000.0;
+                for class in 0..=CRW_INDEX_NAME {
+                    if self.credits.animate_text(class, dt) {
+                        // Clase 0: `PlayBuffer(SOUND_CLICK01)` y `CloseWin`.
+                        self.sounds += 1;
+                        self.close_credits();
+                        return;
+                    }
+                }
+                self.credits.animate_illust(dt);
+            }
+        }
+    }
+
+    /// `CCreditWin::CloseWin` (CreditWin.cpp:227-235): vuelve a pedir la lista de servidores (que
+    /// enseña su ventana y la barra) y la música del login (`credit_music` deja de pedir `Mutheme`).
+    fn close_credits(&mut self) {
+        self.hide_win(Win::Credit);
+        self.credits.illust_state = Fade::Hide;
+        self.server_list_received();
+    }
+
+    /// `COptionWin::UpdateWhileActive` (OptionWin.cpp:141-187).
+    fn option_while_active(&mut self, clicks: &[Btn], input: &FrameInput) {
+        let s = input.screen;
+        for i in 0..SLD_MAX {
+            // `m_btnThumb.Update()`: el pulgar suena al soltarlo encima.
+            let thumb = self.thumb_button(s, i);
+            self.update_button(&thumb, Win::Option, input.down, input.up);
+            let o = slider_origin(s, i);
+            let rel = input.cursor.map(|c| c - o);
+            self.sliders[i].update(rel, input.held, input.up, input.dt);
+        }
+        // Las casillas ya han cambiado al pulsarlas (`m_bCheck = !m_bCheck`).
+        if clicks.contains(&Btn::OptAutoAttack) {
+            self.opts.auto_attack = !self.opts.auto_attack;
+        } else if clicks.contains(&Btn::OptWhisper) {
+            self.opts.whisper_sound = !self.opts.whisper_sound;
+        } else if clicks.contains(&Btn::OptSlideHelp) {
+            self.opts.slide_help = !self.opts.slide_help;
+        } else if clicks.contains(&Btn::OptClose) {
+            self.hide_win(Win::Option);
+            self.sys_flag = false;
+        } else if self.sliders[SLD_EFFECT_VOL].state != 0 {
+            // `SetEffectVolumeLevel`.
+            let pos = self.sliders[SLD_EFFECT_VOL].pos.clamp(0, 10) as u8;
+            if self.sfx != pos {
+                self.sfx = pos;
+                self.set_sfx = Some(pos);
+            }
+        } else if self.sliders[SLD_MUSIC_VOL].state != 0 {
+            let pos = self.sliders[SLD_MUSIC_VOL].pos.clamp(0, 10) as u8;
+            if self.music != pos {
+                self.music = pos;
+                self.set_music = Some(pos);
+            }
+        } else if self.sliders[SLD_RENDER_LV].state != 0 {
+            let pos = self.sliders[SLD_RENDER_LV].pos.clamp(0, 4) as u8;
+            if self.opts.render_level != pos {
+                self.opts.render_level = pos;
+            }
+        } else if input.esc {
+            self.sounds += 1;
+            self.hide_win(Win::Option);
+            self.sys_flag = false;
         }
     }
 
@@ -1100,7 +1703,11 @@ impl ButtonDef {
 struct FrameInput {
     /// Ratón en píxeles de la pantalla de referencia.
     cursor: Option<IVec2>,
+    /// Pantalla de referencia de este fotograma.
+    screen: Screen,
     down: bool,
+    /// Botón izquierdo apretado (`IsLBtnHeldDn`).
+    held: bool,
     up: bool,
     esc: bool,
     enter: bool,
@@ -1133,6 +1740,8 @@ fn update_ui(
     mut typed: MessageReader<KeyboardInput>,
     time: Res<Time>,
     mut sound: ResMut<SoundQueue>,
+    audio: Option<Res<crate::sound::Audio>>,
+    mut opts: ResMut<crate::options::GameOptions>,
     mut args: ResMut<Args>,
     mut load: ResMut<LoadStep>,
     mut next: ResMut<NextState<GameScene>>,
@@ -1143,9 +1752,14 @@ fn update_ui(
     let cursor = window
         .and_then(|w| w.cursor_position())
         .map(|c| (c / scale.0.max(1e-3) / K).floor().as_ivec2());
+    // `g_pOption` y el volumen de sound.rs (F7/F8 pueden cambiarlo mientras tanto).
+    (ui.sfx, ui.music) = crate::sound::volumes(audio.as_deref(), &sound);
+    ui.opts = *opts;
     let input = FrameInput {
         cursor,
+        screen: s,
         down: mouse.just_pressed(MouseButton::Left),
+        held: mouse.pressed(MouseButton::Left),
         up: mouse.just_released(MouseButton::Left),
         esc: keys.just_pressed(KeyCode::Escape),
         enter: keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter),
@@ -1157,6 +1771,15 @@ fn update_ui(
     for _ in 0..std::mem::take(&mut ui.sounds) {
         // `PlayBuffer(SOUND_CLICK01)`.
         sound.play("SOUND_CLICK01");
+    }
+    if let Some(v) = ui.set_sfx.take() {
+        sound.set_sfx_volume(v);
+    }
+    if let Some(v) = ui.set_music.take() {
+        sound.set_music_volume(v);
+    }
+    if *opts != ui.opts {
+        *opts = ui.opts;
     }
     match ui.outcome.take() {
         Some(Outcome::Enter(id)) => {
@@ -1192,10 +1815,19 @@ enum Tex {
     SysLeft,
     SysRight,
     TextBtn,
+    OptTop,
+    CheckBtn,
+    SliderThumb,
+    SliderGauge,
+    SliderBack,
+    CloseBtn,
+    CreditLogo,
+    /// Ilustración de los créditos (`ILLUST`), se carga cuando hace falta (`LoadIllust`).
+    Illust(u8),
 }
 
 impl Tex {
-    const ALL: [Tex; 17] = [
+    const ALL: [Tex; 24] = [
         Tex::GroupBtn,
         Tex::ServerBtn,
         Tex::ServerGauge,
@@ -1213,9 +1845,16 @@ impl Tex {
         Tex::SysLeft,
         Tex::SysRight,
         Tex::TextBtn,
+        Tex::OptTop,
+        Tex::CheckBtn,
+        Tex::SliderThumb,
+        Tex::SliderGauge,
+        Tex::SliderBack,
+        Tex::CloseBtn,
+        Tex::CreditLogo,
     ];
 
-    /// `OpenLogoSceneData` (ZzzOpenData.cpp:4866-4890) y las comunes (ZzzOpenData.cpp:5254-5264).
+    /// `OpenLogoSceneData` (ZzzOpenData.cpp:4866-4890) y las comunes (ZzzOpenData.cpp:5254-5269).
     fn file(self) -> &'static str {
         match self {
             Tex::GroupBtn => "cha_bt.tga",
@@ -1235,6 +1874,14 @@ impl Tex {
             Tex::SysLeft => "op1_back3.jpg",
             Tex::SysRight => "op1_back4.jpg",
             Tex::TextBtn => "op1_b_all.tga",
+            Tex::OptTop => "op2_back1.tga",
+            Tex::CheckBtn => "op2_ch.tga",
+            Tex::SliderThumb => "op2_volume3.tga",
+            Tex::SliderGauge => "op2_volume2.jpg",
+            Tex::SliderBack => "op2_volume1.tga",
+            Tex::CloseBtn => "message_close_b_all.tga",
+            Tex::CreditLogo => "cr_mu_lo.tga",
+            Tex::Illust(i) => ILLUST[i as usize % ILLUST.len()],
         }
     }
 }
@@ -1354,7 +2001,7 @@ fn spawn_login_ui(
     mut materials: ResMut<Assets<LogoMaterial>>,
 ) {
     let saved = crate::settings::saved_value("usuario").unwrap_or_default();
-    commands.insert_resource(LoginUi::new(&saved));
+    commands.insert_resource(LoginUi::new(&saved, load_credits(&args.data)));
 
     let textures: HashMap<Tex, Handle<Image>> = Tex::ALL
         .iter()
@@ -1439,7 +2086,9 @@ fn spawn_login_ui(
 #[derive(Clone, PartialEq, Debug)]
 enum Item {
     /// Imagen (o el trozo `src`) en un rectángulo; `tile` repite la textura en vez de estirarla.
-    Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, src: Option<Rect>, tile: bool },
+    Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, src: Option<Rect>, tile: bool, alpha: u8 },
+    /// Línea de los créditos: letra de 18 en negrita, centrada en `w`.
+    BigText { x: f32, y: f32, w: f32, text: String, color: [u8; 3] },
     /// Rectángulo de color (`RenderColor`).
     Fill { x: f32, y: f32, w: f32, h: f32, color: [u8; 4] },
     /// Texto con la esquina de arriba a la izquierda en (x, y); con `center`, centrado en ese ancho.
@@ -1480,6 +2129,7 @@ impl LoginUi {
                                     h: GAUGE_H as f32,
                                     src: Some(Rect::new(0.0, 0.0, fill, GAUGE_H as f32)),
                                     tile: false,
+                                    alpha: 255,
                                 });
                             }
                         }
@@ -1510,6 +2160,8 @@ impl LoginUi {
                     out.push(tiled(Tex::SysRight, IRect::new(r.x + r.w - 5, r.y + 64, 5, side)));
                     self.push_buttons(s, w, &mut out);
                 }
+                Win::Option => self.push_option(s, &mut out),
+                Win::Credit => self.push_credits(s, &mut out),
                 Win::Msg => {
                     out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
                     let m = msg_rect(s);
@@ -1557,7 +2209,7 @@ impl LoginUi {
             };
             let (x, y, w, h) = (b.rect.x as f32, b.rect.y as f32, b.rect.w as f32, b.rect.h as f32);
             let top = frame as f32 * h;
-            out.push(Item::Image { tex: b.tex, x, y, w, h, src: Some(Rect::new(0.0, top, w, top + h)), tile: false });
+            out.push(Item::Image { tex: b.tex, x, y, w, h, src: Some(Rect::new(0.0, top, w, top + h)), tile: false, alpha: 255 });
             if let Some((text, colors)) = &b.text {
                 // `CButton::Render` (Button.cpp:200-209): centrado en el ancho, a media altura y
                 // medio punto más abajo (punto y medio al apretarlo) en la pantalla de 640×480.
@@ -1570,6 +2222,108 @@ impl LoginUi {
                 out.push(Item::Text { x: s.snap_x(x), y: ty, center: Some(w), text: text.clone(), color });
             }
         }
+    }
+
+    /// `COptionWin::RenderControls` (OptionWin.cpp:189-227).
+    fn push_option(&self, s: Screen, out: &mut Vec<Item>) {
+        // `CWin` de toda la pantalla: negro al 50 %.
+        out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
+        // `CWinEx`: la piedra repetida dentro, cabecera `op2_back1`, pie y laterales.
+        let r = opt_rect(s);
+        out.push(tiled(Tex::SysStone, IRect::new(r.x + 3, r.y + 3, r.w - 6, r.h - 6)));
+        out.push(image(Tex::OptTop, IRect::new(r.x, r.y, OPT_W, 65)));
+        out.push(image(Tex::SysBottom, IRect::new(r.x, r.y + 65 + OPT_SIDE, OPT_W, 43)));
+        out.push(tiled(Tex::SysLeft, IRect::new(r.x, r.y + 65, 5, OPT_SIDE)));
+        out.push(tiled(Tex::SysRight, IRect::new(r.x + r.w - 5, r.y + 65, 5, OPT_SIDE)));
+
+        let label = |x: i32, y: i32, text: String| Item::Text {
+            x: s.snap_x(x as f32),
+            y: s.snap_y(y as f32),
+            center: None,
+            text,
+            color: WHITE,
+        };
+        // `GlobalText[385]` centrado arriba.
+        out.push(Item::Text {
+            x: s.snap_x(r.x as f32),
+            y: s.snap_y((r.y + 10) as f32),
+            center: Some((r.w as f32 / s.rate_x()).floor() * s.rate_x()),
+            text: TEXT_OPTION.into(),
+            color: WHITE,
+        });
+        for (i, t) in [TEXT_AUTO_ATTACK, TEXT_WHISPER, TEXT_SLIDE_HELP].into_iter().enumerate() {
+            let c = check_rect(s, i);
+            out.push(label(c.x + 24, c.y + 4, t.into()));
+        }
+        // Barras: el nombre 18 por encima, el valor a la derecha (el límite de efectos se
+        // enseña como `nivel × 2 + 5`), y la barra: fondo, color repetido y pulgar.
+        let values = [self.sfx as i32, self.music as i32, self.opts.render_level as i32 * 2 + 5];
+        for (i, (name, value)) in [TEXT_VOLUME, TEXT_MUSIC, TEXT_EFFECT_LIMIT].into_iter().zip(values).enumerate() {
+            let o = slider_origin(s, i);
+            out.push(label(o.x, o.y - 18, name.into()));
+            out.push(label(o.x + 85, o.y - 18, value.to_string()));
+            let slider = &self.sliders[i];
+            out.push(image(Tex::SliderBack, IRect::new(o.x, o.y, SLD_W, SLD_H)));
+            let gauge = slider.gauge();
+            if gauge > 0 {
+                let (gx, gy, _, gb) = GAUGE_RECT;
+                out.push(tiled(Tex::SliderGauge, IRect::new(o.x + gx, o.y + gy, gauge, gb - gy)));
+            }
+            out.push(image(Tex::SliderThumb, IRect::new(o.x + slider.thumb, o.y, THUMB, THUMB)));
+        }
+        self.push_buttons(s, Win::Option, out);
+    }
+
+    /// `CCreditWin::RenderControls` (CreditWin.cpp:171-225).
+    fn push_credits(&self, s: Screen, out: &mut Vec<Item>) {
+        let c = &self.credits;
+        // `SetBgAlpha(255)`: fondo negro opaco de toda la pantalla.
+        out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 255] });
+        // Ilustraciones de 400×400 en (0, 126) y (400, 126) de la pantalla de 800×600.
+        if c.illust_state != Fade::Hide {
+            let alpha = c.illust_alpha.clamp(0.0, 255.0) as u8;
+            for side in 0..2u8 {
+                let tex = Tex::Illust(c.illust * 2 + side);
+                out.push(sprite800(s, tex, 400.0 * side as f32, 126.0, 400.0, 400.0, alpha));
+            }
+        }
+        out.push(image(Tex::Deco, credit_deco_rect(s)));
+        out.push(sprite800(s, Tex::CreditLogo, 241.0, 549.0, 290.0, 41.0, 255));
+
+        // Departamento y equipo en gris claro y los nombres en amarillo claro, centrados en la
+        // pantalla de 640×480 (o en columnas de un cuarto o un tercio del ancho).
+        let (rx, ry) = (s.rate_x(), s.rate_y());
+        let line = |x: f32, y: f32, w: f32, text: &str, color| Item::BigText { x: x * rx, y: y * ry, w, text: text.into(), color };
+        let full = s.w as f32;
+        out.push(line(0.0, 20.0, full, c.name(CRW_INDEX_DEPARTMENT), BR_GRAY));
+        out.push(line(0.0, 46.0, full, c.name(CRW_INDEX_TEAM), BR_GRAY));
+        let columns: &[f32] = match c.name_count {
+            1 => &[0.0],
+            2 => &[160.0, 320.0],
+            3 => &[0.0, 213.0, 426.0],
+            4 => &[0.0, 160.0, 320.0, 480.0],
+            _ => &[],
+        };
+        let w = match c.name_count {
+            1 => full,
+            3 => full / 3.0,
+            _ => full / 4.0,
+        };
+        for (i, &x) in columns.iter().enumerate() {
+            out.push(line(x, 72.0, w, c.name(CRW_INDEX_NAME + i), BR_YELLOW));
+        }
+        // Las tres franjas negras de 800×42 que tapan (y destapan) cada línea.
+        for (i, a) in c.hide_alpha.iter().enumerate() {
+            let (sx, sy) = (s.w as f32 / 800.0, s.h as f32 / 600.0);
+            out.push(Item::Fill {
+                x: 0.0,
+                y: 42.0 * i as f32 * sy,
+                w: 800.0 * sx,
+                h: 42.0 * sy,
+                color: [0, 0, 0, a.clamp(0.0, 255.0) as u8],
+            });
+        }
+        self.push_buttons(s, Win::Credit, out);
     }
 
     /// `CLoginWin::RenderControls` (LoginWin.cpp:162-199).
@@ -1620,11 +2374,27 @@ impl LoginUi {
 }
 
 fn image(tex: Tex, r: IRect) -> Item {
-    Item::Image { tex, x: r.x as f32, y: r.y as f32, w: r.w as f32, h: r.h as f32, src: None, tile: false }
+    Item::Image { tex, x: r.x as f32, y: r.y as f32, w: r.w as f32, h: r.h as f32, src: None, tile: false, alpha: 255 }
 }
 
 fn tiled(tex: Tex, r: IRect) -> Item {
-    Item::Image { tex, x: r.x as f32, y: r.y as f32, w: r.w as f32, h: r.h as f32, src: None, tile: true }
+    Item::Image { tex, x: r.x as f32, y: r.y as f32, w: r.w as f32, h: r.h as f32, src: None, tile: true, alpha: 255 }
+}
+
+/// `CSprite` de `org_w`×`org_h` (el trozo de arriba a la izquierda de la textura) en la pantalla
+/// de 800×600 estirada (`SPR_SIZING_DATUMS_LT` con `fScaleX/Y` = pantalla / 800×600).
+fn sprite800(s: Screen, tex: Tex, x: f32, y: f32, org_w: f32, org_h: f32, alpha: u8) -> Item {
+    let (sx, sy) = (s.w as f32 / 800.0, s.h as f32 / 600.0);
+    Item::Image {
+        tex,
+        x: x * sx,
+        y: y * sy,
+        w: org_w * sx,
+        h: org_h * sy,
+        src: Some(Rect::new(0.0, 0.0, org_w, org_h)),
+        tile: false,
+        alpha,
+    }
 }
 
 fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
@@ -1640,10 +2410,13 @@ fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
 
 fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTextures) {
     match item {
-        Item::Image { tex, x, y, w, h, src, tile } => {
+        Item::Image { tex, x, y, w, h, src, tile, alpha } => {
             let Some(handle) = textures.0.get(tex) else { return };
             let mut img = ImageNode::new(handle.clone());
             img.rect = *src;
+            if *alpha < 255 {
+                img.color = Color::srgba_u8(255, 255, 255, *alpha);
+            }
             if *tile {
                 // Una repetición por cada píxel de la textura del original.
                 img.image_mode = NodeImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: K };
@@ -1652,6 +2425,15 @@ fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTexture
         }
         Item::Fill { x, y, w, h, color: [r, g, b, a] } => {
             p.spawn((absolute(*x, *y, *w, *h), BackgroundColor(Color::srgba_u8(*r, *g, *b, *a))));
+        }
+        Item::BigText { x, y, w, text, color } => {
+            let mut node = absolute(*x, *y, *w, CREDIT_FONT);
+            node.justify_content = JustifyContent::Center;
+            let (mut font, line) = text_font(CREDIT_FONT);
+            font.weight = FontWeight::BOLD;
+            p.spawn(node).with_children(|c| {
+                c.spawn((Text::new(text.clone()), font, line, TextColor(srgb(*color)), TextLayout::no_wrap()));
+            });
         }
         Item::Text { x, y, center, text, color } => {
             let label = (Text::new(text.clone()), text_font(FIX_FONT), TextColor(srgb(*color)), TextLayout::no_wrap());
@@ -1699,14 +2481,18 @@ fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTexture
 }
 
 /// Rehace las ventanas cuando cambia algo de lo que se dibuja.
+#[allow(clippy::too_many_arguments)]
 fn draw_windows(
     mut commands: Commands,
     ui: Res<LoginUi>,
-    textures: Res<LoginTextures>,
+    mut textures: ResMut<LoginTextures>,
+    args: Res<Args>,
+    mut images: ResMut<Assets<Image>>,
     windows: Query<&Window>,
     scale: Res<UiScale>,
     layer: Query<Entity, With<WindowsLayer>>,
     mut last: Local<(Option<Entity>, Vec<Item>)>,
+    mut missing: Local<Vec<Tex>>,
 ) {
     let Ok(layer) = layer.single() else { return };
     let (_, s) = screen_size(windows.single().ok(), scale.0);
@@ -1714,6 +2500,20 @@ fn draw_windows(
     // La capa es otra cada vez que se entra en el login.
     if last.0 == Some(layer) && last.1 == items {
         return;
+    }
+    // `LoadIllust`: las ilustraciones de los créditos se cargan al necesitarlas (una vez).
+    for item in &items {
+        if let Item::Image { tex: tex @ Tex::Illust(_), .. } = item
+            && !textures.0.contains_key(tex)
+            && !missing.contains(tex)
+        {
+            match crate::scene::interface_image(&args, &mut images, tex.file()) {
+                Some((h, _)) => {
+                    textures.0.insert(*tex, h);
+                }
+                None => missing.push(*tex),
+            }
+        }
     }
     commands.entity(layer).despawn_children();
     commands.entity(layer).with_children(|p| {

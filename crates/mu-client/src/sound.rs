@@ -9,7 +9,9 @@
 //! - **Pasos** (`PlayWalkSound`): `Data/Audio/SoundEvents.json` elige el sonido según el mapa y la casilla.
 //!
 //! Volumen de 0 a 10 (por defecto 5, como el original): `volumen_sonido=` y `volumen_musica=` en
-//! `mu-launcher.txt`. `F7` cambia el de los efectos y `F8` el de la música.
+//! `mu-launcher.txt`. `F7` cambia el de los efectos y `F8` el de la música; las ventanas de
+//! opciones lo leen con [`volumes`] y lo cambian con [`SoundQueue::set_sfx_volume`] y
+//! [`SoundQueue::set_music_volume`].
 //!
 //! El resto del juego pide sonidos con [`SoundQueue`] (y el motor de efectos con `Ctx::play_sound`).
 
@@ -34,9 +36,14 @@ impl Plugin for SoundPlugin {
             .add_systems(Startup, setup)
             .add_systems(Update, (change_volume, world_sounds))
             // Al final del fotograma, cuando ya se ha pedido todo.
-            .add_systems(PostUpdate, (take_fx_sounds, play_queue).chain());
+            .add_systems(PostUpdate, (take_fx_sounds, apply_volume, play_queue).chain().in_set(SoundSystems));
     }
 }
+
+/// Donde se atienden las peticiones del fotograma (en `PostUpdate`): lo que quiera pisar una
+/// petición de otro sistema (p. ej. la música de los créditos) va antes.
+#[derive(SystemSet, Clone, PartialEq, Eq, Hash, Debug)]
+pub struct SoundSystems;
 
 /// Máximo de canales por sonido (`MAX_CHANNEL`).
 const MAX_CHANNEL: usize = 4;
@@ -64,6 +71,9 @@ pub struct SoundQueue {
     music: Option<String>,
     /// `StopMp3`: cortar la música.
     stop_music: bool,
+    /// Volumen nuevo de los efectos y de la música (F7/F8 o la ventana de opciones).
+    set_sfx: Option<u8>,
+    set_music: Option<u8>,
 }
 
 impl SoundQueue {
@@ -88,6 +98,20 @@ impl SoundQueue {
     pub fn stop_music(&mut self) {
         self.stop_music = true;
     }
+    /// `SetEffectVolumeLevel`: volumen de los efectos (0 a 10). Se guarda en `mu-launcher.txt`.
+    pub fn set_sfx_volume(&mut self, level: u8) {
+        self.set_sfx = Some(level.min(MAX_VOLUME));
+    }
+    /// Volumen de la música (0 a 10). Se guarda en `mu-launcher.txt`.
+    pub fn set_music_volume(&mut self, level: u8) {
+        self.set_music = Some(level.min(MAX_VOLUME));
+    }
+}
+
+/// Volumen de los efectos y de la música (0 a 10), contando lo pedido en este fotograma.
+pub fn volumes(audio: Option<&Audio>, queue: &SoundQueue) -> (u8, u8) {
+    let (sfx, music) = audio.map_or((DEFAULT_VOLUME, DEFAULT_VOLUME), |a| (a.sfx_volume, a.music_volume));
+    (queue.set_sfx.unwrap_or(sfx), queue.set_music.unwrap_or(music))
 }
 
 // --- Tablas ----------------------------------------------------------------------------------------
@@ -443,17 +467,35 @@ pub fn footstep(world: i32, tile: u8, safe_zone: bool) -> Option<String> {
 
 static FOOTSTEP: std::sync::OnceLock<Vec<EventRule>> = std::sync::OnceLock::new();
 
-/// `F7`: volumen de los efectos; `F8`: de la música (0, 2, 4, ..., 10 y vuelta a 0). Se guarda.
-fn change_volume(
-    keys: Res<ButtonInput<KeyCode>>,
+/// `F7`: volumen de los efectos; `F8`: de la música (0, 2, 4, ..., 10 y vuelta a 0).
+fn change_volume(keys: Res<ButtonInput<KeyCode>>, audio: Option<Res<Audio>>, mut queue: ResMut<SoundQueue>) {
+    let Some(audio) = audio else { return };
+    let next = |v: u8| if v >= MAX_VOLUME { 0 } else { (v / 2 * 2 + 2).min(MAX_VOLUME) };
+    let (sfx, music) = volumes(Some(&*audio), &queue);
+    if keys.just_pressed(KeyCode::F7) {
+        queue.set_sfx_volume(next(sfx));
+    }
+    if keys.just_pressed(KeyCode::F8) {
+        queue.set_music_volume(next(music));
+    }
+}
+
+/// Aplica el volumen pedido a lo que ya suena y lo guarda.
+fn apply_volume(
     audio: Option<ResMut<Audio>>,
+    mut queue: ResMut<SoundQueue>,
     mut sinks: Query<(Entity, &mut AudioSink, Has<Music>)>,
     mut commands: Commands,
 ) {
-    let Some(mut audio) = audio else { return };
-    let next = |v: u8| if v >= MAX_VOLUME { 0 } else { (v / 2 * 2 + 2).min(MAX_VOLUME) };
-    if keys.just_pressed(KeyCode::F7) {
-        audio.sfx_volume = next(audio.sfx_volume);
+    let Some(mut audio) = audio else {
+        queue.set_sfx = None;
+        queue.set_music = None;
+        return;
+    };
+    if let Some(level) = queue.set_sfx.take()
+        && level != audio.sfx_volume
+    {
+        audio.sfx_volume = level;
         crate::settings::save_value("volumen_sonido", &audio.sfx_volume.to_string());
         info!("volumen de los efectos: {}/10", audio.sfx_volume);
         for (e, mut sink, music) in &mut sinks {
@@ -462,8 +504,10 @@ fn change_volume(
             }
         }
     }
-    if keys.just_pressed(KeyCode::F8) {
-        audio.music_volume = next(audio.music_volume);
+    if let Some(level) = queue.set_music.take()
+        && level != audio.music_volume
+    {
+        audio.music_volume = level;
         crate::settings::save_value("volumen_musica", &audio.music_volume.to_string());
         info!("volumen de la música: {}/10", audio.music_volume);
         if audio.music_volume == 0 {

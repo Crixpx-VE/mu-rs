@@ -124,6 +124,14 @@ fn unload_world(world: &mut World) {
     world.remove_resource::<crate::terrain::LoadedTerrain>();
     let map = world.resource::<Args>().world;
     world.insert_resource(ClearColor(crate::world_clear_color(map)));
+    // El título de la ventana dice el mapa cargado.
+    let mut windows = world.query::<&mut Window>();
+    for mut w in windows.iter_mut(world) {
+        w.title = match map {
+            LOGIN_WORLD | CHARACTER_WORLD => "MU Rust".to_string(),
+            _ => format!("MU Rust - World{map}"),
+        };
+    }
     world.run_system_cached(crate::terrain::reset).ok();
     world.run_system_cached(crate::objects::reset).ok();
     world.run_system_cached(crate::effects::reset).ok();
