@@ -7,8 +7,11 @@
 //! - `referencias/xulek-muonline/Client.Data` (C#)
 //! - `referencias/muonlinejs` (TypeScript, licencia MIT)
 
+pub mod bmd;
 pub mod crypt;
 pub mod fs;
+pub mod objects;
+pub mod reader;
 pub mod terrain;
 pub mod texture;
 

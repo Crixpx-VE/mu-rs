@@ -7,6 +7,7 @@
 //!                             [--cam x,y,alto,mirax,miray,miraalto]   (en casillas de MU)
 
 mod camera;
+mod objects;
 mod terrain;
 
 use std::path::PathBuf;
@@ -69,6 +70,6 @@ fn main() {
             primary_window: Some(Window { title, ..default() }),
             ..default()
         }))
-        .add_plugins((terrain::TerrainPlugin, camera::FlyCameraPlugin))
+        .add_plugins((terrain::TerrainPlugin, objects::ObjectsPlugin, camera::FlyCameraPlugin))
         .run();
 }

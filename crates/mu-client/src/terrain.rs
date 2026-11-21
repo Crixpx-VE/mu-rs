@@ -129,7 +129,7 @@ fn build_layer_mesh(t: &Terrain, texture: u8, layer: u8, uv_scale: Vec2) -> Opti
 
 /// Textura de `mu-data` → imagen de Bevy que se repite, con mipmaps
 /// (sin mipmaps el suelo lejano "parpadea").
-fn to_bevy_image(tex: &Texture) -> Image {
+pub fn to_bevy_image(tex: &Texture) -> Image {
     let (data, levels) = build_mipmaps(tex);
     let mut image = Image::new(
         Extent3d { width: tex.width, height: tex.height, depth_or_array_layers: 1 },

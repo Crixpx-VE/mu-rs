@@ -12,6 +12,39 @@ pub struct Texture {
     pub rgba: Vec<u8>,
 }
 
+/// Cómo usa una textura su canal alfa.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlphaKind {
+    /// Sin transparencia.
+    Opaque,
+    /// Alfa "todo o nada" (hojas, rejas): se recorta.
+    Cutout,
+    /// Alfa con degradados (sombras, humo, cristales): se mezcla.
+    Blend,
+}
+
+impl Texture {
+    pub fn alpha_kind(&self) -> AlphaKind {
+        let total = self.rgba.len() / 4;
+        let (mut transparent, mut partial) = (0usize, 0usize);
+        for a in self.rgba.iter().skip(3).step_by(4) {
+            if *a < 250 {
+                transparent += 1;
+            }
+            if (16..240).contains(a) {
+                partial += 1;
+            }
+        }
+        if transparent == 0 {
+            AlphaKind::Opaque
+        } else if partial * 20 < total {
+            AlphaKind::Cutout
+        } else {
+            AlphaKind::Blend
+        }
+    }
+}
+
 /// `.OZJ`: 24 bytes de cabecera propia y luego un JPEG normal.
 /// El byte 17 indica si las filas van de arriba abajo; si no, hay que voltearla.
 pub fn read_ozj(buf: &[u8]) -> Result<Texture> {
