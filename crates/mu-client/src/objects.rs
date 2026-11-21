@@ -237,7 +237,7 @@ fn spawn_objects(
             position: Vec3::from_array(o.position),
             rotation: mu_rotation,
             scale: o.scale,
-            angle_x: o.angle[0],
+            angle: Vec3::from_array(o.angle),
             model,
         };
         // Los emisores sin hueso (fuegos, humo) no necesitan el modelo: también los ocultos.

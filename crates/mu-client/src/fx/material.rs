@@ -27,7 +27,7 @@ pub struct FxMaterialPlugin;
 
 impl Plugin for FxMaterialPlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "fx.wgsl");
+        embedded_asset!(app, "fx.wesl");
         app.add_plugins(MaterialPlugin::<FxMaterial>::default());
     }
 }
@@ -103,7 +103,7 @@ fn component(src: BlendFactor, dst: BlendFactor) -> BlendComponent {
 
 impl Material for FxMaterial {
     fn fragment_shader() -> ShaderRef {
-        "embedded://mu_client/fx/fx.wgsl".into()
+        "embedded://mu_client/fx/fx.wesl".into()
     }
 
     fn alpha_mode(&self) -> AlphaMode {
