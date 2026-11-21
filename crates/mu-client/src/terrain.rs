@@ -659,11 +659,33 @@ pub fn frustum2d_params(world: u16, hero: Vec2) -> [f32; 5] {
             let [f, n, t] = ratio(3400.0);
             [f, n, t, 1600.0 * width, 660.0 * width]
         }
-        // Nivel 0 (2017-2066): Kanturu 3 con 2000 · 10 · 0.115, el resto 2400.
+        // Según el `CameraLevel` del recorte (2010-2099). Nivel 0: Kanturu 3 con 2000 · 10 · 0.115, el
+        // resto 2400; los demás llevan `Width = 1 + 0.1`.
         a => {
-            let far = if a == 39 { 2000.0 * 10.0 * 0.115 } else { 2400.0 };
-            let [f, n, t] = ratio(far);
-            [f, n, t, 1190.0, 540.0]
+            let wide = 1.0 + 0.1;
+            match crate::camera::cull_level(world) {
+                1 => {
+                    let [f, n, t] = ratio(2700.0);
+                    [f, n, t, 1200.0 * wide, 540.0 * wide]
+                }
+                2 => {
+                    let [f, n, t] = ratio(3000.0);
+                    [f, n, t, 1300.0 * wide, 540.0 * wide]
+                }
+                3 => {
+                    let [f, n, t] = ratio(3300.0);
+                    [f, n, t, 1500.0 * wide, 580.0 * wide]
+                }
+                4 | 5 => {
+                    let [f, n, t] = ratio(3400.0);
+                    [f, n, t, 1600.0 * wide, 660.0 * wide]
+                }
+                _ => {
+                    let far = if a == 39 { 2000.0 * 10.0 * 0.115 } else { 2400.0 };
+                    let [f, n, t] = ratio(far);
+                    [f, n, t, 1190.0, 540.0]
+                }
+            }
         }
     }
 }

@@ -37,7 +37,27 @@
 //!                                                                    <x destino> <y destino> <rotación:4 | héroe:4>
 //!                                                                    <n efectos> <efectos n>]
 //! servidor → cliente  MapObjectOutOfScope          C1 len 14 <n> n × <id u16 BE>
+//! servidor → cliente  MapMoveChecksumKey           C1 08 8E 01 <clave u32 LE>
+//! cliente  → servidor WarpCommandRequest           C1 0A 8E 02 <clave u32 LE> <índice u16 LE>
+//! servidor → cliente  MapChanged                   C3 0F 1C 0F <cambio de mapa> <mapa u16 BE> <x> <y>
+//!                                                              <rotación> 00 00 00 00 00
+//! servidor → cliente  InventoryMoneyUpdate         C3 08 22 FE <zen u32 BE>
 //! ```
+//!
+//! # Mover de mapa (`M`)
+//!
+//! Al entrar, el servidor manda la clave (`ReceiveMoveMapChecksum`, WSclient.cpp:11932). Cada
+//! `SendRequestMoveMap` (wsclientinline.h:1217) lleva la siguiente: `GetMoveCommandKey` la pasa por
+//! [`map_move_key`] y se la queda (NewUIMoveCommandWindow.cpp:273-278); el servidor hace lo mismo
+//! con la suya (`CheckKeyValue`). Si le vale, quita el zen (`InventoryMoneyUpdate`), saca al
+//! personaje de la vista de los del mapa y manda `MapChanged`; el cliente carga el mapa y contesta
+//! `ClientReadyAfterMapChange` (`SendRequestFinishLoading`, WSclient.cpp:1814), y entonces el
+//! servidor lo mete en la vista de los del mapa nuevo (como `PlayerMapTransitions` de OpenMU).
+//!
+//! `MapChanged` lo lee `ReceiveTeleport` (WSclient.cpp:1698) con `PRECEIVE_TELEPORT_POSITION`
+//! (WSclient.h, sin `pack`): `WORD Flag` en el byte 4 (el 5 es el byte alto del mapa de OpenMU),
+//! `Map` en el 6, `PositionX/Y` en el 7 y 8 y `Angle` en el 9. `Flag` 0 es un teletransporte en el
+//! mismo mapa (sin borrar a los demás); otro valor, cambio de mapa. OpenMU (`MapChanged`) mide 15.
 //!
 //! Formatos sacados de `OpenMU/src/Network/Packets/*.xml` (licencia MIT), variante Season 6 Ep3,
 //! contrastados con el cliente original (`Main5.2`: `WSclient.cpp`, `wsclientinline.h`, `ProtocolSend.cpp`).
@@ -239,6 +259,27 @@ pub fn direction_between(from: (u8, u8), to: (u8, u8)) -> Option<u8> {
     DIRECTIONS.iter().position(|&(x, y)| x as i16 == dx && y as i16 == dy).map(|i| i as u8)
 }
 
+/// `KEY_GENERATE_FILTER` (KeyGenerater.cpp:9-21).
+const KEY_GENERATE_FILTER: [[u32; 4]; 10] = [
+    [321, 37531879, 8734, 32],
+    [873, 64374332, 3546, 87],
+    [537, 24798765, 5798, 32],
+    [654, 32498765, 3573, 73],
+    [546, 98465432, 6459, 12],
+    [987, 24654876, 5616, 54],
+    [357, 34599876, 8764, 98],
+    [665, 78641332, 6547, 54],
+    [813, 85132165, 8421, 98],
+    [454, 57684216, 6875, 45],
+];
+
+/// `CKeyGenerater::GenerateKeyValue` (KeyGenerater.cpp:39-49): la clave siguiente de la de mover
+/// de mapa. `DWORD` con desbordamiento; `f[2] / f[3]` es división entera.
+pub fn map_move_key(key: u32) -> u32 {
+    let f = KEY_GENERATE_FILTER[(key % 10) as usize];
+    key.wrapping_mul(f[0]).wrapping_add(f[1]).wrapping_sub(f[2] / f[3])
+}
+
 // ---------------------------------------------------------------------------------------------
 // Mensajes
 // ---------------------------------------------------------------------------------------------
@@ -260,6 +301,9 @@ pub enum ClientMessage {
     Ping { tick_count: u32, attack_speed: u16, magic_speed: u16 },
     /// `kind`: ver [`logout_kind`].
     Logout { kind: u8 },
+    /// `SendRequestMoveMap(dwBlockKey, wMapIndex)`: `key` es la siguiente de [`map_move_key`] e
+    /// `index` el `MOVEREQINFO::index` elegido en la ventana de mover.
+    WarpCommandRequest { key: u32, index: u16 },
 }
 
 /// Un personaje de la lista de la pantalla de selección.
@@ -355,6 +399,13 @@ pub enum ServerMessage {
     /// Como mucho [`MAX_OUT_OF_SCOPE_IDS`] ids (los que sobren no se mandan).
     MapObjectOutOfScope(Vec<u16>),
     LogoutResponse { kind: u8 },
+    /// La clave de mover de mapa (`PMSG_MAPMOVE_CHECKSUM`).
+    MapMoveChecksumKey { key: u32 },
+    /// Cambio de mapa o teletransporte (`PRECEIVE_TELEPORT_POSITION`). `map` es `WorldActive`
+    /// (carpeta `World{map + 1}`); el cliente gira `(rotation - 1) * 45` grados.
+    MapChanged { is_map_change: bool, map: u16, x: u8, y: u8, rotation: u8 },
+    /// Zen del inventario (`ReceiveGetItem` con `Result` = `GET_ITEM_ZEN` = FE, WSclient.cpp:5607).
+    InventoryMoneyUpdate { money: u32 },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -457,6 +508,7 @@ const CHARACTER_LIST_ENTRY_LEN: usize = 34;
 const SCOPE_CHARACTER_LEN: usize = 36; // sin efectos
 const CHARACTER_INFORMATION_LEN: usize = 72;
 const CHARACTER_CREATED_LEN: usize = 42;
+const MAP_CHANGED_LEN: usize = 15;
 
 // ---------------------------------------------------------------------------------------------
 // Cliente → servidor
@@ -527,6 +579,12 @@ impl ClientMessage {
                 p[4] = *kind;
                 p
             }
+            Self::WarpCommandRequest { key, index } => {
+                let mut p = fixed_c1(10, 0x8E, 0x02);
+                put_u32_le(&mut p, 4, *key);
+                put_u16_le(&mut p, 8, *index);
+                p
+            }
         }
     }
 
@@ -567,6 +625,7 @@ impl ClientMessage {
                 attack_speed: get_u16_le(d, 8)?,
                 magic_speed: get_u16_le(d, 10)?,
             }),
+            (0x8E, 0x02) => Some(Self::WarpCommandRequest { key: get_u32_le(d, 4)?, index: get_u16_le(d, 8)? }),
             _ => None,
         }
     }
@@ -778,6 +837,26 @@ impl ServerMessage {
                 p[4] = *kind;
                 p
             }
+            Self::MapMoveChecksumKey { key } => {
+                let mut p = fixed_c1(8, 0x8E, 0x01);
+                put_u32_le(&mut p, 4, *key);
+                p
+            }
+            Self::MapChanged { is_map_change, map, x, y, rotation } => {
+                // `MapChanged` de OpenMU: 15 bytes, el 3 a 0F y del 10 al 14 a cero.
+                let mut p = fixed_c3(MAP_CHANGED_LEN, 0x1C, 0x0F);
+                p[4] = *is_map_change as u8;
+                p[5..7].copy_from_slice(&map.to_be_bytes());
+                p[7] = *x;
+                p[8] = *y;
+                p[9] = *rotation;
+                p
+            }
+            Self::InventoryMoneyUpdate { money } => {
+                let mut p = fixed_c3(8, 0x22, 0xFE);
+                p[4..8].copy_from_slice(&money.to_be_bytes());
+                p
+            }
         }
     }
 
@@ -850,6 +929,19 @@ impl ServerMessage {
             (0xF3, 0x02) => Some(Self::CharacterDeleteResponse { result: *d.get(4)? }),
             (0xF3, 0x03) => Some(Self::CharacterInformation(CharacterInformation::decode(d)?)),
             (0xDE, 0x00) => Some(Self::CharacterClassCreationUnlock { flags: *d.get(4)? }),
+            (0x8E, 0x01) => Some(Self::MapMoveChecksumKey { key: get_u32_le(d, 4)? }),
+            // `ReceiveTeleport` no mira el byte 3 (ni el largo: `MapChangedExtended` mide 16).
+            (0x1C, _) if d.len() >= 10 => Some(Self::MapChanged {
+                // `WORD Flag` (bytes 4 y 5) del original; con los mapas del S6 (< 256) el byte 5
+                // (alto del mapa) es 0 y basta el 4, como `IsMapChange` de OpenMU.
+                is_map_change: d[4] != 0,
+                map: get_u16_be(d, 5)?,
+                x: d[7],
+                y: d[8],
+                rotation: d[9],
+            }),
+            // `Item[0..4]` en big endian.
+            (0x22, 0xFE) => Some(Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }),
             _ => None,
         }
     }
@@ -1148,6 +1240,49 @@ mod tests {
         assert_eq!(fuera, [0xC1, 10, 0x14, 3, 0, 1, 0x12, 0x34, 0x7F, 0xFF]);
         let muchos = ServerMessage::MapObjectOutOfScope((0..300).collect()).encode();
         assert_eq!(muchos.len(), 4 + 2 * MAX_OUT_OF_SCOPE_IDS);
+    }
+
+    #[test]
+    fn clave_de_mover() {
+        // A mano con `GenerateKeyValue`: 0 % 10 = 0 → 0 * 321 + 37531879 - 8734 / 32 (= 272).
+        assert_eq!(map_move_key(0), 37_531_879 - 272);
+        // 1234567 % 10 = 7 → 1234567 * 665 + 78641332 - 6547 / 54 (= 121).
+        assert_eq!(map_move_key(1_234_567), 1_234_567u32.wrapping_mul(665) + 78_641_332 - 121);
+        // DWORD: desborda sin fallar (u32::MAX % 10 = 5 → -987 + 24654876 - 5616 / 54).
+        assert_eq!(map_move_key(u32::MAX), 24_654_876 - 987 - 104);
+    }
+
+    #[test]
+    fn mover_de_mapa() {
+        let pedir = ida_y_vuelta_cliente(ClientMessage::WarpCommandRequest { key: 0x1122_3344, index: 23 });
+        // `spe << (BYTE)0x02 << (DWORD)dwBlockKey << (WORD)wMapIndex`.
+        assert_eq!(pedir, [0xC1, 10, 0x8E, 0x02, 0x44, 0x33, 0x22, 0x11, 23, 0]);
+
+        let clave = ida_y_vuelta_servidor(ServerMessage::MapMoveChecksumKey { key: 0xA1B2_C3D4 });
+        assert_eq!(clave, [0xC1, 8, 0x8E, 0x01, 0xD4, 0xC3, 0xB2, 0xA1]);
+
+        let cambio = ida_y_vuelta_servidor(ServerMessage::MapChanged { is_map_change: true, map: 3, x: 175, y: 112, rotation: 1 });
+        assert_eq!(cambio, [0xC3, 15, 0x1C, 0x0F, 1, 0, 3, 175, 112, 1, 0, 0, 0, 0, 0]);
+        ida_y_vuelta_servidor(ServerMessage::MapChanged { is_map_change: false, map: 0, x: 1, y: 2, rotation: 0 });
+        // `MapChangedExtended` (16, con el discriminador) también se lee.
+        let mut extendido = cambio.clone();
+        extendido[1] = 16;
+        extendido.push(7);
+        assert_eq!(
+            ServerMessage::decode(&extendido),
+            Some(ServerMessage::MapChanged { is_map_change: true, map: 3, x: 175, y: 112, rotation: 1 })
+        );
+
+        let zen = ida_y_vuelta_servidor(ServerMessage::InventoryMoneyUpdate { money: 0x0001_E240 });
+        assert_eq!(zen, [0xC3, 8, 0x22, 0xFE, 0x00, 0x01, 0xE2, 0x40], "zen en big endian");
+        // Cifrados de punta a punta.
+        let mut client = ClientCrypto::default();
+        let mut server = ServerCrypto::default();
+        for m in [ServerMessage::MapChanged { is_map_change: true, map: 51, x: 52, y: 225, rotation: 0 }, ServerMessage::InventoryMoneyUpdate { money: 5 }] {
+            assert_eq!(ServerMessage::decode(&client.decrypt(&server.encrypt(&m.encode())).unwrap()), Some(m));
+        }
+        let w = ClientMessage::WarpCommandRequest { key: 9, index: 42 };
+        assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&w.encode())).unwrap()), Some(w));
     }
 
     #[test]

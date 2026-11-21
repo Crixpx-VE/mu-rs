@@ -188,6 +188,16 @@ impl Db {
         (c.map, c.x, c.y, c.direction) = (map, x, y, direction);
         self.save();
     }
+
+    /// Guarda el zen de un personaje (al pagar un viaje).
+    pub fn set_money(&mut self, account: &str, name: &str, money: u32) {
+        let Some(c) = self.store.accounts.get_mut(account).and_then(|a| a.characters.iter_mut().find(|c| c.name == name))
+        else {
+            return;
+        };
+        c.money = money;
+        self.save();
+    }
 }
 
 #[cfg(test)]

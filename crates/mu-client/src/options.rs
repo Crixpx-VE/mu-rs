@@ -11,10 +11,10 @@
 //! **Coordenadas:** las de la pantalla de 640×480 del original, centrada y pegada abajo como la
 //! barra (mainframe.rs).
 //!
-//! **Sin servidor:** "Exit Game" cierra el programa, "Select Server" vuelve al login y "Switch
-//! Character" a la selección de personaje (el original se lo pide al servidor con
-//! `SendRequestLogOut`). Del menú de ventanas solo hace algo "System"; ayuda, gremio, mover,
-//! mapa y Gens no existen todavía. Ataque automático, aviso de susurros, ayuda deslizante y
+//! "Exit Game" cierra el programa, "Select Server" vuelve al login y "Switch Character" a la
+//! selección de personaje, avisando al servidor (`SendRequestLogOut`). Del menú de ventanas
+//! funcionan "System", "Move" (move_window.rs) y "Map" (minimap.rs); ayuda, gremio y Gens no
+//! existen todavía. Ataque automático, aviso de susurros, ayuda deslizante y
 //! límite de efectos se ven y se guardan en memoria, pero de momento no cambian nada.
 //!
 //! **Añadido:** la ventana del original solo tiene el volumen de los efectos; aquí lleva debajo
@@ -120,6 +120,9 @@ pub struct GameUi {
     /// `INTERFACE_OPTION` y el estado de su botón de cerrar (0 normal, 1 encima, 2 apretado).
     option: bool,
     close_frame: u8,
+    /// `INTERFACE_MINI_MAP` y su `m_bSuccess` (el mapa tiene minimapa); los lleva minimap.rs.
+    pub minimap: bool,
+    pub minimap_ok: bool,
 }
 
 impl GameUi {
@@ -135,9 +138,19 @@ impl GameUi {
         self.menu_selected = None;
     }
 
+    /// `g_pNewUISystem->HideAll()` (al cambiar de mapa, WSclient.cpp:1830).
+    pub fn hide_all(&mut self) {
+        *self = Self { minimap_ok: self.minimap_ok, ..Self::default() };
+    }
+
     /// Hay una caja de mensajes: se lleva todo el ratón.
     pub fn modal(&self) -> bool {
         self.sys_menu
+    }
+
+    /// `INTERFACE_OPTION` abierta (se queda el Esc antes que el minimapa).
+    pub fn option_open(&self) -> bool {
+        self.option
     }
 
     /// El ratón (pantalla de 640×480) cae en una ventana que se lo queda: un clic ahí no hace
@@ -146,6 +159,7 @@ impl GameUi {
         self.sys_menu
             || (self.option && inside(c, OPT_X, OPT_Y, OPT_W, OPT_H))
             || (self.window_menu && inside(c, MENU_X, MENU_Y + 20.0, MENU_W, 95.0 + 20.0 * (MENU_ITEMS as f32 - 5.0)))
+            || (self.minimap && inside(c, 0.0, 0.0, 640.0, 430.0))
     }
 }
 
@@ -171,6 +185,7 @@ fn update_game_ui(
     mut next: ResMut<NextState<GameScene>>,
     mut exit: MessageWriter<AppExit>,
     mut net: ResMut<crate::net::Net>,
+    mut move_window: ResMut<crate::move_window::MoveWindow>,
 ) {
     let cursor = windows.single().ok().and_then(crate::mainframe::cursor_virtual);
     let (press, held, release) =
@@ -187,6 +202,9 @@ fn update_game_ui(
             ui.option = false;
         } else if ui.window_menu {
             ui.window_menu = false;
+        } else if move_window.is_open() {
+            // `CNewUIMoveCommandWindow::UpdateKeyEvent` (NewUIMoveCommandWindow.cpp:548-560).
+            move_window.close();
         } else {
             open_sys_menu(&mut ui);
         }
@@ -305,10 +323,21 @@ fn update_game_ui(
         if let Some(i) = ui.menu_selected
             && release
         {
-            // Solo "System" lleva a algo: ayuda, gremio, mover, mapa y Gens aún no existen.
+            // "System", "Move" y "Map" llevan a algo: ayuda, gremio y Gens aún no existen.
             if i == 0 {
                 ui.window_menu = false;
                 open_sys_menu(&mut ui);
+                return;
+            }
+            // "Move (M)" (NewUIWindowMenu.cpp:107-112): abre o cierra la ventana de mover; el menú
+            // se queda abierto.
+            if i == 3 {
+                move_window.toggle();
+                return;
+            }
+            // "Map (Tab)" (NewUIWindowMenu.cpp:114-125): cierra el menú y abre/cierra el minimapa (sin `m_bSuccess`, lo cierra).
+            if i == 4 {
+                (ui.window_menu, ui.minimap) = (false, ui.minimap_ok && !ui.minimap);
                 return;
             }
         }

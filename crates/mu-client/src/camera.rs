@@ -1,11 +1,15 @@
 //! Cámara.
 //!
-//! - **Seguir** (la del juego): vista en diagonal desde arriba a la distancia fija del original
-//!   (`CameraDistance` 1000: el Main 5.2 vuelve a poner `g_shCameraLevel = 0` en cada fotograma, así
-//!   que ni la rueda ni Ctrl + rueda la cambian).
+//! - **Seguir** (la del juego): vista en diagonal desde arriba. La rueda (o Ctrl + rueda, como
+//!   `SetViewPortLevel`, ZzzScene.cpp:493) cambia `g_shCameraLevel` de 0 a 4: distancia de 1000 a 1400,
+//!   con su alcance (`CameraViewFar`) y su recorte del suelo (`CreateFrustrum2D`). La distancia se
+//!   acerca un tercio cada tick (`CameraDistance += (Target - CameraDistance) / 3`). El Main 5.2
+//!   pone el nivel a 0 en cada fotograma, así que en el original no se puede alejar; aquí sí.
 //! - **Libre** (solo para probar, con `--cam`): botón derecho + ratón para mirar, WASD para moverse,
 //!   Q/E bajar/subir, Shift rápido.
 //! Con `--screenshot`, hace una captura al arrancar y cierra la app.
+
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use bevy::camera::RenderTarget;
 use bevy::input::mouse::AccumulatedMouseMotion;
@@ -23,6 +27,7 @@ impl Plugin for FlyCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Update, (fly, auto_screenshot))
+            .add_systems(Update, zoom_wheel.run_if(in_state(crate::scene::GameScene::Game)))
             // Después de mover al personaje (Update), para que la cámara no vaya un fotograma tarde.
             .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate))
             .add_systems(
@@ -37,9 +42,44 @@ pub fn in_battle_castle2(p: Vec2) -> bool {
     (16100.0..=19000.0).contains(&p.x) && (18900.0..=21700.0).contains(&p.y)
 }
 
-/// `CameraViewFar` del juego en MU (`MoveMainCamera`, ZzzScene.cpp:1652-1698), con el
-/// `g_shCameraLevel` que deja el propio `MoveMainCamera` (1721-1729: 5 en Vulcanus y los
-/// Doppelganger 1 y 2, 0 en el resto). `hero` es la posición del personaje en MU.
+/// `g_shCameraLevel` (0 a 4) que ha elegido el jugador con la rueda.
+static CAMERA_LEVEL: AtomicU8 = AtomicU8::new(0);
+/// El `static CameraLevel` del recorte del suelo (ZzzLodTerrain.cpp:2010-2013): solo sigue al nivel
+/// cuando la cámara ya no está más lejos que su objetivo (al acercarse, mantiene el recorte grande
+/// hasta llegar).
+static CULL_LEVEL: AtomicU8 = AtomicU8::new(0);
+
+/// Nivel de cámara en un mapa: Vulcanus y los Doppelganger 1 y 2 lo fuerzan a 5
+/// (ZzzScene.cpp:1721-1729); en el resto, el de la rueda.
+fn level_in(world: u16) -> u8 {
+    match world as i32 - 1 {
+        63 | 65 | 66 => 5,
+        _ => CAMERA_LEVEL.load(Ordering::Relaxed),
+    }
+}
+
+/// Nivel de cámara para el recorte del suelo (terrain.rs).
+pub fn cull_level(world: u16) -> u8 {
+    match world as i32 - 1 {
+        63 | 65 | 66 => 5,
+        _ => CULL_LEVEL.load(Ordering::Relaxed),
+    }
+}
+
+/// `CameraDistanceTarget` del nivel, en MU (ZzzScene.cpp:1844-1852). Con nivel 5 el original usa
+/// `g_Direction.m_fCameraViewFar` (de los eventos); sin ellos, 1000.
+fn distance_target(level: u8) -> f32 {
+    match level {
+        1 => 1100.0,
+        2 => 1200.0,
+        3 => 1300.0,
+        4 => 1400.0,
+        _ => 1000.0,
+    }
+}
+
+/// `CameraViewFar` del juego en MU (`MoveMainCamera`, ZzzScene.cpp:1652-1698), según el mapa y el
+/// `g_shCameraLevel`. `hero` es la posición del personaje en MU.
 ///
 /// La comprobación de `InBattleCastle2` va sin mirar el mapa, como en el original.
 pub fn view_far(world: u16, hero: Vec2) -> f32 {
@@ -53,9 +93,36 @@ pub fn view_far(world: u16, hero: Vec2) -> f32 {
         63 | 66 => 3700.0,
         // Doppelganger 1: nivel 5 → `case 4/5`.
         65 => 3200.0,
-        // Nivel 0 fuera del login y la selección.
-        _ => 2000.0,
+        _ => match level_in(world) {
+            1 => 2500.0,
+            2 => 2600.0,
+            3 => 2950.0,
+            4 | 5 => 3200.0,
+            _ => 2000.0,
+        },
     }
+}
+
+/// `SetViewPortLevel`: la rueda sube o baja el nivel (hacia ti acerca, hacia fuera aleja), fuera de
+/// la interfaz.
+fn zoom_wheel(
+    scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
+    over_ui: Res<crate::mainframe::PointerOverUi>,
+    game_ui: Res<crate::options::GameUi>,
+    windows: Query<&Window>,
+) {
+    if scroll.delta.y == 0.0 || over_ui.0 {
+        return;
+    }
+    // Sobre una ventana del juego (las opciones, con su barra de volumen) la rueda es de la ventana.
+    let on_window =
+        windows.single().ok().and_then(crate::mainframe::cursor_virtual).is_some_and(|c| game_ui.blocks(c));
+    if on_window {
+        return;
+    }
+    let level = CAMERA_LEVEL.load(Ordering::Relaxed) as i32;
+    let next = if scroll.delta.y > 0.0 { level - 1 } else { level + 1 };
+    CAMERA_LEVEL.store(next.clamp(0, 4) as u8, Ordering::Relaxed);
 }
 
 /// Alcance de la cámara del juego: `gluPerspective(..., CameraViewNear, CameraViewFar · 1.4)`
@@ -147,13 +214,27 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
 
 fn follow(
     mode: Res<CameraMode>,
+    args: Res<Args>,
+    time: Res<Time>,
     players: Query<&Transform, (With<Player>, Without<FollowCamera>)>,
-    mut cams: Query<(&mut Transform, &FollowCamera)>,
+    mut cams: Query<(&mut Transform, &mut FollowCamera)>,
 ) {
     if *mode != CameraMode::Follow {
         return;
     }
-    let (Ok(player), Ok((mut tf, cam))) = (players.single(), cams.single_mut()) else { return };
+    let (Ok(player), Ok((mut tf, mut cam))) = (players.single(), cams.single_mut()) else { return };
+    // `--zoom` deja la distancia fija; si no, la del nivel, acercándose un tercio por tick (25 Hz).
+    if args.zoom.is_none() {
+        let target = distance_target(level_in(args.world)) / MU_SCALE;
+        let k = 1.0 - (2.0f32 / 3.0).powf(time.delta_secs() * crate::fx::sim::TICKS_PER_SECOND);
+        cam.distance += (target - cam.distance) * k;
+        if (cam.distance - target).abs() < 1e-3 {
+            cam.distance = target;
+        }
+        if target >= cam.distance {
+            CULL_LEVEL.store(CAMERA_LEVEL.load(Ordering::Relaxed), Ordering::Relaxed);
+        }
+    }
     *tf = mu_camera(player.translation, cam.distance * MU_SCALE);
 }
 

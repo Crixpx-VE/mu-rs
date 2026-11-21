@@ -79,6 +79,8 @@ pub struct LoadStep {
     steps: Vec<Step>,
     /// A qué pantalla se pasa al terminar.
     then: Option<GameScene>,
+    /// Cambio de mapa dentro del juego ([`change_map`]): sin la pantalla de carga.
+    map_change: bool,
 }
 
 impl LoadStep {
@@ -107,7 +109,15 @@ pub fn load_world(args: &mut Args, load: &mut LoadStep, world: u16, with_player:
     load.steps = Step::ALL.iter().copied().filter(|s| with_player || *s != Step::Player).collect();
     load.index = Some(0);
     load.then = Some(then);
+    load.map_change = false;
     info!("cargando World{world}");
+}
+
+/// Cambio de mapa dentro del juego (`ReceiveTeleport` → `LoadWorld`, WSclient.cpp:1756-1760): el
+/// original carga de golpe, sin la `LoadingScene`; aquí se carga por pasos con la pantalla en negro.
+pub fn change_map(args: &mut Args, load: &mut LoadStep, world: u16) {
+    load_world(args, load, world, true, GameScene::Game);
+    load.map_change = true;
 }
 
 /// Borra el mapa cargado: sus entidades y lo que guardan los recursos de cada sistema.
@@ -332,7 +342,7 @@ fn spawn_loading(
         BackgroundColor(Color::BLACK),
         GlobalZIndex(100),
     ));
-    if load.then != Some(GameScene::Game) {
+    if load.then != Some(GameScene::Game) || load.map_change {
         return;
     }
     sound.stop_music();

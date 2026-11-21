@@ -1,9 +1,11 @@
 //! Cliente de prueba sin gráficos: hace lo mismo que el juego contra el servidor.
 //!
 //!   cargo run -p mu-server --example bot -- <cuenta> <contraseña> <personaje> [connect=127.0.0.1:44405] [segundos=3]
+//!                                           [destino de M]
 //!
 //! Connect Server → Game Server → login → lista → (crea el personaje si no está) → entra →
-//! camina 3 pasos → espera mostrando lo que llega (otros jugadores) → sale.
+//! camina 3 pasos → (con destino: lo pide como la ventana `M`, espera `MapChanged` y contesta
+//! `ClientReadyAfterMapChange`) → espera mostrando lo que llega (otros jugadores) → sale.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -11,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use mu_protocol::connect;
 use mu_protocol::crypto::ClientCrypto;
-use mu_protocol::game::{ClientMessage, LoginResult, ServerMessage};
+use mu_protocol::game::{ClientMessage, LoginResult, ServerMessage, map_move_key};
 use mu_protocol::packet::PacketBuffer;
 
 struct Conn {
@@ -77,6 +79,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (user, pass, name) = (&a[0], &a[1], &a[2]);
     let cs_addr = a.get(3).map(String::as_str).unwrap_or("127.0.0.1:44405");
     let secs: u64 = a.get(4).and_then(|s| s.parse().ok()).unwrap_or(3);
+    let warp: Option<u16> = a.get(5).and_then(|s| s.parse().ok());
 
     let mut cs = TcpStream::connect(cs_addr)?;
     cs.set_read_timeout(Some(Duration::from_secs(5)))?;
@@ -128,7 +131,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     })?;
     println!("[{user}] dentro: mapa {} ({}, {}) vida {}/{} maná {}/{}", info.map, info.x, info.y, info.health, info.max_health, info.mana, info.max_mana);
+    // Llega justo después de la información (`ReceiveMoveMapChecksum`).
+    let mut key = c.wait(|m| match m {
+        ServerMessage::MapMoveChecksumKey { key } => Some(*key),
+        _ => None,
+    })?;
+    println!("[{user}] clave de mover {key:#010X}, zen {}", info.money);
     c.send(ClientMessage::Walk { source_x: info.x, source_y: info.y, rotation: 3, directions: vec![3, 3, 3] })?;
+    if let Some(index) = warp {
+        // `GetMoveCommandKey` + `SendRequestMoveMap`.
+        key = map_move_key(key);
+        c.send(ClientMessage::WarpCommandRequest { key, index })?;
+        let (map, x, y) = c.wait(|m| match m {
+            ServerMessage::MapChanged { map, x, y, .. } => Some((*map, *x, *y)),
+            _ => None,
+        })?;
+        println!("[{user}] cambia al mapa {map} ({x}, {y})");
+        // `SendRequestFinishLoading` cuando ha cargado.
+        c.send(ClientMessage::ClientReadyAfterMapChange)?;
+    }
     let end = Instant::now() + Duration::from_secs(secs);
     c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
     while Instant::now() < end {

@@ -9,7 +9,10 @@
 //! 4. Elegir personaje: su información (`CharacterInformation`) y entra al mundo en su mapa; ve a
 //!    los demás jugadores de ese mapa y ellos a él.
 //! 5. Caminar: se guarda la casilla de llegada y se reenvía a los demás del mapa.
-//! 6. Salir (o cortarse): se guarda dónde estaba y desaparece para los demás.
+//! 6. Mover de mapa (`M`): con la clave de `MapMoveChecksumKey`, el nivel y el zen (warp.rs), paga,
+//!    desaparece para los del mapa viejo y le llega `MapChanged`; cuando el cliente ha cargado
+//!    (`ClientReadyAfterMapChange`) se ven él y los del mapa nuevo.
+//! 7. Salir (o cortarse): se guarda dónde estaba y desaparece para los demás.
 //!
 //! De momento "ver" es estar en el mismo mapa (sin radio de visión).
 
@@ -29,6 +32,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use crate::classes;
 use crate::db::{CreateError, Db};
 use crate::spawn::Spawns;
+use crate::warp::{Refused, Warps};
 
 /// Un jugador dentro del mundo.
 struct InWorld {
@@ -39,6 +43,9 @@ struct InWorld {
     x: u8,
     y: u8,
     rotation: u8,
+    /// Visible en su mapa. Tras `MapChanged` no lo está hasta que el cliente ha cargado el mapa
+    /// nuevo (`ClientReadyAfterMapChange`, como `PlayerMapTransitions` de OpenMU).
+    ready: bool,
     /// Paquetes para él (en claro; su tarea de escritura los cifra).
     out: UnboundedSender<Vec<u8>>,
 }
@@ -71,12 +78,13 @@ pub struct Shared {
     db: Mutex<Db>,
     world: Mutex<World>,
     spawns: Spawns,
+    warps: Warps,
     pub idle_timeout: Duration,
 }
 
 impl Shared {
-    pub fn new(db: Db, spawns: Spawns) -> Self {
-        Self { db: Mutex::new(db), world: Mutex::new(World::default()), spawns, idle_timeout: Duration::from_secs(300) }
+    pub fn new(db: Db, spawns: Spawns, warps: Warps) -> Self {
+        Self { db: Mutex::new(db), world: Mutex::new(World::default()), spawns, warps, idle_timeout: Duration::from_secs(300) }
     }
 }
 
@@ -99,6 +107,9 @@ struct Session {
     account: Option<String>,
     /// Personaje dentro del mundo.
     in_world: bool,
+    /// Última clave de mover de mapa (`m_dwMapMoveKeyValue`): la que se mandó al entrar y luego
+    /// cada una de [`game::map_move_key`].
+    move_key: u32,
     out: UnboundedSender<Vec<u8>>,
 }
 
@@ -132,7 +143,7 @@ async fn session(socket: TcpStream, shared: &Arc<Shared>) -> std::io::Result<()>
             }
         }
     };
-    let mut s = Session { id, account: None, in_world: false, out };
+    let mut s = Session { id, account: None, in_world: false, move_key: 0, out };
     s.send(ServerMessage::GameServerEntered { success: true, player_id: id, version: game::CLIENT_VERSION });
 
     let result = read_loop(&mut rd, &mut s, shared).await;
@@ -267,7 +278,9 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
                 }
             }
         }
-        ClientMessage::ClientReadyAfterMapChange | ClientMessage::Ping { .. } => {}
+        ClientMessage::WarpCommandRequest { key, index } => warp(s, shared, key, index),
+        ClientMessage::ClientReadyAfterMapChange => map_ready(s, shared),
+        ClientMessage::Ping { .. } => {}
     }
     true
 }
@@ -316,6 +329,9 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
         leadership: c.stats.leadership,
         ..Default::default()
     }));
+    // La clave para mover de mapa (`GCSendMapMoveChecksum` / `GenerateSeedValue`).
+    s.move_key = shared.warps.random() as u32;
+    s.send(ServerMessage::MapMoveChecksumKey { key: s.move_key });
     let me = InWorld {
         account: account.to_string(),
         name: c.name.clone(),
@@ -324,21 +340,91 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
         x: c.x,
         y: c.y,
         rotation: c.direction,
+        ready: true,
         out: s.out.clone(),
     };
     let mut w = shared.world.lock().unwrap();
-    // Él ve a los del mapa y ellos a él.
-    let others: Vec<ScopeCharacter> = w.players.iter().filter(|(_, p)| p.map == c.map).map(|(id, p)| p.scope(*id)).collect();
-    if !others.is_empty() {
-        s.send(ServerMessage::AddCharactersToScope(others));
-    }
-    let mine = ServerMessage::AddCharactersToScope(vec![me.scope(s.id)]).encode();
-    for p in w.players.values().filter(|p| p.map == c.map) {
-        let _ = p.out.send(mine.clone());
-    }
+    show_each_other(&w, s.id, &me);
     eprintln!("[game] {}: {} entra en el mapa {} ({}, {})", s.id, c.name, c.map, c.x, c.y);
     w.players.insert(s.id, me);
     s.in_world = true;
+}
+
+/// `me` (que aún no está en `w.players`, o es `id`) ve a los del mapa y ellos a él.
+fn show_each_other(w: &World, id: u16, me: &InWorld) {
+    let visible = |(pid, p): &(&u16, &InWorld)| **pid != id && p.ready && p.map == me.map;
+    let others: Vec<ScopeCharacter> = w.players.iter().filter(visible).map(|(pid, p)| p.scope(*pid)).collect();
+    if !others.is_empty() {
+        let _ = me.out.send(ServerMessage::AddCharactersToScope(others).encode());
+    }
+    let mine = ServerMessage::AddCharactersToScope(vec![me.scope(id)]).encode();
+    for (_, p) in w.players.iter().filter(visible) {
+        let _ = p.out.send(mine.clone());
+    }
+}
+
+/// `WarpCommandRequest` (la ventana `M`): clave, destino, nivel y zen; luego paga, deja el mapa
+/// viejo y le dice al cliente a dónde va (`MapChanged`). Sin respuesta si no se puede (el
+/// original avisa en el chat).
+fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
+    if !s.in_world {
+        return;
+    }
+    // `CheckKeyValue` (KeyGenerater.cpp:51-63): tiene que ser la siguiente de la última.
+    let expected = game::map_move_key(s.move_key);
+    if key != expected {
+        eprintln!("[game] {}: clave de mover incorrecta ({key:#010X}, esperaba {expected:#010X})", s.id);
+        return;
+    }
+    s.move_key = expected;
+    let Some(account) = s.account.clone() else { return };
+    let mut w = shared.world.lock().unwrap();
+    let Some(me) = w.players.get(&s.id) else { return };
+    if !me.ready {
+        return;
+    }
+    let name = me.name.clone();
+    let Some(c) = shared.db.lock().unwrap().character(&account, &name) else { return };
+    let (landing, cost) = match shared.warps.check(index, c.class, c.level, c.money) {
+        Ok(ok) => ok,
+        Err(why) => {
+            let why = match why {
+                Refused::UnknownWarp => "no existe".to_string(),
+                Refused::Level { needed } => format!("necesita nivel {needed}"),
+                Refused::Money { needed } => format!("necesita {needed} de zen (tiene {})", c.money),
+                Refused::NeedsWings => "Icarus pide alas".to_string(),
+                Refused::BadGate => "puerta inexistente".to_string(),
+            };
+            eprintln!("[game] {}: {name} no puede ir al destino {index}: {why}", s.id);
+            return;
+        }
+    };
+    let money = c.money - cost;
+    {
+        let mut db = shared.db.lock().unwrap();
+        db.set_money(&account, &name, money);
+        db.update_position(&account, &name, landing.map, landing.x, landing.y, landing.angle);
+    }
+    s.send(ServerMessage::InventoryMoneyUpdate { money });
+    // Desaparece para los del mapa viejo.
+    let old_map = me.map;
+    let gone = ServerMessage::MapObjectOutOfScope(vec![s.id]).encode();
+    for (_, p) in w.players.iter().filter(|(pid, p)| **pid != s.id && p.ready && p.map == old_map) {
+        let _ = p.out.send(gone.clone());
+    }
+    let Some(me) = w.players.get_mut(&s.id) else { return };
+    (me.map, me.x, me.y, me.rotation, me.ready) = (landing.map, landing.x, landing.y, landing.angle, false);
+    s.send(ServerMessage::MapChanged { is_map_change: true, map: landing.map as u16, x: landing.x, y: landing.y, rotation: landing.angle });
+    eprintln!("[game] {}: {name} va al destino {index}: mapa {} ({}, {}), paga {cost}", s.id, landing.map, landing.x, landing.y);
+}
+
+/// `ClientReadyAfterMapChange`: ya ha cargado el mapa nuevo; se ven él y los de ese mapa.
+fn map_ready(s: &Session, shared: &Shared) {
+    let mut w = shared.world.lock().unwrap();
+    let Some(me) = w.players.get_mut(&s.id).filter(|p| !p.ready) else { return };
+    me.ready = true;
+    let Some(me) = w.players.get(&s.id) else { return };
+    show_each_other(&w, s.id, me);
 }
 
 fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, directions: Vec<u8>) {
@@ -346,7 +432,7 @@ fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, 
         return;
     }
     let mut w = shared.world.lock().unwrap();
-    let Some(me) = w.players.get_mut(&s.id) else { return };
+    let Some(me) = w.players.get_mut(&s.id).filter(|p| p.ready) else { return };
     // Casilla de llegada: la de salida más cada paso.
     let (mut x, mut y) = (source_x as i32, source_y as i32);
     for &d in &directions {
@@ -361,7 +447,7 @@ fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, 
     let packet =
         ServerMessage::ObjectWalked { id: s.id, target_x: me.x, target_y: me.y, rotation, directions }.encode();
     for (id, p) in &w.players {
-        if *id != s.id && p.map == map {
+        if *id != s.id && p.ready && p.map == map {
             let _ = p.out.send(packet.clone());
         }
     }
@@ -374,7 +460,7 @@ fn leave(s: &mut Session, shared: &Shared, disconnect: bool) {
         s.in_world = false;
         if let Some(me) = w.players.remove(&s.id) {
             let gone = ServerMessage::MapObjectOutOfScope(vec![s.id]).encode();
-            for p in w.players.values().filter(|p| p.map == me.map) {
+            for p in w.players.values().filter(|p| me.ready && p.ready && p.map == me.map) {
                 let _ = p.out.send(gone.clone());
             }
             shared.db.lock().unwrap().update_position(&me.account, &me.name, me.map, me.x, me.y, me.rotation);

@@ -10,11 +10,13 @@
 pub mod bmd;
 pub mod crypt;
 pub mod fs;
+pub mod minimap;
 pub mod objects;
 pub mod path;
 pub mod reader;
 pub mod terrain;
 pub mod texture;
+pub mod warps;
 
 use std::fmt;
 use std::path::PathBuf;

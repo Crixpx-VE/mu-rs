@@ -409,12 +409,17 @@ fn update_buttons(
 }
 
 /// El ratón está sobre la barra o sobre una ventana del juego (un clic ahí no hace caminar).
-fn pointer_over_ui(windows: Query<&Window>, game_ui: Res<crate::options::GameUi>, mut over: ResMut<PointerOverUi>) {
+fn pointer_over_ui(
+    windows: Query<&Window>,
+    game_ui: Res<crate::options::GameUi>,
+    move_window: Res<crate::move_window::MoveWindow>,
+    mut over: ResMut<PointerOverUi>,
+) {
     let on_bar = windows
         .single()
         .ok()
         .and_then(cursor_virtual)
-        .is_some_and(|c| (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c));
+        .is_some_and(|c| (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c) || move_window.blocks(c));
     if over.0 != on_bar {
         over.0 = on_bar;
     }

@@ -41,8 +41,10 @@ mod logfile;
 mod login;
 mod login_ui;
 mod mainframe;
+mod minimap;
 mod net;
 mod model_light;
+mod move_window;
 mod objects;
 mod operate;
 mod options;
@@ -243,5 +245,7 @@ fn main() {
         .add_plugins(overlay::OverlayPlugin)
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
         .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin, water_terrain::WaterTerrainPlugin))
+        .add_plugins(minimap::MiniMapPlugin)
+        .add_plugins(move_window::MoveWindowPlugin)
         .run();
 }

@@ -10,6 +10,7 @@ mod classes;
 mod db;
 mod game;
 mod spawn;
+mod warp;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -37,7 +38,7 @@ async fn main() -> std::io::Result<()> {
 
     let db = db::Db::open(&db_path)?;
     eprintln!("[db] {}", db_path.display());
-    let shared = Arc::new(game::Shared::new(db, spawn::Spawns::load(&data)));
+    let shared = Arc::new(game::Shared::new(db, spawn::Spawns::load(&data), warp::Warps::load(&data)));
 
     let connect_listener = tokio::net::TcpListener::bind(&connect_addr).await?;
     let game_listener = tokio::net::TcpListener::bind(&game_addr).await?;
