@@ -169,7 +169,7 @@ fn spawn_player(
     // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true).
     let item_dir = args.data.join("Item");
     let weapon = fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok().map(|w| {
-        let wbones = weapon_bones(&w, &bones);
+        let wbones = weapon_bones(&w, &bones, false);
         let mut handles = vec![];
         for i in 0..w.meshes.len() {
             let posed = w.pose_with(i, &wbones);
@@ -213,16 +213,39 @@ const WEAPON_MODEL: i32 = crate::fx::core::MODEL_SWORD + 1;
 /// `Weapon[0].LinkBone`: la mano derecha de `player.bmd`.
 pub const RIGHT_HAND_BONE: usize = 33;
 
-/// Huesos del arma pegada a la mano (`PlaceLinkedPart` con `Link`): la matriz de la mano por
-/// `AngleMatrix(70°, 0, 90°)` desplazada (-20, 5, 40), y luego los huesos propios del arma.
-fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34]) -> Vec<bmd::Mat34> {
-    let mut m = bmd::angle_matrix([70f32.to_radians(), 0.0, 90f32.to_radians()]);
-    m[0][3] = -20.0;
-    m[1][3] = 5.0;
-    m[2][3] = 40.0;
-    let hand = player_bones.get(RIGHT_HAND_BONE).copied().unwrap_or(m);
-    let parent = bmd::concat(&hand, &m);
-    weapon.bone_matrices(0, 0).iter().map(|b| bmd::concat(&parent, b)).collect()
+/// Huesos del arma en la mano: el arma en mano se coloca con `Link = false` (`PlanAttachments`,
+/// ZzzCharacter.cpp ≈14257), o sea, directamente con la matriz del hueso de la mano. (El giro
+/// (70°, 0, 90°) desplazado (-20, 5, 40) de `PlaceLinkedPart` es para las armas a la espalda.)
+///
+/// En zona segura el original la lleva a la espalda (`AreWeaponsOnBack`): hueso 47 con `Link`
+/// (`PlaceLinkedPart`: `AngleMatrix(70°, 0, 90°)` desplazada (-20, 5, 40) para las espadas).
+fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec<bmd::Mat34> {
+    let local = weapon.bone_matrices(0, 0);
+    let parent = if on_back {
+        let Some(back) = player_bones.get(BACK_BONE) else { return local };
+        let mut m = bmd::angle_matrix([70f32.to_radians(), 0.0, 90f32.to_radians()]);
+        m[0][3] = -20.0;
+        m[1][3] = 5.0;
+        m[2][3] = 40.0;
+        bmd::concat(back, &m)
+    } else {
+        let Some(hand) = player_bones.get(RIGHT_HAND_BONE) else { return local };
+        *hand
+    };
+    local.iter().map(|b| bmd::concat(&parent, b)).collect()
+}
+
+/// Hueso de la espalda donde van las armas en zona segura (`backBone` de `PlanAttachments`).
+const BACK_BONE: usize = 47;
+
+/// ¿Va el arma a la espalda? En zona segura, salvo mientras se lanza una habilidad (en el original
+/// no se pueden usar en zona segura; aquí se deja para poder probarlas en la ciudad).
+fn weapon_on_back(p: &Player, terrain: Option<&LoadedTerrain>) -> bool {
+    let safe = terrain.is_some_and(|t| {
+        let (x, y) = (p.pos.x as usize, p.pos.y as usize);
+        t.0.attribute(x.min(255), y.min(255)) & mu_data::terrain::attr::SAFE_ZONE != 0
+    });
+    safe && p.casting.is_none()
 }
 
 /// Foto del personaje para el motor de efectos (posición en MU, giro, huesos, arma).
@@ -392,7 +415,7 @@ fn animate(
             }
         }
         if let Some((w, handles)) = &s.weapon {
-            let wbones = weapon_bones(w, &bones);
+            let wbones = weapon_bones(w, &bones, weapon_on_back(&p, terrain.as_deref()));
             for (i, handle) in handles {
                 let posed = w.pose_with(*i, &wbones);
                 if let Some(mut m) = meshes.get_mut(handle) {
