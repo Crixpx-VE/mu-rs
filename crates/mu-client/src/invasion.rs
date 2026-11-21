@@ -75,7 +75,7 @@ fn spawn_label(mut commands: Commands) {
         Text::new(""),
         TextFont { font_size: bevy::text::FontSize::Px(8.0), ..default() },
         TextColor(Color::srgb(1.0, 0.45, 0.3)),
-        TextShadow::default(),
+        TextShadow { offset: Vec2::splat(0.6), color: Color::BLACK },
         Node { position_type: PositionType::Absolute, top: Val::Px(14.0), left: Val::Px(4.0), ..default() },
     ));
 }
