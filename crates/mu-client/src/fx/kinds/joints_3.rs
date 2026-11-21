@@ -1,7 +1,956 @@
-//! (pendiente de traducir)
+//! Estelas (`JOINT`) de `ZzzEffectJoint.cpp`: `BITMAP_JOINT_FORCE`, `BITMAP_LIGHT`, `BITMAP_PIERCING`,
+//! `BITMAP_FLARE_FORCE`, `BITMAP_FLASH`, `BITMAP_DRAIN_LIFE_GHOST`, `BITMAP_PIN_LIGHT`,
+//! `BITMAP_FORCEPILLAR`, `BITMAP_SWORDEFF`, `BITMAP_GROUND_WIND` y `BITMAP_LAVA`.
+//!
+//! Creación = su caso en `CreateJoint`; movimiento = su caso en `MoveJoint`.
+//!
+//! Notas comunes:
+//! - El original NO aplica el avance genérico por −Y·Velocity a `JOINT_FORCE` sub 0, `LIGHT`,
+//!   `PIERCING`, `FLARE_FORCE` ni `FLASH` sub 6; el núcleo sí lo hace, así que esos tipos lo
+//!   deshacen al empezar su `step` ([`undo_generic_move`]).
+//! - `NumTails` del original = `tails.len() - 1` (−1 = sin colas).
+//! - La cola inicial de `CreateJoint` (`bCreateStartTail`) se hace con la posición y el ángulo que
+//!   llegan, antes de que el tipo los cambie.
+//! - Las estelas que en `DescribeJoint` calculan una luminosidad por segmento (`JOINT_FORCE` 0 y 1,
+//!   `FLARE_FORCE` 0-4/11-13) guardan su luz "lógica" en `user[0..3]` y ponen en `light` la luz
+//!   lógica por la luminosidad media de los segmentos.
+
+use bevy::math::{Mat3, Vec3};
 
 use crate::fx::core::*;
 
+/// `Q_PI` del original.
+const Q_PI: f32 = 3.141_592_7;
+
 pub fn register(r: &mut Registry) {
-    let _ = r;
+    r.joint(BITMAP_JOINT_FORCE, JointKind { create: Some(joint_force_create), step: Some(joint_force_step) });
+    r.joint(BITMAP_LIGHT, JointKind { create: Some(light_create), step: Some(light_step) });
+    r.joint(BITMAP_PIERCING, JointKind { create: Some(piercing_create), step: Some(piercing_step) });
+    r.joint(BITMAP_FLARE_FORCE, JointKind { create: Some(flare_force_create), step: Some(flare_force_step) });
+    r.joint(BITMAP_FLASH, JointKind { create: Some(flash_create), step: Some(flash_step) });
+    r.joint(BITMAP_DRAIN_LIFE_GHOST, JointKind { create: Some(drain_life_create), step: Some(drain_life_step) });
+    r.joint(BITMAP_PIN_LIGHT, JointKind { create: Some(pin_light_create), step: Some(pin_light_step) });
+    r.joint(BITMAP_FORCEPILLAR, JointKind { create: Some(force_pillar_create), step: Some(force_pillar_step) });
+    r.joint(BITMAP_SWORDEFF, JointKind { create: Some(sword_eff_create), step: Some(sword_eff_step) });
+    r.joint(BITMAP_GROUND_WIND, JointKind { create: Some(ground_wind_create), step: Some(ground_wind_step) });
+    r.joint(BITMAP_LAVA, JointKind { create: Some(lava_create), step: Some(lava_step) });
+}
+
+// --- Ayudas -----------------------------------------------------------------------------------------
+
+/// Deshace el avance genérico por −Y·Velocity que el núcleo hizo antes del `step` (el original lo
+/// salta para estos tipos). El ángulo aún no ha cambiado, así que es exacto.
+fn undo_generic_move(j: &mut Joint) {
+    j.position -= rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0));
+}
+
+/// `NumTails` del original.
+fn num_tails(j: &Joint) -> i32 {
+    j.tails.len() as i32 - 1
+}
+
+/// Mete una cola nueva delante (como `CreateTail`: como mucho `MaxTails` colas).
+fn push_tail(j: &mut Joint, t: [Vec3; 4]) {
+    j.tails.insert(0, t);
+    let max = j.max_tails.clamp(1, MAX_TAILS);
+    j.tails.truncate(max);
+}
+
+/// `CreateTail(o, Matrix)` con una matriz cualquiera (cruz en los ejes X y Z de `m`).
+fn create_tail_m(j: &mut Joint, m: Mat3) {
+    let (h, p) = (j.scale * 0.5, j.position);
+    push_tail(
+        j,
+        [
+            p + m * Vec3::new(-h, 0.0, 0.0),
+            p + m * Vec3::new(h, 0.0, 0.0),
+            p + m * Vec3::new(0.0, 0.0, -h),
+            p + m * Vec3::new(0.0, 0.0, h),
+        ],
+    );
+}
+
+/// `CreateTailAxis(o, Matrix, 1)` / `FollowTailAxis(o, Matrix, 1)`: cruz en los ejes X e Y de `m`.
+fn create_tail_axis_y(j: &mut Joint, m: Mat3) {
+    let (h, p) = (j.scale * 0.5, j.position);
+    push_tail(
+        j,
+        [
+            p + m * Vec3::new(-h, 0.0, 0.0),
+            p + m * Vec3::new(h, 0.0, 0.0),
+            p + m * Vec3::new(0.0, -h, 0.0),
+            p + m * Vec3::new(0.0, h, 0.0),
+        ],
+    );
+}
+
+/// Luz "lógica" guardada en `user[0..3]` (la que el original tiene en `o->Light`).
+fn logic_light(j: &Joint) -> Vec3 {
+    Vec3::new(j.user[0], j.user[1], j.user[2])
+}
+
+fn set_logic_light(j: &mut Joint, l: Vec3) {
+    j.user[0] = l.x;
+    j.user[1] = l.y;
+    j.user[2] = l.z;
+}
+
+/// Giro (en el mundo) de un hueso del personaje: lo que el original usa al hacer
+/// `VectorRotate(v, o->Target->BoneTransform[bone])` (allí los huesos ya llevan el giro del objeto).
+fn bone_rotation(a: &Actor, bone: usize) -> Mat3 {
+    let r = a.bones.get(bone).map_or(Mat3::IDENTITY, |m| {
+        Mat3::from_cols(
+            Vec3::new(m[0][0], m[1][0], m[2][0]),
+            Vec3::new(m[0][1], m[1][1], m[2][1]),
+            Vec3::new(m[0][2], m[1][2], m[2][2]),
+        )
+    });
+    angle_matrix(a.angle) * r
+}
+
+/// `TransformByObjectBone(out, o->Target, bone)`: posición del hueso del objetivo. `None` si ya no
+/// existe o está muerto (`!o->Target->Live`).
+fn target_bone(ctx: &Ctx, t: Option<Target>, bone: usize) -> Option<Vec3> {
+    match t? {
+        Target::Actor(_) => {
+            let a = ctx.actor(t)?;
+            a.live.then(|| a.bone_world(bone, Vec3::ZERO))
+        }
+        // TODO(original): los "dummies" (MODEL_DOWN_ATTACK_DUMMY, MODEL_DRAGON_KICK_DUMMY...) son
+        // efectos con huesos; aquí solo tenemos su posición.
+        Target::Effect(_) => ctx.target_position(t),
+    }
+}
+
+/// Posición, ángulo (si es un personaje) y `Live` de lo que sigue la estela.
+fn follow_target(ctx: &Ctx, t: Option<Target>) -> Option<(Vec3, Option<Vec3>, bool)> {
+    match t? {
+        Target::Actor(_) => ctx.actor(t).map(|a| (a.position, Some(a.angle), a.live)),
+        Target::Effect(_) => ctx.target_position(t).map(|p| (p, None, true)),
+    }
+}
+
+/// `MoveHumming(Position, Angle, TargetPosition, Turn)` (`ZzzAI.cpp`): gira hacia el objetivo y
+/// devuelve la distancia.
+fn move_humming(position: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f32 {
+    let target_angle = create_angle(position.x, position.y, target.x, target.y);
+    angle.z = turn_angle(angle.z, target_angle, turn);
+    let range = position - target;
+    let distance = (range.x * range.x + range.y * range.y).sqrt();
+    let target_angle = 360.0 - create_angle(position.z, distance, target.z, 0.0);
+    angle.x = turn_angle(angle.x, target_angle, turn);
+    range.length()
+}
+
+/// `CreateJoint(...)` con `PKKey` y `SkillIndex` (que `Ctx::create_joint` no recibe).
+#[allow(clippy::too_many_arguments)]
+fn create_joint_pk(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: Vec3, sub: i32, scale: f32, pk: i32, skill: i32) {
+    let mut nj = Joint::new(ty, pos, target_pos, angle, sub, None, scale);
+    nj.pk_key = pk;
+    nj.skill = skill;
+    ctx.spawns.push(Spawn::Joint(nj));
+}
+
+// --- BITMAP_JOINT_FORCE ------------------------------------------------------------------------------
+
+fn joint_force_create(j: &mut Joint, ctx: &mut Ctx) {
+    let start = j.make_tail();
+    match j.sub_type {
+        // 0, 10 y 8: giro alrededor de la posición de partida (colas hechas a mano en el step).
+        0 | 10 | 8 => {
+            j.life_time = 20.0;
+            j.create_tails = false;
+            j.velocity = 0.0;
+            j.max_tails = 18;
+            // NumTails = -1: sin colas.
+            j.tails.clear();
+            j.target_position = j.position;
+            j.angle.z += 30.0;
+            j.direction = j.angle;
+            j.position += rotate(j.angle, Vec3::new(0.0, -180.0, 0.0));
+            if j.sub_type == 0 {
+                set_logic_light(j, j.light);
+                // `DescribeJoint` solo dibuja la cara de los puntos 0-1 para el subtipo 0.
+                j.render_face = RENDER_FACE_TWO;
+            }
+        }
+        1 => {
+            j.max_tails = 15;
+            j.life_time = 30.0;
+            j.velocity = 0.0;
+            j.only_one_render = 1;
+            j.weapon = 0.0;
+            j.light = Vec3::ONE;
+            j.direction = Vec3::ZERO;
+            set_logic_light(j, j.light);
+            match follow_target(ctx, j.target) {
+                Some((pos, angle, _)) => {
+                    j.position = pos;
+                    if let Some(a) = angle {
+                        j.angle = a;
+                    }
+                }
+                None => j.live = false,
+            }
+            j.tails = vec![start];
+        }
+        2..=6 => {
+            j.life_time = 20.0;
+            j.velocity = 8.0;
+            j.direction.x = 3.5;
+            j.direction.z = 1.0;
+            j.max_tails = 12;
+            j.multi_use = 5.0;
+            match j.sub_type {
+                3 => {
+                    j.tex_type = BITMAP_FLARE;
+                    j.multi_use = 10.0;
+                    j.velocity = 10.0;
+                    j.direction.z = 2.0;
+                    j.reverse_uv = 0;
+                    j.direction.x = 10.5;
+                }
+                4 => {
+                    j.life_time = 20.0;
+                    j.max_tails = 13;
+                    j.tex_type = BITMAP_HOLE;
+                    j.direction.x = 15.5;
+                    j.direction.z = 3.0;
+                    j.multi_use = 10.0;
+                }
+                5 => j.tex_type = BITMAP_LAVA,
+                6 => {
+                    j.tex_type = BITMAP_LAVA;
+                    j.velocity = 20.0;
+                    j.life_time = 16.0;
+                }
+                _ => {
+                    // Subtipo 2.
+                    j.position.z += 10.0;
+                    j.tex_type = BITMAP_INFERNO;
+                    j.life_time = 15.0;
+                    j.multi_use = 5.0;
+                    j.direction.x = 5.0;
+                    j.direction.z = 5.0;
+                }
+            }
+            j.head_angle = Vec3::new(0.0, 0.0, j.angle.z);
+            j.start_position = j.position;
+            start_without_tails(j);
+        }
+        7 | 20 => {
+            j.direction.x = 3.5;
+            j.direction.z = 1.0;
+            j.max_tails = if j.sub_type == 7 { 13 } else { 15 };
+            j.multi_use = 5.0;
+            j.tex_type = BITMAP_INFERNO;
+            j.velocity = 10.0;
+            j.life_time = 20.0;
+            start_without_tails(j);
+        }
+        _ => j.tails = vec![start],
+    }
+}
+
+/// `NumTails = -1` con `m_bCreateTails = true`: sin cola inicial. Se apagan las colas del núcleo
+/// hasta el primer `step` (si no, el núcleo pondría una cola inicial); `user[3]` = pendiente.
+fn start_without_tails(j: &mut Joint) {
+    j.tails.clear();
+    j.create_tails = false;
+    j.user[3] = 1.0;
+}
+
+fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
+    if j.user[3] != 0.0 {
+        j.user[3] = 0.0;
+        j.create_tails = true;
+    }
+    match j.sub_type {
+        0 | 10 | 8 => {
+            // Subtipo 0: el original no hace el avance genérico (con Velocity = 0 no cambia nada).
+            if j.sub_type == 0 {
+                undo_generic_move(j);
+            }
+            let p = Vec3::new(0.0, -145.0, 0.0);
+            for _k in 0..8 {
+                if num_tails(j) < j.max_tails as i32 - 1 {
+                    let prev = j.position;
+                    j.position = j.target_position + rotate(j.direction, p);
+                    // CreateTail(o, AngleMatrix(o->Angle)).
+                    j.follow_tail();
+                    j.direction.z -= 11.0;
+                    if j.sub_type == 8 {
+                        let s = (ctx.rand() % 10) as f32 + 5.0;
+                        create_joint_pk(ctx, BITMAP_JOINT_THUNDER, j.position, j.position, j.angle, 3, s, 5, 10);
+                        let s = (ctx.rand() % 8) as f32 + 4.0;
+                        create_joint_pk(ctx, BITMAP_JOINT_THUNDER, j.position, j.position, j.angle, 3, s, 5, 10);
+                    } else {
+                        let light = if j.sub_type == 0 { logic_light(j) } else { j.light };
+                        if ctx.rand_fps_check(2) {
+                            ctx.create_particle(BITMAP_FIRE, j.position, j.angle, light, 0, 1.0, None);
+                        }
+                        let s = (ctx.rand() % 10) as f32 + 5.0;
+                        create_joint_pk(ctx, BITMAP_JOINT_THUNDER, prev, j.position, j.angle, 3, s, 5, 10);
+                        let s = (ctx.rand() % 8) as f32 + 4.0;
+                        create_joint_pk(ctx, BITMAP_JOINT_THUNDER, prev, j.position, j.angle, 3, s, 5, 10);
+                    }
+                }
+                // TODO(original): subtipos 0 y 10, si es del héroe y LifeTime > 18, cada 5 vueltas
+                // AttackCharacterRange(Skill, Position, 150 (0) / 225 (10), Weapon, PKKey); en Battle
+                // Castle, en zona sin ataque: Velocity = 0, LifeTime /= 5 y se corta el bucle.
+            }
+            match j.sub_type {
+                10 => {
+                    // TODO(original): con m_bySkillSerialNum != 0 solo divide la luz entre 1.5 si
+                    // LifeTime < 10 (aquí se supone 0).
+                    let lum = if j.life_time < 10.0 { j.light.x / 1.5 } else { j.life_time / 30.0 };
+                    j.light = Vec3::splat(lum);
+                }
+                0 => {
+                    let lum = if j.life_time < 10.0 { j.user[0] / 1.5 } else { j.life_time / 30.0 };
+                    set_logic_light(j, Vec3::splat(lum));
+                    // DescribeJoint: (MaxTails − j) / MaxTails · 2 · Light[0] por segmento → media.
+                    let n = num_tails(j).max(0) as f32;
+                    let max = j.max_tails as f32;
+                    let avg = if n > 0.0 { 2.0 * (max - (n - 1.0) * 0.5) / max } else { 0.0 };
+                    j.light = Vec3::splat(lum * avg);
+                }
+                _ => {}
+            }
+        }
+        1 => {
+            let Some((pos, _, live)) = follow_target(ctx, j.target) else {
+                j.live = false;
+                return;
+            };
+            j.live = live;
+            j.position = pos;
+            j.scale -= 1.0;
+            j.position.z += 100.0;
+            let mut l = logic_light(j);
+            if j.life_time < 15.0 {
+                l *= 1.0 / 1.3;
+            }
+            set_logic_light(j, l);
+            // DescribeJoint: (1 − (NumTails − j) / NumTails) · 2 por segmento; media = (N − 1) / N
+            // con el N que habrá tras el FollowTail del núcleo.
+            let n = (j.tails.len() + 1).min(j.max_tails.clamp(1, MAX_TAILS)) as f32 - 1.0;
+            let avg = if n > 0.0 { (n - 1.0) / n } else { 0.0 };
+            j.light = l * avg;
+        }
+        2..=6 => {
+            j.velocity += j.direction.z;
+            if j.life_time < 15.0 {
+                j.direction.z += 0.5;
+            } else {
+                j.direction.z += j.direction.x;
+            }
+            if j.sub_type != 4 && num_tails(j) >= j.max_tails as i32 - 1 {
+                j.create_tails = false;
+            }
+            if j.life_time < j.multi_use {
+                j.light *= 1.0 / 1.3;
+            }
+            if (j.life_time as i32) % 5 == 0 && j.sub_type == 2 {
+                ctx.create_effect(MODEL_SKILL_INFERNO, j.start_position, j.head_angle, j.light, 6, None, 20, 0, 0, 0.0);
+            } else if j.sub_type == 4 {
+                let light = Vec3::new(0.1, 0.6, 1.0);
+                ctx.create_joint(BITMAP_FLARE_BLUE, j.position, j.position, j.angle, 6, None, 30.0);
+                ctx.create_sprite(BITMAP_LIGHT, j.position, 1.6, light, 0.0, 0);
+                ctx.create_sprite(BITMAP_SHINY + 1, j.position, 1.5, light, ctx.world_time * 0.1, 0);
+            }
+        }
+        7 | 20 => {
+            j.velocity += j.direction.z;
+            if j.life_time < 20.0 {
+                j.direction.z += 0.5;
+            } else {
+                j.direction.z += j.direction.x;
+            }
+            if num_tails(j) >= j.max_tails as i32 - 1 {
+                j.create_tails = false;
+            }
+            if j.life_time < j.multi_use {
+                j.light *= 1.0 / 1.3;
+            }
+            j.position.z = ctx.terrain_height(j.position.x, j.position.y) + 3.0;
+        }
+        _ => {}
+    }
+}
+
+// --- BITMAP_LIGHT ------------------------------------------------------------------------------------
+
+fn light_create(j: &mut Joint, ctx: &mut Ctx) {
+    let start = j.make_tail();
+    j.create_tails = false;
+    match j.sub_type {
+        0 => {
+            j.life_time = 20.0;
+            j.max_tails = 30;
+            j.velocity = (ctx.rand() % 10) as f32 + 10.0;
+            let ax = -((ctx.rand() % 40) as f32) + 30.0;
+            let az = (ctx.rand() % 360) as f32;
+            j.angle = Vec3::new(ax, 0.0, az);
+            j.direction = Vec3::ZERO;
+            j.light = Vec3::new(0.1, 0.5, 1.0);
+            j.start_position = j.position;
+        }
+        1 => {
+            j.life_time = 10.0;
+            j.max_tails = 20;
+            j.skill = ctx.rand() % 5;
+            j.velocity = (ctx.rand() % 5) as f32 + 1.0;
+            j.angle = Vec3::new(30.0, 0.0, (ctx.rand() % 360) as f32);
+            j.direction = Vec3::ZERO;
+            j.light = Vec3::new(1.0, 0.8, 0.6);
+            j.start_position = j.position;
+        }
+        _ => {}
+    }
+    j.tails = vec![start];
+}
+
+fn light_step(j: &mut Joint, _ctx: &mut Ctx) {
+    undo_generic_move(j);
+    match j.sub_type {
+        0 => {
+            if j.life_time > 16.0 {
+                for _ in 0..10 {
+                    j.follow_tail();
+                    j.position += rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0));
+                }
+            }
+        }
+        1 => {
+            if j.skill == 0 || j.life_time > 3.0 {
+                for _ in 0..5 {
+                    j.follow_tail();
+                    j.position += rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0));
+                    j.velocity += 0.5;
+                }
+            }
+        }
+        _ => {}
+    }
+    j.light *= 1.0 / 1.2;
+}
+
+// --- BITMAP_PIERCING ---------------------------------------------------------------------------------
+
+fn piercing_create(j: &mut Joint, ctx: &mut Ctx) {
+    let start = j.make_tail();
+    j.create_tails = false;
+    if j.sub_type == 0 || j.sub_type == 1 {
+        j.life_time = 10.0;
+        if j.sub_type == 1 {
+            j.tile_mapping = true;
+            j.scroll = JointScroll::Tile;
+        }
+        j.max_tails = 30;
+        j.velocity = 20.0;
+        j.angle = Vec3::new(-90.0, 0.0, j.angle.z);
+        j.direction = Vec3::ZERO;
+        j.light = if ctx.rand() % 2 == 0 { Vec3::new(1.0, 0.8, 0.6) } else { Vec3::ONE };
+        j.start_position = j.position;
+    }
+    j.tails = vec![start];
+}
+
+fn piercing_step(j: &mut Joint, _ctx: &mut Ctx) {
+    undo_generic_move(j);
+    if j.sub_type == 0 || j.sub_type == 1 {
+        if j.life_time > 9.0 {
+            for _ in 0..30 {
+                j.follow_tail();
+                j.position += rotate(j.angle, Vec3::new(0.0, 0.0, -j.velocity));
+            }
+        }
+        j.velocity -= 2.0;
+        j.light *= 1.0 / 1.4;
+    }
+}
+
+// --- BITMAP_FLARE_FORCE ------------------------------------------------------------------------------
+
+/// Subtipos con la luminosidad por segmento y el desplazamiento de UV de `DescribeJoint`.
+fn flare_force_lit(sub: i32) -> bool {
+    (0..=4).contains(&sub) || (11..=13).contains(&sub)
+}
+
+fn flare_force_create(j: &mut Joint, ctx: &mut Ctx) {
+    let start = j.make_tail();
+    // `o->Skill = SkillIndex` en la parte común: quien la crea pone el índice en `j.skill`.
+    let skill_index = j.skill;
+    j.life_time = 20.0;
+    j.create_tails = false;
+    j.max_tails = 30;
+    j.multi_use = 1.0;
+    j.velocity = -3.0;
+    j.position.z += 150.0;
+    j.direction = Vec3::ZERO;
+    j.target_position = Vec3::ZERO;
+    j.light = Vec3::new(1.0, 0.8, 1.0);
+    j.start_position = j.position;
+    j.weapon = 0.0;
+
+    let sub = j.sub_type;
+    if (1..=4).contains(&sub) || (11..=13).contains(&sub) {
+        j.tex_type = BITMAP_JOINT_THUNDER;
+        j.velocity = -3.0;
+        j.target_position.x = 80.0;
+        j.target_position.y = 180.0;
+        j.weapon = (ctx.rand() % 3 + 2) as f32;
+        if sub == 2 || sub == 4 || (11..=13).contains(&sub) {
+            match sub {
+                11 => j.light = Vec3::new(0.7, 1.0, 0.7),
+                12 => j.light = Vec3::new(1.0, 0.6, 0.6),
+                13 => j.light = Vec3::new(0.7, 0.7, 1.0),
+                _ => {}
+            }
+            j.target_position.y = -180.0;
+        }
+        if sub == 3 || sub == 4 {
+            j.weapon = 0.0;
+        }
+        j.life_time += j.weapon;
+        j.position = j.start_position + rotate(j.target_position, Vec3::new(0.0, 0.0, j.target_position.x));
+    } else if sub != 0 {
+        j.life_time = 15.0;
+        j.skill = 0;
+        j.max_tails = 1;
+        j.weapon = 30.0;
+        // Hueso del personaje del que sale (5-7).
+        j.multi_use = skill_index as f32;
+        j.velocity = 0.0;
+        j.target_position.x = 30.0;
+        j.target_position.z = (sub * 90) as f32;
+        j.light = Vec3::new(1.0, 0.8, 1.0);
+        j.direction = Vec3::new(0.0, -4.0, 0.0);
+        j.start_position = j.position;
+        if j.pk_key != -1 {
+            j.direction.y = 0.0;
+        }
+    }
+
+    if (5..=7).contains(&sub) {
+        j.tex_type = BITMAP_FIRECRACKER;
+    } else if sub == 0 {
+        j.tex_type = BITMAP_JOINT_THUNDER;
+    }
+    if flare_force_lit(sub) {
+        j.scroll = JointScroll::Flare;
+        set_logic_light(j, j.light);
+    }
+    // Los subtipos 5-7 no tienen cola inicial.
+    if !(5..=7).contains(&sub) {
+        j.tails = vec![start];
+    }
+}
+
+fn flare_force_step(j: &mut Joint, ctx: &mut Ctx) {
+    undo_generic_move(j);
+    let sub = j.sub_type;
+    if flare_force_lit(sub) {
+        j.light = logic_light(j);
+    }
+    if (5..=7).contains(&sub) {
+        let actor = ctx.actor(j.target).cloned();
+        if let Some(a) = actor {
+            let bone = j.multi_use as usize;
+            let mut direction = j.direction;
+            j.start_position = a.bone_world(bone, Vec3::new(0.0, 20.0, 0.0));
+            j.position = j.start_position;
+
+            // NumTails = 0: se rehacen todas las colas cada tick.
+            j.tails.clear();
+            let max_tails = (j.max_tails as i32).min(j.weapon as i32).max(0);
+            j.max_tails = max_tails as usize;
+            j.target_position.y = j.target_position.z;
+            let rot_bone = bone_rotation(&a, bone);
+            let rot_bone0 = bone_rotation(&a, 0);
+
+            for i in 0..max_tails {
+                j.start_position += rot_bone * direction;
+                if sub % 2 != 0 {
+                    j.target_position.y += 40.0;
+                } else {
+                    j.target_position.y -= 40.0;
+                }
+                let angle = Vec3::new(j.target_position.y, 0.0, 0.0);
+                j.position = j.start_position + rotate(angle, Vec3::new(0.0, 0.0, j.target_position.x));
+
+                // CreateTail(o, o->Target->BoneTransform[0]).
+                create_tail_m(j, rot_bone0);
+
+                j.target_position.x -= 0.15;
+                if j.pk_key == -1 {
+                    direction.y -= 0.1;
+                }
+                if i % 2 == 0 {
+                    ctx.create_sprite(BITMAP_FLARE, j.start_position, j.light.x / 2.0, j.light, 0.0, 0);
+                }
+            }
+            j.max_tails += 1;
+        } else {
+            j.live = false;
+        }
+        if j.life_time < 7.0 {
+            j.light *= 1.0 / 1.5;
+        }
+    } else if num_tails(j) < j.max_tails as i32 - 1 {
+        if sub == 0 {
+            let mut i = 1;
+            while (i as f32) < j.multi_use {
+                j.follow_tail();
+                j.start_position += rotate(j.angle, Vec3::new(0.0, j.velocity, 0.0));
+                j.position = j.start_position;
+                j.velocity -= 2.0;
+                i += 1;
+            }
+            j.multi_use += 2.0;
+        } else if (1..=4).contains(&sub) || (11..=13).contains(&sub) {
+            if j.weapon <= 0.0 {
+                let mut i = 1;
+                while (i as f32) < j.multi_use {
+                    j.follow_tail();
+                    j.start_position += rotate(j.angle, Vec3::new(0.0, j.velocity, 0.0));
+                    // (Las dos ramas del original restan lo mismo.)
+                    j.target_position.y -= 20.0;
+                    let angle = Vec3::new(0.0, j.target_position.y, j.angle.z);
+                    let off = rotate(angle, Vec3::new(0.0, 0.0, j.target_position.x));
+                    j.position = if sub == 3 || sub == 4 { j.start_position - off } else { j.start_position + off };
+                    j.velocity -= 2.0;
+                    j.target_position.x -= 2.5;
+                    i += 1;
+                }
+                j.multi_use += 2.0;
+            } else {
+                j.weapon -= 1.0;
+            }
+        }
+    }
+
+    if flare_force_lit(sub) {
+        if j.life_time < 10.0 {
+            j.light *= 1.0 / 1.3;
+        }
+        set_logic_light(j, j.light);
+        // DescribeJoint: (NumTails − 1 − j) / MaxTails · 2 por segmento; media = (N − 1) / MaxTails.
+        let n = num_tails(j).max(0) as f32;
+        let avg = if n > 0.0 { (n - 1.0) / j.max_tails as f32 } else { 0.0 };
+        j.light *= avg;
+    }
+}
+
+// --- BITMAP_FLASH ------------------------------------------------------------------------------------
+
+fn flash_create(j: &mut Joint, ctx: &mut Ctx) {
+    let start = j.make_tail();
+    let sub = j.sub_type;
+    if sub <= 3 || sub == 5 {
+        j.max_tails = 10;
+        j.life_time = 40.0;
+        j.velocity = 70.0;
+        j.reverse_uv = (ctx.rand() % 2) as u8;
+        j.multi_use = 150.0;
+        j.pk_key = 0;
+        if sub == 2 {
+            j.velocity = 30.0;
+            j.multi_use = 300.0;
+            j.tex_type = BITMAP_FLARE_FORCE;
+        } else if sub == 3 {
+            j.velocity = 30.0;
+            j.multi_use = 300.0;
+            j.tex_type = BITMAP_FLARE_BLUE;
+        }
+        if sub == 5 {
+            j.tex_type = BITMAP_FLARE;
+            j.max_tails = 15;
+            j.velocity = (ctx.rand() % 20) as f32 + 10.0;
+            j.reverse_uv = 2;
+        } else {
+            j.angle = Vec3::new(90.0, 0.0, 0.0);
+        }
+        j.head_angle = j.angle;
+        // `m_bCreateTails` en user[0]: el original deja dos colas por tick (una con Angle y otra
+        // con HeadAngle), así que las colas se hacen a mano en el step.
+        j.user[0] = 1.0;
+        j.tails = vec![start];
+    } else if sub == 4 {
+        j.max_tails = 20;
+        j.life_time = 30.0;
+        j.velocity = 0.0;
+        j.only_one_render = 1;
+        j.weapon = 0.0;
+        j.tex_type = BITMAP_FLARE_BLUE;
+        j.light = Vec3::ONE;
+        j.direction = Vec3::ZERO;
+        match follow_target(ctx, j.target) {
+            Some((pos, angle, _)) => {
+                j.position = pos;
+                if let Some(a) = angle {
+                    j.angle = a;
+                }
+            }
+            None => j.live = false,
+        }
+        j.tails = vec![start];
+    } else if sub == 6 {
+        j.max_tails = 30;
+        j.life_time = 25.0;
+        j.weapon = j.life_time;
+        j.velocity = (70 + ctx.rand() % 3) as f32 * Q_PI / 180.0;
+        j.light = Vec3::new(0.8, 0.8, 1.0);
+        j.direction = Vec3::new(0.0, -(40.0 + (ctx.rand() % 4) as f32), j.velocity.sin() * 10.0);
+        j.position.y -= 20.0;
+        j.position.z += 130.0;
+        j.start_position = j.position;
+        j.create_tails = false;
+        j.reverse_uv = 3;
+        // Sin cola inicial; CreateTailAxis + NumTails = 0 → una sola cola.
+        j.tails.clear();
+        create_tail_axis_y(j, angle_matrix(j.angle));
+    } else if sub == 7 {
+        // Abre tres rayos del subtipo 6 y muere.
+        j.create_tails = false;
+        j.life_time = 0.0;
+        for i in 0..3 {
+            let off = rotate(j.angle, Vec3::new((i - 1) as f32 * 100.0, -50.0, 0.0));
+            let pos = off + j.position;
+            ctx.create_joint(BITMAP_FLASH, pos, pos, j.angle, 6, None, 40.0);
+        }
+        j.tails = vec![start];
+    } else {
+        j.tails = vec![start];
+    }
+}
+
+fn flash_step(j: &mut Joint, ctx: &mut Ctx) {
+    let sub = j.sub_type;
+    if sub <= 3 || sub == 5 {
+        // Las colas las hace este step (user[0] = m_bCreateTails).
+        j.create_tails = false;
+        let mut lay = j.user[0] != 0.0;
+        if sub == 2 {
+            j.angle.z += (ctx.rand() % 10) as f32 + 10.0;
+        }
+        j.velocity += 10.0;
+        if lay {
+            // FollowTail(o, AngleMatrix(o->Angle)).
+            j.follow_tail();
+        }
+        j.velocity += 10.0;
+        j.position += rotate(j.head_angle, Vec3::new(0.0, -j.velocity, 0.0));
+
+        let height = ctx.terrain_height(j.position.x, j.position.y) - j.multi_use;
+        if j.position.z < height {
+            j.position.z = height;
+            if lay && j.pk_key != 1 {
+                if sub < 2 {
+                    // TODO(original): con Target, anima MODEL_SHADOW_BODY con el ángulo del objetivo
+                    // y SpawnMeshEffects(0, MODEL_SKIN_SHELL[, 1]) (cáscaras de piel por la malla).
+                } else {
+                    let light = if sub == 5 { Vec3::new(1.0, 0.8, 0.3) } else { Vec3::new(0.3, 0.8, 1.0) };
+                    ctx.create_effect(BITMAP_SHOCK_WAVE, j.position, j.angle, light, 4, None, -1, 0, 0, 0.0);
+                }
+            }
+            if sub == 5 {
+                j.pk_key = 1;
+                j.velocity = -20.0;
+            } else {
+                lay = false;
+            }
+            j.light *= 1.0 / 1.2;
+        }
+        let rot = (ctx.rand() % 360) as f32;
+        if sub < 2 {
+            ctx.create_sprite(BITMAP_FLARE, j.position, 1.0, j.light, rot, 0);
+        } else if sub == 5 {
+            ctx.create_sprite(BITMAP_FLARE, j.position, 2.5, j.light, rot, 0);
+        } else {
+            ctx.create_sprite(BITMAP_SHINY + 2, j.position, 1.6, Vec3::new(0.0, 1.0, 1.0), rot, 0);
+        }
+        // FollowTail final de MoveJoint con la última matriz (la de HeadAngle).
+        if lay {
+            create_tail_m(j, angle_matrix(j.head_angle));
+        }
+        j.user[0] = if lay { 1.0 } else { 0.0 };
+    } else if sub == 4 {
+        let Some((pos, _, live)) = follow_target(ctx, j.target) else {
+            j.live = false;
+            return;
+        };
+        j.live = live;
+        j.position = pos;
+        if j.life_time < 15.0 {
+            j.light *= 1.0 / 1.3;
+        }
+    } else if sub == 6 {
+        undo_generic_move(j);
+        let fr = ctx.rand() % 5 - 2;
+        j.direction.y += fr as f32;
+        j.direction.z -= 10.0;
+        let m = angle_matrix(j.angle);
+        j.position += m * j.direction;
+
+        if (j.weapon - j.life_time) < 10.0 {
+            ctx.create_particle(BITMAP_EXPLOTION + 1, j.start_position, j.angle, j.light, 0, 3.0, None);
+            j.scale = 100.0;
+        } else {
+            j.scale = 40.0;
+        }
+
+        let height = ctx.terrain_height(j.position.x, j.position.y);
+        if j.position.z <= height {
+            let mut t_pos = j.position;
+            ctx.create_joint(BITMAP_JOINT_THUNDER, j.position, j.position, j.angle, 4, None, 60.0);
+            if j.direction.z <= 0.0 {
+                j.direction.z = j.velocity.sin() * 20.0;
+            }
+            j.position.z = height + 5.0;
+            t_pos.z = j.position.z + 30.0;
+            ctx.create_particle(BITMAP_ADV_SMOKE + 1, t_pos, j.angle, j.light, 2, 3.0, None);
+        }
+
+        // FollowTailAxis(o, Matrix, 1).
+        create_tail_axis_y(j, m);
+
+        if j.life_time < j.weapon / 2.0 {
+            j.light *= 1.0 / 1.3;
+        }
+    }
+}
+
+// --- BITMAP_DRAIN_LIFE_GHOST -------------------------------------------------------------------------
+
+fn drain_life_create(j: &mut Joint, ctx: &mut Ctx) {
+    if j.sub_type == 0 {
+        j.render_type = JointRender::AlphaBlend;
+        if ctx.rand() % 2 == 0 {
+            j.angle.z += 90.0;
+        } else {
+            j.angle.z -= 90.0;
+        }
+        j.angle.x += (ctx.rand() % 100 - 50) as f32;
+        j.angle.y += (ctx.rand() % 100 - 50) as f32;
+        j.angle.z += (ctx.rand() % 100 - 50) as f32;
+        j.velocity = 1.0 + (ctx.rand() % 10) as f32 * 0.2;
+        j.life_time = (30 + (ctx.rand() % 20 - 10)) as f32;
+        j.scale += (ctx.rand() % 60 - 30) as f32;
+        j.max_tails = (20 + (ctx.rand() % 10 - 5)) as usize;
+    }
+}
+
+fn drain_life_step(j: &mut Joint, _ctx: &mut Ctx) {
+    if j.sub_type == 0 {
+        // TODO(original): el destino es `o->Target->Owner->Position` (con la Z de TargetPosition);
+        // sin el dueño del objetivo se va hacia el TargetPosition con el que se creó.
+        let target = j.target_position;
+        let mut angle = j.angle;
+        move_humming(j.position, &mut angle, target, j.velocity);
+        j.angle = angle;
+        j.velocity += 2.0;
+        if j.life_time < 10.0 {
+            j.light *= 1.0 / 1.2;
+        }
+    }
+}
+
+// --- BITMAP_PIN_LIGHT --------------------------------------------------------------------------------
+
+fn pin_light_create(j: &mut Joint, ctx: &mut Ctx) {
+    j.velocity = (ctx.rand() % 60 + 15) as f32;
+    j.life_time = (ctx.rand() % 3 + 1) as f32;
+    j.max_tails = 5;
+}
+
+fn pin_light_step(j: &mut Joint, _ctx: &mut Ctx) {
+    j.velocity += 0.1;
+    j.light *= 0.9;
+}
+
+// --- BITMAP_FORCEPILLAR / BITMAP_SWORDEFF / BITMAP_GROUND_WIND / BITMAP_LAVA -------------------------
+
+fn force_pillar_create(j: &mut Joint, _ctx: &mut Ctx) {
+    j.render_type = JointRender::AlphaBlend;
+    j.render_face = RENDER_FACE_TWO;
+    j.life_time = 7.0;
+    j.max_tails = 5;
+    j.create_tails = true;
+    j.light = Vec3::new(0.95, 0.72, 0.48);
+}
+
+fn force_pillar_step(j: &mut Joint, ctx: &mut Ctx) {
+    // TODO(original): también muere si el objetivo no es MODEL_DOWN_ATTACK_DUMMY_L/_R, y vuelve a
+    // animar su modelo antes de leer el hueso.
+    match target_bone(ctx, j.target, 0) {
+        Some(p) => j.position = p,
+        None => j.live = false,
+    }
+}
+
+fn sword_eff_create(j: &mut Joint, _ctx: &mut Ctx) {
+    j.render_type = JointRender::AlphaBlend;
+    j.render_face = RENDER_FACE_TWO;
+    j.life_time = 10.0;
+    j.max_tails = 50;
+    j.create_tails = true;
+    j.light = Vec3::new(0.6, 0.6, 1.0);
+}
+
+fn sword_eff_step(j: &mut Joint, ctx: &mut Ctx) {
+    match target_bone(ctx, j.target, 5) {
+        Some(p) => j.position = p,
+        None => j.live = false,
+    }
+}
+
+fn ground_wind_create(j: &mut Joint, _ctx: &mut Ctx) {
+    j.render_type = JointRender::AlphaBlend;
+    j.render_face = RENDER_FACE_TWO;
+    j.life_time = 10.0;
+    j.max_tails = 8;
+    j.create_tails = true;
+    j.light = Vec3::new(0.7, 0.7, 1.0);
+}
+
+fn ground_wind_step(j: &mut Joint, ctx: &mut Ctx) {
+    // TODO(original): muere si el objetivo no es MODEL_DRAGON_KICK_DUMMY, y anima su modelo en el
+    // fotograma AnimationFrame + SubType · AlphaTarget antes de leer el hueso 2.
+    match target_bone(ctx, j.target, 2) {
+        Some(p) => j.position = p,
+        None => {
+            j.live = false;
+            return;
+        }
+    }
+    j.position.z += 20.0;
+    j.light *= 0.7;
+}
+
+fn lava_create(j: &mut Joint, _ctx: &mut Ctx) {
+    j.render_type = JointRender::AlphaBlend;
+    j.render_face = RENDER_FACE_TWO;
+    j.life_time = 10.0;
+    j.max_tails = 10;
+    j.create_tails = true;
+    j.light = Vec3::ONE;
+    // TODO(original): Velocity = PlaySpeed de la acción actual del modelo del objetivo (solo se usa
+    // para retrasar el fotograma de la animación; la posición se toma del hueso cada tick).
+    j.velocity = 0.0;
+}
+
+fn lava_step(j: &mut Joint, ctx: &mut Ctx) {
+    // TODO(original): anima el modelo del objetivo en AnimationFrame − ((Velocity·10 − (SubType % 7))
+    // · 0.1) antes de leer el hueso (cada subtipo va un poco por detrás).
+    let bone = if j.sub_type >= 7 { 28 } else { 36 };
+    match target_bone(ctx, j.target, bone) {
+        Some(p) => j.position = p,
+        None => {
+            j.live = false;
+            return;
+        }
+    }
+    j.light *= 0.8;
 }

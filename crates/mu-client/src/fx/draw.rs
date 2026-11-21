@@ -120,10 +120,10 @@ pub fn mu_to_bevy(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.z, -v.y) / MU_SCALE
 }
 
-/// Color del original (se multiplica en sRGB) → lineal.
+/// Color del original (se multiplica en sRGB) → lineal. Como `PackABGR`, se limita a [0, 1].
 fn linear(c: [f32; 4]) -> [f32; 4] {
-    let f = |v: f32| v.max(0.0).powf(2.2);
-    [f(c[0]), f(c[1]), f(c[2]), c[3]]
+    let f = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
+    [f(c[0]), f(c[1]), f(c[2]), c[3].clamp(0.0, 1.0)]
 }
 
 /// Paso 2: sprites, marcas y estelas en mallas.
@@ -200,10 +200,12 @@ pub fn render_quads(
             match j.scroll {
                 JointScroll::None => base,
                 JointScroll::Thunder => {
-                    if face_one { base * 2.0 - scroll } else { base * 2.0 + scroll * 2.0 }
+                    // Cara uno: U·2 − scroll; cara dos: la misma más 2·scroll (= U·2 + scroll).
+                    if face_one { base * 2.0 - scroll } else { base * 2.0 + scroll }
                 }
                 JointScroll::Tile => (n - 1 - k) as f32 / 16.0 * 2.0 - 2.0 * scroll,
-                JointScroll::Flare => base - scroll,
+                // FLARE_FORCE divide entre (MaxTails − 1) / 2 con división entera.
+                JointScroll::Flare => (n - 1 - k) as f32 / ((j.max_tails.max(3) - 1) / 2) as f32 - scroll,
             }
         };
         let (v0, v1) = if j.reverse_uv == 1 { (1.0, 0.0) } else { (0.0, 1.0) };

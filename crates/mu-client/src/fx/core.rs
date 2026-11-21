@@ -274,7 +274,8 @@ impl Joint {
             collision: false,
             velocity: 0.0,
             direction: Vec3::ZERO,
-            pk_key: 0,
+            // CreateJoint tiene PKKey = -1 por defecto.
+            pk_key: -1,
             skill: 0,
             weapon: 0.0,
             multi_use: 0.0,
@@ -564,6 +565,15 @@ impl Ctx<'_> {
     #[allow(clippy::too_many_arguments)]
     pub fn create_joint(&mut self, ty: i32, position: Vec3, target_position: Vec3, angle: Vec3, sub_type: i32, target: Option<Target>, scale: f32) {
         self.spawns.push(Spawn::Joint(Joint::new(ty, position, target_position, angle, sub_type, target, scale)));
+    }
+
+    /// `CreateJoint` con `PKKey` y `SkillIndex` (los que el original pasa a veces).
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_joint_ex(&mut self, ty: i32, position: Vec3, target_position: Vec3, angle: Vec3, sub_type: i32, target: Option<Target>, scale: f32, pk_key: i32, skill: i32) {
+        let mut j = Joint::new(ty, position, target_position, angle, sub_type, target, scale);
+        j.pk_key = pk_key;
+        j.skill = skill;
+        self.spawns.push(Spawn::Joint(j));
     }
 
     /// `CreateEffect(Type, Position, Angle, Light, SubType, Owner, PKKey, Skill, SkillIndex, ..., Scale)`.
