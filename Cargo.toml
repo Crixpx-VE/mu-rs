@@ -6,6 +6,7 @@ members = [
     "crates/mu-client",
     "crates/mu-connect",
     "crates/mu-server",
+    "crates/mu-launcher",
 ]
 
 [workspace.package]

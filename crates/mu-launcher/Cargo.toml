@@ -1,0 +1,19 @@
+[package]
+name = "mu-launcher"
+description = "Lanzador que actualiza el cliente al abrirse, y el servidor de actualizaciones"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mu-launcher"
+path = "src/bin/mu-launcher.rs"
+
+[[bin]]
+name = "mu-update-server"
+path = "src/bin/mu-update-server.rs"
+
+[dependencies]
+sha2 = "0.10"
+# HTTP simple, sin TLS. Las descargas se comprueban con la huella SHA-256 de la lista.
+ureq = { version = "2", default-features = false }
+tiny_http = "0.12"
