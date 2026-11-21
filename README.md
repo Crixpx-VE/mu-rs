@@ -12,7 +12,7 @@ comportamiento y aspecto es el cliente Season 6 (MuMain): sus fórmulas y númer
 | `mu-client` | El juego (Bevy 0.20) | Sin red todavía (ver abajo qué tiene) |
 | `mu-connect` | Connect Server: lista de servidores y redirección al Game Server | Funciona; tests TCP de punta a punta |
 | `mu-launcher` | `mu-launcher` (actualiza el cliente y lo abre) y `mu-update-server` (publica la carpeta del cliente) | En uso |
-| `mu-server` | Game Server | Vacío (mientras tanto, OpenMU) |
+| `mu-server` | Connect Server + Game Server en un programa: cuentas y personajes (`cuentas.json`), login, lista, crear, borrar, entrar al mundo, caminar y ver a los demás del mapa | Funciona; corre en la tarea "mu-rs servidor" (puertos 44405 y 55901) |
 
 ## Cliente
 
@@ -64,6 +64,17 @@ que cambió. La configuración de cada jugador va en `mu-launcher.txt` (las actu
 cargo run -p mu-connect                                          # 127.0.0.1:44405 → GS de OpenMU en 127.0.0.1:55901
 cargo run -p mu-connect -- --listen 0.0.0.0:44405 --server 0=IP_PUBLICA:55901
 ```
+
+## Servidor de juego
+
+```
+cargo run -p mu-server -- --data ../dist/cliente/Data --db cuentas.json --public-ip 127.0.0.1
+cargo run -p mu-server --example bot -- cuenta clave Personaje [127.0.0.1:44405] [segundos]
+```
+
+Las cuentas se crean solas la primera vez que se entra (servidor privado). El cliente busca el
+Connect Server en `juego=host:puerto` de `mu-launcher.txt`, o en el host de `servidor=` (el de las
+actualizaciones) en el puerto 44405.
 
 ## Probar el login contra un servidor
 
