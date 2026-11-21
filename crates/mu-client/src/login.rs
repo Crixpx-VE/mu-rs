@@ -11,8 +11,10 @@
 //! empieza a girar antes de cada esquina y nunca da tirones. Se calcula a 25 ticks por segundo y
 //! se dibuja interpolado, igual a cualquier fps.
 //!
-//! De MuMain se conservan la altura del ojo (650), la inclinación (17.5° hacia abajo), el campo de
-//! visión del login (90° en horizontal), el alcance (3995) y la niebla negra.
+//! La vista es la del S6 original (`MoveMainCamera` de `ZzzScene.cpp` del Main 5.2): altura del ojo
+//! `-300 - 100 + D - 150` con `D = 1100 · nivel · 0.1` (`110 · nivel - 550`), inclinación -112.5° (mira
+//! 22.5° hacia arriba), campo de visión de 65° en vertical y alcance `390 · nivel`. El nivel de
+//! distancia se interpola entre el de cada punto. La niebla negra va del alcance a ×1.25.
 //!
 //! Por ahora Enter entra al juego (sin servidor todavía).
 
@@ -37,14 +39,10 @@ impl Plugin for LoginPlugin {
 /// `kMinTourAccel` / `kMaxTourAccel`: velocidad por tick.
 const MIN_ACCEL: f32 = 0.1;
 const MAX_ACCEL: f32 = 100.0;
-/// Altura del ojo: la de MuMain (-300 + 950).
-const EYE_HEIGHT: f32 = 650.0;
-/// Inclinación de MuMain (-112.5° + 40°): 17.5° hacia abajo.
-const PITCH: f32 = -72.5;
-/// Alcance de la vista (`RENDER_TERRAIN_DIST`); la niebla va de ahí a ×1.25.
-const VIEW_FAR: f32 = 3995.0;
-/// FOV del login: 90° en horizontal a 4:3 (`CameraConfig::ForLoginScene`) → 73.74° en vertical.
-const TOUR_HFOV: f32 = 90.0;
+/// `SetAngleFrustum(-112.5)`: 22.5° hacia arriba.
+const PITCH: f32 = -112.5;
+/// `CameraFOV = 65` (vertical, `gluPerspective`) en el login con el paseo.
+const TOUR_VFOV: f32 = 65.0;
 /// La cámara mira a este punto de la curva por delante de ella (unidades de MU).
 const LOOK_AHEAD: f32 = 600.0;
 /// Muestras por tramo para medir la curva.
@@ -55,6 +53,8 @@ struct Waypoint {
     pos: Vec2,
     delay: i32,
     accel: f32,
+    /// `fCameraDistanceLevel`.
+    level: f32,
 }
 
 /// La curva cerrada que pasa por los puntos, medida por longitud.
@@ -108,6 +108,13 @@ impl Path {
         segment_point(&self.points, i, t)
     }
 
+    /// Nivel de distancia en `s`: de el del punto de salida al del de llegada del tramo.
+    fn level(&self, s: f32) -> f32 {
+        let (i, t) = self.locate(s);
+        let n = self.points.len();
+        self.points[i].level + (self.points[(i + 1) % n].level - self.points[i].level) * t
+    }
+
     /// Velocidad en `s`: la del punto al que va el tramo (`targetWaypoint->fCameraMoveAccel`).
     fn speed(&self, s: f32) -> f32 {
         let (i, _) = self.locate(s);
@@ -156,7 +163,12 @@ fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
     (0..n)
         .map(|i| {
             let o = 8 + i * 28;
-            Some(Waypoint { pos: Vec2::new(f32_at(o + 4)?, f32_at(o + 8)?), delay: u32_at(o + 16)? as i32, accel: f32_at(o + 20)? })
+            Some(Waypoint {
+                pos: Vec2::new(f32_at(o + 4)?, f32_at(o + 8)?),
+                delay: u32_at(o + 16)? as i32,
+                accel: f32_at(o + 20)?,
+                level: f32_at(o + 24)?,
+            })
         })
         .collect()
 }
@@ -212,18 +224,22 @@ fn place_camera(
     let ahead = t.path.at(s + LOOK_AHEAD) - eye;
     // Rumbo de MU (0 = +Y, 90 = +X), el mismo que da `CreateAngle`.
     let yaw = ahead.x.atan2(ahead.y).to_degrees();
-    let vfov = 2.0 * ((TOUR_HFOV * 0.5).to_radians().tan() / (4.0 / 3.0)).atan();
+    let level = t.path.level(s);
+    // `CameraPosition[2] = -300 - 100 + D - 150`.
+    let height = -300.0 - 100.0 + 1100.0 * level * 0.1 - 150.0;
+    // `CameraViewFar = 390 · nivel`.
+    let far = 390.0 * level;
     for (mut tf, mut proj, fog) in &mut cameras {
-        *tf = crate::camera::mu_view(eye.extend(EYE_HEIGHT), PITCH, yaw);
+        *tf = crate::camera::mu_view(eye.extend(height), PITCH, yaw);
         if let Projection::Perspective(p) = &mut *proj {
-            // `gluPerspective(fov, aspecto, near 100, far × 1.4)`.
-            p.fov = vfov;
-            p.near = 100.0 / MU_SCALE;
-            p.far = VIEW_FAR * 1.4 / MU_SCALE;
+            // `gluPerspective(65, aspecto, near 20, far × 1.4)`.
+            p.fov = TOUR_VFOV.to_radians();
+            p.near = 20.0 / MU_SCALE;
+            p.far = far * 1.4 / MU_SCALE;
         }
         if let Some(mut fog) = fog {
-            // Niebla lineal negra de `far` a `far × 1.25`.
-            fog.falloff = bevy::pbr::FogFalloff::Linear { start: VIEW_FAR / MU_SCALE, end: VIEW_FAR * 1.25 / MU_SCALE };
+            // Niebla lineal negra del alcance a ×1.25.
+            fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
         }
     }
 }
