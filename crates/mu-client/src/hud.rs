@@ -21,10 +21,11 @@ fn spawn_fps(mut commands: Commands) {
     commands.spawn((
         FpsText,
         Text::new("FPS --"),
-        TextFont { font_size: bevy::text::FontSize::Px(16.0), ..default() },
+        // La interfaz va escalada a 480 de alto (ver mainframe.rs): 8 aquí son ~18 px a 1080p.
+        TextFont { font_size: bevy::text::FontSize::Px(8.0), ..default() },
         TextColor(Color::srgb(1.0, 0.95, 0.6)),
         TextShadow::default(),
-        Node { position_type: PositionType::Absolute, top: Val::Px(6.0), left: Val::Px(8.0), ..default() },
+        Node { position_type: PositionType::Absolute, top: Val::Px(3.0), left: Val::Px(4.0), ..default() },
     ));
 }
 

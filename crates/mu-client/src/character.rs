@@ -170,9 +170,11 @@ fn click_to_move(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     terrain: Option<Res<LoadedTerrain>>,
+    over_ui: Res<crate::mainframe::PointerOverUi>,
     mut players: Query<&mut Player>,
 ) {
-    if !buttons.just_pressed(MouseButton::Left) {
+    // Un clic en la interfaz no es para caminar.
+    if !buttons.just_pressed(MouseButton::Left) || over_ui.0 {
         return;
     }
     let (Some(t), Ok(window), Ok((camera, cam_tf)), Ok(mut player)) =

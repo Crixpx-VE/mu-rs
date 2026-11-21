@@ -23,6 +23,7 @@ mod character;
 mod effects;
 mod grass;
 mod hud;
+mod mainframe;
 mod objects;
 mod terrain;
 
@@ -146,6 +147,7 @@ fn main() {
             grass::GrassPlugin,
             effects::EffectsPlugin,
             hud::HudPlugin,
+            mainframe::MainFramePlugin,
             objects::ObjectsPlugin,
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
