@@ -140,8 +140,6 @@ const SLOTS: [(f32, f32, f32); 5] =
     [(8008.0, 18885.0, 115.0), (7986.0, 19145.0, 90.0), (8046.0, 19400.0, 75.0), (8133.0, 19645.0, 60.0), (8282.0, 19845.0, 35.0)];
 /// Altura de los personajes sin montura (ZzzScene.cpp:1105).
 const CHARACTER_Z: f32 = 169.5;
-/// `Object.Scale` en la selección (ZzzCharacter.cpp:11743).
-const CHARACTER_SCALE: f32 = 1.2;
 /// Caja para elegir con el ratón: `BoundingBoxMin/Max` de `MODEL_PLAYER` (ZzzCharacter.cpp:11397-11401),
 /// sin girar ni escalar, desde los pies.
 const PICK_MIN: Vec3 = Vec3::new(-60.0, -60.0, 0.0);
@@ -209,7 +207,7 @@ fn spawn_slot_character(
     let transform = Transform {
         translation: Vec3::new(x, CHARACTER_Z, -y) / MU_SCALE,
         rotation: Quat::from_rotation_x(-FRAC_PI_2) * Quat::from_rotation_z(angle.to_radians()),
-        scale: Vec3::splat(CHARACTER_SCALE / MU_SCALE),
+        scale: Vec3::splat(c.class.select_scale() / MU_SCALE),
     };
     let shadow = crate::shadow::spawn(commands, meshes, shadow_material);
     let mut e = commands.spawn((
@@ -251,7 +249,7 @@ fn animate(
             terrain.as_deref().map(|t| &t.0),
             c.position(),
             Quat::from_rotation_z(c.angle().to_radians()),
-            CHARACTER_SCALE,
+            c.class.select_scale(),
         );
         // Fuera de zona segura: la espada en la mano.
         skinned.pose(c.action, c.frame, false, &mut meshes, &mut sh);
@@ -348,14 +346,16 @@ struct PreviewFace {
 }
 
 /// `RenderCreateCharacter` (CharMakeWin.cpp:388-445): giro, escala y desplazamiento de cada cara.
-fn face_pose(class: Class) -> (Vec3, f32, Vec3) {
+/// La rama del Rage Fighter (de MuMain) no pone giro: se queda el de la cara anterior.
+fn face_pose(class: Class) -> (Option<Vec3>, f32, Vec3) {
     match class {
-        Class::Wizard => (Vec3::new(0.0, 0.0, -40.0), 5.9, Vec3::ZERO),
-        Class::Knight => (Vec3::new(0.0, 0.0, -12.0), 6.05, Vec3::ZERO),
-        Class::Elf => (Vec3::new(8.0, 0.0, 5.0), 9.1, Vec3::new(4.8, 0.0, 0.0)),
-        Class::Gladiator => (Vec3::new(8.0, 0.0, -13.0), 6.0, Vec3::new(0.0, 0.0, 1.8)),
-        Class::Lord => (Vec3::new(8.0, 0.0, -18.0), 6.0, Vec3::ZERO),
-        Class::Summoner => (Vec3::new(2.0, 0.0, 2.0), 9.1, Vec3::new(4.8, 0.0, 4.0)),
+        Class::Wizard => (Some(Vec3::new(0.0, 0.0, -40.0)), 5.9, Vec3::ZERO),
+        Class::Knight => (Some(Vec3::new(0.0, 0.0, -12.0)), 6.05, Vec3::ZERO),
+        Class::Elf => (Some(Vec3::new(8.0, 0.0, 5.0)), 9.1, Vec3::new(4.8, 0.0, 0.0)),
+        Class::Gladiator => (Some(Vec3::new(8.0, 0.0, -13.0)), 6.0, Vec3::new(0.0, 0.0, 1.8)),
+        Class::Lord => (Some(Vec3::new(8.0, 0.0, -18.0)), 6.0, Vec3::ZERO),
+        Class::Summoner => (Some(Vec3::new(2.0, 0.0, 2.0)), 9.1, Vec3::new(4.8, 0.0, 4.0)),
+        Class::Fighter => (None, 6.0, Vec3::new(9.8, 0.0, -7.5)),
     }
 }
 
@@ -379,6 +379,7 @@ fn preview(
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut cameras: Query<(Entity, &mut Camera), With<PreviewCamera>>,
     mut faces: Query<(Entity, &mut PreviewFace)>,
+    mut last_angle: Local<Vec3>,
 ) {
     use bevy::camera::RenderTarget;
     use bevy::camera::visibility::RenderLayers;
@@ -444,6 +445,9 @@ fn preview(
         };
         let bones = model.bone_matrices_at(1, 0.0);
         let (angle, scale, offset) = face_pose(class);
+        // `CharacterView.Object.Angle` empieza en (0, 0, 0).
+        let angle = angle.unwrap_or(*last_angle);
+        *last_angle = angle;
         let [ax, ay, az] = angle.to_array().map(f32::to_radians);
         let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
         let transform = Transform {

@@ -29,21 +29,22 @@ fn cmw_origin(s: Screen) -> IVec2 {
     IVec2::new((s.w - CMW_W) / 2, (s.h - CMW_H) / 2)
 }
 
-/// `CCharMakeWin::SetPosition` (Main 5.2, sin el Rage Fighter): Dark Wizard, Dark Knight y Elf
-/// desde y + 131, la Summoner debajo; Magic Gladiator y Dark Lord desde y + 246.
+/// `CCharMakeWin::SetPosition` con `PBG_ADD_NEWCHAR_MONK`: Dark Wizard, Dark Knight y Elf desde
+/// y + 131 y la Summoner debajo; el Rage Fighter en y + 246 y debajo Magic Gladiator y Dark Lord.
 fn job_rect(s: Screen, class: Class) -> IRect {
     let o = cmw_origin(s);
     let x = o.x + 346;
     let y = match class {
         Class::Wizard | Class::Knight | Class::Elf => o.y + 131 + class.index() as i32 * JOB_H,
         Class::Summoner => o.y + 131 + 3 * JOB_H,
-        Class::Gladiator => o.y + 246,
-        Class::Lord => o.y + 246 + JOB_H,
+        Class::Fighter => o.y + 246,
+        Class::Gladiator => o.y + 246 + JOB_H,
+        Class::Lord => o.y + 246 + 2 * JOB_H,
     };
     IRect::new(x, y, JOB_W, JOB_H)
 }
 
-/// `GlobalText` 1705-1709 y 1690.
+/// `GlobalText` 1705-1709, 1690 y 3152.
 fn description(class: Class) -> &'static str {
     match class {
         Class::Wizard => "Kingdom of wizards, descendant of Arka. He has a inferior physical condition but has a enormous power and can command attacking spells freely.",
@@ -52,6 +53,7 @@ fn description(class: Class) -> &'static str {
         Class::Gladiator => "Complex character that has a characteristics of the Dark knight and Dark wizard. Master in a close-range combat and can command spells freely.",
         Class::Lord => "Charismatic character that can command the troops and handle the Dark spirit and Dark horse.",
         Class::Summoner => "Strong mentality and excellent insight creates the most powerful curse spell. Also this item pulls out another world summoners and use the detrimental sorcery against them.",
+        Class::Fighter => "Legitimate bearers of the Karutan Royal Knights and martial artists of great physical strength. They also help other party memgers by casting subsidiary buffs.",
     }
 }
 

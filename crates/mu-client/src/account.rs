@@ -2,8 +2,9 @@
 //! (como `mu-launcher.txt`, es de cada jugador y las actualizaciones no lo tocan). Cuando haya
 //! servidor, la lista llegará de él (`ReceiveCharacterList`) y esto sobrará.
 //!
-//! También las clases del S6 (Main 5.2: `MAX_CLASS` = 6, sin el Rage Fighter) con lo que de ellas
-//! necesitan la selección, la creación y el juego.
+//! También las clases con lo que de ellas necesitan la selección, la creación y el juego: las 6 del
+//! Main 5.2 y el Rage Fighter, que ese cliente tiene apagado (`PBG_ADD_NEWCHAR_MONK`) y se saca de
+//! MuMain (`MAX_CLASS` = 7).
 
 use std::path::PathBuf;
 
@@ -24,16 +25,19 @@ pub enum Class {
     Gladiator = 3,
     Lord = 4,
     Summoner = 5,
+    /// `CLASS_RAGEFIGHTER` (de MuMain).
+    Fighter = 6,
 }
 
 impl Class {
-    pub const ALL: [Class; 6] = [Class::Wizard, Class::Knight, Class::Elf, Class::Gladiator, Class::Lord, Class::Summoner];
+    pub const ALL: [Class; 7] =
+        [Class::Wizard, Class::Knight, Class::Elf, Class::Gladiator, Class::Lord, Class::Summoner, Class::Fighter];
 
     pub fn index(self) -> usize {
         self as usize
     }
 
-    /// `GetCharacterClassText` para la clase base (`GlobalText` 20-24 y 1687).
+    /// `GetCharacterClassText` para la clase base (`GlobalText` 20-24, 1687 y 3150).
     pub fn name(self) -> &'static str {
         match self {
             Class::Wizard => "Dark Wizard",
@@ -42,7 +46,24 @@ impl Class {
             Class::Gladiator => "Magic Gladiator",
             Class::Lord => "Dark Lord",
             Class::Summoner => "Summoner",
+            Class::Fighter => "Rage Fighter",
         }
+    }
+
+    /// `SetCharacterScale` en el juego (`Skin` 0; MuMain ZzzCharacter.cpp:12924).
+    pub fn game_scale(self) -> f32 {
+        match self {
+            Class::Wizard | Class::Knight | Class::Summoner => 0.9,
+            Class::Elf => 0.88,
+            Class::Gladiator => 0.95,
+            Class::Lord => 0.92,
+            Class::Fighter => 1.03,
+        }
+    }
+
+    /// `SetCharacterScale` en la selección: 1.2, el Rage Fighter 1.35.
+    pub fn select_scale(self) -> f32 {
+        if self == Class::Fighter { 1.35 } else { 1.2 }
     }
 
     /// `IsFemale`.
@@ -65,6 +86,7 @@ impl Class {
             Class::Gladiator => (&["26", "26", "26", "26"], None),
             Class::Lord => (&["26", "20", "20", "15"], Some("25")),
             Class::Summoner => (&["21", "21", "18", "23"], None),
+            Class::Fighter => (&["32", "27", "25", "20"], None),
         }
     }
 }

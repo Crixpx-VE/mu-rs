@@ -47,6 +47,8 @@ pub fn stop_action(class: crate::account::Class, sword_in_hand: bool) -> usize {
         Class::Knight if sword_in_hand => ids::PLAYER_STOP_SWORD as usize,
         Class::Elf => ids::PLAYER_STOP_FEMALE as usize,
         Class::Summoner => ids::PLAYER_STOP_SUMMONER as usize,
+        // MuMain ZzzCharacter.cpp:416.
+        Class::Fighter => ids::PLAYER_STOP_RAGEFIGHTER as usize,
         _ => action::STOP_MALE,
     }
 }
@@ -65,6 +67,9 @@ pub fn play_speed(a: usize) -> f32 {
         0.26
     } else if a == ids::PLAYER_STOP_SUMMONER {
         0.24
+    } else if a == ids::PLAYER_STOP_RAGEFIGHTER {
+        // MuMain ZzzOpenData.cpp:243.
+        0.16
     } else if (ids::PLAYER_STOP_MALE..=ids::PLAYER_STOP_RIDE_WEAPON).contains(&a) {
         0.28
     } else if (ids::PLAYER_WALK_MALE..=ids::PLAYER_WALK_CROSSBOW).contains(&a) {
@@ -413,7 +418,8 @@ fn weapon_blur(entity: Entity, p: &Player, s: &Skinned, terrain: Option<&LoadedT
         if let Some(m) = bones.get(RIGHT_HAND_BONE) {
             let a = Vec3::from_array(bmd::transform_point(m, [0.0, -20.0, 0.0]));
             let b = Vec3::from_array(bmd::transform_point(m, [0.0, -120.0, 0.0]));
-            world.create_blur(entity, origin + rot * a, origin + rot * b, Vec3::ONE, 2, true, frame);
+            let k = p.class.game_scale();
+            world.create_blur(entity, origin + rot * (a * k), origin + rot * (b * k), Vec3::ONE, 2, true, frame);
         }
         f += play_speed / INTER as f32;
     }
@@ -438,7 +444,7 @@ fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>
     crate::fx::ActorState(crate::fx::Actor {
         position: Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h),
         angle: Vec3::new(0.0, 0.0, p.facing.to_degrees()),
-        scale: 1.0,
+        scale: p.class.game_scale(),
         bones: std::sync::Arc::new(bones.to_vec()),
         action: p.action,
         frame: p.frame,
@@ -753,7 +759,13 @@ fn animate(
     for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
-        p.frame += p.casting.unwrap_or_else(|| action_fps(p.action)) * time.delta_secs();
+        // `SetPlayerWalk`: el Rage Fighter camina a 0.32 en vez de 0.33.
+        let fps = if p.class == crate::account::Class::Fighter && p.action == p.walk {
+            0.32 * crate::fx::sim::TICKS_PER_SECOND
+        } else {
+            action_fps(p.action)
+        };
+        p.frame += p.casting.unwrap_or(fps) * time.delta_secs();
         if p.action == p.walk {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }
@@ -771,7 +783,7 @@ fn animate(
             terrain.as_deref().map(|t| &t.0),
             Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, ground),
             Quat::from_rotation_z(p.facing),
-            1.0,
+            p.class.game_scale(),
         );
         let bones = s.pose(p.action, p.frame, weapon_on_back(&p, terrain.as_deref()), &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
@@ -806,7 +818,7 @@ pub fn player_transform(p: &Player, terrain: Option<&LoadedTerrain>) -> Transfor
     Transform {
         translation: Vec3::new(p.pos.x, h / MU_SCALE, -p.pos.y),
         rotation: to_bevy * Quat::from_rotation_z(p.facing),
-        scale: Vec3::splat(1.0 / MU_SCALE),
+        scale: Vec3::splat(p.class.game_scale() / MU_SCALE),
     }
 }
 
