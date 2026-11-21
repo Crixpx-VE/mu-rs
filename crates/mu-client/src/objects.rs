@@ -25,6 +25,7 @@ use mu_data::texture::AlphaKind;
 use mu_data::{bmd, fs, objects, texture};
 
 use crate::Args;
+use crate::model_light::{ModelLight, ModelMaterial, model_material};
 use crate::effects::{Emitters, PlacedEmitter};
 use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
 
@@ -44,7 +45,7 @@ impl Plugin for ObjectsPlugin {
 /// Materiales de los techos, que se desvanecen al entrar en una casa.
 #[derive(Resource)]
 struct Roofs {
-    materials: Vec<(Handle<StandardMaterial>, AlphaMode)>,
+    materials: Vec<(Handle<ModelMaterial>, AlphaMode)>,
     alpha: f32,
 }
 
@@ -62,7 +63,7 @@ fn fade_roofs(
     terrain: Option<Res<LoadedTerrain>>,
     players: Query<&crate::character::Player>,
     mut roofs: ResMut<Roofs>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
 ) {
     let (Some(t), Ok(p)) = (terrain, players.single()) else { return };
     if roofs.materials.is_empty() {
@@ -84,9 +85,9 @@ fn fade_roofs(
     roofs.alpha = alpha;
     for (h, original) in &roofs.materials {
         if let Some(mut m) = materials.get_mut(h) {
-            m.base_color.set_alpha(alpha);
+            m.base.base_color.set_alpha(alpha);
             // Opaco del todo: como siempre. Mientras se desvanece: con transparencia.
-            m.alpha_mode = if alpha >= 1.0 { *original } else { AlphaMode::Blend };
+            m.base.alpha_mode = if alpha >= 1.0 { *original } else { AlphaMode::Blend };
         }
     }
 }
@@ -109,7 +110,7 @@ struct AnimatedModel {
 struct AnimatedMaterials(Vec<AnimatedMaterial>);
 
 struct AnimatedMaterial {
-    handle: Handle<StandardMaterial>,
+    handle: Handle<ModelMaterial>,
     glow: Glow,
     /// Unidades de textura por segundo (u, v).
     scroll: [f32; 2],
@@ -132,7 +133,7 @@ fn animate_objects(time: Res<Time>, mut anims: ResMut<AnimatedModels>, mut meshe
 fn animate_materials(
     time: Res<Time>,
     anims: Res<AnimatedMaterials>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
     mut tick: Local<f32>,
     mut rng: Local<u32>,
 ) {
@@ -153,11 +154,11 @@ fn animate_materials(
         };
         let Some(mut m) = materials.get_mut(&a.handle) else { continue };
         if let Some(g) = glow {
-            m.base_color = Color::linear_rgb(g, g, g);
+            m.base.base_color = Color::linear_rgb(g, g, g);
         }
         if a.scroll != [0.0; 2] {
             let offset = Vec2::new((a.scroll[0] * t).fract(), (a.scroll[1] * t).fract());
-            m.uv_transform = Affine2::from_translation(offset);
+            m.base.uv_transform = Affine2::from_translation(offset);
         }
     }
 }
@@ -198,7 +199,7 @@ struct Caches {
     /// (modelo, velocidad en milésimas de fotograma/s; 0 = estático) → mallas
     models: HashMap<(PathBuf, u32), Vec<ModelPart>>,
     images: HashMap<PathBuf, Option<(Handle<Image>, AlphaKind)>>,
-    materials: HashMap<MaterialKey, Handle<StandardMaterial>>,
+    materials: HashMap<MaterialKey, Handle<ModelMaterial>>,
 }
 
 fn spawn_objects(
@@ -206,7 +207,7 @@ fn spawn_objects(
     args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut anims: ResMut<AnimatedModels>,
     mut mat_anims: ResMut<AnimatedMaterials>,
@@ -358,7 +359,7 @@ fn spawn_objects(
                             .clone()
                     });
                     let mat = object_material(image, part.additive, light);
-                    let original_mode = mat.alpha_mode;
+                    let original_mode = mat.base.alpha_mode;
                     let m = materials.add(mat);
                     if rules.fade_indoors {
                         roofs.materials.push((m.clone(), original_mode));
@@ -447,9 +448,9 @@ fn build_parts(model: &bmd::Bmd, dir: &Path, additive_mesh: Option<usize>, meshe
 /// Umbral de la prueba de alfa del original (`glAlphaFunc(GL_GREATER, 0.25)`).
 pub const ALPHA_REF: f32 = 0.25;
 
-fn object_material(image: Option<(Handle<Image>, AlphaKind)>, additive: bool, light: [u8; 3]) -> StandardMaterial {
-    // Misma conversión que el terreno: la luz del original se multiplica en sRGB.
-    let l = light.map(|v| (v as f32 / 15.0).powf(2.2));
+fn object_material(image: Option<(Handle<Image>, AlphaKind)>, additive: bool, light: [u8; 3]) -> ModelMaterial {
+    // La luz del terreno por la de la normal de cada vértice (`model_light.wesl`).
+    let l = light.map(|v| v as f32 / 15.0);
     let alpha_mode = match (additive, image.as_ref().map(|i| i.1)) {
         (true, _) => AlphaMode::Add,
         // El original dibuja las texturas con alfa con prueba de alfa (> 0.25) y escribiendo
@@ -458,15 +459,17 @@ fn object_material(image: Option<(Handle<Image>, AlphaKind)>, additive: bool, li
         (_, Some(AlphaKind::Cutout | AlphaKind::Blend)) => AlphaMode::Mask(ALPHA_REF),
         _ => AlphaMode::Opaque,
     };
-    StandardMaterial {
-        // Las mallas aditivas son luz propia: no las oscurece la sombra del terreno.
-        base_color: if additive { Color::WHITE } else { Color::linear_rgb(l[0], l[1], l[2]) },
+    let base = StandardMaterial {
+        base_color: Color::WHITE,
         base_color_texture: image.map(|i| i.0),
         unlit: true,
         cull_mode: None,
         alpha_mode,
         ..default()
-    }
+    };
+    // Las mallas aditivas son luz propia: no las oscurece la sombra del terreno
+    // (el original no ilumina las `BlendMesh`).
+    model_material(base, if additive { ModelLight::unlit() } else { ModelLight::lit(l) })
 }
 
 /// Posición/rotación/escala del objeto en MU, convertida a Bevy.

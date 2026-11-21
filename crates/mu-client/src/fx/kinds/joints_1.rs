@@ -157,7 +157,7 @@ fn magic_screw_at(frame: f64, speed_rate: f32) -> Vec3 {
 }
 
 /// `GetMagicScrew(iParam, vResult, fSpeedRate)`: con el reloj `WorldTime / 40`.
-fn magic_screw(param: i32, speed_rate: f32, world_time: f32) -> Vec3 {
+pub(crate) fn magic_screw(param: i32, speed_rate: f32, world_time: f32) -> Vec3 {
     magic_screw_at(param as f64 + world_time as f64 / 40.0, speed_rate)
 }
 

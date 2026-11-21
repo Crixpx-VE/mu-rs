@@ -30,7 +30,9 @@ mod fx;
 mod grass;
 mod hud;
 mod invasion;
+mod logfile;
 mod mainframe;
+mod model_light;
 mod objects;
 mod settings;
 mod terrain;
@@ -141,6 +143,7 @@ fn main() {
         // (funciona aunque no haya pantalla, p. ej. sesión remota desconectada).
         app.add_plugins(
             DefaultPlugins
+                .set(logfile::plugin())
                 .set(WindowPlugin {
                     primary_window: None,
                     exit_condition: bevy::window::ExitCondition::DontExit,
@@ -150,7 +153,7 @@ fn main() {
         )
         .add_plugins(bevy::app::ScheduleRunnerPlugin::run_loop(std::time::Duration::from_secs_f64(1.0 / 30.0)));
     } else {
-        app.insert_resource(bevy::winit::WinitSettings::continuous()).add_plugins(DefaultPlugins.set(
+        app.insert_resource(bevy::winit::WinitSettings::continuous()).add_plugins(DefaultPlugins.set(logfile::plugin()).set(
             WindowPlugin {
                 primary_window: Some(Window {
                     title,
@@ -185,5 +188,6 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin))
         .run();
 }

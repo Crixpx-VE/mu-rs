@@ -5,6 +5,7 @@
 //! 1. Pide la lista de archivos al servidor (dirección en `mu-launcher.txt`: `servidor=http://ip:puerto`).
 //! 2. Descarga lo que falte o haya cambiado, comprobando la huella SHA-256 de cada archivo.
 //! 3. Abre `mu-client.exe` con las opciones recibidas.
+//! 4. Al cerrarse el juego, sube su registro (`mu-client.log`) al servidor (`POST /log`).
 //!
 //! Si el servidor no responde, abre la versión que ya hay. Si se actualiza a sí mismo,
 //! se vuelve a abrir con la versión nueva.
@@ -21,6 +22,8 @@ use sha2::{Digest, Sha256};
 const CONFIG_FILE: &str = "mu-launcher.txt";
 const STATE_FILE: &str = ".mu-launcher-state";
 const CLIENT_EXE: &str = "mu-client.exe";
+/// Lo que el juego saca por consola (el registro propio del juego es `mu-client.log`).
+const CONSOLE_LOG: &str = "mu-client-consola.log";
 
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
@@ -31,7 +34,8 @@ fn main() {
     let _ = std::fs::remove_file(dir.join(self_name()).with_extension("exe.old"));
 
     println!("MU Rust - lanzador {}", env!("CARGO_PKG_VERSION"));
-    match server_url(&dir) {
+    let url = server_url(&dir);
+    match url.clone() {
         Some(url) => match update(&dir, &url) {
             Ok(Updated { files: 0, .. }) => println!("El cliente está al día."),
             Ok(Updated { files, relaunch }) => {
@@ -47,7 +51,35 @@ fn main() {
         None => println!("Sin servidor en {CONFIG_FILE}; no se buscan actualizaciones."),
     }
 
-    run_client(&dir, &game_args);
+    let ok = run_client(&dir, &game_args);
+    if let Some(url) = url {
+        send_log(&dir, &url);
+    }
+    if !ok {
+        println!("\nEl juego se cerró con un error. Mira mu-client.log. Pulsa Enter para salir.");
+        let _ = io::stdin().lock().lines().next();
+    }
+}
+
+/// Sube al servidor el registro del juego (`mu-client.log`) y lo que sacó por consola, para
+/// poder ver qué pasó sin que el jugador tenga que copiarlo.
+fn send_log(dir: &Path, url: &str) {
+    let read = |name: &str| std::fs::read(dir.join(name)).unwrap_or_default();
+    let mut body = b"=== mu-client.log ===\n".to_vec();
+    body.extend(read("mu-client.log"));
+    let console = read(CONSOLE_LOG);
+    if !console.is_empty() {
+        body.extend(b"\n=== consola ===\n");
+        body.extend(console);
+    }
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(5))
+        .timeout_read(Duration::from_secs(20))
+        .build();
+    match agent.post(&format!("{url}/log")).send_bytes(&body) {
+        Ok(_) => println!("Registro del juego enviado."),
+        Err(e) => println!("No se pudo enviar el registro del juego ({e})."),
+    }
 }
 
 fn self_name() -> String {
@@ -249,10 +281,11 @@ fn save_state(dir: &Path, state: &State) {
     let _ = std::fs::write(dir.join(STATE_FILE), text);
 }
 
-/// Abre el juego; su registro va a `mu-client.log`. Si se cierra con error, lo avisa.
-fn run_client(dir: &Path, args: &[String]) {
+/// Abre el juego y espera a que se cierre. Devuelve si terminó bien. El juego escribe su
+/// registro en `mu-client.log`; lo que saca por consola va a `mu-client-consola.log`.
+fn run_client(dir: &Path, args: &[String]) -> bool {
     let exe: PathBuf = dir.join(CLIENT_EXE);
-    let log = std::fs::File::create(dir.join("mu-client.log")).ok();
+    let log = std::fs::File::create(dir.join(CONSOLE_LOG)).ok();
     let mut cmd = Command::new(&exe);
     cmd.args(args).current_dir(dir);
     if let Some(log) = log {
@@ -261,15 +294,11 @@ fn run_client(dir: &Path, args: &[String]) {
         }
     }
     println!("Abriendo el juego...");
-    let ok = match cmd.status() {
+    match cmd.status() {
         Ok(s) => s.success(),
         Err(e) => {
             println!("No se pudo abrir {}: {e}", exe.display());
             false
         }
-    };
-    if !ok {
-        println!("\nEl juego se cerró con un error. Mira mu-client.log. Pulsa Enter para salir.");
-        let _ = io::stdin().lock().lines().next();
     }
 }

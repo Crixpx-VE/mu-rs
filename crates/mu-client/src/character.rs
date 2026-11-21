@@ -34,7 +34,7 @@ pub struct CharacterPlugin;
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, spawn_player)
-            .add_systems(Update, (scripted_walk, click_to_move, cast_skill, walk, animate).chain());
+            .add_systems(Update, (scripted_walk, click_to_move, cast_skill, walk, animate, light_body).chain());
     }
 }
 
@@ -121,7 +121,7 @@ fn spawn_player(
     args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let dir = args.data.join("Player");
@@ -143,6 +143,7 @@ fn spawn_player(
     let mut models = vec![];
     let mut parts = vec![];
     let mut children = vec![];
+    let mut body_materials = vec![];
     for name in DARK_KNIGHT {
         let Ok(model) = fs::read(&dir, name).and_then(|b| bmd::read(&b)) else {
             warn!("falta la pieza {name}");
@@ -160,6 +161,7 @@ fn spawn_player(
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs);
             let handle = meshes.add(mesh);
             let material = materials.add(part_material(&dir, &model.meshes[i].texture, &mut images));
+            body_materials.push(material.clone());
             children.push((Mesh3d(handle.clone()), MeshMaterial3d(material)));
             parts.push((model_index, i, handle));
         }
@@ -183,6 +185,7 @@ fn spawn_player(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
             let material = materials.add(part_material(&item_dir, &w.meshes[i].texture, &mut images));
+            body_materials.push(material.clone());
             children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material)));
             handles.push((i, mesh));
         }
@@ -200,6 +203,7 @@ fn spawn_player(
         Visibility::default(),
         player,
         Skinned { skeleton, parts, models, weapon },
+        BodyMaterials(body_materials),
         actor,
     ));
     for child in children {
@@ -316,19 +320,53 @@ fn scripted_walk(
     }
 }
 
-fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> StandardMaterial {
+fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> crate::model_light::ModelMaterial {
     let tex = texture::load(dir, &bmd::texture_file_name(texture_name)).ok();
     // Igual que los objetos: prueba de alfa y profundidad, como el original.
     let alpha_mode = match tex.as_ref().map(|t| t.alpha_kind()) {
         Some(AlphaKind::Cutout | AlphaKind::Blend) => AlphaMode::Mask(crate::objects::ALPHA_REF),
         _ => AlphaMode::Opaque,
     };
-    StandardMaterial {
+    let base = StandardMaterial {
         base_color_texture: tex.map(|t| images.add(to_bevy_image(&t))),
         unlit: true,
         cull_mode: None,
         alpha_mode,
         ..default()
+    };
+    crate::model_light::model_material(base, crate::model_light::ModelLight::lit([1.0; 3]))
+}
+
+/// Materiales del cuerpo y del arma, para darles la luz del sitio donde está el personaje.
+#[derive(Component)]
+struct BodyMaterials(Vec<Handle<crate::model_light::ModelMaterial>>);
+
+/// `BodyLight`: la luz del terreno bajo el personaje (`RequestTerrainLight`, interpolada).
+fn light_body(
+    terrain: Option<Res<LoadedTerrain>>,
+    players: Query<(&Player, &BodyMaterials)>,
+    mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
+    mut last: Local<Vec4>,
+) {
+    let Some(t) = terrain else { return };
+    let Ok((p, body)) = players.single() else { return };
+    let size = mu_data::terrain::SIZE;
+    let x = p.pos.x.clamp(0.0, (size - 2) as f32);
+    let y = p.pos.y.clamp(0.0, (size - 2) as f32);
+    let (xi, yi) = (x as usize, y as usize);
+    let (fx, fy) = (x - xi as f32, y - yi as f32);
+    let l = |x: usize, y: usize| Vec3::from_array(t.0.light[y * size + x]);
+    let top = l(xi, yi).lerp(l(xi + 1, yi), fx);
+    let bottom = l(xi, yi + 1).lerp(l(xi + 1, yi + 1), fx);
+    let light = top.lerp(bottom, fy).extend(1.0);
+    if light == *last {
+        return;
+    }
+    *last = light;
+    for h in &body.0 {
+        if let Some(mut m) = materials.get_mut(h) {
+            m.extension.light = light;
+        }
     }
 }
 

@@ -15,6 +15,7 @@ pub mod effects_dk2;
 pub mod skills_dk;
 pub mod objects_1;
 pub mod objects_2;
+pub mod fire;
 
 use super::core::Registry;
 
@@ -33,4 +34,5 @@ pub fn register_all(r: &mut Registry) {
     skills_dk::register(r);
     objects_1::register(r);
     objects_2::register(r);
+    fire::register(r);
 }

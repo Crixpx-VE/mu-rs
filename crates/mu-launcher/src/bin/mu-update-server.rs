@@ -7,8 +7,12 @@
 //! Cuando cambia un archivo (por ejemplo, al publicar un `mu-client.exe` nuevo), la lista se
 //! recalcula sola; para evitar entregar un archivo a medio copiar, publícalo con un nombre
 //! temporal (`.tmp`) y renómbralo al final.
+//!
+//! También recibe los registros del juego que suben los lanzadores (`POST /log`) y los guarda
+//! en `registros/` junto a este programa (como mucho 8 MB cada uno y los 300 últimos).
 
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -105,8 +109,66 @@ fn main() {
     }
 }
 
+/// Tamaño máximo de un registro subido.
+const MAX_LOG: usize = 8 << 20;
+/// Registros que se guardan como mucho (se borran los más viejos).
+const MAX_LOGS: usize = 300;
+
+/// Carpeta de los registros que suben los lanzadores: `registros` junto a este programa
+/// (fuera de la carpeta publicada).
+fn logs_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|e| Some(e.parent()?.join("registros")))
+        .unwrap_or_else(|| PathBuf::from("registros"))
+}
+
+/// `POST /log`: el lanzador sube el registro del juego al cerrarse.
+fn receive_log(mut req: Request, who: &str) {
+    let mut body = Vec::new();
+    let read = std::io::Read::take(req.as_reader(), MAX_LOG as u64 + 1).read_to_end(&mut body);
+    if read.is_err() || body.len() > MAX_LOG {
+        let _ = req.respond(Response::from_string("demasiado grande").with_status_code(413));
+        return;
+    }
+    let dir = logs_dir();
+    let saved = std::fs::create_dir_all(&dir).and_then(|_| {
+        let secs = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let name = format!("{secs}-{}.log", who.replace([':', '.'], "_"));
+        std::fs::write(dir.join(&name), &body).map(|_| name)
+    });
+    match saved {
+        Ok(name) => {
+            println!("{who} sube un registro ({} KB): registros/{name}", body.len() / 1000);
+            prune_logs(&dir);
+            let _ = req.respond(Response::from_string("ok"));
+        }
+        Err(e) => {
+            eprintln!("no se pudo guardar el registro de {who}: {e}");
+            let _ = req.respond(Response::from_string("error").with_status_code(500));
+        }
+    }
+}
+
+fn prune_logs(dir: &Path) {
+    let Ok(read) = std::fs::read_dir(dir) else { return };
+    let mut names: Vec<_> = read.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "log")).collect();
+    if names.len() <= MAX_LOGS {
+        return;
+    }
+    // Los nombres empiezan por la hora: el orden alfabético es el de llegada.
+    names.sort();
+    for old in &names[..names.len() - MAX_LOGS] {
+        let _ = std::fs::remove_file(old);
+    }
+}
+
 fn handle(req: Request, catalog: &Mutex<Catalog>) {
     let who = req.remote_addr().map(|a| a.ip().to_string()).unwrap_or_default();
+    if matches!(req.method(), Method::Post) && req.url() == "/log" {
+        receive_log(req, &who);
+        return;
+    }
     if !matches!(req.method(), Method::Get) {
         let _ = req.respond(Response::from_string("").with_status_code(405));
         return;
