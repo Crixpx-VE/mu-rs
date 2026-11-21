@@ -320,7 +320,9 @@ fn step_boids(
                 let o = &mut b.list[i];
                 if o.ai == Ai::Fly {
                     let dist = (o.pos.truncate() - hero_mu.truncate()).length();
-                    if world_ms % 8192 < 2048 && (200.0..=400.0).contains(&dist) {
+                    // Solo bajan a posarse si el personaje está quieto: si no, rebotan en el
+                    // suelo y vuelven a bajar una y otra vez a su lado (parece que lo persiguen).
+                    if hero_still && world_ms % 8192 < 2048 && (200.0..=400.0).contains(&dist) {
                         o.ai = Ai::Down;
                     }
                     o.velocity = 1.0;

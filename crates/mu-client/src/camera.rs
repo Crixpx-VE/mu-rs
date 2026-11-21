@@ -126,14 +126,15 @@ fn mu_fov() -> f32 {
     2.0 * (h_half.tan() / (4.0 / 3.0)).atan()
 }
 
-/// Cámara del juego tal como la calcula el original (`DefaultCamera.cpp`):
+/// Cámara del juego tal como la calcula el original (`DefaultCamera::Update`):
 ///
-/// - Ángulos (-48.5°, 0, -45°); la vista es `Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL.
-/// - Posición: `héroe + AngleMatrixᵀ·(0, -distancia, 0)` en horizontal, y en altura
-///   `héroe.z + distancia - 150`.
+/// 1. Con los ángulos base (0, 0, -45°) se calcula la posición: `héroe + AngleMatrixᵀ·(0, -distancia, 0)`
+///    en horizontal, y en altura `héroe.z + distancia - 150`.
+/// 2. Después `SetCameraAngle` pone la inclinación de -48.5°, que solo afecta a la vista
+///    (`Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL).
 ///
 /// Resultado: la cámara queda al sureste del personaje mirando al noroeste, inclinada 41.5°
-/// hacia abajo, y el personaje sale algo por debajo del centro de la pantalla.
+/// hacia abajo, y el personaje sale justo en el centro de la pantalla.
 /// `hero` va en coordenadas de Bevy; `distance` en unidades de MU.
 fn mu_camera(hero: Vec3, distance: f32) -> Transform {
     let (s0, c0) = (-48.5f32).to_radians().sin_cos();
@@ -141,7 +142,8 @@ fn mu_camera(hero: Vec3, distance: f32) -> Transform {
     // En coordenadas de MU (x, y, z arriba):
     let forward = Vec3::new(-s0 * s2, -s0 * c2, -c0);
     let up = Vec3::new(c0 * s2, c0 * c2, -s0);
-    let offset = Vec3::new(-s2 * distance, -c0 * c2 * distance, distance - 150.0);
+    // Posición con inclinación 0 (paso 1): solo gira el yaw.
+    let offset = Vec3::new(-s2 * distance, -c2 * distance, distance - 150.0);
     // MU (x, y, z) → Bevy (x, z, -y), 100 unidades por casilla.
     let to_bevy = |v: Vec3| Vec3::new(v.x, v.z, -v.y);
     Transform::from_translation(hero + to_bevy(offset) / MU_SCALE).looking_to(to_bevy(forward), to_bevy(up))
