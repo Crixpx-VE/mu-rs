@@ -146,6 +146,18 @@ pub struct ModelRules {
     /// Malla cuya textura se desplaza (`BlendMesh` o `StreamMesh`) y cuánto por segundo (u, v).
     pub scroll: Option<(usize, [f32; 2])>,
     pub velocity: Velocity,
+    /// Techo: se desvanece cuando el personaje entra en la casa (ver [`indoor_tile`]).
+    pub fade_indoors: bool,
+}
+
+/// Si la textura de suelo `tile` (capa 1) bajo el personaje es "dentro de una casa"
+/// (`HeroTile` en `MoveObject`): entonces los techos se desvanecen.
+pub fn indoor_tile(world: u16, tile: u8) -> bool {
+    match world {
+        1 => tile == 4,                // Lorencia
+        3 => tile == 3 || tile >= 10,  // Devias
+        _ => false,
+    }
 }
 
 impl Default for ModelRules {
@@ -156,6 +168,7 @@ impl Default for ModelRules {
             glow: Glow::Steady(1.0),
             scroll: None,
             velocity: Velocity::Fixed(DEFAULT_VELOCITY),
+            fade_indoors: false,
         }
     }
 }
@@ -195,7 +208,12 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
     let r = ModelRules::default;
     let add = ModelRules::add;
     let hidden = ModelRules::hidden;
+    let roof = || ModelRules { fade_indoors: true, ..r() };
     match (world, kind) {
+        // Techos que desaparecen al entrar en la casa.
+        (1, 125 | 126) => roof(),                // Lorencia: HouseWall05-06
+        (3, 81 | 82 | 96 | 98 | 99) => roof(),   // Devias
+
         // Lorencia (WD_0LORENCIA)
         (1, 0 | 1) => ModelRules { velocity: Velocity::PerScale(0.4), ..r() }, // Tree01-02 (se mecen)
         (1, 52) => add(1).flicker(0.4, 0.9),                                   // Bonfire

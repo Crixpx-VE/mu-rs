@@ -19,6 +19,7 @@
 
 mod camera;
 mod character;
+mod grass;
 mod objects;
 mod terrain;
 
@@ -126,6 +127,7 @@ fn main() {
     app.insert_resource(args)
         .add_plugins((
             terrain::TerrainPlugin,
+            grass::GrassPlugin,
             objects::ObjectsPlugin,
             character::CharacterPlugin,
             camera::FlyCameraPlugin,

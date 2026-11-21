@@ -34,8 +34,59 @@ impl Plugin for ObjectsPlugin {
         // PostStartup: el terreno (Startup) ya está cargado para consultar su luz.
         app.init_resource::<AnimatedModels>()
             .init_resource::<AnimatedMaterials>()
+            .init_resource::<Roofs>()
             .add_systems(PostStartup, spawn_objects)
-            .add_systems(Update, (animate_objects, animate_materials));
+            .add_systems(Update, (animate_objects, animate_materials, fade_roofs));
+    }
+}
+
+/// Materiales de los techos, que se desvanecen al entrar en una casa.
+#[derive(Resource)]
+struct Roofs {
+    materials: Vec<(Handle<StandardMaterial>, AlphaMode)>,
+    alpha: f32,
+}
+
+impl Default for Roofs {
+    fn default() -> Self {
+        Self { materials: vec![], alpha: 1.0 }
+    }
+}
+
+/// `Alpha()` del original: `alpha += (objetivo - alpha) · 0.1` en cada tick (25 por segundo),
+/// pasado a tiempo real para que tarde lo mismo a cualquier fps.
+fn fade_roofs(
+    time: Res<Time>,
+    args: Res<Args>,
+    terrain: Option<Res<LoadedTerrain>>,
+    players: Query<&crate::character::Player>,
+    mut roofs: ResMut<Roofs>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let (Some(t), Ok(p)) = (terrain, players.single()) else { return };
+    if roofs.materials.is_empty() {
+        return;
+    }
+    let (x, y) = ((p.pos.x.max(0.0) as usize).min(SIZE - 1), (p.pos.y.max(0.0) as usize).min(SIZE - 1));
+    let inside = objects::indoor_tile(args.world, t.0.mapping.layer1[y * SIZE + x]);
+    let target = if inside { 0.0 } else { 1.0 };
+
+    let before = roofs.alpha;
+    let keep = 0.9f32.powf(time.delta_secs() * objects::TICKS_PER_SECOND);
+    let mut alpha = target + (before - target) * keep;
+    if (alpha - target).abs() < 0.005 {
+        alpha = target;
+    }
+    if alpha == before {
+        return;
+    }
+    roofs.alpha = alpha;
+    for (h, original) in &roofs.materials {
+        if let Some(mut m) = materials.get_mut(h) {
+            m.base_color.set_alpha(alpha);
+            // Opaco del todo: como siempre. Mientras se desvanece: con transparencia.
+            m.alpha_mode = if alpha >= 1.0 { *original } else { AlphaMode::Blend };
+        }
     }
 }
 
@@ -158,6 +209,7 @@ fn spawn_objects(
     mut images: ResMut<Assets<Image>>,
     mut anims: ResMut<AnimatedModels>,
     mut mat_anims: ResMut<AnimatedMaterials>,
+    mut roofs: ResMut<Roofs>,
 ) {
     let list = match objects::load(&args.data, args.world) {
         Ok(l) => l,
@@ -223,7 +275,8 @@ fn spawn_objects(
                 texture: part.texture.clone(),
                 light,
                 additive: part.additive,
-                effect_owner: effect.map(|_| (rel.clone(), part.mesh_index)),
+                // Los techos tampoco comparten material: se desvanecen por su cuenta.
+                effect_owner: (effect.is_some() || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
             };
             let material = match c.materials.get(&key) {
                 Some(m) => m.clone(),
@@ -238,7 +291,12 @@ fn spawn_objects(
                             })
                             .clone()
                     });
-                    let m = materials.add(object_material(image, part.additive, light));
+                    let mat = object_material(image, part.additive, light);
+                    let original_mode = mat.alpha_mode;
+                    let m = materials.add(mat);
+                    if rules.fade_indoors {
+                        roofs.materials.push((m.clone(), original_mode));
+                    }
                     if let Some((glow, scroll)) = effect {
                         mat_anims.0.push(AnimatedMaterial { handle: m.clone(), glow, scroll });
                     }
