@@ -9,6 +9,18 @@
 //!
 //! Efectos de material (del original): mallas aditivas que parpadean como el fuego o laten,
 //! y texturas que se desplazan (agua que cae, cascadas).
+//!
+//! Cómo se dibuja cada malla sale de las pasadas del tipo (`ModelRules::passes`: las llamadas a
+//! `RenderBody`/`RenderMesh` de su código de dibujo) y de los guiones de textura (`_R`, `_H`, `_S`, `_N`),
+//! con `mu_data::objects::render::resolve_all`: cromado, resta (`RENDER_DARK`), suma (`RENDER_BRIGHT`,
+//! `BlendMesh`), `StreamMesh` y texturas puestas en lugar de la de la malla. Cada pasada de cada malla es
+//! una entidad con la misma malla; como el original dibuja con `GL_LEQUAL` (la última pasada tapa a las
+//! anteriores en el mismo sitio), cada pasada lleva un poco más de `depth_bias` que la anterior.
+//!
+//! Lo que se mueve por su cuenta (puertas de Devias, calaveras de Lost Tower) y las sombras de
+//! `RenderBodyShadow` están en [`movers`].
+
+mod movers;
 
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -16,10 +28,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
-use mu_data::objects::{Glow, ModelRules};
+use mu_data::bmd::TextureScript;
+use mu_data::objects::render::{Bitmap, ChromeMode, LookBlend, LookColor, MeshInfo, MeshLook, ObjectDraw, Saw};
+use mu_data::objects::{Glow, Motion};
 use mu_data::terrain::SIZE;
 use mu_data::texture::AlphaKind;
 use mu_data::{bmd, fs, objects, texture};
@@ -38,8 +53,11 @@ impl Plugin for ObjectsPlugin {
             .init_resource::<AnimatedMaterials>()
             .init_resource::<Roofs>()
             .init_resource::<LoginFades>()
+            .init_resource::<movers::Movers>()
+            .init_resource::<movers::BodyShadows>()
             .add_systems(Update, spawn_objects.run_if(crate::scene::load_step(crate::scene::Step::Objects)))
-            .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects, light_login_objects));
+            .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects, light_login_objects))
+            .add_systems(Update, (movers::move_objects, movers::update_shadows.after(animate_objects)));
     }
 }
 
@@ -99,11 +117,15 @@ pub fn reset(
     mut mats: ResMut<AnimatedMaterials>,
     mut roofs: ResMut<Roofs>,
     mut login: ResMut<LoginFades>,
+    mut movers: ResMut<movers::Movers>,
+    mut shadows: ResMut<movers::BodyShadows>,
 ) {
     anims.0.clear();
     mats.0.clear();
     *roofs = Roofs::default();
     *login = LoginFades::default();
+    *movers = movers::Movers::default();
+    *shadows = movers::BodyShadows::default();
 }
 
 /// `LoginSceneCameraDefaults::RENDER_OBJECT_DIST` (`CameraMove.h`).
@@ -311,8 +333,21 @@ struct AnimatedModel {
     /// Fotogramas de animación por segundo.
     fps: f32,
     frame: f32,
+    /// `o->CurrentAction` (solo cambia en los que tienen [`SledDog`]).
+    action: usize,
     /// (índice de malla en el .bmd, malla compartida por las instancias del grupo)
     parts: Vec<(usize, Handle<Mesh>)>,
+    /// Huesos de la pose de este fotograma (para las sombras de `movers`).
+    bones: Vec<bmd::Mat34>,
+    /// Perro del trineo de Devias (un grupo propio por perro).
+    sled_dog: Option<SledDog>,
+}
+
+/// `RenderObjectVisual`, Devias 103 (`ZzzObject.cpp:2824-2831`): en el último fotograma de la acción,
+/// `rand()%32 == 0` → `SetAction(o, 1)`, si no `SetAction(o, 0)` (que reinicia la animación si cambia).
+struct SledDog {
+    tick: f32,
+    rng: crate::fx::core::Rng,
 }
 
 /// Materiales que cambian con el tiempo: brillo de las mallas aditivas y texturas que se mueven.
@@ -321,17 +356,43 @@ pub struct AnimatedMaterials(Vec<AnimatedMaterial>);
 
 struct AnimatedMaterial {
     handle: Handle<ModelMaterial>,
-    glow: Glow,
-    /// Unidades de textura por segundo (u, v).
-    scroll: [f32; 2],
+    /// `BlendMeshLight` que cambia (parpadeo, pulso).
+    glow: Option<Glow>,
+    /// Como lo multiplica el original (en su espacio de color) o, en el login, tal cual.
+    glow_srgb: bool,
+    /// `BlendMeshTexCoordU/V`.
+    wave: Option<[Saw; 2]>,
+}
+
+/// `BlendMeshLight` como color del material (el original multiplica en sRGB).
+fn glow_color(g: f32, srgb: bool) -> Color {
+    if srgb { Color::srgb(g, g, g) } else { Color::linear_rgb(g, g, g) }
 }
 
 fn animate_objects(time: Res<Time>, mut anims: ResMut<AnimatedModels>, mut meshes: ResMut<Assets<Mesh>>) {
+    let dt = time.delta_secs();
+    let tick_len = 1.0 / objects::TICKS_PER_SECOND;
     for a in &mut anims.0 {
-        a.frame += a.fps * time.delta_secs();
-        let bones = a.model.bone_matrices_at(0, a.frame);
+        a.frame += a.fps * dt;
+        if let Some(dog) = a.sled_dog.as_mut() {
+            let frames = a.model.actions.get(a.action).map_or(1, |x| x.frames.max(1)) as f32;
+            a.frame = a.frame.rem_euclid(frames);
+            dog.tick += dt;
+            while dog.tick >= tick_len {
+                dog.tick -= tick_len;
+                if a.frame.floor() as i32 == frames as i32 - 1 {
+                    let want = if dog.rng.rand() % 32 == 0 { 1 } else { 0 };
+                    // `SetAction`: solo si existe la acción y es otra.
+                    if want != a.action && want < a.model.actions.len() {
+                        a.action = want;
+                        a.frame = 0.0;
+                    }
+                }
+            }
+        }
+        a.bones = a.model.bone_matrices_at(a.action, a.frame);
         for (i, handle) in &a.parts {
-            let posed = a.model.pose_with(*i, &bones);
+            let posed = a.model.pose_with(*i, &a.bones);
             if let Some(mut m) = meshes.get_mut(handle) {
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
@@ -348,6 +409,8 @@ fn animate_materials(
     mut rng: Local<u32>,
 ) {
     let t = time.elapsed_secs();
+    // `WorldTime` del original, en ms.
+    let world_time = (time.elapsed_secs_f64() * 1000.0) as f32;
     // El parpadeo del original cambia en cada actualización de su lógica (25 por segundo).
     *tick += time.delta_secs();
     let new_tick = *tick >= 1.0 / objects::TICKS_PER_SECOND;
@@ -356,19 +419,19 @@ fn animate_materials(
     }
     for a in &anims.0 {
         let glow = match a.glow {
-            Glow::Steady(_) if a.scroll == [0.0; 2] => continue,
-            Glow::Flicker { .. } if !new_tick && a.scroll == [0.0; 2] => continue,
-            Glow::Steady(g) => Some(g),
-            Glow::Flicker { min, max } => new_tick.then(|| min + (max - min) * random(&mut rng)),
-            Glow::Pulse { freq, amp, base } => Some((t * freq).sin() * amp + base),
+            None | Some(Glow::Steady(_)) => None,
+            Some(Glow::Flicker { min, max }) => new_tick.then(|| min + (max - min) * random(&mut rng)),
+            Some(Glow::Pulse { freq, amp, base }) => Some((t * freq).sin() * amp + base),
         };
+        if glow.is_none() && a.wave.is_none() {
+            continue;
+        }
         let Some(mut m) = materials.get_mut(&a.handle) else { continue };
         if let Some(g) = glow {
-            m.base.base_color = Color::linear_rgb(g, g, g);
+            m.base.base_color = glow_color(g, a.glow_srgb);
         }
-        if a.scroll != [0.0; 2] {
-            let offset = Vec2::new((a.scroll[0] * t).fract(), (a.scroll[1] * t).fract());
-            m.base.uv_transform = Affine2::from_translation(offset);
+        if let Some([u, v]) = a.wave {
+            m.base.uv_transform = Affine2::from_translation(Vec2::new(u.at(world_time), v.at(world_time)));
         }
     }
 }
@@ -390,15 +453,30 @@ struct ModelPart {
     mesh_index: usize,
     /// Ruta completa de la textura (clave de caché).
     texture: Option<PathBuf>,
-    /// Se dibuja sumando su color (luces, fuego, agua).
-    additive: bool,
+    /// `m->Texture`.
+    texture_index: i32,
+    /// Guion del nombre de la textura (`_R`, `_H`, `_S`, `_N`).
+    script: Option<TextureScript>,
+}
+
+/// De dónde sale la textura de una pasada.
+#[derive(Hash, PartialEq, Eq, Clone)]
+enum TextureSource {
+    None,
+    Own(PathBuf),
+    Bitmap(Bitmap),
 }
 
 #[derive(Hash, PartialEq, Eq)]
 struct MaterialKey {
-    texture: Option<PathBuf>,
+    texture: TextureSource,
+    /// `BodyLight` de la pasada (cuantizada).
     light: [u8; 3],
-    additive: bool,
+    blend: LookBlend,
+    color: LookColor,
+    chrome: Option<ChromeMode>,
+    /// Orden de la pasada (`depth_bias`).
+    pass: usize,
     /// Los materiales con efectos son propios de su (modelo, malla): no se comparten.
     effect_owner: Option<(PathBuf, usize)>,
     /// Los que se funden por su cuenta (objetos del login) son propios de su objeto.
@@ -408,10 +486,35 @@ struct MaterialKey {
 #[derive(Default)]
 struct Caches {
     bmds: HashMap<PathBuf, Option<Arc<bmd::Bmd>>>,
-    /// (modelo, velocidad en milésimas de fotograma/s; 0 = estático) → mallas
-    models: HashMap<(PathBuf, u32), Vec<ModelPart>>,
+    /// (modelo, velocidad en milésimas de fotograma/s; 0 = estático, objeto con grupo propio) → mallas
+    models: HashMap<(PathBuf, u32, Option<usize>), (Vec<ModelPart>, Option<usize>)>,
     images: HashMap<PathBuf, Option<(Handle<Image>, AlphaKind)>>,
+    bitmaps: HashMap<Bitmap, Option<Handle<Image>>>,
     materials: HashMap<MaterialKey, Handle<ModelMaterial>>,
+}
+
+/// Carga una textura global (`BITMAP_CHROME`...) con el filtro y el modo de repetición del original.
+fn load_bitmap(data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+    let rel = Path::new(b.path());
+    let mut dir = data.to_path_buf();
+    for part in rel.parent()?.iter() {
+        dir = fs::find(&dir, part.to_str()?)?;
+    }
+    let name = bmd::texture_file_name(rel.file_name()?.to_str()?);
+    let t = texture::load(&dir, &name).map_err(|e| warn!("{}: {e}", b.path())).ok()?;
+    let mut image = to_bevy_image(&t);
+    let filter = if b.nearest() { ImageFilterMode::Nearest } else { ImageFilterMode::Linear };
+    let address = if b.clamp() { ImageAddressMode::ClampToEdge } else { ImageAddressMode::Repeat };
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: address,
+        address_mode_v: address,
+        mag_filter: filter,
+        min_filter: filter,
+        mipmap_filter: filter,
+        anisotropy_clamp: if b.nearest() { 1 } else { 16 },
+        ..default()
+    });
+    Some(images.add(image))
 }
 
 fn spawn_objects(
@@ -429,9 +532,16 @@ fn spawn_objects(
     mut fx_world: ResMut<crate::fx::FxWorld>,
     mut login_fades: ResMut<LoginFades>,
     mut operates: ResMut<crate::operate::Operates>,
+    (mut movers, mut shadows, mut fx_materials): (
+        ResMut<movers::Movers>,
+        ResMut<movers::BodyShadows>,
+        ResMut<Assets<crate::fx::material::FxMaterial>>,
+    ),
 ) {
     // En el login cada objeto se funde por su cuenta según la distancia a la cámara.
     let login = args.world == crate::scene::LOGIN_WORLD;
+    // Login y selección de personaje: su brillo aditivo lo lleva `LoginFades`/`charselect` como siempre.
+    let login_scene = matches!(args.world, 74 | 75);
     let list = match objects::load(&args.data, args.world) {
         Ok(l) => l,
         Err(e) => {
@@ -561,14 +671,27 @@ fn spawn_objects(
             fx.0.push(place(e, Some((model.clone(), fps))));
         }
         let fps_key = (fps * 1000.0).round() as u32;
-        let parts = c.models.entry((rel.clone(), fps_key)).or_insert_with(|| {
+        // El perro del trineo cambia de acción por su cuenta: su propio grupo.
+        let own_group = (rules.motion == Some(Motion::SledDog) && fps_key > 0).then_some(index);
+        let (parts, group) = c.models.entry((rel.clone(), fps_key, own_group)).or_insert_with(|| {
             let dir = args.data.join(rel.parent().unwrap_or(Path::new("")));
-            let parts = build_parts(&model, &dir, rules.additive_mesh, &mut meshes);
+            let parts = build_parts(&model, &dir, &mut meshes);
+            let mut group = None;
             if fps_key > 0 {
                 let handles = parts.iter().map(|p| (p.mesh_index, p.mesh.clone())).collect();
-                anims.0.push(AnimatedModel { model: model.clone(), fps, frame: 0.0, parts: handles });
+                let sled_dog = own_group.map(|i| SledDog { tick: 0.0, rng: seeded_rng(i) });
+                anims.0.push(AnimatedModel {
+                    model: model.clone(),
+                    fps,
+                    frame: 0.0,
+                    action: 0,
+                    parts: handles,
+                    bones: model.bone_matrices(0, 0),
+                    sled_dog,
+                });
+                group = Some(anims.0.len() - 1);
             }
-            parts
+            (parts, group)
         });
 
         // Luz del terreno bajo el objeto, cuantizada para poder compartir materiales.
@@ -583,63 +706,130 @@ fn spawn_objects(
         // `b->BodyLight` fijo de algunos tipos (en vez de la luz del terreno).
         let light = rules.body_light.map_or(light, |l| [l; 3]);
         let light = light.map(|v| (v.clamp(0.0, 1.0) * 15.0).round() as u8);
+        let object_light = light.map(|v| v as f32 / 15.0);
 
+        let draw = ObjectDraw {
+            blend_mesh: rules.additive_mesh.map_or(-1, |m| m as i32),
+            stream_mesh: rules.stream_mesh.map_or(-1, |m| m as i32),
+            tex_coord: rules.tex_coord,
+            hidden_mesh: -1,
+        };
         let transform = object_transform(o);
+        let mut entities = Vec::new();
         for part in parts.iter() {
-            let effect = part_effect(&rules, part);
-            let key = MaterialKey {
-                texture: part.texture.clone(),
-                light,
-                additive: part.additive,
-                // Los techos tampoco comparten material: se desvanecen por su cuenta.
-                effect_owner: (effect.is_some() || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
-                // Los de sentarse tienen material propio: se iluminan con el ratón encima.
-                instance: (fade.is_some() || operate.is_some()).then_some(index),
+            let own_image = part.texture.as_ref().and_then(|p| {
+                c.images
+                    .entry(p.clone())
+                    .or_insert_with(|| {
+                        let dir = p.parent()?;
+                        let t = texture::load(dir, p.file_name()?.to_str()?).ok()?;
+                        Some((images.add(to_bevy_image(&t)), t.alpha_kind()))
+                    })
+                    .clone()
+            });
+            let info = MeshInfo {
+                index: part.mesh_index,
+                texture_index: part.texture_index,
+                script: part.script,
+                has_alpha: own_image.as_ref().is_some_and(|i| i.1 != AlphaKind::Opaque),
             };
-            let material = match c.materials.get(&key) {
-                Some(m) => m.clone(),
-                None => {
-                    let image = part.texture.as_ref().and_then(|p| {
-                        c.images
-                            .entry(p.clone())
-                            .or_insert_with(|| {
-                                let dir = p.parent()?;
-                                let t = texture::load(dir, p.file_name()?.to_str()?).ok()?;
-                                Some((images.add(to_bevy_image(&t)), t.alpha_kind()))
-                            })
-                            .clone()
-                    });
-                    let mat = object_material(image, part.additive, light);
-                    let original_mode = mat.base.alpha_mode;
-                    let m = materials.add(mat);
-                    if rules.fade_indoors {
-                        roofs.materials.push((m.clone(), original_mode));
+            for (pass, look) in objects::render::resolve_all(rules.passes, &draw, &info) {
+                let body = look.light.unwrap_or(object_light);
+                let glow = (look.color == LookColor::BlendLight).then_some(rules.glow);
+                let animated_glow = glow.filter(|g| !matches!(g, Glow::Steady(_)));
+                let has_effect = animated_glow.is_some() || look.wave.is_some();
+                let source = match (look.textured, look.texture, &part.texture) {
+                    (false, _, _) => TextureSource::None,
+                    (true, Some(b), _) => TextureSource::Bitmap(b),
+                    (true, None, Some(p)) => TextureSource::Own(p.clone()),
+                    (true, None, None) => TextureSource::None,
+                };
+                let key = MaterialKey {
+                    texture: source.clone(),
+                    light: body.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8),
+                    blend: look.blend,
+                    color: look.color,
+                    chrome: look.chrome,
+                    pass,
+                    // Los techos tampoco comparten material: se desvanecen por su cuenta.
+                    effect_owner: (has_effect || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
+                    // Los de sentarse tienen material propio: se iluminan con el ratón encima.
+                    instance: (fade.is_some() || operate.is_some()).then_some(index),
+                };
+                let material = match c.materials.get(&key) {
+                    Some(m) => m.clone(),
+                    None => {
+                        let image = match &source {
+                            TextureSource::None => None,
+                            TextureSource::Own(_) => own_image.as_ref().map(|i| i.0.clone()),
+                            TextureSource::Bitmap(b) => {
+                                c.bitmaps.entry(*b).or_insert_with(|| load_bitmap(&args.data, *b, &mut images)).clone()
+                            }
+                        };
+                        let mat = object_material(image, &look, body, glow, pass, login_scene);
+                        let original_mode = mat.base.alpha_mode;
+                        let m = materials.add(mat);
+                        if rules.fade_indoors {
+                            roofs.materials.push((m.clone(), original_mode));
+                        }
+                        if has_effect {
+                            mat_anims.0.push(AnimatedMaterial {
+                                handle: m.clone(),
+                                glow: animated_glow,
+                                glow_srgb: !login_scene,
+                                wave: look.wave,
+                            });
+                        }
+                        c.materials.insert(key, m.clone());
+                        m
                     }
-                    if let Some((glow, scroll)) = effect {
-                        mat_anims.0.push(AnimatedMaterial { handle: m.clone(), glow, scroll });
+                };
+                let additive = matches!(look.blend, LookBlend::Add | LookBlend::Subtract);
+                let original_mode = materials.get(&material).map_or(AlphaMode::Opaque, |m| m.base.alpha_mode);
+                let entity = commands
+                    .spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity))
+                    .id();
+                entities.push(entity);
+                if let Some(op) = operate.and_then(|i| operates.0.get_mut(i)) {
+                    // Las mallas aditivas y las de color propio no llevan la luz del objeto.
+                    if look.color == LookColor::Lit && look.light.is_none() {
+                        op.materials.push(material.clone());
+                        op.light = Vec3::from_array(object_light);
                     }
-                    c.materials.insert(key, m.clone());
-                    m
                 }
-            };
-            let original_mode = materials.get(&material).map_or(AlphaMode::Opaque, |m| m.base.alpha_mode);
-            let entity = commands
-                .spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity))
-                .id();
-            if let Some(op) = operate.and_then(|i| operates.0.get_mut(i)) {
-                // Las mallas aditivas no llevan la luz del objeto.
-                if !part.additive {
-                    op.materials.push(material.clone());
-                    op.light = Vec3::from_array(light.map(|v| v as f32 / 15.0));
+                if let Some(f) = fade.as_mut() {
+                    f.parts.push((entity, material, original_mode, additive));
                 }
+                spawned += 1;
             }
-            if let Some(f) = fade.as_mut() {
-                f.parts.push((entity, material, original_mode, part.additive));
-            }
-            spawned += 1;
         }
         if let Some(f) = fade {
             login_fades.objects.push(f);
+        }
+        if let Some(motion) = rules.motion.filter(|m| *m != Motion::SledDog) {
+            movers.0.push(movers::Mover::new(motion, o, entities));
+        }
+        if let Some(hidden) = rules.body_shadow {
+            let ground = terrain.as_ref().map_or(o.position[2], |t| {
+                t.0.height_at(o.position[0] / MU_SCALE, o.position[1] / MU_SCALE)
+            });
+            shadows.add(
+                &mut commands,
+                &mut meshes,
+                &mut fx_materials,
+                movers::ShadowSource {
+                    model: model.clone(),
+                    group: *group,
+                    // `RenderBodyShadow(o->BlendMesh, 2)`: ni la malla 2 ni la `BlendMesh`.
+                    meshes: (0..model.meshes.len())
+                        .filter(|&i| i != hidden && model.meshes[i].texture_index as i32 != draw.blend_mesh)
+                        .collect(),
+                    position: Vec3::from_array(o.position),
+                    rotation: mu_rotation,
+                    scale: o.scale,
+                    ground,
+                },
+            );
         }
     }
 
@@ -682,15 +872,17 @@ fn spawn_objects(
     }
 }
 
-/// Efecto de material de una malla, si tiene: (brillo, desplazamiento de textura por segundo).
-fn part_effect(rules: &ModelRules, part: &ModelPart) -> Option<(Glow, [f32; 2])> {
-    let scroll = rules.scroll.filter(|(m, _)| *m == part.mesh_index).map_or([0.0; 2], |(_, s)| s);
-    let glow = if part.additive { rules.glow } else { Glow::Steady(1.0) };
-    (glow != Glow::Steady(1.0) || scroll != [0.0; 2]).then_some((glow, scroll))
+/// `rand()` propio de cada perro (para que no hagan todos lo mismo a la vez).
+fn seeded_rng(index: usize) -> crate::fx::core::Rng {
+    let mut rng = crate::fx::core::Rng::default();
+    for _ in 0..(index % 97) {
+        rng.rand();
+    }
+    rng
 }
 
 /// Crea una malla de Bevy por cada malla del modelo (en la pose inicial).
-fn build_parts(model: &bmd::Bmd, dir: &Path, additive_mesh: Option<usize>, meshes: &mut Assets<Mesh>) -> Vec<ModelPart> {
+fn build_parts(model: &bmd::Bmd, dir: &Path, meshes: &mut Assets<Mesh>) -> Vec<ModelPart> {
     (0..model.meshes.len())
         .filter_map(|i| {
             let posed = model.pose(i, 0, 0);
@@ -701,12 +893,15 @@ fn build_parts(model: &bmd::Bmd, dir: &Path, additive_mesh: Option<usize>, meshe
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs);
+            let m = &model.meshes[i];
             Some(ModelPart {
                 mesh: meshes.add(mesh),
                 mesh_index: i,
-                texture: fs::find(dir, &bmd::texture_file_name(&model.meshes[i].texture)),
-                // El original compara con el índice de textura de la malla, no con el de malla.
-                additive: additive_mesh.is_some_and(|a| model.meshes[i].texture_index as usize == a),
+                texture: fs::find(dir, &bmd::texture_file_name(&m.texture)),
+                // El original compara la `BlendMesh` con el índice de textura de la malla.
+                texture_index: m.texture_index as i32,
+                // `BMD::Open` (`ZzzBMD.cpp:2562-2574`): el guion sale del nombre guardado en el modelo.
+                script: bmd::texture_script(&m.texture),
             })
         })
         .collect()
@@ -715,42 +910,77 @@ fn build_parts(model: &bmd::Bmd, dir: &Path, additive_mesh: Option<usize>, meshe
 /// Umbral de la prueba de alfa del original (`glAlphaFunc(GL_GREATER, 0.25)`).
 pub const ALPHA_REF: f32 = 0.25;
 
-fn object_material(image: Option<(Handle<Image>, AlphaKind)>, additive: bool, light: [u8; 3]) -> ModelMaterial {
-    // La luz del terreno por la de la normal de cada vértice (`model_light.wesl`).
-    let l = light.map(|v| v as f32 / 15.0);
-    let alpha_mode = match (additive, image.as_ref().map(|i| i.1)) {
-        (true, _) => AlphaMode::Add,
+/// Lo que se suma a `depth_bias` por cada pasada: la siguiente pasada sobre la misma malla queda
+/// delante de la anterior, como con `GL_LEQUAL` (unidades del búfer de profundidad: algo minúsculo).
+const PASS_DEPTH_BIAS: f32 = 2.0;
+
+/// Material de una malla en una pasada (`MeshLook`), con `body` = su `BodyLight` y `glow` = su
+/// `BlendMeshLight` si es la `BlendMesh`.
+fn object_material(
+    image: Option<Handle<Image>>,
+    look: &MeshLook,
+    body: [f32; 3],
+    glow: Option<Glow>,
+    pass: usize,
+    login_scene: bool,
+) -> ModelMaterial {
+    let alpha_mode = match look.blend {
+        LookBlend::Opaque => AlphaMode::Opaque,
         // El original dibuja las texturas con alfa con prueba de alfa (> 0.25) y escribiendo
         // profundidad (`EnableAlphaTest`). Mezclar sin profundidad hace que plantas y hojas
         // se pinten por encima de lo que tienen delante.
-        (_, Some(AlphaKind::Cutout | AlphaKind::Blend)) => AlphaMode::Mask(ALPHA_REF),
-        _ => AlphaMode::Opaque,
+        LookBlend::AlphaTest => AlphaMode::Mask(ALPHA_REF),
+        // La resta cambia la mezcla en `ModelLight::specialize`.
+        LookBlend::Add | LookBlend::Subtract => AlphaMode::Add,
+    };
+    // `BlendMeshLight` inicial (los que cambian los lleva `animate_materials`).
+    let g = match glow {
+        Some(Glow::Steady(g)) => g,
+        Some(Glow::Flicker { max, .. }) => max,
+        Some(Glow::Pulse { amp, base, .. }) => base + amp,
+        None => 1.0,
     };
     let base = StandardMaterial {
-        base_color: Color::WHITE,
-        base_color_texture: image.map(|i| i.0),
+        base_color: glow_color(g, !login_scene),
+        base_color_texture: image,
         unlit: true,
         cull_mode: None,
         alpha_mode,
+        depth_bias: pass as f32 * PASS_DEPTH_BIAS,
         ..default()
     };
-    // Las mallas aditivas son luz propia: no las oscurece la sombra del terreno
-    // (el original no ilumina las `BlendMesh`).
-    model_material(base, if additive { ModelLight::unlit() } else { ModelLight::lit(l) })
+    let light = match look.color {
+        // La luz del terreno por la de la normal de cada vértice (`model_light.wesl`).
+        LookColor::Lit => ModelLight::lit(body),
+        // `glColor3fv(BodyLight)`.
+        LookColor::Flat => ModelLight::flat(body),
+        // `glColor3f(BodyLight · BlendMeshLight)`. En el login y la selección de personaje el brillo
+        // lo llevan sus propios sistemas, como antes.
+        LookColor::BlendLight if login_scene => ModelLight::unlit(),
+        LookColor::BlendLight => ModelLight::flat(body),
+    };
+    model_material(
+        base,
+        light.with_chrome(look.chrome).with_subtract(look.blend == LookBlend::Subtract),
+    )
 }
 
 /// Posición/rotación/escala del objeto en MU, convertida a Bevy.
+fn object_transform(o: &objects::MapObject) -> Transform {
+    mu_transform(Vec3::from_array(o.position), Vec3::from_array(o.angle), o.scale)
+}
+
+/// Posición (MU), ángulos (grados) y escala de un objeto, en Bevy.
 ///
 /// MU: Z arriba, 100 unidades por casilla, ángulos en grados aplicados X→Y→Z.
 /// Bevy: Y arriba, 1 unidad por casilla. El cambio de ejes es un giro de -90° en X.
-fn object_transform(o: &objects::MapObject) -> Transform {
+pub(crate) fn mu_transform(position: Vec3, angle: Vec3, scale: f32) -> Transform {
     let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
-    let [ax, ay, az] = o.angle.map(f32::to_radians);
+    let [ax, ay, az] = angle.to_array().map(f32::to_radians);
     let rot = Quat::from_euler(EulerRot::ZYX, az, ay, ax);
-    let pos = Vec3::from_array(o.position);
     Transform {
-        translation: to_bevy * pos / MU_SCALE,
+        translation: to_bevy * position / MU_SCALE,
         rotation: to_bevy * rot,
-        scale: Vec3::splat(o.scale / MU_SCALE),
+        scale: Vec3::splat(scale / MU_SCALE),
     }
 }

@@ -10,8 +10,15 @@
 //! z  = altura del terreno en (x, y) + 5
 //! ```
 //!
-//! Se dibuja en negro semitransparente sin pintar dos veces el mismo punto (`Blend::Shadow`), para
-//! que los trozos que se solapan no queden más oscuros. Opacidad: la de la versión de referencia (0.6).
+//! Cómo se pinta depende del mapa (`RenderPartObjectEffect`, ZzzObject.cpp:9336-9358):
+//! - en casi todos, negro opaco (`DisableAlphaBlend` + `glColor3f(0, 0, 0)`); va con `Blend::Shadow`
+//!   a opacidad 1, que es lo mismo;
+//! - en Atlans (`WorldActive == 7`), negro al 20 % (`EnableAlphaTest` + `glColor4f(0, 0, 0, 0.2)`; la
+//!   prueba de alfa la quita `DisableTexture`) y sin escribir profundidad (`RenderBodyShadow`), así que
+//!   donde se solapan dos trozos oscurece más: `Blend::Blend3`;
+//! - en Kalima (`InHellas`) e Icarus (`WD_10HEAVEN`), ninguna.
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -22,8 +29,8 @@ use mu_data::terrain::Terrain;
 use crate::fx::material::{Blend, FxMaterial};
 use crate::terrain::MU_SCALE;
 
-/// Opacidad de la sombra (`kDefaultGroundShadowOpacity`).
-const OPACITY: f32 = 0.6;
+/// Opacidad de la sombra en Atlans (`glColor4f(0, 0, 0, 0.2)`).
+const ATLANS_OPACITY: f32 = 0.2;
 /// `shearX` y `shearHeight` de la proyección.
 const SHEAR_X: f32 = 2000.0;
 const SHEAR_HEIGHT: f32 = 4000.0;
@@ -36,9 +43,45 @@ impl Plugin for ShadowPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PreStartup, |mut commands: Commands, mut materials: ResMut<Assets<FxMaterial>>| {
             let mut m = FxMaterial::new(None, Blend::Shadow);
-            m.params.tint = Vec4::new(0.0, 0.0, 0.0, OPACITY);
+            m.params.tint = Vec4::new(0.0, 0.0, 0.0, 1.0);
             commands.insert_resource(ShadowMaterial(materials.add(m)));
-        });
+        })
+        .add_systems(Update, world_shadow);
+    }
+}
+
+/// Si el mapa cargado tiene sombras (lo consulta [`Builder::finish`]).
+static ENABLED: AtomicBool = AtomicBool::new(true);
+
+/// Cómo son las sombras en `world` (nuestro número de mapa): `None` = no hay; si no, mezcla y opacidad.
+fn world_style(world: u16) -> Option<(Blend, f32)> {
+    match world as i32 - 1 {
+        // Kalima 1-7 (`InHellas`) e Icarus.
+        24..=29 | 36 | 10 => None,
+        7 => Some((Blend::Blend3, ATLANS_OPACITY)),
+        _ => Some((Blend::Shadow, 1.0)),
+    }
+}
+
+/// Al cambiar de mapa, el material y si se dibujan.
+fn world_shadow(
+    args: Res<crate::Args>,
+    material: Option<Res<ShadowMaterial>>,
+    mut materials: ResMut<Assets<FxMaterial>>,
+    mut current: Local<Option<u16>>,
+) {
+    let Some(material) = material else { return };
+    if *current == Some(args.world) {
+        return;
+    }
+    *current = Some(args.world);
+    let style = world_style(args.world);
+    ENABLED.store(style.is_some(), Ordering::Relaxed);
+    if let Some((blend, alpha)) = style
+        && let Some(mut m) = materials.get_mut(&material.0)
+    {
+        m.blend = blend;
+        m.params.tint = Vec4::new(0.0, 0.0, 0.0, alpha);
     }
 }
 
@@ -93,6 +136,9 @@ impl<'a> Builder<'a> {
 
     /// Añade los vértices (triángulos sueltos) de una malla posada.
     pub fn add(&mut self, positions: &[[f32; 3]]) {
+        if !ENABLED.load(Ordering::Relaxed) {
+            return;
+        }
         self.out.reserve(positions.len());
         for p in positions {
             let mut r = self.rotation * (Vec3::from_array(*p) * self.scale);

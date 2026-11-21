@@ -105,20 +105,43 @@ pub fn read_attributes(buf: &[u8]) -> Result<Vec<u16>> {
         .collect())
 }
 
-/// Archivos de textura del suelo de `world` según su índice en las capas del `.map`.
-fn tile_textures(world: u16) -> Vec<(u8, String)> {
-    let mut v = default_tile_textures();
-    // Login (74) y selección de personaje (75): la 10 es `AlphaTile01.Tga` (`MapManager::LoadWorld`).
-    if world == 74 || world == 75 {
-        v[10].1 = "AlphaTile01.ozt".into();
+/// Archivos de textura del suelo de `world` según su índice en las capas del `.map`
+/// (`CMapManager::LoadWorld`, MapManager.cpp:1439-1583). Con carpeta (relativa a `Data`), la
+/// textura no está en la del mapa. `world` es la carpeta (`WorldActive + 1`).
+fn tile_textures(world: u16) -> Vec<(u8, Option<&'static str>, String)> {
+    let mut v: Vec<(u8, Option<&'static str>, String)> =
+        default_tile_textures().into_iter().map(|(i, n)| (i, None, n)).collect();
+    let mut set = |i: usize, dir: Option<&'static str>, name: &str| v[i] = (i as u8, dir, name.to_string());
+    match world {
+        // Elbeland (`WD_51HOME_6TH_CHAR`): la 2 es `AlphaTileGround01.Tga` (1445-1454).
+        52 => set(2, None, "AlphaTileGround01.ozt"),
+        // Kanturu 3 (`WD_39KANTURU_3RD`): la 3 es `AlphaTileGround02.Tga` (1461-1465).
+        40 => set(3, None, "AlphaTileGround02.ozt"),
+        // Illusion Temple (`IsCursedTemple`): la 4 es `AlphaTileGround03.Tga` (1471-1475).
+        46..=51 => set(4, None, "AlphaTileGround03.ozt"),
+        // Login / selección (1493-1497) y Empire Guardian (1579-1583): la 10 es `AlphaTile01.Tga`.
+        70..=75 => set(10, None, "AlphaTile01.ozt"),
+        // Vulcanus (`IsPKField`) y Doppelganger 2: la 11 es la lava `Object64\song_lava1.jpg` (1506-1510).
+        64 | 67 => set(11, Some("Object64"), "song_lava1.ozj"),
+        // Karutan 1 y 2 (`IsKarutanMap`): la 12 es `AlphaTile01.Tga` (1516-1521).
+        81 | 82 => set(12, None, "AlphaTile01.ozt"),
+        _ => {}
     }
     v
 }
 
-/// Índice de textura que el original dibuja con prueba de alfa (`RenderFace`): la 10 en los
-/// Empire Guardian (carpetas 70-73), el login (74) y la selección de personaje (75).
+/// Índice de textura que el original dibuja con prueba de alfa (`RenderFace`, ZzzLodTerrain.cpp:1330-1393):
+/// la 3 en Kanturu 3, la 4 en Illusion Temple, la 2 en Elbeland, la 10 en los Empire Guardian (70-73),
+/// el login (74) y la selección de personaje (75), y la 12 en Karutan.
 pub fn alpha_tested_tile(world: u16) -> Option<u8> {
-    (70..=75).contains(&world).then_some(10)
+    match world {
+        40 => Some(3),
+        46..=51 => Some(4),
+        52 => Some(2),
+        70..=75 => Some(10),
+        81 | 82 => Some(12),
+        _ => None,
+    }
 }
 
 /// Archivos de textura del suelo según su índice en las capas del `.map`.
@@ -225,9 +248,10 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
         used[t as usize] = true;
     }
     let mut textures: Vec<Option<Texture>> = vec![None; 256];
-    for (index, name) in tile_textures(world) {
+    for (index, folder, name) in tile_textures(world) {
         if used[index as usize] {
-            textures[index as usize] = texture::load(&dir, &name).ok();
+            let from = folder.and_then(|f| fs::find(data_dir, f)).unwrap_or_else(|| dir.clone());
+            textures[index as usize] = texture::load(&from, &name).ok();
         }
     }
 
@@ -275,6 +299,21 @@ fn normalize(v: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn texturas_del_suelo_por_mapa() {
+        let name = |world: u16, i: usize| tile_textures(world)[i].2.clone();
+        assert_eq!(name(1, 10), "TileRock04.ozj");
+        assert_eq!(name(52, 2), "AlphaTileGround01.ozt");
+        assert_eq!(name(40, 3), "AlphaTileGround02.ozt");
+        assert_eq!(name(47, 4), "AlphaTileGround03.ozt");
+        assert_eq!(name(71, 10), "AlphaTile01.ozt");
+        assert_eq!(name(81, 12), "AlphaTile01.ozt");
+        assert_eq!(tile_textures(64)[11].1, Some("Object64"));
+        assert_eq!(alpha_tested_tile(40), Some(3));
+        assert_eq!(alpha_tested_tile(52), Some(2));
+        assert_eq!(alpha_tested_tile(1), None);
+    }
 
     /// Prueba con los datos reales si están en `referencias/` (si no, se salta).
     #[test]

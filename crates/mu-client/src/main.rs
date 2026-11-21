@@ -30,11 +30,13 @@ mod character;
 mod charselect;
 mod cursor;
 mod effects;
+mod fish;
 mod fonts;
 mod fx;
 mod grass;
 mod hud;
 mod invasion;
+mod leaves;
 mod logfile;
 mod login;
 mod login_ui;
@@ -44,6 +46,7 @@ mod model_light;
 mod objects;
 mod operate;
 mod options;
+mod overlay;
 mod remote;
 mod settings;
 mod shadow;
@@ -158,19 +161,21 @@ impl Args {
     }
 }
 
-/// Color de fondo de cada mapa (`SetWorldClearColor`, en `SceneManager.cpp`): bytes / 256.
+/// Color de fondo de cada mapa: bytes / 256. Es el que hay justo antes del `glClear` de cada fotograma
+/// (`RenderScene`, ZzzScene.cpp:2347-2396 del Main 5.2). El verde de Lorencia y el azul de Devias de
+/// `RenderMainScene` (2059-2066) se ponen después del `glClear` y el siguiente fotograma los vuelve a
+/// pisar antes de borrar, así que no se ven nunca: esos mapas tienen fondo negro. (MuMain, con su
+/// `SetWorldClearColor`, los juntó en uno y sí los pinta, pero el cliente S6 no.)
 pub fn world_clear_color(world: u16) -> Color {
     let rgb8 = |r: u8, g: u8, b: u8| Color::srgb(r as f32 / 256.0, g as f32 / 256.0, b as f32 / 256.0);
     // `WorldActive` del original: nuestro número de mapa menos uno.
     match world as i32 - 1 {
-        0 => rgb8(10, 20, 14),                // Lorencia: verde oscuro
-        2 => rgb8(0, 0, 10),                  // Devias: azul marino casi negro
         10 => rgb8(3, 25, 44),                // Heaven: azul
         24..=29 | 36 => rgb8(30, 40, 40),     // Kalima: turquesa oscuro
         45..=50 => rgb8(9, 8, 33),            // Cursed Temple: morado oscuro
         51 => rgb8(178, 178, 178),            // Elbeland: gris
         65 => rgb8(148, 179, 223),            // Doppelganger: azul claro
-        _ => Color::BLACK,                    // el resto, Dungeon incluido: negro
+        _ => Color::BLACK,                    // el resto, Lorencia y Devias incluidos: negro
     }
 }
 
@@ -225,6 +230,7 @@ fn main() {
             fx::FxPlugin,
             boids::BoidsPlugin,
             invasion::InvasionPlugin,
+            leaves::LeavesPlugin,
             hud::HudPlugin,
             mainframe::MainFramePlugin,
             settings::SettingsPlugin,
@@ -233,7 +239,8 @@ fn main() {
             camera::FlyCameraPlugin,
         ))
         .add_plugins(fonts::FontsPlugin)
+        .add_plugins(overlay::OverlayPlugin)
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
-        .add_plugins((net::NetPlugin, remote::RemotePlugin))
+        .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin))
         .run();
 }

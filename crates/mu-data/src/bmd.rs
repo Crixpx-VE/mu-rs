@@ -423,6 +423,81 @@ mod tests {
     }
 }
 
+/// Guion de textura (`TextureScript.h`): letras tras el primer `_` del nombre de la textura de una
+/// malla (`ju01_R.jpg`, `test12_H.jpg`...) que cambian cómo se dibuja esa malla.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TextureScript {
+    /// `R` (`getBright`): en `RenderBody` la malla es su propia `BlendMesh` (suma su color).
+    pub bright: bool,
+    /// `H` (`getHiddenMesh`): `RenderBody` no la dibuja.
+    pub hidden: bool,
+    /// `S` (`getStreamMesh`): su textura se desplaza con `BlendMeshTexCoordU/V` (como `StreamMesh`,
+    /// pero sigue iluminada).
+    pub stream: bool,
+    /// `N` (`getNoneBlendMesh`): las pasadas de cromado (`RENDER_CHROME*`, `METAL`, `OIL`) no la dibujan.
+    pub none_blend: bool,
+}
+
+/// `TextureScriptParsing::parsingTScript` (`TextureScript.cpp:16`) con el nombre de textura del modelo
+/// (los 32 bytes de `Textures[i].FileName`).
+///
+/// Desde el primer `_` hasta el primer `.`, se miran como mucho 4 letras tras el `_`: cada `R`, `H`,
+/// `S` o `N` activa su opción; cualquier otra (`tree_01`, `_RX`...) anula el guion entero (devuelve
+/// `None` aunque ya hubiera opciones: `m_bBeScript = false`). Distingue mayúsculas. Los casos `'DC'` y
+/// `'DT'` del original son constantes de dos letras que nunca coinciden con una letra: no hacen nada.
+pub fn texture_script(name: &str) -> Option<TextureScript> {
+    let bytes = name.as_bytes();
+    let bytes = &bytes[..bytes.len().min(32)];
+    let bytes = &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())];
+    let start = bytes.iter().position(|&b| b == b'_')?;
+    // `strtok(strTokenFile, ".")`: empieza en el `_` (que no es `.`) y acaba en el primer `.`.
+    let token = &bytes[start..];
+    let token = &token[..token.iter().position(|&b| b == b'.').unwrap_or(token.len())];
+    let length = token.len().min(5);
+    let mut script = TextureScript::default();
+    let mut be_script = false;
+    for &c in &token[1..length] {
+        match c {
+            b'R' => script.bright = true,
+            b'H' => script.hidden = true,
+            b'S' => script.stream = true,
+            b'N' => script.none_blend = true,
+            _ => return None,
+        }
+        be_script = true;
+    }
+    be_script.then_some(script)
+}
+
+#[cfg(test)]
+mod script_tests {
+    use super::*;
+
+    #[test]
+    fn guiones_de_textura() {
+        let s = |bright, hidden, stream, none_blend| Some(TextureScript { bright, hidden, stream, none_blend });
+        assert_eq!(texture_script("ju01_R.jpg"), s(true, false, false, false));
+        assert_eq!(texture_script("test12_H.jpg"), s(false, true, false, false));
+        assert_eq!(texture_script("water_S.tga"), s(false, false, true, false));
+        assert_eq!(texture_script("rock_N.jpg"), s(false, false, false, true));
+        assert_eq!(texture_script("glow_RS.jpg"), s(true, false, true, false));
+        // Solo se miran 4 letras tras el `_`.
+        assert_eq!(texture_script("x_RHSNQ.jpg"), s(true, true, true, true));
+        // Cualquier otra letra anula el guion, aunque antes hubiera alguna válida.
+        assert_eq!(texture_script("tree_01.jpg"), None);
+        assert_eq!(texture_script("bridge_shadow01.tga"), None);
+        assert_eq!(texture_script("a_RX.jpg"), None);
+        assert_eq!(texture_script("a_r.jpg"), None);
+        // Solo cuenta el primer `_`.
+        assert_eq!(texture_script("tile_wood_R.jpg"), None);
+        // Sin letras tras el `_`, o sin `_`.
+        assert_eq!(texture_script("a_.jpg"), None);
+        assert_eq!(texture_script("plain.jpg"), None);
+        // Sin extensión: hasta el final.
+        assert_eq!(texture_script("Kinglight_R"), s(true, false, false, false));
+    }
+}
+
 /// Nombre del archivo de textura en disco: `.jpg` → `.OZJ`, `.tga` → `.OZT`.
 pub fn texture_file_name(texture: &str) -> String {
     let file = texture.rsplit(['\\', '/']).next().unwrap_or(texture);

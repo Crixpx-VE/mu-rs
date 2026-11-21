@@ -13,6 +13,13 @@ use mu_data::texture::{self, Texture};
 use super::core::TexInfo;
 use super::tables::bitmaps::BITMAPS;
 
+/// Texturas que el original carga al entrar en un mapa (`MapManager.cpp`), no en `OpenBasicData`,
+/// y que por eso no están en la tabla generada: las salpicaduras de la lluvia (MapManager.cpp:1574-1577).
+const MAP_BITMAPS: &[(i32, &str, bool)] = &[
+    (super::core::BITMAP_RAIN_CIRCLE, "World1/rain02.tga", false),
+    (super::core::BITMAP_RAIN_CIRCLE + 1, "World10/rain03.tga", false),
+];
+
 #[derive(Resource)]
 pub struct FxTextures {
     data: PathBuf,
@@ -22,7 +29,8 @@ pub struct FxTextures {
 
 impl FxTextures {
     pub fn new(data: PathBuf) -> Self {
-        Self { data, table: BITMAPS.iter().map(|&(id, path, rep)| (id, (path, rep))).collect(), loaded: HashMap::new() }
+        let table = BITMAPS.iter().chain(MAP_BITMAPS).map(|&(id, path, rep)| (id, (path, rep))).collect();
+        Self { data, table, loaded: HashMap::new() }
     }
 
     /// La textura `id` (cargándola si hace falta). `None` si no existe o no se puede leer.

@@ -136,6 +136,7 @@ fn unload_world(world: &mut World) {
     world.run_system_cached(crate::objects::reset).ok();
     world.run_system_cached(crate::effects::reset).ok();
     world.run_system_cached(crate::fx::reset).ok();
+    world.run_system_cached(crate::leaves::reset).ok();
     world.run_system_cached(crate::sound::reset).ok();
     world.run_system_cached(crate::operate::reset).ok();
 }

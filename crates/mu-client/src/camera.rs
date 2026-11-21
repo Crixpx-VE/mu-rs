@@ -24,7 +24,56 @@ impl Plugin for FlyCameraPlugin {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Update, (fly, auto_screenshot))
             // Después de mover al personaje (Update), para que la cámara no vaya un fotograma tarde.
-            .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate))
+            .add_systems(
+                PostUpdate,
+                game_far_plane.after(CameraMoved).run_if(in_state(crate::scene::GameScene::Game)),
+            );
+    }
+}
+
+/// `battleCastle::InBattleCastle2` (GMBattleCastle.h:11): el castillo del Valle de Loren, en MU.
+pub fn in_battle_castle2(p: Vec2) -> bool {
+    (16100.0..=19000.0).contains(&p.x) && (18900.0..=21700.0).contains(&p.y)
+}
+
+/// `CameraViewFar` del juego en MU (`MoveMainCamera`, ZzzScene.cpp:1652-1698), con el
+/// `g_shCameraLevel` que deja el propio `MoveMainCamera` (1721-1729: 5 en Vulcanus y los
+/// Doppelganger 1 y 2, 0 en el resto). `hero` es la posición del personaje en MU.
+///
+/// La comprobación de `InBattleCastle2` va sin mirar el mapa, como en el original.
+pub fn view_far(world: u16, hero: Vec2) -> f32 {
+    match world as i32 - 1 {
+        _ if in_battle_castle2(hero) => 3000.0,
+        // Valle de Loren (`InBattleCastle() && MAIN_SCENE`).
+        30 => 2500.0,
+        // Elbeland (`WD_51HOME_6TH_CHAR`).
+        51 => 2800.0 * 1.15,
+        // Vulcanus y Doppelganger 2.
+        63 | 66 => 3700.0,
+        // Doppelganger 1: nivel 5 → `case 4/5`.
+        65 => 3200.0,
+        // Nivel 0 fuera del login y la selección.
+        _ => 2000.0,
+    }
+}
+
+/// Alcance de la cámara del juego: `gluPerspective(..., CameraViewNear, CameraViewFar · 1.4)`
+/// (`BeginOpengl`, ZzzOpenglUtil.cpp:643). Lo que queda más lejos no se dibuja y se ve el fondo.
+fn game_far_plane(
+    args: Res<Args>,
+    players: Query<&Transform, (With<Player>, Without<FollowCamera>)>,
+    mut cams: Query<&mut Projection, With<FollowCamera>>,
+) {
+    let hero = players.single().map_or(Vec2::ZERO, |p| Vec2::new(p.translation.x, -p.translation.z) * MU_SCALE);
+    let far = view_far(args.world, hero) * 1.4 / MU_SCALE;
+    for mut proj in &mut cams {
+        // Sin tocarla si ya está bien (cambiarla rehace el frustum).
+        if matches!(&*proj, Projection::Perspective(p) if p.far != far)
+            && let Projection::Perspective(p) = &mut *proj
+        {
+            p.far = far;
+        }
     }
 }
 
@@ -71,6 +120,7 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
         Projection::Perspective(PerspectiveProjection {
             fov: mu_fov(),
             near: 0.2,
+            // Fuera del juego (login, selección) cada pantalla pone el suyo; en el juego, `game_far_plane`.
             far: 400.0,
             ..default()
         }),

@@ -389,6 +389,7 @@ fn world_sounds(
     mut queue: ResMut<SoundQueue>,
     mut sources: ResMut<Assets<AudioSource>>,
     mut rng: Local<u32>,
+    leaves: Option<Res<crate::leaves::Leaves>>,
 ) {
     let (Some(mut audio), Some(t), Ok(p)) = (audio, terrain, players.single()) else { return };
     let (x, y) = ((p.pos.x.max(0.0) as usize).min(SIZE - 1), (p.pos.y.max(0.0) as usize).min(SIZE - 1));
@@ -400,13 +401,18 @@ fn world_sounds(
         (*rng >> 16) % n == 0
     };
 
-    // `PlayWorldAmbientSounds`.
+    // `PlayWorldAmbientSounds` (ZzzScene.cpp:2484-2560).
     match world {
         0 => {
             if tile == 4 {
                 queue.stop("SOUND_WIND01");
+                queue.stop("SOUND_RAIN01");
             } else {
                 queue.play_loop("SOUND_WIND01");
+                // `RainCurrent > 0`: la lluvia de leaves.rs (la manda el servidor con el tiempo).
+                if leaves.as_ref().is_some_and(|l| l.rain_current > 0) {
+                    queue.play_loop("SOUND_RAIN01");
+                }
             }
         }
         1 => queue.play_loop("SOUND_DUNGEON01"),
@@ -428,6 +434,24 @@ fn world_sounds(
         7 => queue.play_loop("SOUND_WATER01"),
         8 => queue.play_loop("SOUND_DESERT01"),
         10 => queue.play_loop("SOUND_HEAVEN01"),
+        // Raklion (sala del jefe).
+        58 => queue.play_loop("SOUND_WIND01"),
+        // Loren Market: viento y lluvia siempre.
+        79 => {
+            queue.play_loop("SOUND_WIND01");
+            queue.play_loop("SOUND_RAIN01");
+        }
+        // Karutan (`ASG_ADD_MAP_KARUTAN`).
+        80 => queue.play_loop("SOUND_KARUTAN_DESERT_ENV"),
+        81 => {
+            if tile == 12 {
+                queue.stop("SOUND_KARUTAN_DESERT_ENV");
+                queue.play_loop("SOUND_KARUTAN_KARDAMAHAL_ENV");
+            } else {
+                queue.stop("SOUND_KARUTAN_KARDAMAHAL_ENV");
+                queue.play_loop("SOUND_KARUTAN_DESERT_ENV");
+            }
+        }
         _ => {}
     }
 
@@ -443,6 +467,27 @@ fn world_sounds(
         8 => Some("tarkan"),
         4 => Some("lost_tower_a"),
         24..=29 | 36 => Some("kalima"),
+        // Los `PlayBGM` de cada mapa (ZzzScene.cpp:2697-2754), en su estado de siempre (sin
+        // eventos del servidor: Crywolf y Kanturu 3 antes de la batalla, Illusion Temple esperando).
+        31 => Some("huntingground"),
+        33 => Some("Aida"),
+        34 => Some("crywolf1st"),
+        37 => Some("kanturu_1st"),
+        38 => Some("kanturu_2nd"),
+        39 => Some("KanturuTower"),
+        41 => Some("BalgasBarrack"),
+        42 => Some("BalgasRefuge"),
+        45..=50 => Some("cursedtemplewait"),
+        51 => Some("elbeland"),
+        56 => Some("SwampOfCalmness"),
+        57 => Some("Raklion"),
+        62 => Some("Santa_Village"),
+        63 => Some("PK_Field"),
+        64 => Some("DuelArena"),
+        65..=68 => Some("iDoppelganger"),
+        69..=72 => Some("ImperialGuardianFort"),
+        80 => Some("Karutan_A"),
+        81 => Some("Karutan_B"),
         _ => None,
     };
     if let Some(track) = track {

@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use crate::reader::Reader;
 use crate::{Error, Result, crypt, fs};
 
+pub mod render;
+
+use render::{Bitmap, Pass, Saw, flags};
+
 #[derive(Debug, Clone)]
 pub struct MapObject {
     /// Tipo de modelo (índice en la tabla de modelos del mapa).
@@ -140,16 +144,41 @@ pub enum Glow {
 pub struct ModelRules {
     /// No se dibuja: solo marca un punto (fuego, humo, sitio para sentarse...).
     pub hidden: bool,
-    /// Malla que se dibuja con mezcla aditiva (luces, agua, fuego): `BlendMesh`.
+    /// `o->BlendMesh`: las mallas cuyo índice de textura es este se dibujan sumando (luces, agua,
+    /// fuego); y la malla con este índice se desplaza con [`ModelRules::tex_coord`].
     pub additive_mesh: Option<usize>,
+    /// `o->BlendMeshLight`.
     pub glow: Glow,
-    /// Malla cuya textura se desplaza (`BlendMesh` o `StreamMesh`) y cuánto por segundo (u, v).
-    pub scroll: Option<(usize, [f32; 2])>,
+    /// `o->BlendMeshTexCoordU/V` (los pone `MoveObject` en cada tick).
+    pub tex_coord: [Saw; 2],
+    /// `Models[tipo].StreamMesh`: malla sin luz por la normal (color `BodyLight`) que se desplaza.
+    pub stream_mesh: Option<usize>,
     pub velocity: Velocity,
     /// Techo: se desvanece cuando el personaje entra en la casa (ver [`indoor_tile`]).
     pub fade_indoors: bool,
     /// `b->BodyLight` fijo (gris) en vez de la luz del terreno bajo el objeto.
     pub body_light: Option<f32>,
+    /// Las llamadas `RenderBody`/`RenderMesh` de su código de dibujo, en orden
+    /// ([`render::DEFAULT_PASSES`] = un `RenderBody(RENDER_TEXTURE)`).
+    pub passes: &'static [Pass],
+    /// `RenderBodyShadow` tras dibujarlo: sombra negra en el suelo, sin esta malla (`o->HiddenMesh`).
+    pub body_shadow: Option<usize>,
+    /// Se mueve por su cuenta (puertas, calaveras, el perro del trineo).
+    pub motion: Option<Motion>,
+}
+
+/// Objetos que `MoveObject` / `RenderObjectVisual` mueven por su cuenta.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Motion {
+    /// Puerta de Devias que se abre girando al acercarse el personaje (`ZzzObject.cpp:4004-4047`).
+    SwingDoor,
+    /// Puerta de Devias que se abre deslizándose (tipo 86).
+    SlidingDoor,
+    /// Calavera de Lost Tower que sale despedida al pisarla (`CheckSkull`, `ZzzEffectFireLeave.cpp:88`).
+    Skull,
+    /// Perro del trineo de Devias: al acabar la animación, 1 de cada 32 veces hace la acción 1
+    /// (`RenderObjectVisual`, `ZzzObject.cpp:2824-2831`).
+    SledDog,
 }
 
 /// Si la textura de suelo `tile` (capa 1) bajo el personaje es "dentro de una casa"
@@ -168,10 +197,14 @@ impl Default for ModelRules {
             hidden: false,
             additive_mesh: None,
             glow: Glow::Steady(1.0),
-            scroll: None,
+            tex_coord: [Saw::ZERO; 2],
+            stream_mesh: None,
             velocity: Velocity::Fixed(DEFAULT_VELOCITY),
             fade_indoors: false,
             body_light: None,
+            passes: render::DEFAULT_PASSES,
+            body_shadow: None,
+            motion: None,
         }
     }
 }
@@ -183,9 +216,27 @@ impl ModelRules {
     fn add(mesh: usize) -> Self {
         Self { additive_mesh: Some(mesh), ..Self::default() }
     }
-    /// Desplaza la textura de la malla aditiva.
-    fn scroll(mut self, u: f32, v: f32) -> Self {
-        self.scroll = Some((self.additive_mesh.unwrap_or(0), [u, v]));
+    /// `o->BlendMeshTexCoordU = k · ((int)WorldTime % periodo)`.
+    fn tex_u(mut self, period: f32, k: f32) -> Self {
+        self.tex_coord[0] = Saw { period, k };
+        self
+    }
+    /// `o->BlendMeshTexCoordV = k · ((int)WorldTime % periodo)`.
+    fn tex_v(mut self, period: f32, k: f32) -> Self {
+        self.tex_coord[1] = Saw { period, k };
+        self
+    }
+    /// `Models[tipo].StreamMesh = mesh`.
+    fn stream(mut self, mesh: usize) -> Self {
+        self.stream_mesh = Some(mesh);
+        self
+    }
+    fn passes(mut self, passes: &'static [Pass]) -> Self {
+        self.passes = passes;
+        self
+    }
+    fn motion(mut self, m: Motion) -> Self {
+        self.motion = Some(m);
         self
     }
     fn flicker(mut self, min: f32, max: f32) -> Self {
@@ -209,8 +260,8 @@ impl ModelRules {
 
 /// Reglas de un tipo de objeto. `world` es el número de carpeta (`World1` = Lorencia).
 ///
-/// Desplazamientos de textura: el original usa `WorldTime % periodo · k`, que avanza
-/// `k · 1000` unidades por segundo; aquí van ya en unidades por segundo.
+/// Desplazamientos de textura: `tex_u(periodo, k)` / `tex_v(periodo, k)` son el
+/// `k · ((int)WorldTime % periodo)` del original tal cual (diente de sierra, con su salto).
 pub fn model_rules(world: u16, kind: i16) -> ModelRules {
     let r = ModelRules::default;
     let add = ModelRules::add;
@@ -228,16 +279,16 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
         (1, 90) => add(1).speed(0.3),                                          // StreetLight
         (1, 96 | 97) => r().speed(0.3),                                        // Sign01-02
         (1, 98) => add(2),                                                     // Carriage01
-        (1, 105) => add(3).scroll(0.0, -1.0),                                  // Waterspout (agua que cae)
+        (1, 105) => add(3).tex_v(1000.0, -0.001),                                 // Waterspout (agua que cae)
         (1, 117) => add(4).flicker(0.4, 0.7),                                  // House03 (fragua)
-        (1, 118) => add(8).scroll(0.0, -1.0),                                  // House04
-        (1, 119) => add(2).scroll(0.0, -1.0),                                  // House05 (molino)
+        (1, 118) => add(8).tex_v(1000.0, -0.001),                                 // House04
+        (1, 119) => add(2).tex_v(1000.0, -0.001),                                 // House05 (molino)
         (1, 122) => add(4).flicker(0.4, 0.7),                                  // HouseWall02
         (1, 130..=133) => hidden(),                                            // Light01-03 (fuego), PoseBox
         (1, 150) => add(1).speed(0.3),                                         // Candle
 
         // Dungeon (WD_1DUNGEON)
-        (2, 22..=24) => ModelRules { scroll: Some((1, [0.0, -1.0])), ..r() },
+        (2, 22..=24) => r().stream(1).tex_v(1000.0, -0.001),
         (2, 39 | 40 | 51 | 52 | 60) => hidden(),
 
         // Devias (WD_2DEVIAS)
@@ -245,29 +296,39 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
         (3, 54 | 56) => add(1),
         (3, 78) => add(3).flicker(0.4, 0.7),
         (3, 91 | 100) => hidden(),
+        // Puertas (`CreateObject` 4793-4800 y `MoveObject` 4004-4047) y perro del trineo (2824-2831).
+        (3, 20 | 65 | 88) => r().motion(Motion::SwingDoor),
+        (3, 86) => r().motion(Motion::SlidingDoor),
+        (3, 103) => r().motion(Motion::SledDog),
 
         // Noria (WD_3NORIA)
         (4, 1) => add(1),
         (4, 9) => add(3),
         (4, 17 | 19 | 37) => add(0),
-        (4, 18) => add(2).scroll(0.0, 1.0),
+        (4, 18) => add(2).tex_v(1000.0, 0.001),
         (4, 38) => hidden(), // sitio para sentarse
         (4, 39) => add(1),
-        (4, 41) => add(0).scroll(0.0, 0.5),
-        (4, 42) => ModelRules { scroll: Some((0, [-2.0, 0.0])), ..r() },
-        (4, 43) => ModelRules { scroll: Some((0, [2.0, 0.0])), ..r() },
+        (4, 41) => add(0).tex_v(2000.0, 0.0005),
+        (4, 42) => r().stream(0).tex_u(500.0, -0.002),
+        (4, 43) => r().stream(0).tex_u(500.0, 0.002),
 
         // Lost Tower (WD_4LOSTTOWER)
         (5, 18 | 23) => add(1),
-        (5, 19 | 20) => add(4).scroll(-1.0, 0.0),
+        // `RenderObject` (`ZzzObject.cpp:1031-1050`): primero todo con `BITMAP_CHROME` y `BodyLight`
+        // (1, 0.2, 0.1), con `StreamMesh` 2 (19/20) o 1 (3/4); luego normal. Lo rojo se ve por los huecos
+        // de las texturas con alfa y en la `BlendMesh`. `MoveObject` (4086-4094): U = -(WT%1000)·0.001.
+        (5, 3 | 4) => r().tex_u(1000.0, -0.001).passes(LOST_TOWER_3_4),
+        (5, 19 | 20) => add(4).tex_u(1000.0, -0.001).passes(LOST_TOWER_19_20),
         (5, 24 | 25) => hidden(),
+        // `CheckSkull` (`MoveObject` 4082-4085).
+        (5, 38 | 39) => r().motion(Motion::Skull),
 
         // Exile (WD_5UNKNOWN)
         (6, 2) => add(0),
         (6, 3) => add(0).flicker(0.6, 0.9),
 
         // Arena (WD_6STADIUM)
-        (7, 21) => add(3).scroll(0.0, -1.0),
+        (7, 21) => add(3).tex_v(1000.0, -0.001),
         (7, 38) => hidden(),
 
         // Atlans (WD_7ATLANSE)
@@ -278,14 +339,24 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
         (8, 40) => add(0).pulse(0.004, 0.3, 0.5).speed(0.05),
 
         // Tarkan (WD_8TARKAN)
-        (9, 2) => add(0).scroll(-1.0, 0.0),
-        (9, 4) => add(0).pulse(0.002, 0.35, 0.65).scroll(0.0, -0.1),
+        (9, 2) => add(0).tex_u(1000.0, -0.001),
+        (9, 4) => add(0).pulse(0.002, 0.35, 0.65).tex_v(10000.0, -0.0001),
         (9, 7) => add(0).pulse(0.002, 0.35, 0.65),
         (9, 8) => r().speed(DEFAULT_VELOCITY * 4.0),
         (9, 60 | 63 | 64 | 70 | 76 | 83) => hidden(),
-        (9, 61 | 65 | 66) => add(1).scroll(0.0, -1.0).pulse(0.002, 0.35, 0.65),
-        (9, 72) => add(0).scroll(0.0, -0.2),
+        (9, 61 | 65 | 66) => add(1).tex_v(1000.0, -0.001).pulse(0.002, 0.35, 0.65),
+        (9, 72) => add(0).tex_v(10000.0, -0.0002),
         (9, 82) => add(0),
+        // `MapManager.cpp:1168-1173`: `StreamMesh = 0` en 11, 12, 13, 73, 75 y 79 (sin luz por la normal);
+        // `MoveObject` (4204-4256) las desplaza.
+        (9, 11 | 13 | 73 | 75 | 79) => r().stream(0).tex_v(10000.0, -0.0002),
+        (9, 12) => r().stream(0).tex_u(50000.0, -0.00005).tex_v(50000.0, -0.00005),
+        // `RenderObject` (1052-1058): la malla 0 normal y luego cromada sumando (`BITMAP_CHROME`).
+        (9, 81) => r().passes(TARKAN_81),
+
+        // Blood Castle (`InBloodCastle`: WD_11BLOODCASTLE1..7 y WD_52, World12-18 y World53): 28/29 con
+        // `RenderBodyShadow` sin la malla 2 (`RenderObject` 1059-1076).
+        (12..=18 | 53, 28 | 29) => ModelRules { body_shadow: Some(2), ..r() },
 
         // Heaven (WD_10HEAVEN): nubes
         (11, 0..=5) => hidden(),
@@ -327,6 +398,21 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
         _ => r(),
     }
 }
+
+/// `b->BodyLight` de la primera pasada de Lost Tower 3/4/19/20.
+const LOST_TOWER_RED: [f32; 3] = [1.0, 0.2, 0.1];
+const LOST_TOWER_3_4: &[Pass] = &[
+    Pass::body(flags::TEXTURE).texture(Bitmap::Chrome).light(LOST_TOWER_RED).stream(1),
+    Pass::body(flags::TEXTURE).stream(-1),
+];
+const LOST_TOWER_19_20: &[Pass] = &[
+    Pass::body(flags::TEXTURE).texture(Bitmap::Chrome).light(LOST_TOWER_RED).stream(2),
+    Pass::body(flags::TEXTURE).stream(-1),
+];
+const TARKAN_81: &[Pass] = &[
+    Pass::mesh(0, flags::TEXTURE),
+    Pass::mesh(0, flags::CHROME | flags::BRIGHT).texture(Bitmap::Chrome),
+];
 
 /// Qué suelta un emisor de partículas.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
