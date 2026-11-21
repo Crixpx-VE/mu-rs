@@ -26,16 +26,34 @@ fn main() {
         let d = ((o.position[0] - center[0]).powi(2) + (o.position[1] - center[1]).powi(2)).sqrt() / 100.0;
         if d <= radius {
             by_kind.entry(o.kind).or_default().push(format!(
-                "({:.1},{:.1},z{:.0} esc {:.2})",
+                "({:.1},{:.1},z{:.0} esc {:.2} ang {:?})",
                 o.position[0] / 100.0,
                 o.position[1] / 100.0,
                 o.position[2],
-                o.scale
+                o.scale,
+                o.angle
             ));
         }
     }
     for (k, v) in by_kind {
-        println!("tipo {k:4} {:?} x{}: {}", objects::model_path(world, k).unwrap_or_default(), v.len(), v.join(" "));
+        let rel = objects::model_path(world, k).unwrap_or_default();
+        // Caja del modelo en su pose inicial (unidades de MU, sin girar).
+        let bbox = (|| {
+            let dir = data.join(rel.parent()?);
+            let b = mu_data::bmd::read(&mu_data::fs::read(&dir, rel.file_name()?.to_str()?).ok()?).ok()?;
+            let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+            for m in 0..b.meshes.len() {
+                for p in b.pose(m, 0, 0).positions {
+                    for i in 0..3 {
+                        lo[i] = lo[i].min(p[i]);
+                        hi[i] = hi[i].max(p[i]);
+                    }
+                }
+            }
+            Some(format!("caja {:.0?}..{:.0?}", lo, hi))
+        })()
+        .unwrap_or_default();
+        println!("tipo {k:4} {rel:?} {bbox} x{}: {}", v.len(), v.join(" "));
     }
     if let Ok(t) = terrain::load(&data, world) {
         let (cx, cy) = ((center[0] / 100.0) as i32, (center[1] / 100.0) as i32);
