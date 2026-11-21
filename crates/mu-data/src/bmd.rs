@@ -217,6 +217,47 @@ pub fn rotate_vector(m: &Mat34, v: [f32; 3]) -> [f32; 3] {
     [f(0), f(1), f(2)]
 }
 
+/// Cuaternión `[x, y, z, w]` equivalente a [`angle_matrix`] (`AngleQuaternion` del original).
+pub fn angle_quaternion(a: [f32; 3]) -> [f32; 4] {
+    let (sx, cx) = (a[0] * 0.5).sin_cos();
+    let (sy, cy) = (a[1] * 0.5).sin_cos();
+    let (sz, cz) = (a[2] * 0.5).sin_cos();
+    [
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz,
+    ]
+}
+
+/// Interpolación esférica entre dos rotaciones (por el camino corto).
+pub fn quat_slerp(a: [f32; 4], mut b: [f32; 4], t: f32) -> [f32; 4] {
+    let mut dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
+    if dot < 0.0 {
+        b = b.map(|v| -v);
+        dot = -dot;
+    }
+    let (wa, wb) = if dot > 0.9995 {
+        (1.0 - t, t)
+    } else {
+        let theta = dot.acos();
+        let s = theta.sin();
+        (((1.0 - t) * theta).sin() / s, (t * theta).sin() / s)
+    };
+    let q = [0, 1, 2, 3].map(|i| a[i] * wa + b[i] * wb);
+    let l = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+    q.map(|v| v / l)
+}
+
+pub fn quat_matrix(q: [f32; 4]) -> Mat34 {
+    let [x, y, z, w] = q;
+    [
+        [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - w * z), 2.0 * (x * z + w * y), 0.0],
+        [2.0 * (x * y + w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - w * x), 0.0],
+        [2.0 * (x * z - w * y), 2.0 * (y * z + w * x), 1.0 - 2.0 * (x * x + y * y), 0.0],
+    ]
+}
+
 /// Malla lista para dibujar: triángulos sueltos (3 vértices cada uno), ya posados.
 #[derive(Debug, Clone, Default)]
 pub struct PosedMesh {
@@ -250,9 +291,60 @@ impl Bmd {
         out
     }
 
+    /// Como [`Bmd::bone_matrices`] pero en un instante intermedio: `frame` 2.25 mezcla
+    /// el fotograma 2 (75 %) con el 3 (25 %). Al llegar al final vuelve al primero.
+    ///
+    /// En las animaciones con `lock_positions` (caminar, correr...) el hueso raíz se queda
+    /// en la X/Y del primer fotograma: el desplazamiento lo pone el juego, no la animación.
+    /// Además su último fotograma repite el primero, así que el bucle tiene uno menos.
+    pub fn bone_matrices_at(&self, action: usize, frame: f32) -> Vec<Mat34> {
+        let Some(act) = self.actions.get(action).filter(|a| a.frames > 0) else {
+            return self.bone_matrices(action, 0);
+        };
+        let locked = act.lock_positions.is_some();
+        let frames = if locked { (act.frames - 1).max(1) } else { act.frames };
+        let f = frame.rem_euclid(frames as f32);
+        let f0 = f.floor() as usize % frames;
+        let f1 = (f0 + 1) % frames;
+        let t = f - f.floor();
+
+        let mut out: Vec<Mat34> = vec![IDENTITY; self.bones.len()];
+        for (i, b) in self.bones.iter().enumerate() {
+            if b.dummy {
+                continue;
+            }
+            let (Some(pos), Some(rot)) = (b.positions.get(action), b.rotations.get(action)) else {
+                continue;
+            };
+            let (Some(p0), Some(p1), Some(r0), Some(r1)) = (pos.get(f0), pos.get(f1), rot.get(f0), rot.get(f1))
+            else {
+                continue;
+            };
+            let q = quat_slerp(angle_quaternion(*r0), angle_quaternion(*r1), t);
+            let mut local = quat_matrix(q);
+            for k in 0..3 {
+                local[k][3] = p0[k] + (p1[k] - p0[k]) * t;
+            }
+            if i == 0 && locked {
+                local[0][3] = pos[0][0];
+                local[1][3] = pos[0][1];
+            }
+            out[i] = match usize::try_from(b.parent).ok().filter(|&pi| pi < i) {
+                Some(pi) => concat(&out[pi], &local),
+                None => local,
+            };
+        }
+        out
+    }
+
     /// Geometría de la malla `mesh` en la pose (animación, fotograma) indicada.
     pub fn pose(&self, mesh: usize, action: usize, frame: usize) -> PosedMesh {
-        let bones = self.bone_matrices(action, frame);
+        self.pose_with(mesh, &self.bone_matrices(action, frame))
+    }
+
+    /// Geometría de la malla `mesh` con huesos dados. Sirve para piezas de armadura,
+    /// que no tienen animaciones propias y usan el esqueleto de `player.bmd`.
+    pub fn pose_with(&self, mesh: usize, bones: &[Mat34]) -> PosedMesh {
         let m = &self.meshes[mesh];
         let bone = |b: i16| bones.get(b as usize).unwrap_or(&IDENTITY);
         let mut out = PosedMesh::default();
@@ -278,6 +370,56 @@ impl Bmd {
         out.normals.truncate(n);
         out.uvs.truncate(n);
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cuaternion_y_matriz_coinciden() {
+        for a in [[0.3, -1.2, 2.0], [1.5, 0.2, -0.7], [0.0, 0.0, 3.1], [-2.0, 1.0, 0.5]] {
+            let m1 = angle_matrix(a);
+            let m2 = quat_matrix(angle_quaternion(a));
+            for r in 0..3 {
+                for c in 0..3 {
+                    assert!((m1[r][c] - m2[r][c]).abs() < 1e-5, "{a:?} [{r}][{c}] {} vs {}", m1[r][c], m2[r][c]);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn interpolar_en_fotograma_exacto_da_la_pose_exacta() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data/Player");
+        let Ok(buf) = crate::fs::read(&data, "player.bmd") else { return };
+        let m = read(&buf).expect("player.bmd");
+        eprintln!("player.bmd: {} huesos, {} animaciones", m.bones.len(), m.actions.len());
+        // Sin bloqueo de raíz (animación 0) el fotograma exacto debe coincidir.
+        let a = m.bone_matrices(0, 0);
+        let b = m.bone_matrices_at(0, 0.0);
+        for (x, y) in a.iter().zip(&b) {
+            for r in 0..3 {
+                for c in 0..4 {
+                    assert!((x[r][c] - y[r][c]).abs() < 1e-3);
+                }
+            }
+        }
+
+        // Quieto y caminando: la armadura debe quedar en un tamaño humano (~2 m = 200 unidades).
+        let armor = read(&crate::fs::read(&data, "ArmorClass02.bmd").unwrap()).unwrap();
+        for action in [1usize, 15] {
+            eprintln!("acción {action}: {} fotogramas, lock={}", m.actions[action].frames, m.actions[action].lock_positions.is_some());
+            for i in 0..40 {
+                let bones = m.bone_matrices_at(action, i as f32 * 0.37);
+                for mesh in 0..armor.meshes.len() {
+                    for p in armor.pose_with(mesh, &bones).positions {
+                        assert!(p.iter().all(|v| v.is_finite() && v.abs() < 400.0), "acción {action} t {i}: {p:?}");
+                    }
+                }
+            }
+        }
     }
 }
 

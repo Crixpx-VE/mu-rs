@@ -65,6 +65,46 @@ pub fn read_heights(buf: &[u8]) -> Result<Vec<f32>> {
     Ok(buf[start..].iter().map(|&h| h as f32 * HEIGHT_SCALE).collect())
 }
 
+/// Banderas de cada casilla en `EncTerrainN.att`.
+pub mod attr {
+    /// Zona segura (no se puede atacar).
+    pub const SAFE_ZONE: u16 = 0x0001;
+    /// Ocupada por un personaje (lo marca el juego en tiempo real, no el archivo).
+    pub const CHARACTER: u16 = 0x0002;
+    /// No se puede caminar.
+    pub const NO_MOVE: u16 = 0x0004;
+    /// Sin suelo (vacío, se cae).
+    pub const NO_GROUND: u16 = 0x0008;
+    pub const WATER: u16 = 0x0010;
+    pub const ACTION: u16 = 0x0020;
+    pub const HEIGHT: u16 = 0x0040;
+    pub const CAMERA_UP: u16 = 0x0080;
+}
+
+/// `EncTerrainN.att`: descifrado de mapa + XOR de 3 bytes, cabecera de 4 bytes
+/// (versión, mapa, 255, 255) y luego 1 o 2 bytes de banderas por casilla.
+pub fn read_attributes(buf: &[u8]) -> Result<Vec<u16>> {
+    if buf.starts_with(b"ATT\x01") {
+        return Err(Error::Format("este .att usa el cifrado nuevo (Season 15+), no soportado todavía".into()));
+    }
+    let mut dec = crypt::map_file_decrypt(buf);
+    const XOR3: [u8; 3] = [0xFC, 0xCF, 0xAB];
+    for (i, b) in dec.iter_mut().enumerate() {
+        *b ^= XOR3[i % 3];
+    }
+    let wide = match dec.len() {
+        n if n == 4 + CELLS => false,
+        n if n == 4 + CELLS * 2 => true,
+        n => return Err(Error::Format(format!(".att de {n} bytes inesperado"))),
+    };
+    if dec[0] != 0 || dec[2] != 255 || dec[3] != 255 {
+        return Err(Error::Format(format!("cabecera de .att rara: {:?}", &dec[..4])));
+    }
+    Ok((0..CELLS)
+        .map(|i| if wide { u16::from_le_bytes([dec[4 + 2 * i], dec[5 + 2 * i]]) } else { dec[4 + i] as u16 })
+        .collect())
+}
+
 /// Archivos de textura del suelo según su índice en las capas del `.map`.
 fn default_tile_textures() -> Vec<(u8, String)> {
     let mut v: Vec<(u8, String)> = [
@@ -101,6 +141,8 @@ pub struct Terrain {
     /// Luz final de cada vértice (RGB 0..1): mapa de luz × sombreado por la pendiente.
     pub light: Vec<[f32; 3]>,
     pub mapping: TerrainMapping,
+    /// Banderas de cada casilla (ver [`attr`]). Todo 0 si el mapa no trae `.att`.
+    pub attributes: Vec<u16>,
     /// Textura de cada índice de capa (`None` si el mapa no la usa o no existe).
     pub textures: Vec<Option<Texture>>,
 }
@@ -108,6 +150,32 @@ pub struct Terrain {
 impl Terrain {
     pub fn height(&self, x: usize, y: usize) -> f32 {
         self.heights[(y.min(SIZE - 1)) * SIZE + x.min(SIZE - 1)]
+    }
+
+    /// Altura interpolada en un punto cualquiera (en casillas), como `RequestTerrainHeight`.
+    pub fn height_at(&self, x: f32, y: f32) -> f32 {
+        let x = x.clamp(0.0, (SIZE - 1) as f32);
+        let y = y.clamp(0.0, (SIZE - 1) as f32);
+        let (xi, yi) = (x.floor() as usize, y.floor() as usize);
+        let (fx, fy) = (x - xi as f32, y - yi as f32);
+        let h00 = self.height(xi, yi);
+        let h10 = self.height(xi + 1, yi);
+        let h01 = self.height(xi, yi + 1);
+        let h11 = self.height(xi + 1, yi + 1);
+        let top = h00 + (h10 - h00) * fx;
+        let bottom = h01 + (h11 - h01) * fx;
+        top + (bottom - top) * fy
+    }
+
+    pub fn attribute(&self, x: usize, y: usize) -> u16 {
+        if x >= SIZE || y >= SIZE {
+            return attr::NO_MOVE;
+        }
+        self.attributes[y * SIZE + x]
+    }
+
+    pub fn walkable(&self, x: usize, y: usize) -> bool {
+        self.attribute(x, y) & (attr::NO_MOVE | attr::NO_GROUND) == 0
     }
 }
 
@@ -147,7 +215,11 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
         }
     }
 
-    Ok(Terrain { world, dir, heights, light, mapping, textures })
+    let attributes = fs::read(&dir, &format!("EncTerrain{world}.att"))
+        .and_then(|b| read_attributes(&b))
+        .unwrap_or_else(|_| vec![0; CELLS]);
+
+    Ok(Terrain { world, dir, heights, light, mapping, attributes, textures })
 }
 
 /// Sombreado según la pendiente, como `CreateTerrainLight` del original:
@@ -204,6 +276,11 @@ mod tests {
         usadas.sort();
         usadas.dedup();
         assert!(usadas.len() <= 30, "índices de capa 1 raros: {usadas:?}");
+        // La plaza de Lorencia (~135,128) es zona segura y caminable; el foso no.
+        assert!(t.attribute(135, 128) & attr::SAFE_ZONE != 0, "plaza: {:#06X}", t.attribute(135, 128));
+        assert!(t.walkable(135, 128));
+        let bloqueadas = t.attributes.iter().filter(|&&a| a & attr::NO_MOVE != 0).count();
+        assert!(bloqueadas > 1000 && bloqueadas < CELLS / 2 + CELLS / 4, "casillas bloqueadas: {bloqueadas}");
         let alt = t.heights.iter().cloned().fold(0.0, f32::max);
         eprintln!(
             "Lorencia: .map v{} n{}, capa1 usa {usadas:?}, altura máx {alt}",

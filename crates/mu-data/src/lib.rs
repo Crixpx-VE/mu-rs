@@ -11,6 +11,7 @@ pub mod bmd;
 pub mod crypt;
 pub mod fs;
 pub mod objects;
+pub mod path;
 pub mod reader;
 pub mod terrain;
 pub mod texture;
