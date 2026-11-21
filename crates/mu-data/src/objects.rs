@@ -97,32 +97,175 @@ const LORENCIA_MODELS: &[(i16, &str, i16)] = &[
     (151, "Beer", 3),
 ];
 
-/// Reglas especiales de dibujo de un tipo de objeto (del `ZzzObject.cpp` original).
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ModelRules {
-    /// No se dibuja: solo marca un punto (fuego, luz, sitio para sentarse...).
-    pub hidden: bool,
-    /// Malla que se dibuja con mezcla aditiva (luces, agua, fuego).
-    pub additive_mesh: Option<usize>,
+/// Velocidad de animación por defecto de los objetos (`o->Velocity` en `CreateObject`).
+pub const DEFAULT_VELOCITY: f32 = 0.16;
+/// Actualizaciones por segundo de la lógica del original: `Velocity` son fotogramas por actualización.
+pub const TICKS_PER_SECOND: f32 = 25.0;
+
+/// Velocidad de la animación de un objeto.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Velocity {
+    /// Fotogramas de animación por actualización (25 por segundo).
+    Fixed(f32),
+    /// `k / escala`: los árboles grandes se mecen más despacio.
+    PerScale(f32),
 }
 
+impl Velocity {
+    /// Fotogramas de animación por segundo para un objeto de escala `scale`.
+    pub fn fps(self, scale: f32) -> f32 {
+        let v = match self {
+            Velocity::Fixed(v) => v,
+            Velocity::PerScale(k) => k / scale.max(0.01),
+        };
+        v * TICKS_PER_SECOND
+    }
+}
+
+/// Brillo de la malla aditiva (`BlendMeshLight`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Glow {
+    Steady(f32),
+    /// Parpadeo de fuego: un valor al azar entre `min` y `max` en cada actualización.
+    Flicker { min: f32, max: f32 },
+    /// Pulso suave: `sin(t · freq) · amp + base`, con `t` en segundos.
+    Pulse { freq: f32, amp: f32, base: f32 },
+}
+
+/// Reglas especiales de dibujo de un tipo de objeto.
+///
+/// Sacadas de `CreateObject`, `MoveObject` y `UpdateObjectVisual` (`ZzzObject.cpp` del original).
+/// Lo que crea partículas o luces (fuego, humo, chispas) no está aquí.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ModelRules {
+    /// No se dibuja: solo marca un punto (fuego, humo, sitio para sentarse...).
+    pub hidden: bool,
+    /// Malla que se dibuja con mezcla aditiva (luces, agua, fuego): `BlendMesh`.
+    pub additive_mesh: Option<usize>,
+    pub glow: Glow,
+    /// Malla cuya textura se desplaza (`BlendMesh` o `StreamMesh`) y cuánto por segundo (u, v).
+    pub scroll: Option<(usize, [f32; 2])>,
+    pub velocity: Velocity,
+}
+
+impl Default for ModelRules {
+    fn default() -> Self {
+        Self {
+            hidden: false,
+            additive_mesh: None,
+            glow: Glow::Steady(1.0),
+            scroll: None,
+            velocity: Velocity::Fixed(DEFAULT_VELOCITY),
+        }
+    }
+}
+
+impl ModelRules {
+    fn hidden() -> Self {
+        Self { hidden: true, ..Self::default() }
+    }
+    fn add(mesh: usize) -> Self {
+        Self { additive_mesh: Some(mesh), ..Self::default() }
+    }
+    /// Desplaza la textura de la malla aditiva.
+    fn scroll(mut self, u: f32, v: f32) -> Self {
+        self.scroll = Some((self.additive_mesh.unwrap_or(0), [u, v]));
+        self
+    }
+    fn flicker(mut self, min: f32, max: f32) -> Self {
+        self.glow = Glow::Flicker { min, max };
+        self
+    }
+    /// `sin(WorldTime · freq_ms) · amp + base`, con la frecuencia del original (por milisegundo).
+    fn pulse(mut self, freq_ms: f32, amp: f32, base: f32) -> Self {
+        self.glow = Glow::Pulse { freq: freq_ms * 1000.0, amp, base };
+        self
+    }
+    fn speed(mut self, v: f32) -> Self {
+        self.velocity = Velocity::Fixed(v);
+        self
+    }
+}
+
+/// Reglas de un tipo de objeto. `world` es el número de carpeta (`World1` = Lorencia).
+///
+/// Desplazamientos de textura: el original usa `WorldTime % periodo · k`, que avanza
+/// `k · 1000` unidades por segundo; aquí van ya en unidades por segundo.
 pub fn model_rules(world: u16, kind: i16) -> ModelRules {
-    let hidden = |h| ModelRules { hidden: h, additive_mesh: None };
-    let add = |m| ModelRules { hidden: false, additive_mesh: Some(m) };
+    let r = ModelRules::default;
+    let add = ModelRules::add;
+    let hidden = ModelRules::hidden;
     match (world, kind) {
-        // Lorencia
-        (1, 130..=132) => hidden(true), // Light01-03: solo crean fuego
-        (1, 133) => hidden(true),       // PoseBox: sitio para sentarse
-        (1, 52) => add(1),              // Bonfire
-        (1, 90) => add(1),              // StreetLight
-        (1, 98) => add(2),              // Carriage01
-        (1, 105) => add(3),             // Waterspout
-        (1, 117) => add(4),             // House03
-        (1, 118) => add(8),             // House04
-        (1, 119) => add(2),             // House05
-        (1, 122) => add(4),             // HouseWall02
-        (1, 150) => add(1),             // Candle
-        _ => ModelRules::default(),
+        // Lorencia (WD_0LORENCIA)
+        (1, 0 | 1) => ModelRules { velocity: Velocity::PerScale(0.4), ..r() }, // Tree01-02 (se mecen)
+        (1, 52) => add(1).flicker(0.4, 0.9),                                   // Bonfire
+        (1, 59) => r().speed(0.0),                                             // TreasureChest
+        (1, 90) => add(1).speed(0.3),                                          // StreetLight
+        (1, 96 | 97) => r().speed(0.3),                                        // Sign01-02
+        (1, 98) => add(2),                                                     // Carriage01
+        (1, 105) => add(3).scroll(0.0, -1.0),                                  // Waterspout (agua que cae)
+        (1, 117) => add(4).flicker(0.4, 0.7),                                  // House03 (fragua)
+        (1, 118) => add(8).scroll(0.0, -1.0),                                  // House04
+        (1, 119) => add(2).scroll(0.0, -1.0),                                  // House05 (molino)
+        (1, 122) => add(4).flicker(0.4, 0.7),                                  // HouseWall02
+        (1, 130..=133) => hidden(),                                            // Light01-03 (fuego), PoseBox
+        (1, 150) => add(1).speed(0.3),                                         // Candle
+
+        // Dungeon (WD_1DUNGEON)
+        (2, 22..=24) => ModelRules { scroll: Some((1, [0.0, -1.0])), ..r() },
+        (2, 39 | 40 | 51 | 52 | 60) => hidden(),
+
+        // Devias (WD_2DEVIAS)
+        (3, 19 | 92 | 93) => add(0),
+        (3, 54 | 56) => add(1),
+        (3, 78) => add(3).flicker(0.4, 0.7),
+        (3, 91 | 100) => hidden(),
+
+        // Noria (WD_3NORIA)
+        (4, 1) => add(1),
+        (4, 9) => add(3),
+        (4, 17 | 19 | 37) => add(0),
+        (4, 18) => add(2).scroll(0.0, 1.0),
+        (4, 38) => hidden(), // sitio para sentarse
+        (4, 39) => add(1),
+        (4, 41) => add(0).scroll(0.0, 0.5),
+        (4, 42) => ModelRules { scroll: Some((0, [-2.0, 0.0])), ..r() },
+        (4, 43) => ModelRules { scroll: Some((0, [2.0, 0.0])), ..r() },
+
+        // Lost Tower (WD_4LOSTTOWER)
+        (5, 18 | 23) => add(1),
+        (5, 19 | 20) => add(4).scroll(-1.0, 0.0),
+        (5, 24 | 25) => hidden(),
+
+        // Exile (WD_5UNKNOWN)
+        (6, 2) => add(0),
+        (6, 3) => add(0).flicker(0.6, 0.9),
+
+        // Arena (WD_6STADIUM)
+        (7, 21) => add(3).scroll(0.0, -1.0),
+        (7, 38) => hidden(),
+
+        // Atlans (WD_7ATLANSE)
+        (8, 22 | 39) => hidden(),
+        (8, 23) => add(0).pulse(0.002, 0.3, 0.5),
+        (8, 32 | 34) => add(1).pulse(0.004, 0.5, 0.5),
+        (8, 38) => add(0),
+        (8, 40) => add(0).pulse(0.004, 0.3, 0.5).speed(0.05),
+
+        // Tarkan (WD_8TARKAN)
+        (9, 2) => add(0).scroll(-1.0, 0.0),
+        (9, 4) => add(0).pulse(0.002, 0.35, 0.65).scroll(0.0, -0.1),
+        (9, 7) => add(0).pulse(0.002, 0.35, 0.65),
+        (9, 8) => r().speed(DEFAULT_VELOCITY * 4.0),
+        (9, 60 | 63 | 64 | 70 | 76 | 83) => hidden(),
+        (9, 61 | 65 | 66) => add(1).scroll(0.0, -1.0).pulse(0.002, 0.35, 0.65),
+        (9, 72) => add(0).scroll(0.0, -0.2),
+        (9, 82) => add(0),
+
+        // Heaven (WD_10HEAVEN): nubes
+        (11, 0..=5) => hidden(),
+
+        _ => r(),
     }
 }
 

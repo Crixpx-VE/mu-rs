@@ -30,7 +30,27 @@ pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, spawn_terrain);
+        app.init_resource::<WaterMaterials>()
+            .add_systems(Startup, spawn_terrain)
+            .add_systems(Update, move_water);
+    }
+}
+
+/// Textura del terreno que es agua en todos los mapas (`TileWater01`).
+const WATER_TEXTURE: usize = 5;
+/// El agua avanza una textura entera cada 20 s (`WaterMove` en `ZzzLodTerrain.cpp`).
+const WATER_PERIOD_SECS: f32 = 20.0;
+
+/// Materiales de las casillas de agua, cuya textura se desplaza.
+#[derive(Resource, Default)]
+struct WaterMaterials(Vec<Handle<StandardMaterial>>);
+
+fn move_water(time: Res<Time>, water: Res<WaterMaterials>, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let offset = (time.elapsed_secs() / WATER_PERIOD_SECS).fract();
+    for h in &water.0 {
+        if let Some(mut m) = materials.get_mut(h) {
+            m.uv_transform = bevy::math::Affine2::from_translation(Vec2::new(offset, 0.0));
+        }
     }
 }
 
@@ -40,6 +60,7 @@ fn spawn_terrain(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut water: ResMut<WaterMaterials>,
 ) {
     let t = match terrain::load(&args.data, args.world) {
         Ok(t) => t,
@@ -65,6 +86,9 @@ fn spawn_terrain(
                 depth_bias: if layer == 1 { 0.0 } else { 1.0 },
                 ..default()
             });
+            if index == WATER_TEXTURE {
+                water.0.push(material.clone());
+            }
             commands.spawn((
                 Name::new(format!("Terreno capa {layer} textura {index}")),
                 Mesh3d(meshes.add(mesh)),

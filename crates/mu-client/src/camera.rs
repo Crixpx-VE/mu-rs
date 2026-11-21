@@ -14,6 +14,7 @@ use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 
 use crate::Args;
 use crate::character::Player;
+use crate::terrain::MU_SCALE;
 
 pub struct FlyCameraPlugin;
 
@@ -34,7 +35,7 @@ struct FlyCamera {
 
 #[derive(Component)]
 struct FollowCamera {
-    /// Distancia al personaje, en casillas.
+    /// Distancia al personaje, en casillas (escalón de zoom del original / 100).
     distance: f32,
 }
 
@@ -60,14 +61,14 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     let mut cam = commands.spawn((
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection {
-            fov: 35f32.to_radians(),
-            near: 0.1,
+            fov: mu_fov(),
+            near: 0.2,
             far: 400.0,
             ..default()
         }),
         transform,
         FlyCamera { yaw, pitch },
-        FollowCamera { distance: args.zoom.unwrap_or(12.0) },
+        FollowCamera { distance: args.zoom.unwrap_or(ZOOM_DEFAULT) },
         // No usamos luces dinámicas (la luz viene precalculada en el mapa), así que
         // no hace falta repartir luces por zonas de pantalla ("clustering").
         // (`None` falla en Bevy 0.20 con una textura de tamaño cero; `Single` es lo mínimo.)
@@ -103,14 +104,43 @@ fn follow(
         return;
     }
     let (Ok(player), Ok((mut tf, mut cam))) = (players.single(), cams.single_mut()) else { return };
-    cam.distance = (cam.distance - scroll.delta.y * 0.8).clamp(4.0, 30.0);
+    // Zoom por escalones de 100 unidades de MU (1000…1700 en el original).
+    if scroll.delta.y != 0.0 {
+        cam.distance = (cam.distance - scroll.delta.y.signum()).clamp(ZOOM_MIN, ZOOM_MAX);
+    }
+    *tf = mu_camera(player.translation, cam.distance * MU_SCALE);
+}
 
-    // Como en MU: mirando hacia el noroeste del mapa desde arriba (unos 48° de inclinación).
-    let pitch = 48f32.to_radians();
-    let yaw = (-45f32).to_radians();
-    let back = Quat::from_rotation_y(yaw) * Vec3::new(0.0, pitch.sin(), pitch.cos());
-    let target = player.translation + Vec3::Y * 0.9;
-    *tf = Transform::from_translation(target + back * cam.distance).looking_at(target, Vec3::Y);
+/// Escalones de zoom del original (`PLAYER_ZOOM_LADDER`), en casillas: 10…17, por defecto 13.
+const ZOOM_MIN: f32 = 10.0;
+const ZOOM_MAX: f32 = 17.0;
+pub const ZOOM_DEFAULT: f32 = 13.0;
+
+/// Campo de visión vertical del original: 40° horizontales a 4:3 (`HFovToVFov`), unos 30.5°.
+fn mu_fov() -> f32 {
+    let h_half = 20f32.to_radians();
+    2.0 * (h_half.tan() / (4.0 / 3.0)).atan()
+}
+
+/// Cámara del juego tal como la calcula el original (`DefaultCamera.cpp`):
+///
+/// - Ángulos (-48.5°, 0, -45°); la vista es `Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL.
+/// - Posición: `héroe + AngleMatrixᵀ·(0, -distancia, 0)` en horizontal, y en altura
+///   `héroe.z + distancia - 150`.
+///
+/// Resultado: la cámara queda al sureste del personaje mirando al noroeste, inclinada 41.5°
+/// hacia abajo, y el personaje sale algo por debajo del centro de la pantalla.
+/// `hero` va en coordenadas de Bevy; `distance` en unidades de MU.
+fn mu_camera(hero: Vec3, distance: f32) -> Transform {
+    let (s0, c0) = (-48.5f32).to_radians().sin_cos();
+    let (s2, c2) = (-45f32).to_radians().sin_cos();
+    // En coordenadas de MU (x, y, z arriba):
+    let forward = Vec3::new(-s0 * s2, -s0 * c2, -c0);
+    let up = Vec3::new(c0 * s2, c0 * c2, -s0);
+    let offset = Vec3::new(-s2 * distance, -c0 * c2 * distance, distance - 150.0);
+    // MU (x, y, z) → Bevy (x, z, -y), 100 unidades por casilla.
+    let to_bevy = |v: Vec3| Vec3::new(v.x, v.z, -v.y);
+    Transform::from_translation(hero + to_bevy(offset) / MU_SCALE).looking_to(to_bevy(forward), to_bevy(up))
 }
 
 fn fly(
