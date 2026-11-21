@@ -33,9 +33,12 @@ Qué tiene:
   Ver `src/fx/mod.rs`.
 - Barra principal de la interfaz S6 (esferas, experiencia, botones) en la pantalla virtual 640×480.
 - Cámara del original (DefaultCamera), resoluciones fijas (F10), contador de fps (F3).
+- Sonido del original: efectos, ambiente y música por mapa, pasos, pájaros, dragones, habilidades.
+  Los `.wav`/`.mp3` (`Data/Sound`, `Data/Music`) no vienen con MuMain: salen del cliente completo
+  oficial de Webzen (MU Red 1.20.61). Sombras de personaje y bichos, luz de los modelos del original.
 
 Controles: **clic izquierdo** caminar · **rueda** zoom · **Tab** cámara libre · **1-0** habilidades ·
-**F3** fps · **F9** invasión de dragones · **F10** resolución.
+**F3** fps · **F7/F8** volumen de efectos/música · **F9** invasión de dragones · **F10** resolución.
 
 Opciones de prueba: `--spawn x,y`, `--walk-to x,y`, `--cam ...`, `--zoom N`, `--resolucion AxB`,
 `--sin-vsync`, `--invasion 1|3`, `--probar-habilidades`, `--screenshot archivo.png`.
