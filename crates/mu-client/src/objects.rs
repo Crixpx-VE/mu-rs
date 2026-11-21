@@ -212,6 +212,8 @@ fn spawn_objects(
     mut mat_anims: ResMut<AnimatedMaterials>,
     mut roofs: ResMut<Roofs>,
     mut fx: ResMut<Emitters>,
+    registry: Res<crate::fx::core::Registry>,
+    mut fx_world: ResMut<crate::fx::FxWorld>,
 ) {
     let list = match objects::load(&args.data, args.world) {
         Ok(l) => l,
@@ -244,7 +246,32 @@ fn spawn_objects(
         for e in emitters.iter().filter(|e| e.bone.is_none()) {
             fx.0.push(place(e, None));
         }
+        // Objetos con código de efectos (`MoveObject`/`UpdateObjectVisual`) para el motor.
+        let world_active = args.world as i32 - 1;
+        let has_fx = registry.objects.contains_key(&(world_active, o.kind as i32));
+        let fx_object = |model: Option<Arc<bmd::Bmd>>, velocity: f32| crate::fx::core::MapObject {
+            ty: o.kind as i32,
+            position: Vec3::from_array(o.position),
+            angle: Vec3::from_array(o.angle),
+            scale: o.scale,
+            light: Vec3::from_array(terrain.as_ref().map_or([1.0; 3], |t| {
+                let x = ((o.position[0] / MU_SCALE).max(0.0) as usize).min(SIZE - 1);
+                let y = ((o.position[1] / MU_SCALE).max(0.0) as usize).min(SIZE - 1);
+                t.0.light[y * SIZE + x]
+            })),
+            model,
+            velocity,
+            animation_frame: 0.0,
+            bones: None,
+            timer: 0.0,
+            hidden_mesh: if rules.hidden { -2 } else { -1 },
+            user: [0.0; 4],
+            created: false,
+        };
         if rules.hidden {
+            if has_fx {
+                fx_world.map_objects.push(fx_object(None, 0.0));
+            }
             continue;
         }
         let Some(rel) = objects::model_path(args.world, o.kind) else {
@@ -265,6 +292,9 @@ fn spawn_objects(
         // Grupo de animación: los objetos de un modelo que van a la misma velocidad comparten malla.
         let animated = model.actions.first().is_some_and(|a| a.frames > 1);
         let fps = if animated { rules.velocity.fps(o.scale) } else { 0.0 };
+        if has_fx {
+            fx_world.map_objects.push(fx_object(Some(model.clone()), fps / objects::TICKS_PER_SECOND));
+        }
         // Emisores pegados a un hueso (salpicaduras de la fuente): siguen la animación.
         for e in emitters.iter().filter(|e| e.bone.is_some()) {
             fx.0.push(place(e, Some((model.clone(), fps))));

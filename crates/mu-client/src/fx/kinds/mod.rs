@@ -13,6 +13,8 @@ pub mod joints_3;
 pub mod effects_dk1;
 pub mod effects_dk2;
 pub mod skills_dk;
+pub mod objects_1;
+pub mod objects_2;
 
 use super::core::Registry;
 
@@ -29,4 +31,6 @@ pub fn register_all(r: &mut Registry) {
     effects_dk1::register(r);
     effects_dk2::register(r);
     skills_dk::register(r);
+    objects_1::register(r);
+    objects_2::register(r);
 }

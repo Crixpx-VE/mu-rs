@@ -16,6 +16,8 @@ pub const MAX_JOINTS: usize = 500;
 pub const MAX_EFFECTS: usize = 300;
 /// Ticks de la lógica del original por segundo (`REFERENCE_FPS`).
 pub const TICKS_PER_SECOND: f32 = 25.0;
+/// Distancia (MU) hasta la que los objetos del mapa sueltan sus efectos.
+pub const OBJECT_FX_DISTANCE: f32 = 3000.0;
 
 /// Todo lo vivo del motor.
 #[derive(Resource, Default)]
@@ -35,6 +37,8 @@ pub struct FxWorld {
     pub casts: Vec<Cast>,
     /// Estelas de las armas.
     pub blurs: Vec<Blur>,
+    /// Objetos del mapa con código de efectos (los registra `objects.rs`).
+    pub map_objects: Vec<MapObject>,
 }
 
 impl FxWorld {
@@ -106,7 +110,7 @@ pub fn tick(
     let effect_positions: HashMap<u32, Vec3> = world.effects.iter().map(|e| (e.id, e.position)).collect();
     let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
 
-    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, .. } = world;
+    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, map_objects, ticks, .. } = world;
     let mut ctx = Ctx {
         rng,
         world_time: time.elapsed_secs() * 1000.0,
@@ -121,6 +125,22 @@ pub fn tick(
         next_effect_id,
         world_active: args.world as i32 - 1,
     };
+
+    // Objetos del mapa (`MoveObjects` / `UpdateObjectVisual`): solo los cercanos, como el original,
+    // que solo mueve los bloques que se ven.
+    let hero_pos = ctx.hero_actor().map(|a| a.position);
+    for o in map_objects.iter_mut() {
+        if hero_pos.is_some_and(|h| (o.position.truncate() - h.truncate()).length() > OBJECT_FX_DISTANCE) {
+            continue;
+        }
+        let Some(step) = registry.objects.get(&(ctx.world_active, o.ty)).copied() else { continue };
+        o.animation_frame = o.velocity * *ticks as f32;
+        o.bones = o.model.as_ref().filter(|m| m.actions.first().is_some_and(|a| a.frames > 1)).map(|m| {
+            std::sync::Arc::new(m.bone_matrices_at(0, o.animation_frame))
+        }).or_else(|| o.model.as_ref().map(|m| std::sync::Arc::new(m.bone_matrices(0, 0))));
+        step(o, &mut ctx);
+        o.created = true;
+    }
 
     // Habilidades en curso (`MoveCharactersClient` va antes que `MoveEffects`): `AttackStage` cada
     // tick y el efecto final al llegar a `g_iLimitAttackTime`.

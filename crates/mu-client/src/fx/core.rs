@@ -419,6 +419,49 @@ pub struct SpriteFx {
     pub alpha: f32,
 }
 
+// --- Objetos del mapa con efectos (`MoveObject` / `UpdateObjectVisual`) --------------------------
+
+/// Un objeto del mapa que suelta efectos (el `OBJECT` de los objetos del mundo). Lo dibuja
+/// `objects.rs`; aquí solo está lo que necesita su código de efectos.
+#[derive(Clone)]
+pub struct MapObject {
+    /// `o->Type`: el tipo del objeto en el mapa (índice de `EncTerrainN.obj`).
+    pub ty: i32,
+    pub position: Vec3,
+    /// Grados (x, y, z), como `o->Angle`.
+    pub angle: Vec3,
+    pub scale: f32,
+    /// `o->Light`: la luz del terreno donde está.
+    pub light: Vec3,
+    /// Modelo (para los efectos pegados a sus huesos) y velocidad de su animación (fotogramas/tick).
+    pub model: Option<Arc<mu_data::bmd::Bmd>>,
+    pub velocity: f32,
+    /// `o->AnimationFrame` en este tick.
+    pub animation_frame: f32,
+    /// Huesos en la pose de este tick (se rellenan antes de llamar al código del objeto).
+    pub bones: Option<Arc<Vec<Mat34>>>,
+    /// `o->Timer`, `o->HiddenMesh`... y campos libres para el código de cada tipo.
+    pub timer: f32,
+    pub hidden_mesh: i32,
+    pub user: [f32; 4],
+    /// Ya se hizo lo de `CreateObject` (efectos que el original crea una sola vez al cargar).
+    pub created: bool,
+}
+
+impl MapObject {
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` + posición, giro y escala del objeto.
+    pub fn bone_world(&self, bone: usize, offset: Vec3) -> Vec3 {
+        let local = match self.bones.as_ref().and_then(|b| b.get(bone)) {
+            Some(m) => Vec3::from_array(bmd::transform_point(m, offset.to_array())),
+            None => offset,
+        };
+        self.position + rotate(self.angle, local * self.scale)
+    }
+}
+
+/// Código de efectos de un tipo de objeto en un mapa: se llama una vez por tick.
+pub type ObjectStep = fn(&mut MapObject, &mut Ctx);
+
 // --- Estela del arma (`Blur`, ZzzEffectBlurSpark.cpp) ---------------------------------------------
 
 /// `MAX_BLUR_TAILS`: puntos como mucho de una estela de arma.
@@ -849,9 +892,15 @@ pub struct Registry {
     pub effects: std::collections::HashMap<i32, EffectKind>,
     /// Habilidades por número `AT_SKILL_*`.
     pub skills: std::collections::HashMap<i32, SkillKind>,
+    /// Objetos del mapa por (`WorldActive`, tipo del objeto).
+    pub objects: std::collections::HashMap<(i32, i32), ObjectStep>,
 }
 
 impl Registry {
+    /// Registra el código de efectos de los objetos `ty` del mapa `world_active` (Lorencia = 0).
+    pub fn object(&mut self, world_active: i32, ty: i32, step: ObjectStep) {
+        self.objects.insert((world_active, ty), step);
+    }
     pub fn skill(&mut self, skill: i32, kind: SkillKind) {
         self.skills.insert(skill, kind);
     }
