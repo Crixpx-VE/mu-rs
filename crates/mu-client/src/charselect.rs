@@ -64,7 +64,7 @@ impl Plugin for CharSelectPlugin {
             )
             .add_systems(
                 Update,
-                (scene_events, sync_balloons, animate, input, music, layout_ui, light_characters, preview)
+                (net_messages, scene_events, sync_balloons, animate, input, music, layout_ui, light_characters, preview)
                     .chain()
                     .in_set(CharSelectSystems)
                     .run_if(here()),
@@ -174,19 +174,60 @@ impl SlotCharacter {
     }
 }
 
-fn spawn_characters(
+/// Al entrar: pide la lista de personajes (`SendRequestCharacterList`); llega en `net_messages`.
+fn spawn_characters(mut commands: Commands, mut net: ResMut<crate::net::Net>) {
+    commands.insert_resource(CharSceneLink { account: crate::account::current_account(), ..default() });
+    net.send(mu_protocol::game::ClientMessage::RequestCharacterList { language: 0 });
+}
+
+/// Lo que llega del servidor: la lista (`ReceiveCharacterList`) y, al conectar, la información del
+/// personaje (`ReceiveJoinMapServer`), que lleva al mapa donde está.
+#[allow(clippy::too_many_arguments)]
+fn net_messages(
     mut commands: Commands,
-    args: Res<Args>,
+    mut from: MessageReader<crate::net::FromServer>,
+    mut args: ResMut<Args>,
+    mut load: ResMut<LoadStep>,
+    mut next: ResMut<NextState<GameScene>>,
+    sel: Option<ResMut<CharSelect>>,
+    existing: Query<(Entity, &crate::shadow::Shadow), With<SlotCharacter>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
 ) {
-    let account = crate::account::current_account();
-    let list = crate::account::characters(&account);
-    commands.insert_resource(CharSceneLink { account, count: list.len(), ..default() });
-    for c in &list {
-        spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, c);
+    use mu_protocol::game::{self, ServerMessage};
+    for m in from.read() {
+        match &m.0 {
+            ServerMessage::CharacterList { characters, .. } => {
+                for (e, shadow) in &existing {
+                    commands.entity(e).despawn();
+                    commands.entity(shadow.1).despawn();
+                }
+                for c in characters {
+                    let c = StoredCharacter {
+                        slot: c.slot as usize,
+                        name: c.name.clone(),
+                        class: Class::from_index(game::base_class_index(c.class)),
+                        level: c.level as u32,
+                        guild_status: c.guild_position,
+                    };
+                    if c.slot < SLOTS.len() {
+                        spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, &c);
+                    }
+                }
+            }
+            ServerMessage::CharacterInformation(info) => {
+                if !sel.as_ref().is_some_and(|s| s.starting) {
+                    continue;
+                }
+                commands.insert_resource(crate::account::HeroInfo(info.clone()));
+                // `MapId` es `WorldActive`: la carpeta es la siguiente.
+                load_world(&mut args, &mut load, info.map as u16 + 1, true, GameScene::Game);
+                next.set(GameScene::Loading);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -946,9 +987,7 @@ fn input(
     link: Option<ResMut<CharSceneLink>>,
     mut commands: Commands,
     mut sound: ResMut<crate::sound::SoundQueue>,
-    mut args: ResMut<Args>,
-    mut load: ResMut<LoadStep>,
-    mut next: ResMut<NextState<GameScene>>,
+    mut net: ResMut<crate::net::Net>,
 ) {
     let (Some(mut sel), Some(mut link)) = (sel, link) else { return };
     let window = windows.single().ok();
@@ -1020,7 +1059,7 @@ fn input(
     }
     // `CCharSelMainWin::UpdateWhileActive`.
     match clicked {
-        Some(CsButton::Connect) => start_game(&mut sel, &characters, &mut commands, &mut args, &mut load, &mut next, &mut sound),
+        Some(CsButton::Connect) => start_game(&mut sel, &characters, &mut commands, &mut net, &mut sound),
         Some(CsButton::Menu) => link.to_ui.push(UiRequest::SysMenu),
         Some(CsButton::Create) => link.to_ui.push(UiRequest::Create),
         Some(CsButton::Delete) => link.to_ui.push(UiRequest::Delete),
@@ -1040,12 +1079,12 @@ fn input(
             if let Some(h) = sel.hovered {
                 sel.selected = Some(h);
             }
-            start_game(&mut sel, &characters, &mut commands, &mut args, &mut load, &mut next, &mut sound);
+            start_game(&mut sel, &characters, &mut commands, &mut net, &mut sound);
         }
     } else if !on_ui && down && double {
         if let Some(h) = sel.hovered {
             sel.selected = Some(h);
-            start_game(&mut sel, &characters, &mut commands, &mut args, &mut load, &mut next, &mut sound);
+            start_game(&mut sel, &characters, &mut commands, &mut net, &mut sound);
         }
     } else if !on_ui && down {
         sel.selected = sel.hovered;
@@ -1103,15 +1142,14 @@ fn music(sel: Option<Res<CharSelect>>, mut sound: ResMut<crate::sound::SoundQueu
 /// `GetDoubleClickTime` por defecto de Windows.
 const DOUBLE_CLICK_SECS: f32 = 0.5;
 
-/// `StartGame` (ZzzScene.cpp:854-871): con un personaje elegido, a la carga del juego (Lorencia).
+/// `StartGame` (ZzzScene.cpp:854-871): con un personaje elegido, `SendRequestJoinMapServer`; la
+/// información del personaje (con su mapa) llega en `net_messages` y entonces se carga el mapa.
 /// `LoadingScene` para la música del login (ZzzScene.cpp:1503).
 fn start_game(
     sel: &mut CharSelect,
     characters: &Query<&SlotCharacter>,
     commands: &mut Commands,
-    args: &mut Args,
-    load: &mut LoadStep,
-    next: &mut NextState<GameScene>,
+    net: &mut crate::net::Net,
     sound: &mut crate::sound::SoundQueue,
 ) {
     if sel.starting {
@@ -1121,6 +1159,5 @@ fn start_game(
     commands.insert_resource(crate::account::Hero { name: c.name.clone(), class: c.class, level: c.level });
     sel.starting = true;
     sound.stop_music();
-    load_world(args, load, 1, true, GameScene::Game);
-    next.set(GameScene::Loading);
+    net.send(mu_protocol::game::ClientMessage::SelectCharacter { name: c.name.clone() });
 }

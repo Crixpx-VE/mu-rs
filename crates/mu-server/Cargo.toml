@@ -1,9 +1,14 @@
 [package]
 name = "mu-server"
-description = "Game Server (más adelante; mientras tanto se usa OpenMU)"
+description = "Servidor de MU: Connect Server y Game Server"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 mu-protocol.workspace = true
 mu-data.workspace = true
+mu-connect = { path = "../mu-connect" }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "macros", "time", "sync"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"

@@ -39,10 +39,12 @@ mod logfile;
 mod login;
 mod login_ui;
 mod mainframe;
+mod net;
 mod model_light;
 mod objects;
 mod operate;
 mod options;
+mod remote;
 mod settings;
 mod shadow;
 mod scene;
@@ -228,5 +230,6 @@ fn main() {
         ))
         .add_plugins(fonts::FontsPlugin)
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
+        .add_plugins((net::NetPlugin, remote::RemotePlugin))
         .run();
 }

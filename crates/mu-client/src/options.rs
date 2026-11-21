@@ -170,6 +170,7 @@ fn update_game_ui(
     mut load: ResMut<LoadStep>,
     mut next: ResMut<NextState<GameScene>>,
     mut exit: MessageWriter<AppExit>,
+    mut net: ResMut<crate::net::Net>,
 ) {
     let cursor = windows.single().ok().and_then(crate::mainframe::cursor_virtual);
     let (press, held, release) =
@@ -221,18 +222,25 @@ fn update_game_ui(
                 if let Some(i) = clicked {
                     sound.play("SOUND_CLICK01");
                     close_sys_menu(&mut ui);
+                    use mu_protocol::game::{ClientMessage, logout_kind};
                     match i {
-                        // `GameOverBtnDown`: `SendRequestLogOut(0)` → sin servidor, se sale.
+                        // `GameOverBtnDown`: `SendRequestLogOut(0)` y se sale.
                         0 => {
+                            net.send(ClientMessage::Logout { kind: logout_kind::CLOSE_GAME });
+                            net.close();
                             exit.write(AppExit::Success);
                         }
-                        // `ChooseServerBtnDown`: `SendRequestLogOut(2)` → al login.
+                        // `ChooseServerBtnDown`: `SendRequestLogOut(2)` → al login, sin conexión.
                         1 => {
+                            net.send(ClientMessage::Logout { kind: logout_kind::BACK_TO_SERVER_SELECTION });
+                            net.close();
                             crate::scene::load_world(&mut args, &mut load, crate::scene::LOGIN_WORLD, false, GameScene::Login);
                             next.set(GameScene::Loading);
                         }
-                        // `ChooseCharacterBtnDown`: `SendRequestLogOut(1)` → a la selección.
+                        // `ChooseCharacterBtnDown`: `SendRequestLogOut(1)` → a la selección (la
+                        // conexión sigue; al entrar se pide otra vez la lista).
                         2 => {
+                            net.send(ClientMessage::Logout { kind: logout_kind::BACK_TO_CHARACTER_SELECTION });
                             crate::scene::load_world(&mut args, &mut load, crate::scene::CHARACTER_WORLD, false, GameScene::CharacterSelect);
                             next.set(GameScene::Loading);
                         }

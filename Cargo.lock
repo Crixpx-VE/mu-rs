@@ -3830,6 +3830,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "mu-data",
+ "mu-protocol",
  "serde",
  "serde_json",
 ]
@@ -3866,8 +3867,13 @@ version = "0.1.0"
 name = "mu-server"
 version = "0.1.0"
 dependencies = [
+ "mu-connect",
  "mu-data",
  "mu-protocol",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
 ]
 
 [[package]]

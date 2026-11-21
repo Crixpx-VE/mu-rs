@@ -806,7 +806,31 @@ enum MsgCode {
     DeleteSuccess,
     ResidentWrong,
     CreateFail,
-    CreateFail2,
+    /// `MESSAGE_WAIT`: esperando al servidor (sin botones).
+    Wait,
+    // Login con el servidor (`ReceiveLogIn` / `ReceiveJoinServer`, WSclient.cpp:12760).
+    ServerLost,
+    LoginFailPassword,
+    LoginFailId,
+    LoginFailConnected,
+    LoginFailServerBusy,
+    LoginFailBlocked,
+    LoginFailVersion,
+    LoginFailConnect,
+    LoginFailError,
+}
+
+/// Lo que el gestor pide a la red (lo manda `update_ui`).
+#[derive(Clone, Debug, PartialEq)]
+enum NetOut {
+    /// `SendRequestServerList` al Connect Server.
+    ServerList,
+    /// `SendRequestServerAddress`: conectar al Game Server de ese id.
+    Connect(u16),
+    /// Un mensaje al Game Server.
+    Game(mu_protocol::game::ClientMessage),
+    /// Cerrar la conexión con el Game Server.
+    Close,
 }
 
 struct Message {
@@ -826,6 +850,8 @@ enum GroupPos {
 }
 
 struct ServerInfo {
+    /// Id en el Connect Server.
+    id: u16,
     /// Número del servidor dentro del grupo (`m_iIndex`, desde 1).
     index: i32,
     /// Carga (`m_iPercent`): 100 = lleno, 128 o más = preparándose.
@@ -1024,6 +1050,10 @@ struct LoginUi {
     char_selected: Option<(usize, String, u8)>,
     /// Para charselect.rs (personaje creado o borrado).
     scene_events: Vec<crate::charselect::SceneEvent>,
+    /// Para la red.
+    net_out: Vec<NetOut>,
+    /// Clases que el servidor deja crear (`CharacterCreationUnlockFlags`).
+    class_unlock: u8,
 }
 
 impl LoginUi {
@@ -1038,7 +1068,7 @@ impl LoginUi {
             held: None,
             btn_window: None,
             cursor: None,
-            groups: offline_server_list(),
+            groups: Vec::new(),
             selected_group: None,
             selected_server: None,
             id: TextBox::new(saved_id, MAX_ID, false),
@@ -1069,10 +1099,11 @@ impl LoginUi {
             char_count: 0,
             char_selected: None,
             scene_events: Vec::new(),
+            // `ConnectConnectionServer` al entrar en el login.
+            net_out: vec![NetOut::ServerList],
+            class_unlock: 0,
         };
         ui.update_display();
-        // Sin servidor: la lista llega enseguida (`ReceiveServerList`).
-        ui.server_list_received();
         ui
     }
 
@@ -1163,7 +1194,7 @@ impl LoginUi {
                 self.exit_clock = 0.0;
                 (MsgKind::None, countdown_text(self.exit_count))
             }
-            // `GlobalText` 390, 1715, 391, 1654, 1712, 1713, 1714, 401, 1716 y 396.
+            // `GlobalText` 390, 1715, 391, 1654, 1712, 1713, 1714, 401 y 1716.
             MsgCode::MinLength => (MsgKind::Ok, "Type more than 4 letters".into()),
             MsgCode::IdSpaceError => (MsgKind::Ok, "It contains prohibited words.".into()),
             MsgCode::SpecialName => (MsgKind::Ok, "Cannot use symbols.".into()),
@@ -1181,7 +1212,26 @@ impl LoginUi {
             MsgCode::DeleteSuccess => (MsgKind::Ok, "Character was deleted successfully.".into()),
             MsgCode::ResidentWrong => (MsgKind::Ok, "The password you have entered is incorrect.".into()),
             MsgCode::CreateFail => (MsgKind::Ok, "Incorrect character name was entered or same character name exists.".into()),
-            MsgCode::CreateFail2 => (MsgKind::Ok, "No more characters can be created.".into()),
+            MsgCode::Wait => (MsgKind::None, "Please wait".into()),
+            // `GlobalText` 402, 407, 414, 415, 416, 417, 405 + 406, 408 y 409.
+            MsgCode::ServerLost => (MsgKind::Ok, "You are disconnected from the server.".into()),
+            MsgCode::LoginFailPassword => (MsgKind::Ok, "Password is incorrect".into()),
+            MsgCode::LoginFailId => (MsgKind::Ok, "Your account is invalid".into()),
+            MsgCode::LoginFailConnected => (MsgKind::Ok, "Your account is already connected".into()),
+            MsgCode::LoginFailServerBusy => (MsgKind::Ok, "The server is full".into()),
+            MsgCode::LoginFailBlocked => (MsgKind::Ok, "This account is blocked".into()),
+            MsgCode::LoginFailVersion => {
+                // Dos líneas (`lpszMsg`, `lpszMsg2`).
+                self.msg = Message {
+                    code: Some(code),
+                    kind: MsgKind::Ok,
+                    lines: vec!["New version of game is required".into(), "Please download the new version".into()],
+                };
+                self.show_win(Win::Msg);
+                return;
+            }
+            MsgCode::LoginFailConnect => (MsgKind::Ok, "Connection error".into()),
+            MsgCode::LoginFailError => (MsgKind::Ok, "Connection closed due to 3 failed attempts.".into()),
         };
         self.msg = Message { code: Some(code), kind, lines: separate_lines(&text) };
         self.show_win(Win::Msg);
@@ -1513,15 +1563,18 @@ impl LoginUi {
                 }
                 let Some(g) = self.selected() else { return };
                 let chosen = clicks.iter().find_map(|c| match c {
-                    Btn::Server(j) => g.servers.get(*j).map(|info| (g.name.clone(), info.index, info.percent, info.non_pvp)),
+                    Btn::Server(j) => {
+                        g.servers.get(*j).map(|info| (g.name.clone(), info.index, info.percent, info.non_pvp, info.id))
+                    }
                     _ => None,
                 });
-                if let Some((name, index, percent, non_pvp)) = chosen {
+                if let Some((name, index, percent, non_pvp, id)) = chosen {
                     if percent < 100 {
                         self.hide_win(Win::ServerSel);
                         self.selected_server = Some((name, index, non_pvp));
-                        // `SendRequestServerAddress` → el servidor de juego saluda (`ReceiveJoinServer`).
-                        self.show_win(Win::Login);
+                        // `SendRequestServerAddress` → el servidor de juego saluda (`ReceiveJoinServer`)
+                        // y entonces se abre la ventana de login.
+                        self.net_out.push(NetOut::Connect(id));
                     } else if percent < 128 {
                         self.popup(MsgCode::ServerBusy);
                     }
@@ -1688,15 +1741,73 @@ impl LoginUi {
         } else if self.pass.text.is_empty() {
             self.popup(MsgCode::InputPassword);
         } else {
-            // Sin servidor: cualquier cuenta vale (`RECEIVE_LOG_IN_SUCCESS`).
-            self.outcome = Some(Outcome::Enter(self.id.text.clone()));
+            // `SendRequestLogIn`: la respuesta llega en `net_message` (`ReceiveLogIn`).
+            let tick = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u32);
+            self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::login(&self.id.text, &self.pass.text, tick)));
         }
     }
 
-    /// `CLoginWin::CancelLogin`: vuelve a pedir la lista al connect server.
+    /// `CLoginWin::CancelLogin`: `ConnectConnectionServer`, otra vez la lista de servidores.
     fn cancel_login(&mut self) {
         self.hide_win(Win::Login);
+        self.net_out.push(NetOut::Close);
+        self.net_out.push(NetOut::ServerList);
+    }
+
+    /// `ReceiveServerList`: la lista del Connect Server en un grupo "mu-rs" (Non-PvP). El número
+    /// de cada servidor en su grupo es `id % 20 + 1`.
+    fn receive_server_list(&mut self, list: &[(u16, u8)]) {
+        let servers: Vec<ServerInfo> =
+            list.iter().map(|&(id, load)| ServerInfo { id, index: (id % 20) as i32 + 1, percent: load as i32, non_pvp: 1 }).collect();
+        let pvp = !servers.iter().any(|s| s.non_pvp & 1 != 0);
+        self.groups = vec![ServerGroup { name: "mu-rs".into(), pos: GroupPos::Left, btn: usize::MAX, pvp, servers }];
         self.server_list_received();
+    }
+
+    /// Lo que llega de la red.
+    fn net_status(&mut self, status: &crate::net::NetStatus) {
+        use crate::net::NetStatus;
+        match status {
+            NetStatus::ServerList(list) if self.scene == UiScene::Login => self.receive_server_list(list),
+            NetStatus::ConnectFailed(why) if self.scene == UiScene::Login => {
+                warn!("Connect Server: {why}");
+                self.popup(MsgCode::ServerLost);
+            }
+            NetStatus::GameLost(_) => {
+                if !self.is_shown(Win::Msg) || self.msg.code != Some(MsgCode::ServerLost) {
+                    self.hide_win(Win::Login);
+                    self.popup(MsgCode::ServerLost);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn net_message(&mut self, msg: &mu_protocol::game::ServerMessage) {
+        use mu_protocol::game::{LoginResult, ServerMessage};
+        match msg {
+            ServerMessage::GameServerEntered { success, .. } if self.scene == UiScene::Login => {
+                if *success {
+                    self.show_win(Win::Login);
+                    self.first_load = true;
+                } else {
+                    self.popup(MsgCode::ServerLost);
+                }
+            }
+            ServerMessage::LoginResponse(r) if self.scene == UiScene::Login => match r {
+                LoginResult::Okay => self.outcome = Some(Outcome::Enter(self.id.text.clone())),
+                LoginResult::InvalidPassword => self.popup(MsgCode::LoginFailPassword),
+                LoginResult::AccountInvalid => self.popup(MsgCode::LoginFailId),
+                LoginResult::AccountAlreadyConnected => self.popup(MsgCode::LoginFailConnected),
+                LoginResult::ServerIsFull => self.popup(MsgCode::LoginFailServerBusy),
+                LoginResult::AccountBlocked | LoginResult::TemporaryBlocked => self.popup(MsgCode::LoginFailBlocked),
+                LoginResult::WrongVersion => self.popup(MsgCode::LoginFailVersion),
+                LoginResult::ConnectionClosed3Fails => self.popup(MsgCode::LoginFailError),
+                _ => self.popup(MsgCode::LoginFailConnect),
+            },
+            _ if self.scene == UiScene::Character => self.char_net_message(msg),
+            _ => {}
+        }
     }
 
     /// `CMsgWin::ManageOKClick` (MsgWin.cpp:447-494).
@@ -1711,9 +1822,31 @@ impl LoginUi {
                 self.show_win(Win::Login);
                 self.give_focus(Field::Pass, true);
             }
+            // Contraseña o cuenta mal, ya conectada...: otra vez la ventana de login.
+            Some(
+                MsgCode::LoginFailPassword
+                | MsgCode::LoginFailId
+                | MsgCode::LoginFailConnected
+                | MsgCode::LoginFailBlocked,
+            ) => {
+                self.show_win(Win::Login);
+                self.give_focus(Field::Pass, true);
+            }
+            // Sin conexión: a la lista de servidores (`ConnectConnectionServer`).
+            Some(
+                MsgCode::ServerLost
+                | MsgCode::LoginFailServerBusy
+                | MsgCode::LoginFailVersion
+                | MsgCode::LoginFailConnect
+                | MsgCode::LoginFailError,
+            ) if self.scene == UiScene::Login => {
+                self.net_out.push(NetOut::Close);
+                self.net_out.push(NetOut::ServerList);
+            }
+            Some(MsgCode::ServerLost) => self.outcome = Some(Outcome::ServerSelect),
             Some(MsgCode::DeleteConfirm) => self.popup(MsgCode::DeleteResident),
             Some(MsgCode::DeleteResident) => self.request_delete(),
-            Some(MsgCode::CreateFail | MsgCode::CreateFail2) => self.show_char_make(),
+            Some(MsgCode::CreateFail) => self.show_char_make(),
             _ => {}
         }
     }
@@ -1810,14 +1943,6 @@ fn separate_lines(text: &str) -> Vec<String> {
     lines
 }
 
-/// La lista de servidores sin connect server: un grupo "mu-rs" a la izquierda con un servidor
-/// Non-PvP vacío (en `ServerList.bmd` irían el nombre, la columna y los Non-PvP de cada grupo).
-fn offline_server_list() -> Vec<ServerGroup> {
-    let servers = vec![ServerInfo { index: 1, percent: 0, non_pvp: 1 }];
-    // `MakeServerGroup`: es PvP si ningún servidor lleva el bit Non-PvP.
-    let pvp = !servers.iter().any(|s| s.non_pvp & 1 != 0);
-    vec![ServerGroup { name: "mu-rs".into(), pos: GroupPos::Left, btn: usize::MAX, pvp, servers }]
-}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum BtnState {
@@ -1896,7 +2021,19 @@ fn update_ui(
     mut load: ResMut<LoadStep>,
     mut next: ResMut<NextState<GameScene>>,
     mut exit: MessageWriter<AppExit>,
+    (mut net, mut status, mut from): (
+        ResMut<crate::net::Net>,
+        MessageReader<crate::net::NetStatus>,
+        MessageReader<crate::net::FromServer>,
+    ),
 ) {
+    // Lo que ha llegado de la red, antes de la pasada (`ProtocolCompiler`).
+    for st in status.read() {
+        ui.net_status(st);
+    }
+    for m in from.read() {
+        ui.net_message(&m.0);
+    }
     let window = windows.single().ok();
     let (_, s) = screen_size(window, scale.0);
     let cursor = window
@@ -1931,6 +2068,14 @@ fn update_ui(
     if *opts != ui.opts {
         *opts = ui.opts;
     }
+    for out in std::mem::take(&mut ui.net_out) {
+        match out {
+            NetOut::ServerList => net.request_server_list(),
+            NetOut::Connect(id) => net.connect_to_server(id),
+            NetOut::Game(msg) => net.send(msg),
+            NetOut::Close => net.close(),
+        }
+    }
     match ui.outcome.take() {
         Some(Outcome::Enter(id)) => {
             crate::settings::save_value("usuario", &id);
@@ -1938,9 +2083,15 @@ fn update_ui(
             next.set(GameScene::Loading);
         }
         Some(Outcome::Exit) => {
+            // `SendRequestLogOut(0)`.
+            net.send(mu_protocol::game::ClientMessage::Logout { kind: 0 });
+            net.close();
             exit.write(AppExit::Success);
         }
         Some(Outcome::ServerSelect) => {
+            // `SendRequestLogOut(2)`: de vuelta a la lista de servidores, sin conexión.
+            net.send(mu_protocol::game::ClientMessage::Logout { kind: 2 });
+            net.close();
             crate::scene::load_world(&mut args, &mut load, crate::scene::LOGIN_WORLD, false, GameScene::Login);
             next.set(GameScene::Loading);
         }

@@ -3,14 +3,13 @@
 //! menú de sistema con "Select Server" y las opciones. La barra de abajo, los globos y el 3D son de
 //! charselect.rs; se cuentan lo necesario por `CharSceneLink`.
 //!
-//! Sin servidor: crear y borrar van a `account.rs` y la respuesta llega enseguida
-//! (`ReceiveCreateCharacter` / `ReceiveDeleteCharacter`). Para borrar vale cualquier contraseña no
-//! vacía (no se guardan contraseñas).
+//! Crear y borrar van al servidor; mientras contesta sale "Please wait" (`MESSAGE_WAIT`). Para borrar,
+//! el código es la contraseña de la cuenta.
 
 use bevy::ui::UiScale;
 
 use super::*;
-use crate::account::{self, Class, CreateError};
+use crate::account::{self, Class};
 use crate::charselect::{CharSceneLink, SceneEvent, UiRequest};
 
 /// `CCharMakeWin`: `m_winBack` de 454×406, centrado (UIMng.cpp).
@@ -101,9 +100,76 @@ impl LoginUi {
         ui.focus = None;
         ui.account = account;
         ui.char_count = count;
-        // `CCharSelMainWin::UpdateDisplay`: sin personajes, directamente a crear uno.
-        ui.char_display();
+        // Hasta que llegue la lista del servidor (`ReceiveCharacterList` → `UpdateDisplay`).
+        ui.net_out.clear();
         ui
+    }
+
+    /// Lo que llega del servidor en esta pantalla.
+    pub(super) fn char_net_message(&mut self, msg: &mu_protocol::game::ServerMessage) {
+        use mu_protocol::game::{self, ServerMessage};
+        match msg {
+            ServerMessage::CharacterList { unlock_flags, characters, .. } => {
+                self.class_unlock = *unlock_flags;
+                self.char_count = characters.len();
+                // `CCharSelMainWin::UpdateDisplay`: sin personajes, directamente a crear uno.
+                self.char_display();
+            }
+            ServerMessage::CharacterClassCreationUnlock { flags } => self.class_unlock = *flags,
+            ServerMessage::CharacterCreated { name, slot, level, class } => {
+                // `ReceiveCreateCharacter` con éxito: `CloseMsgWin` y el personaje en su hueco.
+                self.close_wait();
+                self.scene_events.push(SceneEvent::Created(account::StoredCharacter {
+                    slot: *slot as usize,
+                    name: name.clone(),
+                    class: Class::from_index(game::base_class_index(*class)),
+                    level: *level as u32,
+                    guild_status: 255,
+                }));
+                self.char_count += 1;
+            }
+            ServerMessage::CharacterCreationFailed => {
+                self.close_wait();
+                self.popup(MsgCode::CreateFail);
+            }
+            ServerMessage::CharacterDeleteResponse { result } => {
+                self.close_wait();
+                match result {
+                    1 => {
+                        let Some((_, name, _)) = self.char_selected.take() else { return };
+                        self.scene_events.push(SceneEvent::Deleted(name));
+                        self.char_count = self.char_count.saturating_sub(1);
+                        // `MESSAGE_DELETE_CHARACTER_SUCCESS`: `SelectedHero = -1` y `UpdateDisplay`.
+                        self.char_display();
+                        self.popup(MsgCode::DeleteSuccess);
+                    }
+                    0 => self.popup(MsgCode::DeleteGuildWarning),
+                    _ => self.popup(MsgCode::ResidentWrong),
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// `CloseMsgWin` del "Please wait".
+    fn close_wait(&mut self) {
+        if self.is_shown(Win::Msg) && self.msg.code == Some(MsgCode::Wait) {
+            self.hide_win(Win::Msg);
+        }
+    }
+
+    /// ¿Se puede crear esta clase? (`g_CharCardEnable` con las banderas del servidor: Magic
+    /// Gladiator, Dark Lord y Summoner necesitan su carta; el Rage Fighter, la suya.)
+    fn class_enabled(&self, class: Class) -> bool {
+        use mu_protocol::game::unlock;
+        let bit = match class {
+            Class::Gladiator => unlock::MAGIC_GLADIATOR,
+            Class::Lord => unlock::DARK_LORD,
+            Class::Summoner => unlock::SUMMONER,
+            Class::Fighter => unlock::RAGE_FIGHTER,
+            _ => return true,
+        };
+        self.class_unlock & bit != 0
     }
 
     /// `ShowWin(&m_CharMakeWin)`: la caja del nombre vacía y con el foco (`CCharMakeWin::Show`).
@@ -133,18 +199,12 @@ impl LoginUi {
     /// `RequestDeleteCharacter` y su respuesta.
     pub(super) fn request_delete(&mut self) {
         let Some((_, name, _)) = self.char_selected.clone() else { return };
-        if self.del_pass.text.is_empty() {
-            self.popup(MsgCode::ResidentWrong);
-            return;
-        }
-        account::delete(&self.account, &name);
-        self.scene_events.push(SceneEvent::Deleted(name));
-        self.char_count = self.char_count.saturating_sub(1);
-        self.char_selected = None;
         self.focus = None;
-        // `MESSAGE_DELETE_CHARACTER_SUCCESS`: `SelectedHero = -1` y `UpdateDisplay`.
-        self.char_display();
-        self.popup(MsgCode::DeleteSuccess);
+        // `SendRequestDeleteCharacter(ID, código)` y `PopUp(MESSAGE_WAIT)`; la respuesta llega en
+        // `char_net_message`.
+        let code = self.del_pass.text.clone();
+        self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::DeleteCharacter { name, security_code: code }));
+        self.popup(MsgCode::Wait);
     }
 
     /// `CCharMakeWin::RequestCreateCharacter` y `ReceiveCreateCharacter`.
@@ -157,16 +217,12 @@ impl LoginUi {
         } else if special_text(&name) {
             self.popup(MsgCode::SpecialName);
         } else {
+            // `SendRequestCreateCharacter`, `HideWin` y `PopUpMsgWin(MESSAGE_WAIT)`.
+            let class = mu_protocol::game::class_number(self.job.index() as u8);
+            self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::CreateCharacter { name, class }));
             self.hide_win(Win::CharMake);
             self.focus = None;
-            match account::create(&self.account, &name, self.job) {
-                Ok(c) => {
-                    self.scene_events.push(SceneEvent::Created(c));
-                    self.char_count += 1;
-                }
-                Err(CreateError::NameTaken) => self.popup(MsgCode::CreateFail),
-                Err(CreateError::Full) => self.popup(MsgCode::CreateFail2),
-            }
+            self.popup(MsgCode::Wait);
         }
     }
 
@@ -174,14 +230,16 @@ impl LoginUi {
     /// 2 y elegido 3) y OK / Cancel.
     pub(super) fn char_make_buttons(&self, s: Screen, out: &mut Vec<ButtonDef>) {
         for class in Class::ALL {
+            // Deshabilitado: fotograma 0 y texto gris (`adwJobBtnClr[3]`).
+            let enabled = self.class_enabled(class);
             out.push(ButtonDef {
                 id: Btn::Job(class),
                 rect: job_rect(s, class),
                 tex: Tex::GroupBtn,
-                frames: [0, 2, 1],
+                frames: if enabled { [0, 2, 1] } else { [0, 0, 0] },
                 check_frame: Some(3),
                 checked: self.job == class,
-                text: Some((class.name().to_string(), [BR_GRAY, BR_GRAY, WHITE])),
+                text: Some((class.name().to_string(), if enabled { [BR_GRAY, BR_GRAY, WHITE] } else { [GRAY; 3] })),
             });
         }
         let o = cmw_origin(s);
@@ -193,7 +251,7 @@ impl LoginUi {
     pub(super) fn char_make_while_active(&mut self, clicks: &[Btn], input: &FrameInput) {
         for &c in clicks {
             if let Btn::Job(class) = c {
-                if self.job != class {
+                if self.job != class && self.class_enabled(class) {
                     self.job = class;
                     // `UpdateDisplay` → `SelectCreateCharacter`: la cara nueva, desde la acción 1.
                     self.job_picks += 1;
@@ -258,9 +316,7 @@ impl LoginUi {
 /// `CUIMng::CreateCharacterScene`: el gestor y su capa de ventanas, por encima de la barra y los
 /// globos de charselect.rs.
 pub(super) fn spawn_character_ui(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets<Image>>) {
-    let account = account::current_account();
-    let count = account::characters(&account).len();
-    commands.insert_resource(LoginUi::new_character_scene(account, count));
+    commands.insert_resource(LoginUi::new_character_scene(account::current_account(), 0));
     let textures: HashMap<Tex, Handle<Image>> = Tex::ALL
         .iter()
         .filter_map(|&t| crate::scene::interface_image(&args, &mut images, t.file()).map(|(h, _)| (t, h)))

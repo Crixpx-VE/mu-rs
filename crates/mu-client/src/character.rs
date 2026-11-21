@@ -320,6 +320,8 @@ fn spawn_player(
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
     hero: Option<Res<crate::account::Hero>>,
+    info: Option<Res<crate::account::HeroInfo>>,
+    mut stats: ResMut<crate::mainframe::CharacterStats>,
 ) {
     let class = hero.map_or(crate::account::Class::Knight, |h| {
         info!("entra {} ({} nivel {})", h.name, h.class.name(), h.level);
@@ -332,16 +334,34 @@ fn spawn_player(
         return;
     };
 
-    let start = args.spawn.unwrap_or(if args.world == 1 { [133.0, 127.0] } else { [128.0, 128.0] });
+    // Con servidor, donde diga (`CharacterInformation`); si no, `--spawn` o el centro del mapa.
+    let from_server = info.as_ref().map(|i| [i.0.x as f32 + 0.5, i.0.y as f32 + 0.5]);
+    let start = from_server.or(args.spawn).unwrap_or(if args.world == 1 { [133.0, 127.0] } else { [128.0, 128.0] });
     let mut pos = Vec2::from_array(start);
     if let Some(t) = &terrain {
         pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
+    }
+    // `Direction` (0..7, como los pasos de caminar) → ángulo de MU.
+    let facing = info.as_ref().map_or(0.0, |i| direction_facing(i.0.direction));
+    if let Some(i) = &info {
+        let i = &i.0;
+        *stats = crate::mainframe::CharacterStats {
+            hp: i.health as u32,
+            hp_max: i.max_health as u32,
+            mp: i.mana as u32,
+            mp_max: i.max_mana as u32,
+            ag: i.ability as u32,
+            ag_max: i.max_ability as u32,
+            sd: i.shield as u32,
+            sd_max: i.max_shield as u32,
+            ..default()
+        };
     }
 
     let player = Player {
         pos,
         path: VecDeque::new(),
-        facing: 0.0,
+        facing,
         action: stop,
         frame: 0.0,
         casting: None,
@@ -552,14 +572,29 @@ fn hero_path(t: &mu_data::terrain::Terrain, from: (usize, usize), to: (usize, us
     (p.len() > 1).then_some(p)
 }
 
-/// `SendMove`: el tiempo hasta atender otro clic depende de lo largo del camino.
-fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTimer) {
+/// `SendMove`: el tiempo hasta atender otro clic depende de lo largo del camino; el camino va al
+/// servidor (`SendCharacterMove`: casilla de salida, dirección y un paso por casilla).
+fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTimer, net: &mut crate::net::Net) {
     timer.max = match path.len() {
         0..=2 => 0,
         3 => 5,
         n => 10 + (n as u32 - 2) * 3,
     };
+    if net.connected() {
+        let tiles: Vec<(u8, u8)> = path.iter().map(|&(x, y)| (x.min(255) as u8, y.min(255) as u8)).collect();
+        let directions: Vec<u8> =
+            tiles.windows(2).filter_map(|w| mu_protocol::game::direction_between(w[0], w[1])).collect();
+        if let (Some(&(sx, sy)), Some(&first)) = (tiles.first(), directions.first()) {
+            net.send(mu_protocol::game::ClientMessage::Walk { source_x: sx, source_y: sy, rotation: first, directions });
+        }
+    }
     player.path = path.into_iter().skip(1).collect();
+}
+
+/// Ángulo de MU (el de `Player::facing`) de una dirección de paso (0..7).
+pub fn direction_facing(direction: u8) -> f32 {
+    let (dx, dy) = mu_protocol::game::DIRECTIONS[(direction & 7) as usize];
+    (dx as f32).atan2(-(dy as f32))
 }
 
 /// El ratón en el juego (`MoveHero`, ZzzInterface.cpp ≈7340-7636), una vez por tick:
@@ -581,6 +616,7 @@ fn hero_input(
     mut timer: Local<MouseTimer>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut players: Query<&mut Player>,
+    mut net: ResMut<crate::net::Net>,
 ) {
     use mu_data::terrain::attr;
     let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
@@ -624,7 +660,7 @@ fn hero_input(
                 if (wall == attr::HEIGHT || wall < attr::CHARACTER) && !moving {
                     player.operate = Some(i);
                     match hero_path(&t.0, here, (tx as usize, ty as usize)) {
-                        Some(p) => send_move(&mut player, p, &mut timer),
+                        Some(p) => send_move(&mut player, p, &mut timer, &mut net),
                         None => operate_action(&mut player, op, &mut sound),
                     }
                 }
@@ -634,7 +670,7 @@ fn hero_input(
                 pointer.dont_move = a >= attr::NO_GROUND && a & attr::ACTION == 0 && a & attr::HEIGHT == 0;
                 if let Some(p) = (here != to || !moving).then(|| hero_path(&t.0, here, to)).flatten() {
                     player.operate = None;
-                    send_move(&mut player, p, &mut timer);
+                    send_move(&mut player, p, &mut timer, &mut net);
                 }
             }
         }
