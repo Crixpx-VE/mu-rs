@@ -11,7 +11,8 @@
 //! - viento: los vértices de arriba se mueven en Y `sin(2·t + 5·x) · 10` (t en segundos).
 //!
 //! El viento depende del tiempo real, así que va igual a cualquier fps. Los vértices se
-//! recalculan en CPU cada fotograma (solo cambia la Y de MU de los de arriba).
+//! recalculan en CPU cada fotograma (solo cambia la Y de MU de los de arriba), pero solo en
+//! los bloques de 16×16 casillas que se ven: como el original, que solo mueve la hierba en pantalla.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -70,8 +71,6 @@ fn spawn_grass(
         let name = format!("TileGrass{:02}.ozt", index + 1);
         let Ok(tex) = texture::load(&t.dir, &name) else { continue };
         let height = tex.height as f32 * 2.0;
-        let Some((mesh, base, tops)) = build_grass(t, index, height, &row_offset) else { continue };
-        let handle = meshes.add(mesh);
         let material = materials.add(StandardMaterial {
             base_color_texture: Some(images.add(to_bevy_image(&tex))),
             unlit: true,
@@ -80,15 +79,27 @@ fn spawn_grass(
             alpha_mode: AlphaMode::Mask(0.25),
             ..default()
         });
-        info!("hierba {name}: {} matas", base.len() / 4);
-        commands.spawn((
-            Name::new(format!("Hierba {name}")),
-            Mesh3d(handle.clone()),
-            MeshMaterial3d(material),
-            GrassMesh { mesh: handle, base, tops, wave_x },
-        ));
+        let mut total = 0;
+        for cy in (0..SIZE).step_by(CHUNK) {
+            for cx in (0..SIZE).step_by(CHUNK) {
+                let area = (cx..(cx + CHUNK).min(SIZE - 1), cy..(cy + CHUNK).min(SIZE - 1));
+                let Some((mesh, base, tops)) = build_grass(t, index, height, &row_offset, area) else { continue };
+                total += base.len() / 4;
+                let handle = meshes.add(mesh);
+                commands.spawn((
+                    Name::new(format!("Hierba {name} ({cx},{cy})")),
+                    Mesh3d(handle.clone()),
+                    MeshMaterial3d(material.clone()),
+                    GrassMesh { mesh: handle, base, tops, wave_x },
+                ));
+            }
+        }
+        info!("hierba {name}: {total} matas");
     }
 }
+
+/// Lado de cada bloque de hierba, en casillas.
+const CHUNK: usize = 16;
 
 /// `TerrainGrassTexture`: desfase de U al azar por fila (0, 0.25, 0.5, 0.75).
 fn row_offsets() -> Vec<f32> {
@@ -105,7 +116,13 @@ fn row_offsets() -> Vec<f32> {
 
 type GrassData = (Mesh, Vec<[f32; 3]>, Vec<(u32, u16)>);
 
-fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32]) -> Option<GrassData> {
+fn build_grass(
+    t: &Terrain,
+    texture: u8,
+    height: f32,
+    row_offset: &[f32],
+    (xs, ys): (std::ops::Range<usize>, std::ops::Range<usize>),
+) -> Option<GrassData> {
     let m = &t.mapping;
     let mut pos = Vec::new();
     let mut uv = Vec::new();
@@ -119,8 +136,8 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32]) -> Opt
         [l[0].powf(2.2), l[1].powf(2.2), l[2].powf(2.2), 1.0]
     };
 
-    for y in 0..SIZE - 1 {
-        for x in 0..SIZE - 1 {
+    for y in ys {
+        for x in xs.clone() {
             if m.layer1[y * SIZE + x] != texture {
                 continue;
             }
@@ -162,11 +179,21 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32]) -> Opt
     Some((mesh, pos, tops))
 }
 
-fn wave_grass(time: Res<Time>, grass: Query<&GrassMesh>, mut meshes: ResMut<Assets<Mesh>>) {
+fn wave_grass(time: Res<Time>, grass: Query<(&GrassMesh, &ViewVisibility)>, mut meshes: ResMut<Assets<Mesh>>) {
     let t = time.elapsed_secs();
-    for g in &grass {
-        let wind: Vec<f32> =
-            (0..SIZE).map(|x| (t * WIND_SPEED + x as f32 * g.wave_x).sin() * WIND_SCALE / MU_SCALE).collect();
+    let mut wind_for: Option<(f32, Vec<f32>)> = None;
+    // Solo los bloques que se vieron en el último fotograma.
+    for (g, visible) in &grass {
+        if !visible.get() {
+            continue;
+        }
+        let wind = match &wind_for {
+            Some((wx, w)) if *wx == g.wave_x => w,
+            _ => {
+                let w = (0..SIZE).map(|x| (t * WIND_SPEED + x as f32 * g.wave_x).sin() * WIND_SCALE / MU_SCALE).collect();
+                &wind_for.insert((g.wave_x, w)).1
+            }
+        };
         let mut pos = g.base.clone();
         for &(v, x) in &g.tops {
             // +Y de MU es -Z en Bevy.

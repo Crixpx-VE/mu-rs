@@ -13,14 +13,16 @@
 //!   --cam x,y,alto,mx,my,ma  cámara libre en esa posición, mirando a ese punto (en casillas)
 //!   --screenshot <png>       hace una captura y se cierra
 //!   --screenshot-delay <s>   segundos de espera antes de capturar (por defecto 10)
-//!   --zoom <casillas>        distancia inicial de la cámara de seguimiento (por defecto 12)
+//!   --zoom <casillas>        distancia inicial de la cámara de seguimiento (10-17, por defecto 13)
+//!   --sin-vsync              sin límite de fps (para medir rendimiento)
 //!
-//! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir.
+//! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps.
 
 mod camera;
 mod character;
 mod effects;
 mod grass;
+mod hud;
 mod objects;
 mod terrain;
 
@@ -43,6 +45,8 @@ pub struct Args {
     pub cam: Option<[f32; 6]>,
     /// Distancia inicial de la cámara de seguimiento (casillas).
     pub zoom: Option<f32>,
+    /// Sin sincronía vertical: los fps no se limitan a la frecuencia del monitor (para medir).
+    pub no_vsync: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -75,6 +79,7 @@ impl Args {
             screenshot_delay: 10.0,
             cam: None,
             zoom: None,
+            no_vsync: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -89,6 +94,7 @@ impl Args {
                 }
                 "--cam" => args.cam = Some(parse_floats(it.next(), "--cam")),
                 "--zoom" => args.zoom = Some(it.next().expect("--zoom <casillas>").parse().expect("número")),
+                "--sin-vsync" => args.no_vsync = true,
                 otro => eprintln!("argumento desconocido: {otro}"),
             }
         }
@@ -119,7 +125,16 @@ fn main() {
     } else {
         app.insert_resource(bevy::winit::WinitSettings::continuous()).add_plugins(DefaultPlugins.set(
             WindowPlugin {
-                primary_window: Some(Window { title, resolution: (1280, 720).into(), ..default() }),
+                primary_window: Some(Window {
+                    title,
+                    resolution: (1280, 720).into(),
+                    present_mode: if args.no_vsync {
+                        bevy::window::PresentMode::AutoNoVsync
+                    } else {
+                        bevy::window::PresentMode::AutoVsync
+                    },
+                    ..default()
+                }),
                 ..default()
             },
         ));
@@ -130,6 +145,7 @@ fn main() {
             terrain::TerrainPlugin,
             grass::GrassPlugin,
             effects::EffectsPlugin,
+            hud::HudPlugin,
             objects::ObjectsPlugin,
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
