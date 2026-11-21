@@ -34,7 +34,7 @@ pub struct CharacterPlugin;
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(PostStartup, spawn_player)
-            .add_systems(Update, (scripted_walk, click_to_move, walk, animate).chain());
+            .add_systems(Update, (scripted_walk, click_to_move, cast_skill, walk, animate).chain());
     }
 }
 
@@ -48,6 +48,49 @@ pub struct Player {
     pub facing: f32,
     pub action: usize,
     pub frame: f32,
+    /// Haciendo una habilidad: su animación manda hasta que acaba (fotogramas por segundo).
+    pub casting: Option<f32>,
+}
+
+/// Habilidades del Dark Knight en las teclas (sin servidor todavía: se lanzan en el sitio):
+/// (tecla, `AT_SKILL_*`, acción de `player.bmd`, velocidad `PlaySpeed` de `SetAttackSpeed`).
+const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
+    use crate::fx::core::*;
+    [
+        (KeyCode::Digit1, AT_SKILL_TWISTING_SLASH, PLAYER_ATTACK_SKILL_WHEEL as usize, 0.24),
+        (KeyCode::Digit2, AT_SKILL_RAGEFUL_BLOW, PLAYER_ATTACK_SKILL_FURY_STRIKE as usize, 0.38),
+        (KeyCode::Digit3, AT_SKILL_DEATHSTAB, PLAYER_ATTACK_DEATHSTAB as usize, 0.25),
+        (KeyCode::Digit4, AT_SKILL_IMPALE, PLAYER_ATTACK_SKILL_SPEAR as usize, 0.30),
+        (KeyCode::Digit5, AT_SKILL_SWELL_LIFE, PLAYER_SKILL_VITALITY as usize, 0.34),
+        (KeyCode::Digit6, AT_SKILL_FALLING_SLASH, PLAYER_ATTACK_SKILL_SWORD1 as usize, 0.30),
+        (KeyCode::Digit7, AT_SKILL_LUNGE, PLAYER_ATTACK_SKILL_SWORD1 as usize + 1, 0.30),
+        (KeyCode::Digit8, AT_SKILL_UPPERCUT, PLAYER_ATTACK_SKILL_SWORD1 as usize + 2, 0.27),
+        (KeyCode::Digit9, AT_SKILL_CYCLONE, PLAYER_ATTACK_SKILL_SWORD1 as usize + 3, 0.30),
+        (KeyCode::Digit0, AT_SKILL_SLASH, PLAYER_ATTACK_SKILL_SWORD1 as usize + 4, 0.24),
+    ]
+};
+
+/// Lanza una habilidad: animación del personaje y su `AttackTime` en el motor de efectos.
+fn cast_skill(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut world: ResMut<crate::fx::FxWorld>,
+    mut players: Query<(Entity, &mut Player)>,
+) {
+    let Ok((entity, mut p)) = players.single_mut() else { return };
+    if p.casting.is_some() {
+        return;
+    }
+    let Some(&(_, skill, action, speed)) = SKILL_KEYS.iter().find(|(k, ..)| keys.just_pressed(*k)) else { return };
+    p.path.clear();
+    p.pos = Vec2::new(p.pos.x.floor() + 0.5, p.pos.y.floor() + 0.5);
+    p.action = action;
+    p.frame = 0.0;
+    // `PlaySpeed` son fotogramas por tick del original (25 por segundo).
+    p.casting = Some(speed * crate::fx::sim::TICKS_PER_SECOND);
+    // Objetivo: un punto 2 casillas por delante (no hay monstruos todavía).
+    let (s, c) = p.facing.sin_cos();
+    let ahead = Vec3::new((p.pos.x + 2.0 * s) * MU_SCALE, (p.pos.y - 2.0 * c) * MU_SCALE, 0.0);
+    world.casts.push(crate::fx::core::Cast::new(entity, skill, None, ahead));
 }
 
 /// Esqueleto + piezas, compartido por la animación.
@@ -57,6 +100,8 @@ struct Skinned {
     /// (modelo de la pieza, índice de malla, malla de Bevy que se actualiza)
     parts: Vec<(usize, usize, Handle<Mesh>)>,
     models: Vec<Bmd>,
+    /// El arma de la mano derecha y sus mallas.
+    weapon: Option<(Bmd, Vec<(usize, Handle<Mesh>)>)>,
 }
 
 /// Piezas del Dark Knight con la armadura inicial (clase 02).
@@ -112,17 +157,79 @@ fn spawn_player(
         models.push(model);
     }
 
-    let player = Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0 };
+    // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true).
+    let item_dir = args.data.join("Item");
+    let weapon = fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok().map(|w| {
+        let wbones = weapon_bones(&w, &bones);
+        let mut handles = vec![];
+        for i in 0..w.meshes.len() {
+            let posed = w.pose_with(i, &wbones);
+            if posed.positions.is_empty() {
+                continue;
+            }
+            let mesh = meshes.add(
+                Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+                    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions)
+                    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
+                    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
+            );
+            let material = materials.add(part_material(&item_dir, &w.meshes[i].texture, &mut images));
+            children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material)));
+            handles.push((i, mesh));
+        }
+        (w, handles)
+    });
+    if weapon.is_none() {
+        warn!("falta el arma Item/{WEAPON_FILE}");
+    }
+
+    let player = Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None };
+    let actor = actor_state(&player, &bones, terrain.as_deref());
     let mut e = commands.spawn((
         Name::new("Jugador"),
         player_transform(&player, terrain.as_deref()),
         Visibility::default(),
         player,
-        Skinned { skeleton, parts, models },
+        Skinned { skeleton, parts, models, weapon },
+        actor,
     ));
     for child in children {
         e.with_child(child);
     }
+}
+
+/// Arma inicial del Dark Knight: la espada corta (`MODEL_SWORD + 1` = `Item/Sword02.bmd`).
+const WEAPON_FILE: &str = "Sword02.bmd";
+const WEAPON_MODEL: i32 = crate::fx::core::MODEL_SWORD + 1;
+/// `Weapon[0].LinkBone`: la mano derecha de `player.bmd`.
+pub const RIGHT_HAND_BONE: usize = 33;
+
+/// Huesos del arma pegada a la mano (`PlaceLinkedPart` con `Link`): la matriz de la mano por
+/// `AngleMatrix(70°, 0, 90°)` desplazada (-20, 5, 40), y luego los huesos propios del arma.
+fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34]) -> Vec<bmd::Mat34> {
+    let mut m = bmd::angle_matrix([70f32.to_radians(), 0.0, 90f32.to_radians()]);
+    m[0][3] = -20.0;
+    m[1][3] = 5.0;
+    m[2][3] = 40.0;
+    let hand = player_bones.get(RIGHT_HAND_BONE).copied().unwrap_or(m);
+    let parent = bmd::concat(&hand, &m);
+    weapon.bone_matrices(0, 0).iter().map(|b| bmd::concat(&parent, b)).collect()
+}
+
+/// Foto del personaje para el motor de efectos (posición en MU, giro, huesos, arma).
+fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>) -> crate::fx::ActorState {
+    let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+    crate::fx::ActorState(crate::fx::Actor {
+        position: Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h),
+        angle: Vec3::new(0.0, 0.0, p.facing.to_degrees()),
+        scale: 1.0,
+        bones: std::sync::Arc::new(bones.to_vec()),
+        action: p.action,
+        frame: p.frame,
+        weapon: Some((WEAPON_MODEL, 0)),
+        weapon_bone: RIGHT_HAND_BONE,
+        live: true,
+    })
 }
 
 /// `--walk-to`: orden de caminar sin ratón. En modo captura se da 1 s antes de capturar,
@@ -182,6 +289,9 @@ fn click_to_move(
     else {
         return;
     };
+    if player.casting.is_some() {
+        return;
+    }
     let Some(cursor) = window.cursor_position() else { return };
     let Ok(ray) = camera.viewport_to_world(cam_tf, cursor) else { return };
     let Some(hit) = raycast_terrain(&t.0, ray) else { return };
@@ -238,7 +348,7 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
             }
         }
         let action = if p.path.is_empty() { action::STOP_MALE } else { action::WALK_MALE };
-        if action != p.action {
+        if p.casting.is_none() && action != p.action {
             p.action = action;
             p.frame = 0.0;
         }
@@ -246,9 +356,23 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
     }
 }
 
-fn animate(time: Res<Time>, mut meshes: ResMut<Assets<Mesh>>, mut q: Query<(&mut Player, &Skinned)>) {
-    for (mut p, s) in &mut q {
-        p.frame += ANIM_FPS * time.delta_secs();
+fn animate(
+    time: Res<Time>,
+    terrain: Option<Res<LoadedTerrain>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut q: Query<(&mut Player, &Skinned, &mut crate::fx::ActorState)>,
+) {
+    for (mut p, s, mut actor) in &mut q {
+        p.frame += p.casting.unwrap_or(ANIM_FPS) * time.delta_secs();
+        // La habilidad termina al acabar su animación: vuelve a estar quieto.
+        if p.casting.is_some() {
+            let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
+            if p.frame >= frames - 1.0 {
+                p.casting = None;
+                p.action = action::STOP_MALE;
+                p.frame = 0.0;
+            }
+        }
         let bones = s.skeleton.bone_matrices_at(p.action, p.frame);
         for (model, mesh, handle) in &s.parts {
             let posed = s.models[*model].pose_with(*mesh, &bones);
@@ -257,6 +381,17 @@ fn animate(time: Res<Time>, mut meshes: ResMut<Assets<Mesh>>, mut q: Query<(&mut
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
             }
         }
+        if let Some((w, handles)) = &s.weapon {
+            let wbones = weapon_bones(w, &bones);
+            for (i, handle) in handles {
+                let posed = w.pose_with(*i, &wbones);
+                if let Some(mut m) = meshes.get_mut(handle) {
+                    m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
+                    m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
+                }
+            }
+        }
+        *actor = actor_state(&p, &bones, terrain.as_deref());
     }
 }
 

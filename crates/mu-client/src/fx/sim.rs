@@ -14,6 +14,8 @@ use crate::terrain::{LoadedTerrain, TerrainLights};
 pub const MAX_PARTICLES: usize = 3000;
 pub const MAX_JOINTS: usize = 500;
 pub const MAX_EFFECTS: usize = 300;
+/// Ticks de la lógica del original por segundo (`REFERENCE_FPS`).
+pub const TICKS_PER_SECOND: f32 = 25.0;
 
 /// Todo lo vivo del motor.
 #[derive(Resource, Default)]
@@ -29,6 +31,8 @@ pub struct FxWorld {
     pub ticks: u64,
     /// Lo pedido desde fuera del motor (personajes, objetos del mapa) para el próximo tick.
     pub pending: Vec<Spawn>,
+    /// Habilidades en curso (`AttackTime` de cada personaje).
+    pub casts: Vec<Cast>,
 }
 
 /// Personajes que pueden seguir los efectos, actualizados por quien los mueve.
@@ -69,7 +73,7 @@ pub fn tick(
     let effect_positions: HashMap<u32, Vec3> = world.effects.iter().map(|e| (e.id, e.position)).collect();
     let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
 
-    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, .. } = world;
+    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, .. } = world;
     let mut ctx = Ctx {
         rng,
         world_time: time.elapsed_secs() * 1000.0,
@@ -84,6 +88,24 @@ pub fn tick(
         next_effect_id,
         world_active: args.world as i32 - 1,
     };
+
+    // Habilidades en curso (`MoveCharactersClient` va antes que `MoveEffects`): `AttackStage` cada
+    // tick y el efecto final al llegar a `g_iLimitAttackTime`.
+    for c in casts.iter_mut() {
+        let kind = registry.skills.get(&c.skill).copied().unwrap_or_default();
+        if let Some(stage) = kind.stage {
+            stage(c, &mut ctx);
+        }
+        if c.attack_time >= LIMIT_ATTACK_TIME {
+            if let Some(finish) = kind.finish {
+                finish(c, &mut ctx);
+            }
+            c.live = false;
+        } else {
+            c.attack_time += 1;
+        }
+    }
+    casts.retain(|c| c.live);
 
     // Efectos (`MoveEffect`): lo propio del tipo y luego `LifeTime -= 1`.
     for e in effects.iter_mut() {

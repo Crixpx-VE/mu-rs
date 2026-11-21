@@ -416,6 +416,45 @@ pub struct SpriteFx {
     pub alpha: f32,
 }
 
+// --- Habilidades -----------------------------------------------------------------------------------
+
+/// `g_iLimitAttackTime`: cuando `AttackTime` llega aquí se lanza el efecto final de la habilidad.
+pub const LIMIT_ATTACK_TIME: i32 = 15;
+
+/// Una habilidad en curso de un personaje: lo que el original guarda en el `CHARACTER`
+/// (`Skill`, `AttackTime`, `TargetCharacter`, `m_vPosSword`...). Cada tick: `AttackTime += 1`,
+/// se llama a `stage` (`AttackStage`/`AttackEffect`) y al llegar a [`LIMIT_ATTACK_TIME`] a
+/// `finish` (el `switch` de `ZzzCharacter.cpp` ≈ 4154-4437); entonces termina.
+#[derive(Clone)]
+pub struct Cast {
+    pub owner: Entity,
+    pub skill: i32,
+    pub attack_time: i32,
+    /// Objetivo (`TargetCharacter`) y su posición (o el punto del suelo elegido).
+    pub target: Option<Target>,
+    pub target_position: Vec3,
+    /// `m_vPosSword` y otros datos que el original guarda en el personaje.
+    pub pos_sword: Vec3,
+    pub user: [f32; 8],
+    pub live: bool,
+}
+
+impl Cast {
+    pub fn new(owner: Entity, skill: i32, target: Option<Target>, target_position: Vec3) -> Self {
+        Self { owner, skill, attack_time: 1, target, target_position, pos_sword: Vec3::ZERO, user: [0.0; 8], live: true }
+    }
+}
+
+pub type SkillStage = fn(&mut Cast, &mut Ctx);
+
+#[derive(Clone, Copy, Default)]
+pub struct SkillKind {
+    /// Cada tick mientras dura (`AttackStage` + `AttackEffect`).
+    pub stage: Option<SkillStage>,
+    /// Al llegar `AttackTime` a [`LIMIT_ATTACK_TIME`].
+    pub finish: Option<SkillStage>,
+}
+
 // --- Peticiones de creación ---------------------------------------------------------------------
 
 /// Lo que se pide crear durante un tick; se crea al acabar el tick (con su función de creación).
@@ -720,9 +759,14 @@ pub struct Registry {
     pub particles: std::collections::HashMap<i32, ParticleKind>,
     pub joints: std::collections::HashMap<i32, JointKind>,
     pub effects: std::collections::HashMap<i32, EffectKind>,
+    /// Habilidades por número `AT_SKILL_*`.
+    pub skills: std::collections::HashMap<i32, SkillKind>,
 }
 
 impl Registry {
+    pub fn skill(&mut self, skill: i32, kind: SkillKind) {
+        self.skills.insert(skill, kind);
+    }
     pub fn particle(&mut self, ty: i32, kind: ParticleKind) {
         self.particles.insert(ty, kind);
     }
