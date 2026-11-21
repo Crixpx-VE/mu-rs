@@ -562,7 +562,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
                 if distance <= 35.0 {
                     j.live = false;
                     ctx.create_particle(BITMAP_LIGHTNING + 1, j.position, j.angle, j.light, 1, 1.0, None);
-                    // TODO(original): PlayBuffer(SOUND_GET_ENERGY).
+                    ctx.play_sound("SOUND_GET_ENERGY");
                 } else if distance <= 70.0 && (old_angle - j.angle.z).abs() > 20.0 && j.velocity >= 20.0 {
                     j.velocity -= 10.0;
                 }
@@ -603,7 +603,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
             let distance = move_humming(j.position, &mut j.angle, j.target_position, j.velocity);
             if distance <= 35.0 {
                 j.live = false;
-                // TODO(original): PlayBuffer(SOUND_GET_ENERGY).
+                ctx.play_sound("SOUND_GET_ENERGY");
             } else if distance <= 70.0 && (old_angle - j.angle.z).abs() > 20.0 && j.velocity >= 20.0 {
                 j.velocity -= 10.0;
             }
@@ -953,7 +953,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
             j.velocity = 70.0;
             j.life_time = 49.0;
             j.max_tails = 6;
-            // TODO(original): PlayBuffer(SOUND_BRANDISH_SWORD03).
+            ctx.play_sound("SOUND_BRANDISH_SWORD03");
         }
         2 | 21 => {
             j.render_type = JointRender::AlphaBlend;

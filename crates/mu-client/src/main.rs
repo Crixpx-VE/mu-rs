@@ -20,7 +20,7 @@
 //!                            mu-launcher.txt, o 1024x768). F10 cambia y guarda.
 //!
 //! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps ·
-//! F9 = invasión de dragones (apagada → rojos → dorados).
+//! F9 = invasión de dragones (apagada → rojos → dorados) · F7/F8 = volumen de efectos/música.
 
 mod boids;
 mod camera;
@@ -36,6 +36,7 @@ mod model_light;
 mod objects;
 mod settings;
 mod shadow;
+mod sound;
 mod terrain;
 
 use std::path::PathBuf;
@@ -189,6 +190,6 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin))
         .run();
 }

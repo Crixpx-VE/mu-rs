@@ -109,8 +109,8 @@ fn launch(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
     if uses_skill_warrior(c.skill) {
         let owner = Some(Target::Actor(c.owner));
         ctx.create_particle(BITMAP_SHINY + 2, o.position, o.angle, Vec3::ONE, 0, 0.0, owner);
-        // TODO(original): PlayBuffer(SOUND_BRANDISH_SWORD01 + rand() % 2).
-        let _ = ctx.rand() % 2;
+        let swing = if ctx.rand() % 2 == 0 { "SOUND_BRANDISH_SWORD01" } else { "SOUND_BRANDISH_SWORD02" };
+        ctx.play_sound(swing);
     }
 }
 
@@ -127,7 +127,7 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                 return;
             }
             if check_attack_time(c, 8) {
-                // TODO(original): PlayBuffer(SOUND_SKILL_SWORD2).
+                ctx.play_sound("SOUND_SKILL_SWORD2");
                 set_last_attack_effect_time(c);
             }
             if (2..=8).contains(&c.attack_time) && ctx.rand_fps_check(1) {
@@ -168,7 +168,7 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
         }
         AT_SKILL_IMPALE => {
             if check_attack_time(c, 10) {
-                // TODO(original): PlayBuffer(SOUND_RIDINGSPEAR).
+                ctx.play_sound("SOUND_RIDINGSPEAR");
                 set_last_attack_effect_time(c);
             } else if check_attack_time(c, 4) {
                 // Preparación: la lanza en la mano.
@@ -238,7 +238,7 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
         AT_SKILL_RAGEFUL_BLOW => {
             // o->Weapon/WeaponLevel = arma derecha: el efecto lo lee de `Actor::weapon` del dueño.
             ctx.create_effect(MODEL_SKILL_FURY_STRIKE, o.position, o.angle, light, 0, owner, pk_key, 0, hot_key, 0.0);
-            // TODO(original): PlayBuffer(SOUND_FURY_STRIKE1).
+            ctx.play_sound("SOUND_FURY_STRIKE1");
         }
         AT_SKILL_SWELL_LIFE => {
             let count = 36;
@@ -251,12 +251,13 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
                     ctx.create_effect(BITMAP_MAGIC + 1, o.position, angle, light, 4, owner, -1, 0, 0, 0.0);
                 }
             }
-            // TODO(original): PlayBuffer(SOUND_SWELLLIFE).
+            ctx.play_sound("SOUND_SWELLLIFE");
         }
         AT_SKILL_TWISTING_SLASH => {
             // o->Weapon/WeaponLevel = arma derecha: el efecto lo lee de `Actor::weapon` del dueño.
             ctx.create_effect(MODEL_SKILL_WHEEL1, o.position, o.angle, light, 0, owner, pk_key, 0, hot_key, 0.0);
-            // TODO(original): PlayBuffer(SOUND_SKILL_SWORD4) y c->PostMoveProcess_Active(g_iLimitAttackTime).
+            ctx.play_sound("SOUND_SKILL_SWORD4");
+            // TODO(original): c->PostMoveProcess_Active(g_iLimitAttackTime).
         }
         _ => {}
     }

@@ -301,7 +301,7 @@ fn create_bubble(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = 30.0 + rf(ctx, 10);
             p.scale = (rf(ctx, 6) + 4.0) * 0.03;
             p.light = Vec3::ONE;
-            // TODO(original): PlayBuffer(SOUND_DEATH_BUBBLE).
+            ctx.play_sound("SOUND_DEATH_BUBBLE");
         }
         3 => {
             p.life_time = 30.0 + rf(ctx, 10);

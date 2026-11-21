@@ -606,11 +606,18 @@ pub struct Ctx<'a> {
     pub next_effect_id: &'a mut u32,
     /// `gMapManager.WorldActive`: mapa actual con la numeración del original (Lorencia = 0).
     pub world_active: i32,
+    /// `PlayBuffer`: sonidos pedidos (`SOUND_*`), los reproduce `sound.rs`.
+    pub sounds: &'a mut Vec<&'static str>,
 }
 
 impl Ctx<'_> {
     pub fn rand(&mut self) -> i32 {
         self.rng.rand()
+    }
+
+    /// `PlayBuffer(id)`.
+    pub fn play_sound(&mut self, id: &'static str) {
+        self.sounds.push(id);
     }
 
     /// `rand_fps_check(n)`: verdadero 1 de cada `n` ticks (siempre si n ≤ 1).

@@ -39,6 +39,8 @@ pub struct FxWorld {
     pub blurs: Vec<Blur>,
     /// Objetos del mapa con código de efectos (los registra `objects.rs`).
     pub map_objects: Vec<MapObject>,
+    /// Sonidos pedidos en los ticks (`PlayBuffer`); los toca `sound.rs`.
+    pub sounds: Vec<&'static str>,
 }
 
 impl FxWorld {
@@ -110,7 +112,7 @@ pub fn tick(
     let effect_positions: HashMap<u32, Vec3> = world.effects.iter().map(|e| (e.id, e.position)).collect();
     let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
 
-    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, map_objects, ticks, .. } = world;
+    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, map_objects, ticks, sounds, .. } = world;
     let mut ctx = Ctx {
         rng,
         world_time: time.elapsed_secs() * 1000.0,
@@ -124,6 +126,7 @@ pub fn tick(
         earthquake,
         next_effect_id,
         world_active: args.world as i32 - 1,
+        sounds,
     };
 
     // Objetos del mapa (`MoveObjects` / `UpdateObjectVisual`): solo los cercanos, como el original,

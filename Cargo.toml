@@ -16,7 +16,10 @@ edition = "2024"
 [workspace.dependencies]
 mu-protocol = { path = "crates/mu-protocol" }
 mu-data = { path = "crates/mu-data" }
-bevy = "0.20.1"
+# wav (efectos) y mp3 (música) del cliente original.
+bevy = { version = "0.20.1", features = ["wav", "mp3"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 # Bevy en debug es muy lento sin optimizar las dependencias.

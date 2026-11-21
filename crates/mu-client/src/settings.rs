@@ -30,6 +30,25 @@ fn config_path() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join(CONFIG_FILE))
 }
 
+/// Valor de `clave=` en `mu-launcher.txt` (la clave sin el `=`).
+pub fn saved_value(key: &str) -> Option<String> {
+    let text = std::fs::read_to_string(config_path()?).ok()?;
+    let prefix = format!("{key}=");
+    text.lines().find_map(|l| l.trim().strip_prefix(&prefix).map(|v| v.trim().to_string()))
+}
+
+/// Guarda `clave=valor` en `mu-launcher.txt`, sin tocar el resto de líneas.
+pub fn save_value(key: &str, value: &str) {
+    let Some(path) = config_path() else { return };
+    let prefix = format!("{key}=");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().filter(|l| !l.trim().starts_with(&prefix)).map(str::to_string).collect();
+    lines.push(format!("{prefix}{value}"));
+    if let Err(e) = std::fs::write(&path, lines.join("\r\n") + "\r\n") {
+        warn!("no se pudo guardar {key} en {}: {e}", path.display());
+    }
+}
+
 /// `1024x768` → (1024, 768).
 pub fn parse_resolution(s: &str) -> Option<(u32, u32)> {
     let (w, h) = s.trim().split_once(['x', 'X', '*'])?;

@@ -217,7 +217,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
             count += 1;
         }
         e.life_time = 0.0;
-        // TODO(original): PlayBuffer(SOUND_FURY_STRIKE3).
+        ctx.play_sound("SOUND_FURY_STRIKE3");
     } else {
         // El arma sube y baja en arco.
         let mut count = e.life_time;
@@ -247,7 +247,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
                 let position = Vec3::new(p0.x, p0.y, p0.z - (i * 30) as f32);
                 ctx.create_effect(MODEL_TAIL, position, angle, e.light, 0, None, -1, 0, 0, 0.0);
             }
-            // TODO(original): PlayBuffer(SOUND_FURY_STRIKE2).
+            ctx.play_sound("SOUND_FURY_STRIKE2");
         }
 
         let a = (20.0 - count) * add_angle;

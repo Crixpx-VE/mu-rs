@@ -173,13 +173,13 @@ fn draw_spark2(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
 
 // --- BITMAP_EXPLOTION_MONO / BITMAP_EXPLOTION ------------------------------------------------------
 
-fn create_explotion(p: &mut Particle, _ctx: &mut Ctx) {
+fn create_explotion(p: &mut Particle, ctx: &mut Ctx) {
     p.life_time = 20.0;
     if p.sub_type == 2 {
         p.life_time = 30.0;
     }
-    // TODO(original): PlayBuffer(SOUND_MOONRABBIT_EXPLOSION) si SubType == 10; si no,
-    // PlayBuffer(SOUND_EXPLOTION01) (salvo en la escena de login).
+    // (En la escena de login no suena; aquí no hay.)
+    ctx.play_sound(if p.sub_type == 10 { "SOUND_MOONRABBIT_EXPLOSION" } else { "SOUND_EXPLOTION01" });
 }
 
 /// Anillo de 18 humos + explosiones a `dist` del centro (subtipo 2).
@@ -267,9 +267,9 @@ fn step_flare_red(p: &mut Particle, ctx: &mut Ctx) {
 
 // --- BITMAP_EXPLOTION + 1 --------------------------------------------------------------------------
 
-fn create_explotion1(p: &mut Particle, _ctx: &mut Ctx) {
+fn create_explotion1(p: &mut Particle, ctx: &mut Ctx) {
     p.life_time = 12.0;
-    // TODO(original): PlayBuffer(SOUND_EXPLOTION01).
+    ctx.play_sound("SOUND_EXPLOTION01");
 }
 
 fn step_explotion1(p: &mut Particle, _ctx: &mut Ctx) {

@@ -116,6 +116,7 @@ fn spawn_meteors(
     players: Query<&Player>,
     terrain: Option<Res<LoadedTerrain>>,
     mut world: ResMut<crate::fx::FxWorld>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
 ) {
     if !inv.active() {
         return;
@@ -131,4 +132,5 @@ fn spawn_meteors(
     let id = world.next_effect_id;
     let e = crate::fx::core::Effect::new(id, crate::fx::core::MODEL_FIRE, pos, Vec3::ZERO, Vec3::ONE, 3, None, -1, 0, 0, 0.0);
     crate::fx::request(&mut world, crate::fx::core::Spawn::Effect(e));
+    sound.play("SOUND_METEORITE01");
 }

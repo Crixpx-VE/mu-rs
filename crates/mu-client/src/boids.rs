@@ -270,6 +270,7 @@ fn step_boids(
     time: Res<Time<Fixed>>,
     invasion: Res<Invasion>,
     mut fire: ResMut<FireRequests>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
 ) {
     let (Some(mut b), Some(t), Ok(hero)) = (boids, terrain, players.single()) else { return };
     let t = &t.0;
@@ -309,6 +310,10 @@ fn step_boids(
 
         if b.list[i].dragon {
             step_dragon(&mut b, i, &ground, &mut fire);
+            // El rugido: 1 de cada 128 ticks por dragón vivo.
+            if b.list[i].live && b.chance(128) {
+                sound.play("SOUND_MONSTER_BULLATTACK1");
+            }
             continue;
         }
         let Some(kind) = kind else { continue };
@@ -404,6 +409,25 @@ fn step_boids(
             o.look = o.pos.truncate() + 3.0 * p.truncate();
             if b.chance(512) {
                 b.list[i].live = false;
+            }
+        }
+        // Sus sonidos, a menos de 6 casillas del personaje.
+        if (b.list[i].pos.truncate() - hero_mu.truncate()).length() < 600.0 {
+            match kind {
+                Kind::Bird => {
+                    if b.chance(512) {
+                        sound.play_object("SOUND_BIRD01");
+                    }
+                    if b.chance(512) {
+                        sound.play_object("SOUND_BIRD02");
+                    }
+                }
+                Kind::Bat => {
+                    if b.chance(256) {
+                        sound.play_object("SOUND_BAT01");
+                    }
+                }
+                Kind::Butterfly => {}
             }
         }
         let o = &mut b.list[i];

@@ -1445,7 +1445,7 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         };
         f_pos = f_pos / (30.0 + j.multi_use) * 30.0;
         if j.life_time as i32 == 30 {
-            // TODO(original): PlayBuffer(SOUND_METEORITE01).
+            ctx.play_sound("SOUND_METEORITE01");
         }
         let f_circle = if homing {
             ((f_life - 10.0).max(0.0) * 5.0).min(150.0)

@@ -466,11 +466,17 @@ fn animate(
     mut render_frame: Local<u64>,
     mut q: Query<(Entity, &mut Player, &Skinned, &mut crate::fx::ActorState, &crate::shadow::Shadow)>,
     mut visibility: Query<&mut Visibility, Without<Player>>,
+    args: Res<Args>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
 ) {
     *render_frame += 1;
     for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
+        let before = p.frame;
         p.frame += p.casting.unwrap_or(ANIM_FPS) * time.delta_secs();
+        if p.action == action::WALK_MALE {
+            footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
+        }
         // La habilidad termina al acabar su animación: vuelve a estar quieto.
         if p.casting.is_some() {
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
@@ -509,6 +515,26 @@ fn animate(
         }
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         *actor = actor_state(&p, &bones, terrain.as_deref());
+    }
+}
+
+/// Pasos (`PlayWalkSound`): al pasar los fotogramas 1.5 y 4.5 de la animación de caminar.
+fn footsteps(p: &Player, before: f32, s: &Skinned, terrain: Option<&LoadedTerrain>, world: i32, sound: &mut crate::sound::SoundQueue) {
+    let Some(act) = s.skeleton.actions.get(p.action) else { return };
+    // Las animaciones de caminar repiten el primer fotograma al final.
+    let n = if act.lock_positions.is_some() { act.frames.saturating_sub(1).max(1) } else { act.frames.max(1) } as f32;
+    let (a, b) = (before.rem_euclid(n), p.frame.rem_euclid(n));
+    let crossed = |k: f32| if b >= a { a < k && b >= k } else { a < k || b >= k };
+    if !(crossed(1.5) || crossed(4.5)) {
+        return;
+    }
+    let Some(t) = terrain else { return };
+    let size = mu_data::terrain::SIZE;
+    let (x, y) = ((p.pos.x.max(0.0) as usize).min(size - 1), (p.pos.y.max(0.0) as usize).min(size - 1));
+    let tile = t.0.mapping.layer1[y * size + x];
+    let safe = t.0.attribute(x, y) & mu_data::terrain::attr::SAFE_ZONE != 0;
+    if let Some(id) = crate::sound::footstep(world, tile, safe) {
+        sound.play(&id);
     }
 }
 
