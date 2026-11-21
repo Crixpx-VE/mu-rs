@@ -23,9 +23,13 @@ impl Plugin for FlyCameraPlugin {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Update, (toggle_mode, fly, auto_screenshot))
             // Después de mover al personaje (Update), para que la cámara no vaya un fotograma tarde.
-            .add_systems(PostUpdate, follow.before(TransformSystems::Propagate));
+            .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate));
     }
 }
+
+/// Cuándo queda colocada la cámara en cada fotograma (para lo que se orienta hacia ella).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct CameraMoved;
 
 #[derive(Component)]
 struct FlyCamera {

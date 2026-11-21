@@ -25,6 +25,7 @@ use mu_data::texture::AlphaKind;
 use mu_data::{bmd, fs, objects, texture};
 
 use crate::Args;
+use crate::effects::{Emitters, PlacedEmitter};
 use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
 
 pub struct ObjectsPlugin;
@@ -210,6 +211,7 @@ fn spawn_objects(
     mut anims: ResMut<AnimatedModels>,
     mut mat_anims: ResMut<AnimatedMaterials>,
     mut roofs: ResMut<Roofs>,
+    mut fx: ResMut<Emitters>,
 ) {
     let list = match objects::load(&args.data, args.world) {
         Ok(l) => l,
@@ -225,6 +227,23 @@ fn spawn_objects(
 
     for o in &list {
         let rules = objects::model_rules(args.world, o.kind);
+        let emitters = objects::emitters(args.world, o.kind);
+        let mu_rotation = {
+            let [ax, ay, az] = o.angle.map(f32::to_radians);
+            Quat::from_euler(EulerRot::ZYX, az, ay, ax)
+        };
+        let place = |emitter: &objects::Emitter, model: Option<(Arc<bmd::Bmd>, f32)>| PlacedEmitter {
+            emitter: *emitter,
+            position: Vec3::from_array(o.position),
+            rotation: mu_rotation,
+            scale: o.scale,
+            angle_x: o.angle[0],
+            model,
+        };
+        // Los emisores sin hueso (fuegos, humo) no necesitan el modelo: también los ocultos.
+        for e in emitters.iter().filter(|e| e.bone.is_none()) {
+            fx.0.push(place(e, None));
+        }
         if rules.hidden {
             continue;
         }
@@ -246,6 +265,10 @@ fn spawn_objects(
         // Grupo de animación: los objetos de un modelo que van a la misma velocidad comparten malla.
         let animated = model.actions.first().is_some_and(|a| a.frames > 1);
         let fps = if animated { rules.velocity.fps(o.scale) } else { 0.0 };
+        // Emisores pegados a un hueso (salpicaduras de la fuente): siguen la animación.
+        for e in emitters.iter().filter(|e| e.bone.is_some()) {
+            fx.0.push(place(e, Some((model.clone(), fps))));
+        }
         let fps_key = (fps * 1000.0).round() as u32;
         let parts = c.models.entry((rel.clone(), fps_key)).or_insert_with(|| {
             let dir = args.data.join(rel.parent().unwrap_or(Path::new("")));

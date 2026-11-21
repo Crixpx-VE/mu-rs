@@ -287,6 +287,65 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
     }
 }
 
+/// Qué suelta un emisor de partículas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmitKind {
+    /// `CreateFire(0)`: llamas (`BITMAP_FIRE`) con luz naranja.
+    Fire,
+    /// `CreateFire(1)`: humo claro (`BITMAP_SMOKE` subtipo 0).
+    Smoke,
+    /// `CreateFire(2)`: humo oscuro (`BITMAP_SMOKE` subtipo 2, se dibuja restando).
+    DarkSmoke,
+}
+
+/// Un punto de un objeto que suelta partículas en cada actualización (25 por segundo).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Emitter {
+    pub kind: EmitKind,
+    /// Desplazamiento desde el objeto, en sus ejes (unidades de MU).
+    pub offset: [f32; 3],
+    /// Si va pegado a un hueso del modelo (que puede estar animado), cuál.
+    pub bone: Option<usize>,
+    /// Desplazamiento al azar en X y Z de ± este valor (la fuente salpica en un área).
+    pub spread: f32,
+}
+
+impl Emitter {
+    const fn at(kind: EmitKind, x: f32, y: f32, z: f32) -> Self {
+        Self { kind, offset: [x, y, z], bone: None, spread: 0.0 }
+    }
+}
+
+/// Emisores de partículas de un tipo de objeto (`MoveObject` / `UpdateObjectVisual` del original).
+pub fn emitters(world: u16, kind: i16) -> Vec<Emitter> {
+    use EmitKind::*;
+    const fn fire(x: f32, y: f32, z: f32) -> Emitter {
+        Emitter::at(Fire, x, y, z)
+    }
+    match (world, kind) {
+        // Lorencia
+        (1, 50) => vec![fire(0.0, 0.0, 200.0)],                                 // FireLight01
+        (1, 51) => vec![fire(0.0, -30.0, 60.0)],                                // FireLight02
+        (1, 52) => vec![fire(0.0, 0.0, 60.0)],                                  // Bonfire
+        (1, 55) => vec![fire(-150.0, -150.0, 140.0), fire(150.0, -150.0, 140.0)], // DungeonGate
+        (1, 80) => vec![fire(90.0, -200.0, 30.0), fire(90.0, 200.0, 30.0)],     // Bridge
+        (1, 105) => vec![
+            // Waterspout: salpicaduras pegadas a los huesos 1 y 4 del chorro (1 de cada 2 ticks).
+            Emitter { kind: Smoke, offset: [0.0, -20.0, 0.0], bone: Some(1), spread: 16.0 },
+            Emitter { kind: Smoke, offset: [0.0, -80.0, 0.0], bone: Some(4), spread: 16.0 },
+        ],
+        (1, 130) => vec![fire(0.0, 0.0, 0.0)],                // Light01
+        (1, 131) => vec![Emitter::at(Smoke, 0.0, 0.0, 0.0)],     // Light02
+        (1, 132) => vec![Emitter::at(DarkSmoke, 0.0, 0.0, 0.0)], // Light03
+        // Dungeon
+        (2, 41) => vec![fire(0.0, -30.0, 240.0)],
+        (2, 42) => vec![fire(0.0, 0.0, 190.0)],
+        // Devias
+        (3, 66) => vec![fire(0.0, 0.0, 50.0)],
+        _ => vec![],
+    }
+}
+
 /// Ruta del modelo (`.bmd`) de un tipo de objeto en un mapa, relativa a `Data/`.
 ///
 /// Lorencia usa nombres propios; el resto de mapas usa `Object{mapa}/Object{tipo+1:02}.bmd`.

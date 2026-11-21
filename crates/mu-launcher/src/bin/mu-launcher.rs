@@ -89,7 +89,13 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
 
     let mut state = load_state(dir);
     let mut pending: Vec<&Entry> = vec![];
-    for e in &manifest {
+    let mut checked = 0usize;
+    for (i, e) in manifest.iter().enumerate() {
+        // Mostrar avance mientras se comprueban archivos que aún no conocemos (la primera vez, todos).
+        if checked > 0 && (i % 250 == 0 || i + 1 == manifest.len()) {
+            print!("\r  Comprobando archivos  {}  {}/{}", bar(i as u64 + 1, manifest.len() as u64), i + 1, manifest.len());
+            io::stdout().flush()?;
+        }
         let local = to_local(dir, &e.path);
         let current = match std::fs::metadata(&local) {
             Ok(m) if m.len() == e.size => {
@@ -97,6 +103,7 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
                 match state.get(&e.path) {
                     Some((size, s, sha)) if *size == m.len() && *s == stamp => Some(sha.clone()),
                     _ => {
+                        checked += 1;
                         let sha = hash_file(&local)?;
                         state.insert(e.path.clone(), (m.len(), stamp, sha.clone()));
                         Some(sha)
@@ -110,9 +117,20 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
         }
     }
 
+    if checked > 0 {
+        println!(" listo.");
+        // Guardar ya: si se corta la descarga, no hay que volver a comprobarlo todo.
+        save_state(dir, &state);
+    }
     let total: u64 = pending.iter().map(|e| e.size).sum();
     if !pending.is_empty() {
-        println!("Hay que descargar {} archivos ({:.1} MB).", pending.len(), total as f64 / 1e6);
+        println!("Hay que descargar {} archivos nuevos o cambiados ({:.1} MB):", pending.len(), total as f64 / 1e6);
+        for e in pending.iter().take(10) {
+            println!("  - {}", e.path);
+        }
+        if pending.len() > 10 {
+            println!("  ... y {} más", pending.len() - 10);
+        }
     }
     let me = self_name();
     let mut relaunch = false;
@@ -160,8 +178,13 @@ fn download(agent: &ureq::Agent, url: &str, e: &Entry, local: &Path, done: &mut 
         *done += n as u64;
         if *done - last_shown > 1 << 20 || got == e.size {
             last_shown = *done;
-            let pct = if total > 0 { *done * 100 / total } else { 100 };
-            print!("\r  {pct:3}%  {:.1}/{:.1} MB  {:<50}", *done as f64 / 1e6, total as f64 / 1e6, short(&e.path));
+            print!(
+                "\r  Descargando  {}  {:.1}/{:.1} MB  {:<40}",
+                bar(*done, total),
+                *done as f64 / 1e6,
+                total as f64 / 1e6,
+                short(&e.path)
+            );
             io::stdout().flush()?;
         }
     }
@@ -181,8 +204,26 @@ fn part_ext(p: &Path) -> String {
     }
 }
 
+/// Las últimas 40 letras de una ruta (sin cortar un carácter por la mitad).
 fn short(p: &str) -> &str {
-    if p.len() > 50 { &p[p.len() - 50..] } else { p }
+    let mut start = p.len().saturating_sub(40);
+    while !p.is_char_boundary(start) {
+        start += 1;
+    }
+    &p[start..]
+}
+
+/// Barra de progreso de texto: `[██████░░░░░░]  45%`.
+fn bar(done: u64, total: u64) -> String {
+    const WIDTH: u64 = 30;
+    let frac = if total == 0 { 1.0 } else { (done as f64 / total as f64).min(1.0) };
+    let filled = (frac * WIDTH as f64).round() as u64;
+    format!(
+        "[{}{}] {:3}%",
+        "█".repeat(filled as usize),
+        "░".repeat((WIDTH - filled) as usize),
+        (frac * 100.0).floor() as u64
+    )
 }
 
 fn stamp(m: &std::fs::Metadata) -> u128 {

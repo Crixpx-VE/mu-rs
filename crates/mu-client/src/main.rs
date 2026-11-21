@@ -19,6 +19,7 @@
 
 mod camera;
 mod character;
+mod effects;
 mod grass;
 mod objects;
 mod terrain;
@@ -128,6 +129,7 @@ fn main() {
         .add_plugins((
             terrain::TerrainPlugin,
             grass::GrassPlugin,
+            effects::EffectsPlugin,
             objects::ObjectsPlugin,
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
