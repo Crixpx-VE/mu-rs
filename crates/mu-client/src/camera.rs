@@ -123,7 +123,7 @@ const ZOOM_MAX: f32 = 17.0;
 pub const ZOOM_DEFAULT: f32 = 13.0;
 
 /// Campo de visión vertical del original: 40° horizontales a 4:3 (`HFovToVFov`), unos 30.5°.
-fn mu_fov() -> f32 {
+pub fn mu_fov() -> f32 {
     let h_half = 20f32.to_radians();
     2.0 * (h_half.tan() / (4.0 / 3.0)).atan()
 }

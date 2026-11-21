@@ -86,7 +86,7 @@ impl LoadStep {
         match self.index {
             None => 1.0,
             // El paso actual ya se ha hecho cuando se dibuja este fotograma.
-            Some(i) => (i + 1) as f32 / self.steps.len().max(1) as f32,
+            Some(i) => ((i + 1) as f32 / self.steps.len().max(1) as f32).min(1.0),
         }
     }
 
@@ -145,8 +145,10 @@ fn advance_load(
     if args.hold_title && *scene.get() == GameScene::Title && i + 1 >= load.steps.len() / 2 {
         return;
     }
-    // El título se ve al menos `TITLE_SECS`: su barra no pasa de lo que lleva de tiempo.
+    // El título se ve al menos `TITLE_SECS`: su barra no pasa de lo que lleva de tiempo. Mientras
+    // espera, el índice queda pasado el último paso (que no se repite).
     if *scene.get() == GameScene::Title && i + 1 >= load.steps.len() && time.elapsed_secs() < TITLE_SECS {
+        load.index = Some(load.steps.len());
         return;
     }
     if i + 1 < load.steps.len() {

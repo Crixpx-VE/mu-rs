@@ -13,10 +13,11 @@
 //! - el ángulo de la cámara gira hacia el rumbo como mucho 1° por tick (diferencia / 30);
 //! - el nivel de distancia se interpola entre el del punto anterior y el del siguiente.
 //!
-//! Y la vista (`CalculateCameraPosition` + `SetCameraAngle`):
-//! - ojo = recorrido + ajuste del mapa (-300, 650, 950; la altura del recorrido es -300) +
-//!   `AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)`, con `D = 1100 · nivel · 0.1`;
-//! - mira con inclinación -112.5° + 40° = -72.5° y giro = ángulo del recorrido - 5°.
+//! Y la vista, como el S6 original (`MoveMainCamera`; la versión de MuMain de referencia quitó el
+//! cálculo de la altura y lo compensa con ajustes a ojo, que no se usan aquí):
+//! - ojo = recorrido + `AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)`, con `D = 1100 · nivel · 0.1`;
+//! - altura = -300 (la del recorrido) - 100 + D - 150;
+//! - mira con inclinación -112.5° (22.5° hacia arriba) y giro = ángulo del recorrido.
 //!
 //! Por ahora Enter entra al juego (sin servidor todavía).
 
@@ -31,7 +32,8 @@ pub struct LoginPlugin;
 
 impl Plugin for LoginPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameScene::Login), (start_tour, spawn_login_ui))
+        app.add_systems(OnEnter(GameScene::Login), (start_tour, spawn_login_ui, add_fog))
+            .add_systems(OnExit(GameScene::Login), restore_camera)
             .add_systems(FixedUpdate, step_tour.run_if(in_state(GameScene::Login)))
             .init_resource::<Tuning>()
             .add_systems(Update, (tune, place_camera, login_input).chain().run_if(in_state(GameScene::Login)))
@@ -50,14 +52,19 @@ const MAX_ROTATE: f32 = 1.0;
 const TOUR_Z: f32 = -300.0;
 /// `TOUR_BASE_DISTANCE`.
 const BASE_DISTANCE: f32 = 1100.0;
-/// `LoginSceneCameraDefaults`: el ajuste del recorrido al mapa actual.
-const OFFSET: Vec3 = Vec3::new(-300.0, 650.0, 950.0);
-const ANGLE_PITCH: f32 = 40.0;
-const ANGLE_YAW: f32 = -5.0;
+/// En el modo de paseo el original baja la cámara 100 (`temp = (0, 0, -100)`) y luego, como en el
+/// juego, le suma `distancia - 150`.
+const TOUR_DROP: f32 = 100.0;
+const HEIGHT_OFFSET: f32 = 150.0;
 /// `SetAngleFrustum(-112.5)`.
 const FRUSTUM_ANGLE: f32 = -112.5;
-/// `RENDER_OBJECT_DIST`: lo más lejos que se ve en el login.
-const VIEW_FAR: f32 = 5903.0;
+/// MuMain: `LoginSceneCameraDefaults` y `RENDER_TERRAIN_DIST` (alcance; la niebla va de ahí a ×1.25).
+const MUMAIN_OFFSET: Vec3 = Vec3::new(-300.0, 650.0, 950.0);
+const MUMAIN_PITCH: f32 = 40.0;
+const MUMAIN_YAW: f32 = -5.0;
+const MUMAIN_FAR: f32 = 3995.0;
+/// FOV del paseo: 90° en horizontal a 4:3 (`CameraConfig::ForLoginScene`) → 73.74° en vertical.
+const TOUR_HFOV: f32 = 90.0;
 
 #[derive(Clone, Copy)]
 struct Waypoint {
@@ -79,7 +86,7 @@ struct Tour {
     angle: f32,
     target_angle: f32,
     level: f32,
-    /// Vista del tick anterior y de este (ojo, ángulo), para interpolar.
+    /// Estado del tick anterior y de este (recorrido, nivel de distancia, ángulo), para interpolar.
     prev: (Vec3, f32, f32),
     now: (Vec3, f32, f32),
 }
@@ -116,20 +123,30 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
         return;
     };
     let (start, target) = (points[points.len() - 1], points[0]);
-    // El original aplica el ajuste a las dos posiciones al empezar (y otra vez al dibujar).
-    let current = start.pos + OFFSET.truncate();
-    let tour = start.pos.extend(0.0) + OFFSET;
+    let current = start.pos;
+    let tour = start.pos.extend(TOUR_Z);
     let dir = (target.pos - start.pos).normalize_or_zero();
     let angle = create_angle(0.0, 0.0, dir.x, -dir.y);
     let mut t = Tour { points, index: 0, delay: 0, current, tour, angle, target_angle: angle, level: start.distance, prev: (Vec3::ZERO, 0.0, 0.0), now: (Vec3::ZERO, 0.0, 0.0) };
-    t.now = view(&t);
+    t.now = (t.tour, t.level, t.angle);
     t.prev = t.now;
     commands.insert_resource(t);
+}
+
+/// Postura de la cámara: la de MuMain o la del S6 original reconstruida (`F5` cambia).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum Pose {
+    /// MuMain: ajuste (-300, 650, 950) al recorrido, altura fija 650, inclinación -72.5°, giro -5°.
+    MuMain,
+    /// S6 original (código que MuMain dejó sin usar): altura -300 - 100 + D - 150, inclinación
+    /// -112.5° (mira hacia arriba), sin ajustes. No está comprobada contra el cliente real.
+    Legacy,
 }
 
 /// Ajustes de prueba de la cámara (teclas en el login), para compararla con el cliente original.
 #[derive(Resource, Clone, Copy, PartialEq)]
 struct Tuning {
+    pose: Pose,
     distance: f32,
     offset: Vec3,
     pitch: f32,
@@ -137,7 +154,7 @@ struct Tuning {
 
 impl Default for Tuning {
     fn default() -> Self {
-        Self { distance: 1.0, offset: Vec3::ZERO, pitch: 0.0 }
+        Self { pose: Pose::MuMain, distance: 1.0, offset: Vec3::ZERO, pitch: 0.0 }
     }
 }
 
@@ -157,20 +174,29 @@ fn tune(keys: Res<ButtonInput<KeyCode>>, mut tuning: ResMut<Tuning>) {
     if pressed(KeyCode::End) { t.offset.z -= 50.0; }
     if pressed(KeyCode::Insert) { t.pitch += 2.5; }
     if pressed(KeyCode::Delete) { t.pitch -= 2.5; }
+    if pressed(KeyCode::F5) { t.pose = if t.pose == Pose::MuMain { Pose::Legacy } else { Pose::MuMain }; }
     if *t != before {
-        info!("login: cámara de prueba: distancia x{:.2}, desplazamiento {:?}, inclinación {:+.1}°", t.distance, t.offset, t.pitch);
+        info!("login: cámara de prueba: postura {:?}, distancia x{:.2}, desplazamiento {:?}, inclinación {:+.1}°", t.pose, t.distance, t.offset, t.pitch);
     }
 }
 
-/// Ojo, inclinación y giro de la vista de este tick.
-fn view(t: &Tour) -> (Vec3, f32, f32) {
-    let d = BASE_DISTANCE * t.level * 0.1;
+/// Ojo, inclinación, giro y alcance de la vista (`CalculateCameraPosition` + `SetCameraAngle`).
+fn view(pose: Pose, tour: Vec3, level: f32, angle: f32) -> (Vec3, f32, f32, f32) {
+    let d = BASE_DISTANCE * level * 0.1;
     // `AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)`.
     let (s, c) = (-45f32).to_radians().sin_cos();
-    let offset = Vec3::new(-s * d, -c * d, 0.0);
-    let mut eye = t.tour + offset + OFFSET;
-    eye.z = TOUR_Z + OFFSET.z;
-    (eye, FRUSTUM_ANGLE + ANGLE_PITCH, t.angle + ANGLE_YAW)
+    let mut eye = tour + Vec3::new(-s * d, -c * d, 0.0);
+    match pose {
+        Pose::MuMain => {
+            eye += MUMAIN_OFFSET;
+            eye.z = TOUR_Z + MUMAIN_OFFSET.z;
+            (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
+        }
+        Pose::Legacy => {
+            eye.z = TOUR_Z - TOUR_DROP + d - HEIGHT_OFFSET;
+            (eye, FRUSTUM_ANGLE, angle, 390.0 * level)
+        }
+    }
 }
 
 fn signed_delta(from: f32, to: f32) -> f32 {
@@ -240,7 +266,7 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
         t.delay += 1;
         break;
     }
-    t.now = view(t);
+    t.now = (t.tour, t.level, t.angle);
 }
 
 /// Coloca la cámara entre el tick anterior y este.
@@ -248,24 +274,53 @@ fn place_camera(
     tour: Option<Res<Tour>>,
     tuning: Res<Tuning>,
     fixed: Res<Time<Fixed>>,
-    mut cameras: Query<(&mut Transform, &mut Projection), With<Camera3d>>,
+    mut cameras: Query<(&mut Transform, &mut Projection, Option<&mut DistanceFog>), With<Camera3d>>,
 ) {
     let Some(t) = tour else { return };
     let a = fixed.overstep_fraction();
-    let mut eye = t.prev.0.lerp(t.now.0, a);
-    let pitch = t.prev.1 + (t.now.1 - t.prev.1) * a + tuning.pitch;
+    let tour_pos = t.prev.0.lerp(t.now.0, a);
+    let level = t.prev.1 + (t.now.1 - t.prev.1) * a;
+    let angle = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
+    let (mut eye, pitch, yaw, far) = view(tuning.pose, tour_pos, level, angle);
+    let pitch = pitch + tuning.pitch;
     // Ajuste de prueba: la distancia se alarga sobre la diagonal del original.
     if tuning.distance != 1.0 {
-        let d = BASE_DISTANCE * t.level * 0.1 * (tuning.distance - 1.0);
+        let d = BASE_DISTANCE * level * 0.1 * (tuning.distance - 1.0);
         let (s, c) = (-45f32).to_radians().sin_cos();
         eye += Vec3::new(-s * d, -c * d, 0.0);
     }
     eye += tuning.offset;
-    let yaw = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
-    for (mut tf, mut proj) in &mut cameras {
+    let vfov = 2.0 * ((TOUR_HFOV * 0.5).to_radians().tan() / (4.0 / 3.0)).atan();
+    for (mut tf, mut proj, fog) in &mut cameras {
         *tf = crate::camera::mu_view(eye, pitch, yaw);
         if let Projection::Perspective(p) = &mut *proj {
-            p.far = VIEW_FAR / MU_SCALE;
+            // `gluPerspective(fov, aspecto, near 100, far × 1.4)`.
+            p.fov = vfov;
+            p.near = 100.0 / MU_SCALE;
+            p.far = far * 1.4 / MU_SCALE;
+        }
+        if let Some(mut fog) = fog {
+            // Niebla lineal negra de `far` a `far × 1.25`.
+            fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
+        }
+    }
+}
+
+/// Niebla negra del login (`FogEnable = true`; la distancia la pone `place_camera`).
+fn add_fog(mut commands: Commands, cameras: Query<Entity, With<Camera3d>>) {
+    for e in &cameras {
+        commands.entity(e).insert(DistanceFog { color: Color::BLACK, ..default() });
+    }
+}
+
+/// Al salir: sin niebla y con el campo de visión y el alcance del juego.
+fn restore_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Projection), With<Camera3d>>) {
+    for (e, mut proj) in &mut cameras {
+        commands.entity(e).remove::<DistanceFog>();
+        if let Projection::Perspective(p) = &mut *proj {
+            p.fov = crate::camera::mu_fov();
+            p.near = 0.2;
+            p.far = 400.0;
         }
     }
 }
@@ -291,15 +346,9 @@ fn login_input(
     mut load: ResMut<LoadStep>,
     mut next: ResMut<NextState<GameScene>>,
     mut sound: ResMut<crate::sound::SoundQueue>,
-    mut cameras: Query<&mut Projection, With<Camera3d>>,
 ) {
     sound.music("login_theme");
     if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
-        for mut proj in &mut cameras {
-            if let Projection::Perspective(p) = &mut *proj {
-                p.far = 400.0;
-            }
-        }
         load_world(&mut args, &mut load, 1, true, GameScene::Game);
         next.set(GameScene::Loading);
     }
