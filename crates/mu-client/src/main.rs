@@ -15,8 +15,10 @@
 //!   --screenshot-delay <s>   segundos de espera antes de capturar (por defecto 10)
 //!   --zoom <casillas>        distancia inicial de la cámara de seguimiento (10-17, por defecto 13)
 //!   --sin-vsync              sin límite de fps (para medir rendimiento)
+//!   --invasion <1|3>         empezar con la invasión de dragones (1 = rojos, 3 = dorados)
 //!
-//! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps.
+//! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps ·
+//! F9 = invasión de dragones (apagada → rojos → dorados).
 
 mod boids;
 mod camera;
@@ -24,6 +26,7 @@ mod character;
 mod effects;
 mod grass;
 mod hud;
+mod invasion;
 mod mainframe;
 mod objects;
 mod terrain;
@@ -49,6 +52,8 @@ pub struct Args {
     pub zoom: Option<f32>,
     /// Sin sincronía vertical: los fps no se limitan a la frecuencia del monitor (para medir).
     pub no_vsync: bool,
+    /// Empezar con la invasión de dragones activa (1 = rojos, 3 = dorados). En el juego: F9.
+    pub invasion: u8,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -82,6 +87,7 @@ impl Args {
             cam: None,
             zoom: None,
             no_vsync: false,
+            invasion: 0,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -97,6 +103,7 @@ impl Args {
                 "--cam" => args.cam = Some(parse_floats(it.next(), "--cam")),
                 "--zoom" => args.zoom = Some(it.next().expect("--zoom <casillas>").parse().expect("número")),
                 "--sin-vsync" => args.no_vsync = true,
+                "--invasion" => args.invasion = it.next().and_then(|v| v.parse().ok()).unwrap_or(1),
                 otro => eprintln!("argumento desconocido: {otro}"),
             }
         }
@@ -148,6 +155,7 @@ fn main() {
             grass::GrassPlugin,
             effects::EffectsPlugin,
             boids::BoidsPlugin,
+            invasion::InvasionPlugin,
             hud::HudPlugin,
             mainframe::MainFramePlugin,
             objects::ObjectsPlugin,

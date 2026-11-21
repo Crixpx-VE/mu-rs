@@ -31,8 +31,11 @@ pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterMaterials>()
+            .init_resource::<TerrainLights>()
             .add_systems(Startup, spawn_terrain)
-            .add_systems(Update, move_water);
+            // Las luces se vacían al empezar cada tick; los emisores las rellenan después.
+            .add_systems(FixedFirst, clear_lights)
+            .add_systems(Update, (move_water, apply_lights));
     }
 }
 
@@ -77,7 +80,6 @@ fn spawn_terrain(
         let uv_scale = Vec2::new(64.0 / tex.width as f32, 64.0 / tex.height as f32);
 
         for layer in [1, 2] {
-            let Some(mesh) = build_layer_mesh(&t, index as u8, layer, uv_scale) else { continue };
             let material = materials.add(StandardMaterial {
                 base_color_texture: Some(image.clone()),
                 unlit: true,
@@ -89,27 +91,153 @@ fn spawn_terrain(
             if index == WATER_TEXTURE {
                 water.0.push(material.clone());
             }
-            commands.spawn((
-                Name::new(format!("Terreno capa {layer} textura {index}")),
-                Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(material),
-            ));
+            // Un trozo por bloque de 16×16 casillas: así las luces dinámicas solo rehacen lo que tocan.
+            for cy in (0..SIZE - 1).step_by(CHUNK) {
+                for cx in (0..SIZE - 1).step_by(CHUNK) {
+                    let area = [cx, cy, (cx + CHUNK).min(SIZE - 1), (cy + CHUNK).min(SIZE - 1)];
+                    let Some((mesh, chunk)) = build_layer_mesh(&t, index as u8, layer, uv_scale, area) else {
+                        continue;
+                    };
+                    let handle = meshes.add(mesh);
+                    commands.spawn((
+                        Name::new(format!("Terreno capa {layer} textura {index} ({cx},{cy})")),
+                        Mesh3d(handle.clone()),
+                        MeshMaterial3d(material.clone()),
+                        TerrainChunk { mesh: handle, ..chunk },
+                    ));
+                }
+            }
         }
     }
 
     commands.insert_resource(LoadedTerrain(t));
 }
 
-/// Malla con todas las casillas que usan `texture` en la capa indicada.
-fn build_layer_mesh(t: &Terrain, texture: u8, layer: u8, uv_scale: Vec2) -> Option<Mesh> {
+/// Lado de los trozos del terreno, en casillas.
+const CHUNK: usize = 16;
+
+/// Un trozo del terreno, con lo necesario para recalcular su luz.
+#[derive(Component)]
+pub struct TerrainChunk {
+    mesh: Handle<Mesh>,
+    /// Esquina (x, y) de cada vértice.
+    corners: Vec<[u8; 2]>,
+    /// Transparencia de cada vértice (capa 2).
+    alpha: Vec<f32>,
+    /// Casillas que cubre: [x0, y0, x1, y1].
+    area: [usize; 4],
+    /// Tenía luces dinámicas en la última actualización (hay que devolverlo a su luz normal).
+    lit: bool,
+}
+
+/// Una luz que se suma al terreno durante una actualización (`AddTerrainLight`).
+#[derive(Clone, Copy)]
+pub struct DynamicLight {
+    /// Posición en casillas.
+    pub pos: Vec2,
+    pub color: [f32; 3],
+    /// Radio en casillas.
+    pub range: f32,
+}
+
+/// Luces dinámicas de la actualización actual. Las rellenan los sistemas de `FixedUpdate`
+/// (fuegos, eventos...) después de que [`clear_lights`] la vacíe al empezar el tick.
+#[derive(Resource, Default)]
+pub struct TerrainLights {
+    pub lights: Vec<DynamicLight>,
+    /// Cambia en cada tick, para saber si hay que recalcular.
+    generation: u64,
+    applied: u64,
+}
+
+impl TerrainLights {
+    pub fn add(&mut self, pos: Vec2, color: [f32; 3], range: f32) {
+        self.lights.push(DynamicLight { pos, color, range });
+    }
+}
+
+/// Al empezar cada tick, las luces del anterior desaparecen (como `InitTerrainLight`).
+pub fn clear_lights(mut lights: ResMut<TerrainLights>) {
+    lights.lights.clear();
+    lights.generation += 1;
+}
+
+/// Recalcula el color de los trozos que tocan las luces de este tick (o que las tenían antes).
+fn apply_lights(
+    terrain: Option<Res<LoadedTerrain>>,
+    mut lights: ResMut<TerrainLights>,
+    mut chunks: Query<&mut TerrainChunk>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    let Some(t) = terrain else { return };
+    if lights.applied == lights.generation {
+        return;
+    }
+    lights.applied = lights.generation;
+    for mut c in &mut chunks {
+        let [x0, y0, x1, y1] = c.area;
+        let touching: Vec<&DynamicLight> = lights
+            .lights
+            .iter()
+            .filter(|l| {
+                l.pos.x + l.range >= x0 as f32
+                    && l.pos.x - l.range <= x1 as f32
+                    && l.pos.y + l.range >= y0 as f32
+                    && l.pos.y - l.range <= y1 as f32
+            })
+            .collect();
+        if touching.is_empty() && !c.lit {
+            continue;
+        }
+        c.lit = !touching.is_empty();
+        let colors: Vec<[f32; 4]> = c
+            .corners
+            .iter()
+            .zip(&c.alpha)
+            .map(|(&[x, y], &a)| {
+                let mut l = t.0.light[y as usize * SIZE + x as usize];
+                for light in &touching {
+                    let d = (light.pos - Vec2::new(x as f32, y as f32)).length();
+                    let falloff = (light.range - d) / light.range;
+                    if falloff > 0.0 {
+                        for k in 0..3 {
+                            l[k] = (l[k] + light.color[k] * falloff).max(0.0);
+                        }
+                    }
+                }
+                vertex_color(l, a)
+            })
+            .collect();
+        if let Some(mut m) = meshes.get_mut(&c.mesh) {
+            m.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        }
+    }
+}
+
+/// El original multiplica la luz en espacio sRGB; en lineal equivale a elevarla a 2.2.
+fn vertex_color(l: [f32; 3], alpha: f32) -> [f32; 4] {
+    let c = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
+    [c(l[0]), c(l[1]), c(l[2]), alpha]
+}
+
+/// Malla con las casillas de `area` que usan `texture` en la capa indicada.
+fn build_layer_mesh(
+    t: &Terrain,
+    texture: u8,
+    layer: u8,
+    uv_scale: Vec2,
+    area: [usize; 4],
+) -> Option<(Mesh, TerrainChunk)> {
     let m = &t.mapping;
     let mut pos = Vec::new();
     let mut uv = Vec::new();
     let mut color = Vec::new();
     let mut idx: Vec<u32> = Vec::new();
+    let mut corners_out = Vec::new();
+    let mut alpha_out = Vec::new();
 
-    for y in 0..SIZE - 1 {
-        for x in 0..SIZE - 1 {
+    for y in area[1]..area[3] {
+        for x in area[0]..area[2] {
             let i = y * SIZE + x;
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             let alpha = corners.map(|(cx, cy)| m.alpha[cy * SIZE + cx] as f32 / 255.0);
@@ -128,10 +256,10 @@ fn build_layer_mesh(t: &Terrain, texture: u8, layer: u8, uv_scale: Vec2) -> Opti
                 let h = t.height(cx, cy) / MU_SCALE;
                 pos.push([cx as f32, h, -(cy as f32)]);
                 uv.push([cx as f32 * uv_scale.x, cy as f32 * uv_scale.y]);
-                let l = t.light[cy * SIZE + cx];
                 let a = if layer == 1 { 1.0 } else { alpha[k] };
-                // El original multiplica en espacio sRGB; en lineal equivale a elevar la luz a 2.2.
-                color.push([l[0].powf(2.2), l[1].powf(2.2), l[2].powf(2.2), a]);
+                color.push(vertex_color(t.light[cy * SIZE + cx], a));
+                corners_out.push([cx as u8, cy as u8]);
+                alpha_out.push(a);
             }
             idx.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }
@@ -141,14 +269,14 @@ fn build_layer_mesh(t: &Terrain, texture: u8, layer: u8, uv_scale: Vec2) -> Opti
         return None;
     }
     let n = pos.len();
-    Some(
-        Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n])
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, color)
-            .with_inserted_indices(Indices::U32(idx)),
-    )
+    let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n])
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, color)
+        .with_inserted_indices(Indices::U32(idx));
+    let chunk = TerrainChunk { mesh: Handle::default(), corners: corners_out, alpha: alpha_out, area, lit: false };
+    Some((mesh, chunk))
 }
 
 /// Textura de `mu-data` → imagen de Bevy que se repite, con mipmaps

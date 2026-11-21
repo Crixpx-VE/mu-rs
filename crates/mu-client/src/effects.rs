@@ -19,7 +19,10 @@ use mu_data::objects::{EmitKind, Emitter, TICKS_PER_SECOND};
 use mu_data::texture::{self, Texture};
 
 use crate::Args;
-use crate::terrain::{MU_SCALE, to_bevy_image};
+use crate::terrain::{MU_SCALE, TerrainLights, to_bevy_image};
+
+/// Distancia (MU) hasta la que los fuegos iluminan el suelo.
+const LIGHT_DISTANCE: f32 = 3000.0;
 
 pub struct EffectsPlugin;
 
@@ -27,6 +30,7 @@ impl Plugin for EffectsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Time::<Fixed>::from_hz(TICKS_PER_SECOND as f64))
             .init_resource::<Emitters>()
+            .init_resource::<FireRequests>()
             .init_resource::<Particles>()
             .add_systems(Startup, setup_sprites)
             .add_systems(FixedUpdate, (emit, step).chain())
@@ -49,6 +53,11 @@ pub struct PlacedEmitter {
 
 #[derive(Resource, Default)]
 pub struct Emitters(pub Vec<PlacedEmitter>);
+
+/// Llamas sueltas que piden otros sistemas para este tick (p. ej. la cabeza de los dragones):
+/// (posición en MU, luz). Se crean en el siguiente `emit`.
+#[derive(Resource, Default)]
+pub struct FireRequests(pub Vec<(Vec3, Vec3)>);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Kind {
@@ -178,10 +187,35 @@ fn empty_mesh() -> Mesh {
 }
 
 /// Un tick de los emisores (`CreateFire` y las salpicaduras de la fuente).
-fn emit(emitters: Res<Emitters>, mut ps: ResMut<Particles>, time: Res<Time<Fixed>>) {
+fn emit(
+    emitters: Res<Emitters>,
+    mut ps: ResMut<Particles>,
+    mut lights: ResMut<TerrainLights>,
+    players: Query<&crate::character::Player>,
+    time: Res<Time<Fixed>>,
+    mut requests: ResMut<FireRequests>,
+) {
     let world_ms = (time.elapsed_secs() * 1000.0) as u32;
+    // Llamas pedidas por otros (`CreateParticle(BITMAP_FIRE, ..., subtipo 0)`).
+    for (pos, light) in requests.0.drain(..) {
+        let vel = -((ps.rand() % 16 + 32) as f32) * 0.1;
+        let scale = (ps.rand() % 64 + 128) as f32 * 0.01;
+        let p = new_particle(Kind::Fire(0), pos, Vec3::new(0.0, vel, 0.0), Quat::IDENTITY, 24, scale, light, 0.0);
+        ps.list.push(p);
+    }
+    // Las luces en el suelo solo importan cerca del personaje (lo que se ve).
+    let hero = players.single().map(|p| p.pos * MU_SCALE).ok();
     for e in &emitters.0 {
         let em = &e.emitter;
+        if em.kind == EmitKind::Fire
+            && let Some(h) = hero
+            && (e.position.truncate() - h).length() < LIGHT_DISTANCE
+        {
+            // `CreateFire(0)`: luz naranja de radio 4 en cada tick, aunque no salga llama.
+            let l = ps.range(6.0, 11.0) * 0.1;
+            let p = e.position + e.rotation * Vec3::from_array(em.offset);
+            lights.add(p.truncate() / MU_SCALE, [l, 0.6 * l, 0.4 * l], 4.0);
+        }
         // Posición del emisor en el mundo (MU).
         let local = match (em.bone, &e.model) {
             (Some(bone), Some((model, fps))) => {

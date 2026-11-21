@@ -38,6 +38,8 @@ const GRASS_TEXTURES: u8 = 3;
 const WIND_SCALE: f32 = 10.0;
 /// Velocidad del viento en radianes por segundo (`WorldTime · 0.002`, con el tiempo en ms).
 const WIND_SPEED: f32 = 2.0;
+/// Durante la invasión de dragones.
+const WIND_SPEED_EVENT: f32 = 10.0;
 
 #[derive(Component)]
 struct GrassMesh {
@@ -179,8 +181,15 @@ fn build_grass(
     Some((mesh, pos, tops))
 }
 
-fn wave_grass(time: Res<Time>, grass: Query<(&GrassMesh, &ViewVisibility)>, mut meshes: ResMut<Assets<Mesh>>) {
-    let t = time.elapsed_secs();
+fn wave_grass(
+    time: Res<Time>,
+    invasion: Res<crate::invasion::Invasion>,
+    grass: Query<(&GrassMesh, &ViewVisibility)>,
+    mut meshes: ResMut<Assets<Mesh>>,
+) {
+    // Durante la invasión, `WindSpeed = WorldTime % 36000 · 0.01`: 10 rad/s en vez de 2.
+    let speed = if invasion.active() { WIND_SPEED_EVENT } else { WIND_SPEED };
+    let t = time.elapsed_secs() * speed / WIND_SPEED;
     let mut wind_for: Option<(f32, Vec<f32>)> = None;
     // Solo los bloques que se vieron en el último fotograma.
     for (g, visible) in &grass {
