@@ -130,18 +130,23 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
 /// Ojo, inclinación, giro y alcance de la vista (`CalculateCameraPosition` + `SetCameraAngle` de MuMain).
 ///
 /// MuMain pone la cámara en `recorrido + AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0) + (-300, 650)`, un
-/// desplazamiento fijo en el mundo: en las curvas la cámara se sale del recorrido. Aquí ese mismo
-/// desplazamiento gira con el rumbo, tomando como referencia el del primer tramo (donde se ve igual).
-fn view(tour: Vec3, level: f32, angle: f32, ref_angle: f32) -> (Vec3, f32, f32, f32) {
+/// desplazamiento fijo en el mundo que la saca a un lado del recorrido. Aquí va centrada, justo
+/// detrás en la dirección en la que mira, a la misma distancia hacia atrás que daba eso en el primer
+/// tramo (un cuarto de `D`), con su altura y su inclinación.
+fn view(tour: Vec3, level: f32, angle: f32) -> (Vec3, f32, f32, f32) {
     let d = BASE_DISTANCE * level * 0.1;
-    let (s, c) = (-45f32).to_radians().sin_cos();
-    let w = Vec2::new(-s * d, -c * d) + MUMAIN_OFFSET.truncate();
-    // Giro en el sentido de los ángulos de MU (0 = +Y, 90 = +X).
-    let (rs, rc) = (angle - ref_angle).to_radians().sin_cos();
-    let w = Vec2::new(w.x * rc + w.y * rs, -w.x * rs + w.y * rc);
-    let eye = (tour.truncate() + w).extend(TOUR_Z + MUMAIN_OFFSET.z);
-    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
+    let yaw = angle + MUMAIN_YAW;
+    // Rumbo de MU: 0 = +Y, 90 = +X.
+    let forward = Vec2::new(yaw.to_radians().sin(), yaw.to_radians().cos());
+    let eye = (tour.truncate() - forward * d * BEHIND).extend(EYE_HEIGHT);
+    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, yaw, MUMAIN_FAR)
 }
+
+/// Lo que va la cámara por detrás del recorrido, en fracción de `D`.
+const BEHIND: f32 = 0.25;
+/// Altura del ojo. MuMain la deja en 650 (-300 + 950); comparada con el cliente original se ve
+/// algo alta, así que va un poco más baja (el suelo de la sala está a 169.5).
+const EYE_HEIGHT: f32 = 550.0;
 fn signed_delta(from: f32, to: f32) -> f32 {
     let d = to.rem_euclid(360.0) - from.rem_euclid(360.0);
     if d > 180.0 {
@@ -225,7 +230,7 @@ fn place_camera(
     let tour_pos = t.prev.0.lerp(t.now.0, a);
     let level = t.prev.1 + (t.now.1 - t.prev.1) * a;
     let angle = t.prev.2 + signed_delta(t.prev.2, t.now.2) * a;
-    let (eye, pitch, yaw, far) = view(tour_pos, level, angle, t.ref_angle);
+    let (eye, pitch, yaw, far) = view(tour_pos, level, angle);
     let vfov = 2.0 * ((TOUR_HFOV * 0.5).to_radians().tan() / (4.0 / 3.0)).atan();
     for (mut tf, mut proj, fog) in &mut cameras {
         *tf = crate::camera::mu_view(eye, pitch, yaw);

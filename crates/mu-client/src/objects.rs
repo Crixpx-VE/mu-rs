@@ -39,7 +39,7 @@ impl Plugin for ObjectsPlugin {
             .init_resource::<Roofs>()
             .init_resource::<LoginFades>()
             .add_systems(Update, spawn_objects.run_if(crate::scene::load_step(crate::scene::Step::Objects)))
-            .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects));
+            .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects, light_login_objects));
     }
 }
 
@@ -150,6 +150,52 @@ struct LoginFade {
 
 /// Tipos con malla de guion `_R` (su propia `BlendMesh`, que brilla con `BlendMeshLight`).
 const LOGIN_SCRIPT_BRIGHT: [i16; 2] = [127, 157];
+
+/// `BodyLight` de los objetos con material propio (login y selección): la luz del suelo en su sitio,
+/// con las luces dinámicas de este tick (fuegos, `AddTerrainLight`), como `RequestModelTerrainLight`.
+fn light_login_objects(
+    terrain: Option<Res<LoadedTerrain>>,
+    lights: Res<crate::terrain::TerrainLights>,
+    fades: Res<LoginFades>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
+) {
+    let Some(t) = terrain else { return };
+    if fades.objects.is_empty() {
+        return;
+    }
+    for o in &fades.objects {
+        let p = o.position / MU_SCALE;
+        let (x, y) = (p.x.clamp(0.0, (SIZE - 2) as f32), p.y.clamp(0.0, (SIZE - 2) as f32));
+        let (xi, yi) = (x as usize, y as usize);
+        let (fx, fy) = (x - xi as f32, y - yi as f32);
+        // Luz de cada esquina de la casilla con las luces dinámicas, y luego interpolada.
+        let corner = |cx: usize, cy: usize| {
+            let mut l = Vec3::from_array(t.0.light[cy * SIZE + cx]);
+            for light in &lights.lights {
+                let d = (light.pos - Vec2::new(cx as f32, cy as f32)).length();
+                if d < light.range {
+                    l += Vec3::from_array(light.color) * ((light.range - d) / light.range);
+                }
+            }
+            l.max(Vec3::ZERO)
+        };
+        let top = corner(xi, yi).lerp(corner(xi + 1, yi), fx);
+        let bottom = corner(xi, yi + 1).lerp(corner(xi + 1, yi + 1), fx);
+        let light = top.lerp(bottom, fy);
+        for (_, h, _, additive) in &o.parts {
+            if *additive {
+                continue;
+            }
+            let Some(m) = materials.get(h) else { continue };
+            let old = m.extension.light;
+            if old.w > 0.5 && (old.truncate() - light).abs().max_element() > 0.01 {
+                if let Some(mut m) = materials.get_mut(h) {
+                    m.extension.light = light.extend(1.0);
+                }
+            }
+        }
+    }
+}
 
 fn fade_login_objects(
     time: Res<Time>,
