@@ -36,6 +36,7 @@ mod model_light;
 mod objects;
 mod settings;
 mod shadow;
+mod scene;
 mod sound;
 mod terrain;
 
@@ -66,6 +67,10 @@ pub struct Args {
     pub resolution: Option<(u32, u32)>,
     /// Lanza todas las habilidades una tras otra (para probar sin teclado).
     pub skill_test: bool,
+    /// `--world`: entrar directo al juego en ese mapa, sin título ni login.
+    pub direct: bool,
+    /// `--ver-titulo`: la pantalla del título se queda a medias (para comprobarla en una captura).
+    pub hold_title: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -102,12 +107,17 @@ impl Args {
             invasion: 0,
             resolution: None,
             skill_test: false,
+            direct: false,
+            hold_title: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
             match a.as_str() {
                 "--data" => args.data = it.next().expect("--data <ruta>").into(),
-                "--world" => args.world = it.next().expect("--world <N>").parse().expect("número"),
+                "--world" => {
+                    args.world = it.next().expect("--world <N>").parse().expect("número");
+                    args.direct = true;
+                }
                 "--spawn" => args.spawn = Some(parse_floats(it.next(), "--spawn")),
                 "--walk-to" => args.walk_to = Some(parse_floats(it.next(), "--walk-to")),
                 "--screenshot" => args.screenshot = Some(it.next().expect("--screenshot <png>").into()),
@@ -118,6 +128,7 @@ impl Args {
                 "--zoom" => args.zoom = Some(it.next().expect("--zoom <casillas>").parse().expect("número")),
                 "--sin-vsync" => args.no_vsync = true,
                 "--probar-habilidades" => args.skill_test = true,
+                "--ver-titulo" => args.hold_title = true,
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
                     if args.resolution.is_none() {
@@ -133,7 +144,7 @@ impl Args {
 }
 
 /// Color de fondo de cada mapa (`SetWorldClearColor`, en `SceneManager.cpp`): bytes / 256.
-fn world_clear_color(world: u16) -> Color {
+pub fn world_clear_color(world: u16) -> Color {
     let rgb8 = |r: u8, g: u8, b: u8| Color::srgb(r as f32 / 256.0, g as f32 / 256.0, b as f32 / 256.0);
     // `WorldActive` del original: nuestro número de mapa menos uno.
     match world as i32 - 1 {
@@ -206,6 +217,6 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin))
         .run();
 }

@@ -33,7 +33,7 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, spawn_player)
+        app.add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
             .add_systems(Update, (scripted_walk, click_to_move, cast_skill, walk, animate, light_body).chain());
     }
 }
@@ -201,6 +201,7 @@ fn spawn_player(
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
     let mut e = commands.spawn((
         Name::new("Jugador"),
+        crate::scene::WorldEntity,
         player_transform(&player, terrain.as_deref()),
         Visibility::default(),
         player,

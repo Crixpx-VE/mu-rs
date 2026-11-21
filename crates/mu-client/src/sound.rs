@@ -60,6 +60,8 @@ pub enum PlayKind {
 pub struct SoundQueue {
     plays: Vec<(String, PlayKind)>,
     stops: Vec<String>,
+    /// `PlayMp3`: pista pedida este fotograma (nombre en `Data/Music`, sin `.mp3`).
+    music: Option<String>,
 }
 
 impl SoundQueue {
@@ -75,6 +77,10 @@ impl SoundQueue {
     /// `StopBuffer(id)`.
     pub fn stop(&mut self, id: &str) {
         self.stops.push(id.to_string());
+    }
+    /// `PlayMp3(nombre)`: si ya suena, nada; si suena otra, se cambia.
+    pub fn music(&mut self, name: &str) {
+        self.music = Some(name.to_string());
     }
 }
 
@@ -122,7 +128,7 @@ struct Channels {
 }
 
 #[derive(Resource)]
-struct Audio {
+pub struct Audio {
     data: PathBuf,
     /// `SOUND_*` → (archivo relativo a `Data`, canales).
     table: HashMap<String, (String, usize)>,
@@ -262,6 +268,9 @@ fn play_queue(
             }
         }
     }
+    if let Some(name) = queue.music.take() {
+        play_music(&mut commands, &mut audio, &mut sources, &name);
+    }
     let plays = std::mem::take(&mut queue.plays);
     if audio.sfx_volume == 0 {
         return;
@@ -291,6 +300,17 @@ fn play_queue(
         }
     }
     audio.loops.retain(|e| alive.contains(*e));
+}
+
+/// Al cambiar de mapa: se cortan los efectos y bucles del anterior (`StopInactiveAmbientSounds`).
+pub fn reset(mut commands: Commands, audio: Option<ResMut<Audio>>) {
+    let Some(mut audio) = audio else { return };
+    for (_, ch) in audio.channels.drain() {
+        for e in ch.entities.into_iter().flatten() {
+            commands.entity(e).try_despawn();
+        }
+    }
+    audio.loops.clear();
 }
 
 /// `PlayMp3(nombre)`: si ya suena esa pista, nada; si suena otra, se cambia.

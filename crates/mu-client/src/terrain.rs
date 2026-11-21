@@ -32,7 +32,7 @@ impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<WaterMaterials>()
             .init_resource::<TerrainLights>()
-            .add_systems(Startup, spawn_terrain)
+            .add_systems(Update, spawn_terrain.run_if(crate::scene::load_step(crate::scene::Step::Terrain)))
             // Las luces se vacían al empezar cada tick; los emisores las rellenan después.
             .add_systems(FixedFirst, clear_lights)
             .add_systems(Update, (move_water, apply_lights));
@@ -46,7 +46,7 @@ const WATER_PERIOD_SECS: f32 = 20.0;
 
 /// Materiales de las casillas de agua, cuya textura se desplaza.
 #[derive(Resource, Default)]
-struct WaterMaterials(Vec<Handle<StandardMaterial>>);
+pub struct WaterMaterials(Vec<Handle<StandardMaterial>>);
 
 fn move_water(time: Res<Time>, water: Res<WaterMaterials>, mut materials: ResMut<Assets<StandardMaterial>>) {
     let offset = (time.elapsed_secs() / WATER_PERIOD_SECS).fract();
@@ -104,6 +104,7 @@ fn spawn_terrain(
                         Mesh3d(handle.clone()),
                         MeshMaterial3d(material.clone()),
                         TerrainChunk { mesh: handle, ..chunk },
+                        crate::scene::WorldEntity,
                     ));
                 }
             }
@@ -111,6 +112,12 @@ fn spawn_terrain(
     }
 
     commands.insert_resource(LoadedTerrain(t));
+}
+
+/// Al cambiar de mapa: nada del anterior.
+pub fn reset(mut water: ResMut<WaterMaterials>, mut lights: ResMut<TerrainLights>) {
+    water.0.clear();
+    lights.lights.clear();
 }
 
 /// Lado de los trozos del terreno, en casillas.

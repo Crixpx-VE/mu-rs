@@ -33,18 +33,18 @@ pub struct ObjectsPlugin;
 
 impl Plugin for ObjectsPlugin {
     fn build(&self, app: &mut App) {
-        // PostStartup: el terreno (Startup) ya está cargado para consultar su luz.
+        // Después del terreno, para consultar su luz.
         app.init_resource::<AnimatedModels>()
             .init_resource::<AnimatedMaterials>()
             .init_resource::<Roofs>()
-            .add_systems(PostStartup, spawn_objects)
+            .add_systems(Update, spawn_objects.run_if(crate::scene::load_step(crate::scene::Step::Objects)))
             .add_systems(Update, (animate_objects, animate_materials, fade_roofs));
     }
 }
 
 /// Materiales de los techos, que se desvanecen al entrar en una casa.
 #[derive(Resource)]
-struct Roofs {
+pub struct Roofs {
     materials: Vec<(Handle<ModelMaterial>, AlphaMode)>,
     alpha: f32,
 }
@@ -92,9 +92,16 @@ fn fade_roofs(
     }
 }
 
+/// Al cambiar de mapa: nada del anterior.
+pub fn reset(mut anims: ResMut<AnimatedModels>, mut mats: ResMut<AnimatedMaterials>, mut roofs: ResMut<Roofs>) {
+    anims.0.clear();
+    mats.0.clear();
+    *roofs = Roofs::default();
+}
+
 /// Grupos de objetos animados (árboles, banderas, molino...).
 #[derive(Resource, Default)]
-struct AnimatedModels(Vec<AnimatedModel>);
+pub struct AnimatedModels(Vec<AnimatedModel>);
 
 struct AnimatedModel {
     model: Arc<bmd::Bmd>,
@@ -107,7 +114,7 @@ struct AnimatedModel {
 
 /// Materiales que cambian con el tiempo: brillo de las mallas aditivas y texturas que se mueven.
 #[derive(Resource, Default)]
-struct AnimatedMaterials(Vec<AnimatedMaterial>);
+pub struct AnimatedMaterials(Vec<AnimatedMaterial>);
 
 struct AnimatedMaterial {
     handle: Handle<ModelMaterial>,
@@ -371,7 +378,7 @@ fn spawn_objects(
                     m
                 }
             };
-            commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material), transform));
+            commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material), transform, crate::scene::WorldEntity));
             spawned += 1;
         }
     }

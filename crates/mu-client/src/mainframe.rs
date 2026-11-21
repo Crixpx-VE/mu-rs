@@ -28,10 +28,15 @@ impl Plugin for MainFramePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CharacterStats>()
             .init_resource::<PointerOverUi>()
-            .add_systems(Startup, spawn_main_frame)
+            .add_systems(OnEnter(crate::scene::GameScene::Game), spawn_main_frame)
+            .add_systems(OnExit(crate::scene::GameScene::Game), crate::scene::despawn::<MainFrameRoot>)
             .add_systems(Update, (update_scale, update_gauges, update_numbers, update_buttons, pointer_over_ui));
     }
 }
+
+/// La barra entera (solo existe en el juego).
+#[derive(Component)]
+pub struct MainFrameRoot;
 
 /// Alto de la pantalla virtual del original.
 const VIRTUAL_HEIGHT: f32 = 480.0;
@@ -198,6 +203,7 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
     // Barra de 640×51 abajo y centrada.
     let mut bar = commands.spawn((
         Name::new("Barra principal"),
+        MainFrameRoot,
         Node {
             position_type: PositionType::Absolute,
             bottom: Val::Px(0.0),

@@ -34,7 +34,7 @@ pub struct BoidsPlugin;
 
 impl Plugin for BoidsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PostStartup, setup_boids)
+        app.add_systems(Update, setup_boids.run_if(crate::scene::load_step(crate::scene::Step::Boids)))
             .add_systems(FixedUpdate, step_boids)
             .add_systems(Update, draw_boids);
     }
@@ -145,7 +145,7 @@ fn spawn_body(
     let mut parts = vec![];
     let mut mats = vec![];
     let entity = commands
-        .spawn((Name::new(name), Transform::default(), Visibility::Hidden))
+        .spawn((Name::new(name), Transform::default(), Visibility::Hidden, crate::scene::WorldEntity))
         .with_children(|p| {
             for (mi, tex) in textures.iter().enumerate() {
                 let posed = model.pose(mi, 0, 0);

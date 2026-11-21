@@ -27,8 +27,7 @@ pub struct GrassPlugin;
 
 impl Plugin for GrassPlugin {
     fn build(&self, app: &mut App) {
-        // PostStartup: el terreno se carga en Startup.
-        app.add_systems(PostStartup, spawn_grass).add_systems(Update, wave_grass);
+        app.add_systems(Update, (spawn_grass.run_if(crate::scene::load_step(crate::scene::Step::Grass)), wave_grass));
     }
 }
 
@@ -93,6 +92,7 @@ fn spawn_grass(
                     Mesh3d(handle.clone()),
                     MeshMaterial3d(material.clone()),
                     GrassMesh { mesh: handle, base, tops, wave_x },
+                    crate::scene::WorldEntity,
                 ));
             }
         }

@@ -62,6 +62,13 @@ impl Plugin for FxPlugin {
     }
 }
 
+/// Al cambiar de mapa: ni efectos, ni objetos del mapa, ni personajes del anterior.
+pub fn reset(mut world: ResMut<FxWorld>, mut actors: ResMut<sim::Actors>) {
+    let next_effect_id = world.next_effect_id;
+    *world = FxWorld { next_effect_id, ..default() };
+    *actors = sim::Actors::default();
+}
+
 /// Pedir un efecto desde fuera del motor (personajes, objetos del mapa): se crea en el próximo tick.
 pub fn request(world: &mut FxWorld, spawn: core::Spawn) {
     world.pending.push(spawn);

@@ -80,8 +80,10 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     ));
 
     if args.screenshot.is_some() {
-        let image = images.add(Image::new_target_texture(960, 540, TextureFormat::Rgba8UnormSrgb, None));
-        cam.insert(RenderTarget::Image(image.clone().into()));
+        // 4:3 como las resoluciones del juego, y con la interfaz dibujada en la captura.
+        let image = images.add(Image::new_target_texture(1024, 768, TextureFormat::Rgba8UnormSrgb, None));
+        cam.insert((RenderTarget::Image(image.clone().into()), IsDefaultUiCamera));
+        commands.insert_resource(bevy::ui::UiScale(768.0 / 480.0));
         commands.insert_resource(OffscreenTarget(image));
     }
 }

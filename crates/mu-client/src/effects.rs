@@ -46,6 +46,12 @@ pub struct PlacedEmitter {
 #[derive(Resource, Default)]
 pub struct Emitters(pub Vec<PlacedEmitter>);
 
+/// Al cambiar de mapa: nada del anterior.
+pub fn reset(mut emitters: ResMut<Emitters>, mut fire: ResMut<FireRequests>) {
+    emitters.0.clear();
+    fire.0.clear();
+}
+
 /// Llamas sueltas que piden otros sistemas para este tick (p. ej. la cabeza de los dragones):
 /// (posición en MU, luz).
 #[derive(Resource, Default)]

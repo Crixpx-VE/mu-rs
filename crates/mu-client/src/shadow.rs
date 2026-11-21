@@ -60,6 +60,7 @@ pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, material: &Shad
             MeshMaterial3d(material.0.clone()),
             Transform::default(),
             Visibility::Hidden,
+            crate::scene::WorldEntity,
             // La malla cambia de sitio cada fotograma: su caja inicial no vale.
             NoFrustumCulling,
         ))
