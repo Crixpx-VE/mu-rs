@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, UNIX_EPOCH};
 
-use mu_launcher::{DEFAULT_PORT, Entry, encode_path, hash_file, hex, parse_manifest, to_local};
+use mu_launcher::{DEFAULT_PORT, Entry, encode_path, excluded, hash_file, hex, is_safe_path, parse_manifest, to_local};
 use sha2::{Digest, Sha256};
 
 const CONFIG_FILE: &str = "mu-launcher.txt";
@@ -120,6 +120,22 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
     println!("{} archivos en el servidor.", manifest.len());
 
     let mut state = load_state(dir);
+    // Lo que instaló el lanzador (está en su estado) y el servidor ya no publica: se borra.
+    // Solo esos archivos: la configuración del jugador y los registros nunca están en el estado.
+    let published: std::collections::HashSet<&str> = manifest.iter().map(|e| e.path.as_str()).collect();
+    let gone: Vec<String> = state
+        .keys()
+        .filter(|p| !published.contains(p.as_str()) && is_safe_path(p) && !excluded(p))
+        .cloned()
+        .collect();
+    if !gone.is_empty() {
+        println!("Quitando {} archivos que ya no forman parte del cliente.", gone.len());
+        for p in &gone {
+            let _ = std::fs::remove_file(to_local(dir, p));
+            state.remove(p);
+        }
+        save_state(dir, &state);
+    }
     let mut pending: Vec<&Entry> = vec![];
     let mut checked = 0usize;
     for (i, e) in manifest.iter().enumerate() {
