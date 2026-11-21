@@ -1,22 +1,18 @@
 # mu-rs
 
-Cliente y servidor de MU Online (Season 6) escritos desde cero en Rust.
+Cliente y servidor de MU Online (Season 6) escritos desde cero en Rust. La referencia de
+comportamiento y aspecto es el cliente Season 6 (MuMain): sus fórmulas y números se traducen tal cual.
 
 ## Estructura
 
 | Crate | Qué es | Estado |
 |---|---|---|
-| `mu-data` | Lectores de los archivos del cliente: terreno (`.map`, `.att`, `.OZB`), texturas (`.OZJ`, `.OZT`), modelos (`.bmd`), objetos del mapa (`.obj`), búsqueda de caminos | Funciona con los datos S6 |
-| `mu-protocol` | Protocolo de red compartido por cliente y servidor: paquetes C1–C4, Xor32, Xor3, SimpleModulus, Connect Server, entrada y login del Game Server | Cifrado verificado contra un paquete real del cliente oficial; login sin probar aún contra un servidor real |
-| `mu-client` | El juego (Bevy 0.20): mapa con objetos, personaje animado que camina con clic | Sin red todavía |
-| `mu-connect` | Connect Server: lista de servidores y redirección al Game Server | Funciona; probado con tests TCP de punta a punta |
+| `mu-data` | Lectores de los archivos del cliente: terreno (`.map`, `.att`, `.OZB`), texturas (`.OZJ`, `.OZT`), modelos (`.bmd`), objetos del mapa (`.obj`) y sus reglas de dibujo, búsqueda de caminos | Funciona con los datos S6 |
+| `mu-protocol` | Protocolo de red compartido: paquetes C1–C4, Xor32, Xor3, SimpleModulus, Connect Server, entrada y login del Game Server | Cifrado verificado contra un paquete real; login sin probar aún contra un servidor real |
+| `mu-client` | El juego (Bevy 0.20) | Sin red todavía (ver abajo qué tiene) |
+| `mu-connect` | Connect Server: lista de servidores y redirección al Game Server | Funciona; tests TCP de punta a punta |
+| `mu-launcher` | `mu-launcher` (actualiza el cliente y lo abre) y `mu-update-server` (publica la carpeta del cliente) | En uso |
 | `mu-server` | Game Server | Vacío (mientras tanto, OpenMU) |
-
-## Requisitos
-
-- Rust (stable) y, en Windows, Visual Studio Build Tools
-- La carpeta `Data` de un cliente Season 6. Por defecto se usa `../referencias/MuMain/src/bin/Data`;
-  se puede cambiar con `--data <ruta>` o la variable `MU_DATA`.
 
 ## Cliente
 
@@ -25,12 +21,39 @@ cargo run -p mu-client                    # Lorencia
 cargo run -p mu-client -- --world 3       # Devias (2 = Dungeon, 4 = Noria...)
 ```
 
-Controles: **clic izquierdo** caminar · **rueda** zoom · **Tab** cámara libre (botón derecho + WASD, Q/E, Shift).
+Qué tiene:
+- Terreno con sus capas, agua que se mueve, hierba con viento, luces dinámicas en el suelo (fuegos).
+- Objetos del mapa con las reglas del original (mallas aditivas, parpadeos, texturas que se
+  desplazan, ocultos), animados, y techos que se desvanecen al entrar en casa.
+- Pájaros/murciélagos/mariposas en bandada; invasión de dragones (F9).
+- Dark Knight con armadura y espada (en la mano, o a la espalda en zona segura), que camina con
+  clic, con sus habilidades (teclas 1-0) y la estela del arma.
+- **Motor de efectos** (`src/fx/`) traducido de MuMain: partículas, sprites, estelas ("joints"),
+  efectos con modelo y habilidades. Corre a 25 ticks/s como el original y se dibuja interpolado.
+  Ver `src/fx/mod.rs`.
+- Barra principal de la interfaz S6 (esferas, experiencia, botones) en la pantalla virtual 640×480.
+- Cámara del original (DefaultCamera), resoluciones fijas (F10), contador de fps (F3).
 
-Opciones útiles para pruebas: `--spawn x,y`, `--walk-to x,y`, `--cam x,y,alto,mx,my,ma`,
-`--zoom N`, `--screenshot archivo.png` (renderiza sin ventana, captura y sale).
+Controles: **clic izquierdo** caminar · **rueda** zoom · **Tab** cámara libre · **1-0** habilidades ·
+**F3** fps · **F9** invasión de dragones · **F10** resolución.
+
+Opciones de prueba: `--spawn x,y`, `--walk-to x,y`, `--cam ...`, `--zoom N`, `--resolucion AxB`,
+`--sin-vsync`, `--invasion 1|3`, `--probar-habilidades`, `--screenshot archivo.png`.
 
 La primera compilación de Bevy tarda (~15–20 min); después es rápida.
+
+## Motor de efectos: cómo se traduce un tipo nuevo
+
+1. `python tools/gen_fx_tables.py ../referencias/MuMain/src/source` regenera `src/fx/tables/`
+   (constantes `BITMAP_*`/`MODEL_*`/... con sus valores exactos, texturas y modelos de efectos).
+2. El código de cada tipo va en `src/fx/kinds/<familia>.rs` con `pub fn register(r: &mut Registry)`,
+   registrado en `kinds/mod.rs`. Ver las reglas de traducción al principio de `src/fx/core.rs`.
+
+## Publicar una versión para los jugadores
+
+`.\publicar.ps1` compila el cliente y el lanzador y los copia (sin dejar archivos a medias) a
+`..\dist\cliente`, que es la carpeta que sirve `mu-update-server`. Los lanzadores descargan solo lo
+que cambió. La configuración de cada jugador va en `mu-launcher.txt` (las actualizaciones no la tocan).
 
 ## Connect Server
 
@@ -39,40 +62,32 @@ cargo run -p mu-connect                                          # 127.0.0.1:444
 cargo run -p mu-connect -- --listen 0.0.0.0:44405 --server 0=IP_PUBLICA:55901
 ```
 
-Por defecto solo escucha en local. Abrirlo a la red es una decisión explícita (`--listen 0.0.0.0:...`).
-
 ## Probar el login contra un servidor
 
 ```
 cargo run -p mu-protocol --example login -- test0 test0 [127.0.0.1:44405]
 ```
 
-Hace el recorrido completo del cliente: Connect Server → lista → Game Server → saludo → login cifrado
-(Xor3 + Xor32 + SimpleModulus) → lista de personajes. Con OpenMU funcionando, debería responder `Okay`
-(OpenMU crea las cuentas de prueba `test0`…`test9`, contraseña igual al usuario).
+Connect Server → lista → Game Server → saludo → login cifrado → lista de personajes. Con OpenMU debería
+responder `Okay` (cuentas de prueba `test0`…`test9`, contraseña igual al usuario).
 
 ## Tests
 
 ```
-cargo test -p mu-data -p mu-protocol -p mu-connect
+cargo test -p mu-data -p mu-protocol -p mu-connect -p mu-launcher
 ```
-
-Los tests de `mu-data` usan los datos reales si existen en `../referencias/` y si no, se saltan.
 
 ## Referencias
 
 En `../referencias/` (no forman parte de este repo):
 
-- **OpenMU** (MIT): servidor de pruebas y definición del protocolo. Se puede traducir su código.
+- **MuMain**: el cliente Season 6 (C++). Referencia principal: se traducen sus fórmulas.
+- **OpenMU** (MIT): servidor de pruebas y definición del protocolo.
 - **muonlinejs** (MIT): lectores de formatos.
-- **xulek-muonline**: arquitectura de un cliente moderno (licencia solo educativa: leer, no copiar).
-- **MuMain**: el cliente original (código de origen filtrado): solo para consultar comportamiento.
+- **xulek-muonline**: cliente moderno en C# (licencia solo educativa: leer, no copiar).
 
-## Pendiente / notas
+## Notas
 
-- Reglas de dibujo por modelo (mallas aditivas, ocultas) solo están para Lorencia; en otros mapas
-  algunos objetos salen con zonas negras.
-- Sin efectos (fuego, agua animada, hojas), sin niebla, sin sonido.
-- En un servidor sin tarjeta gráfica (renderizado por software WARP) Bevy pierde memoria muy
-  rápido y se cierra al minuto, incluso con una escena vacía. Pendiente comprobar en un PC con GPU
-  que no pasa.
+- Este servidor de desarrollo no tiene tarjeta gráfica: Bevy usa renderizado por software y no
+  aguanta más de un minuto. Lo visual se comprueba en el PC del jugador con el lanzador.
+- Pendiente: red (login, personajes, monstruos), resto de interfaz, sonido, resto de clases.
