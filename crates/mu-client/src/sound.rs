@@ -62,6 +62,8 @@ pub struct SoundQueue {
     stops: Vec<String>,
     /// `PlayMp3`: pista pedida este fotograma (nombre en `Data/Music`, sin `.mp3`).
     music: Option<String>,
+    /// `StopMp3`: cortar la música.
+    stop_music: bool,
 }
 
 impl SoundQueue {
@@ -81,6 +83,10 @@ impl SoundQueue {
     /// `PlayMp3(nombre)`: si ya suena, nada; si suena otra, se cambia.
     pub fn music(&mut self, name: &str) {
         self.music = Some(name.to_string());
+    }
+    /// `StopMp3`.
+    pub fn stop_music(&mut self) {
+        self.stop_music = true;
     }
 }
 
@@ -267,6 +273,9 @@ fn play_queue(
                 }
             }
         }
+    }
+    if std::mem::take(&mut queue.stop_music) {
+        stop_music(&mut commands, &mut audio, None);
     }
     if let Some(name) = queue.music.take() {
         play_music(&mut commands, &mut audio, &mut sources, &name);

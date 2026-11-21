@@ -305,12 +305,49 @@ const TITLE_SECS: f32 = 3.0;
 #[derive(Component)]
 struct LoadingUi;
 
-fn spawn_loading(mut commands: Commands) {
-    commands.spawn((
+/// `LoadingScene` (Main 5.2, `ZzzScene.cpp`): al entrar al juego, `Interface/LSBg01-04.jpg` en la
+/// pantalla de 800×600 (dos de 400×512 arriba y dos de 400×88 abajo) y se corta la música del
+/// login. Del login a la selección de personaje el original no la enseña: solo negro.
+fn spawn_loading(
+    mut commands: Commands,
+    args: Res<Args>,
+    load: Res<LoadStep>,
+    mut images: ResMut<Assets<Image>>,
+    mut sound: ResMut<crate::sound::SoundQueue>,
+) {
+    let mut root = commands.spawn((
         Name::new("Cargando"),
         LoadingUi,
         Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
         BackgroundColor(Color::BLACK),
         GlobalZIndex(100),
     ));
+    if load.then != Some(GameScene::Game) {
+        return;
+    }
+    sound.stop_music();
+    let pieces = [
+        ("LSBg01.jpg", 0.0, 0.0, 512.0),
+        ("LSBg02.jpg", 400.0, 0.0, 512.0),
+        ("LSBg03.jpg", 0.0, 512.0, 88.0),
+        ("LSBg04.jpg", 400.0, 512.0, 88.0),
+    ];
+    let loaded: Vec<_> = pieces.iter().filter_map(|&(n, x, y, h)| interface_image(&args, &mut images, n).map(|i| (i.0, x, y, h))).collect();
+    root.with_children(|r| {
+        // Pantalla virtual de 640×480 centrada, como el título.
+        r.spawn(Node {
+            position_type: PositionType::Absolute,
+            left: Val::Percent(50.0),
+            top: Val::Percent(50.0),
+            margin: UiRect { left: Val::Px(-320.0), top: Val::Px(-240.0), ..default() },
+            width: Val::Px(640.0),
+            height: Val::Px(480.0),
+            ..default()
+        })
+        .with_children(|v| {
+            for (img, x, y, h) in loaded {
+                v.spawn(sprite(img, x, y, 400.0, h, 800.0));
+            }
+        });
+    });
 }
