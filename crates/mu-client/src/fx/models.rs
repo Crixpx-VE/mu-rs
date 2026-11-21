@@ -69,6 +69,16 @@ impl FxModels {
             return Some((d.to_string(), f.to_string(), t.to_string()));
         }
         // Los que el original carga en bucles (el generador no los ve).
+        // Modelos de objetos de mapa que usan los efectos (`OpenWorldModels` / `MapManager`).
+        let fixed = match id {
+            MODEL_WARP..=MODEL_WARP3 => Some(("Npc", format!("warp{:02}.bmd", id - MODEL_WARP + 1))),
+            MODEL_DUNGEON_STONE01 => Some(("Object2", "DungeonStone01.bmd".into())),
+            MODEL_CLOUD => Some(("Object11", "cloud.bmd".into())),
+            _ => None,
+        };
+        if let Some((dir, file)) = fixed {
+            return Some((dir.into(), file, dir.into()));
+        }
         if (MODEL_STONE1..=MODEL_STONE2).contains(&id) {
             return Some(("Skill".into(), format!("Stone{:02}.bmd", id - MODEL_STONE1 + 1), "Skill".into()));
         }

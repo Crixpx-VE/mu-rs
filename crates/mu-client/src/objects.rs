@@ -242,13 +242,15 @@ fn spawn_objects(
             angle: Vec3::from_array(o.angle),
             model,
         };
+        // Objetos con código de efectos (`MoveObject`/`UpdateObjectVisual`) para el motor.
+        let world_active = args.world as i32 - 1;
+        let has_fx = registry.objects.contains_key(&(world_active, o.kind as i32));
+        // Los emisores provisionales solo quedan para los objetos que el motor aún no traduce.
+        let emitters = if has_fx { Vec::new() } else { emitters };
         // Los emisores sin hueso (fuegos, humo) no necesitan el modelo: también los ocultos.
         for e in emitters.iter().filter(|e| e.bone.is_none()) {
             fx.0.push(place(e, None));
         }
-        // Objetos con código de efectos (`MoveObject`/`UpdateObjectVisual`) para el motor.
-        let world_active = args.world as i32 - 1;
-        let has_fx = registry.objects.contains_key(&(world_active, o.kind as i32));
         let fx_object = |model: Option<Arc<bmd::Bmd>>, velocity: f32| crate::fx::core::MapObject {
             ty: o.kind as i32,
             position: Vec3::from_array(o.position),
@@ -268,26 +270,37 @@ fn spawn_objects(
             user: [0.0; 4],
             created: false,
         };
+        let rel = objects::model_path(args.world, o.kind);
+        let mut load_bmd = |rel: &PathBuf, missing: &mut HashMap<i16, String>| {
+            c.bmds
+                .entry(rel.clone())
+                .or_insert_with(|| {
+                    let dir = args.data.join(rel.parent().unwrap_or(Path::new("")));
+                    let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    fs::read(&dir, name)
+                        .and_then(|b| bmd::read(&b))
+                        .map(Arc::new)
+                        .map_err(|e| missing.insert(o.kind, e.to_string()))
+                        .ok()
+                })
+                .clone()
+        };
         if rules.hidden {
+            // Los ocultos no se dibujan, pero su código de efectos puede usar los huesos.
             if has_fx {
-                fx_world.map_objects.push(fx_object(None, 0.0));
+                let model = rel.as_ref().and_then(|r| load_bmd(r, &mut missing));
+                let fps = model.as_ref().map_or(0.0, |m| {
+                    if m.actions.first().is_some_and(|a| a.frames > 1) { rules.velocity.fps(o.scale) } else { 0.0 }
+                });
+                fx_world.map_objects.push(fx_object(model, fps / objects::TICKS_PER_SECOND));
             }
             continue;
         }
-        let Some(rel) = objects::model_path(args.world, o.kind) else {
+        let Some(rel) = rel else {
             missing.entry(o.kind).or_insert_with(|| "sin entrada en la tabla".into());
             continue;
         };
-        let model = c.bmds.entry(rel.clone()).or_insert_with(|| {
-            let dir = args.data.join(rel.parent().unwrap_or(Path::new("")));
-            let name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            fs::read(&dir, name)
-                .and_then(|b| bmd::read(&b))
-                .map(Arc::new)
-                .map_err(|e| missing.insert(o.kind, e.to_string()))
-                .ok()
-        });
-        let Some(model) = model.clone() else { continue };
+        let Some(model) = load_bmd(&rel, &mut missing) else { continue };
 
         // Grupo de animación: los objetos de un modelo que van a la misma velocidad comparten malla.
         let animated = model.actions.first().is_some_and(|a| a.frames > 1);
@@ -360,6 +373,31 @@ fn spawn_objects(
             commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material), transform));
             spawned += 1;
         }
+    }
+
+    // Portales que `MapManager.cpp` crea por código (`CreateObject(MODEL_WARP, Pos, (0,0,10))`, z = 0):
+    // sus anillos son efectos que crea el código del objeto.
+    let warp = match args.world {
+        3 => Some([53.0 * MU_SCALE + 50.0, 92.0 * MU_SCALE + 20.0]),
+        4 => Some([223.0 * MU_SCALE, 30.0 * MU_SCALE]),
+        _ => None,
+    };
+    if let Some([x, y]) = warp {
+        fx_world.map_objects.push(crate::fx::core::MapObject {
+            ty: crate::fx::tables::ids::MODEL_WARP,
+            position: Vec3::new(x, y, 0.0),
+            angle: Vec3::new(0.0, 0.0, 10.0),
+            scale: 1.0,
+            light: Vec3::ZERO,
+            model: None,
+            velocity: 0.0,
+            animation_frame: 0.0,
+            bones: None,
+            timer: 0.0,
+            hidden_mesh: -1,
+            user: [0.0; 4],
+            created: false,
+        });
     }
 
     info!(
