@@ -1,0 +1,7 @@
+[package]
+name = "mu-protocol"
+description = "Paquetes y cifrado del protocolo de MU Online, compartido por cliente y servidor"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

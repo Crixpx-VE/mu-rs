@@ -1,0 +1,8 @@
+[package]
+name = "mu-data"
+description = "Lectores de los archivos del cliente de MU (BMD, OZJ, OZT, terreno, items...)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+image.workspace = true

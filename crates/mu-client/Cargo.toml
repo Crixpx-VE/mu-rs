@@ -1,0 +1,9 @@
+[package]
+name = "mu-client"
+description = "Cliente de MU Online"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mu-data.workspace = true
+bevy.workspace = true

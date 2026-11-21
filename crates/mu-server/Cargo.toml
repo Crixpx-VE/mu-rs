@@ -1,0 +1,9 @@
+[package]
+name = "mu-server"
+description = "Game Server (más adelante; mientras tanto se usa OpenMU)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mu-protocol.workspace = true
+mu-data.workspace = true

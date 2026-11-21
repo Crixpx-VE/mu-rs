@@ -1,0 +1,8 @@
+[package]
+name = "mu-connect"
+description = "Connect Server: entrega la lista de servidores al cliente"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+mu-protocol.workspace = true

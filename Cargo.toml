@@ -1,0 +1,26 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mu-protocol",
+    "crates/mu-data",
+    "crates/mu-client",
+    "crates/mu-connect",
+    "crates/mu-server",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[workspace.dependencies]
+mu-protocol = { path = "crates/mu-protocol" }
+mu-data = { path = "crates/mu-data" }
+bevy = "0.20.1"
+image = { version = "0.25.10", default-features = false, features = ["jpeg"] }
+
+# Bevy en debug es muy lento sin optimizar las dependencias.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
