@@ -31,6 +31,7 @@ mod grass;
 mod hud;
 mod invasion;
 mod logfile;
+mod login;
 mod mainframe;
 mod model_light;
 mod objects;
@@ -217,6 +218,6 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin))
         .run();
 }

@@ -25,15 +25,13 @@ impl Plugin for ScenePlugin {
             .add_systems(Startup, start)
             .add_systems(OnEnter(GameScene::Title), spawn_title)
             .add_systems(Update, update_title_gauge.run_if(in_state(GameScene::Title)))
-            .add_systems(PreUpdate, unload_world)
             .add_systems(OnExit(GameScene::Title), despawn::<TitleUi>)
-            .add_systems(OnEnter(GameScene::Login), spawn_login)
-            .add_systems(Update, login.run_if(in_state(GameScene::Login)))
-            .add_systems(OnExit(GameScene::Login), despawn::<LoginUi>)
             .add_systems(OnEnter(GameScene::Loading), spawn_loading)
             .add_systems(OnExit(GameScene::Loading), despawn::<LoadingUi>)
             // Un paso de carga por fotograma, al final, cuando ya se ha hecho el de este.
-            .add_systems(Last, advance_load);
+            // El borrado va en el mismo sitio que el avance: si una carga empieza a mitad de fotograma,
+            // su primer paso (borrar) se hace igualmente antes de pasar al siguiente.
+            .add_systems(Last, (unload_world, advance_load).chain());
     }
 }
 
@@ -87,7 +85,8 @@ impl LoadStep {
     pub fn progress(&self) -> f32 {
         match self.index {
             None => 1.0,
-            Some(i) => i as f32 / self.steps.len().max(1) as f32,
+            // El paso actual ya se ha hecho cuando se dibuja este fotograma.
+            Some(i) => (i + 1) as f32 / self.steps.len().max(1) as f32,
         }
     }
 
@@ -135,9 +134,19 @@ fn unload_world(world: &mut World) {
     world.run_system_cached(crate::sound::reset).ok();
 }
 
-fn advance_load(mut load: ResMut<LoadStep>, mut next: ResMut<NextState<GameScene>>, args: Res<Args>, scene: Res<State<GameScene>>) {
+fn advance_load(
+    mut load: ResMut<LoadStep>,
+    mut next: ResMut<NextState<GameScene>>,
+    args: Res<Args>,
+    scene: Res<State<GameScene>>,
+    time: Res<Time<Real>>,
+) {
     let Some(i) = load.index else { return };
     if args.hold_title && *scene.get() == GameScene::Title && i + 1 >= load.steps.len() / 2 {
+        return;
+    }
+    // El título se ve al menos `TITLE_SECS`: su barra no pasa de lo que lleva de tiempo.
+    if *scene.get() == GameScene::Title && i + 1 >= load.steps.len() && time.elapsed_secs() < TITLE_SECS {
         return;
     }
     if i + 1 < load.steps.len() {
@@ -263,51 +272,15 @@ fn spawn_title(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asset
     });
 }
 
-fn update_title_gauge(load: Res<LoadStep>, mut q: Query<&mut Node, With<TitleGauge>>) {
+fn update_title_gauge(load: Res<LoadStep>, time: Res<Time<Real>>, mut q: Query<&mut Node, With<TitleGauge>>) {
+    let shown = load.progress().min(time.elapsed_secs() / TITLE_SECS).clamp(0.0, 1.0);
     for mut n in &mut q {
-        n.width = Val::Px(656.0 * 0.8 * load.progress());
+        n.width = Val::Px(656.0 * 0.8 * shown);
     }
 }
 
-// --- Login (provisional: falta su interfaz y la cámara de paseo del original) -----------------------
-
-#[derive(Component)]
-struct LoginUi;
-
-fn spawn_login(mut commands: Commands) {
-    commands.spawn((
-        Name::new("Login"),
-        LoginUi,
-        Text::new("Pulsa Enter para entrar"),
-        TextFont { font_size: bevy::text::FontSize::Px(10.0), ..default() },
-        TextColor(Color::WHITE),
-        TextShadow { offset: Vec2::splat(0.6), color: Color::BLACK },
-        Node { position_type: PositionType::Absolute, bottom: Val::Px(40.0), left: Val::Percent(50.0), margin: UiRect::left(Val::Px(-55.0)), ..default() },
-    ));
-}
-
-fn login(
-    keys: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut args: ResMut<Args>,
-    mut load: ResMut<LoadStep>,
-    mut next: ResMut<NextState<GameScene>>,
-    mut sound: ResMut<crate::sound::SoundQueue>,
-    mut cameras: Query<&mut Transform, With<Camera3d>>,
-) {
-    sound.music("login_theme");
-    // Mientras tanto, una vuelta lenta alrededor del centro del mapa.
-    let a = time.elapsed_secs() * 0.05;
-    let center = Vec3::new(128.0, 3.0, -128.0);
-    for mut tf in &mut cameras {
-        let eye = center + Vec3::new(a.cos() * 14.0, 9.0, a.sin() * 14.0);
-        *tf = Transform::from_translation(eye).looking_at(center, Vec3::Y);
-    }
-    if keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) {
-        load_world(&mut args, &mut load, 1, true, GameScene::Game);
-        next.set(GameScene::Loading);
-    }
-}
+/// Lo mínimo que se ve la pantalla del título.
+const TITLE_SECS: f32 = 3.0;
 
 // --- Carga (provisional: pantalla negra) ---------------------------------------------------------
 

@@ -151,6 +151,17 @@ fn mu_camera(hero: Vec3, distance: f32) -> Transform {
     Transform::from_translation(hero + to_bevy(offset) / MU_SCALE).looking_to(to_bevy(forward), to_bevy(up))
 }
 
+/// Vista del original desde `eye` (MU) con inclinación `pitch` y giro `yaw` en grados (los mismos ejes
+/// que [`mu_camera`]: `Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL).
+pub fn mu_view(eye: Vec3, pitch: f32, yaw: f32) -> Transform {
+    let (s0, c0) = pitch.to_radians().sin_cos();
+    let (s2, c2) = yaw.to_radians().sin_cos();
+    let forward = Vec3::new(-s0 * s2, -s0 * c2, -c0);
+    let up = Vec3::new(c0 * s2, c0 * c2, -s0);
+    let to_bevy = |v: Vec3| Vec3::new(v.x, v.z, -v.y);
+    Transform::from_translation(to_bevy(eye) / MU_SCALE).looking_to(to_bevy(forward), to_bevy(up))
+}
+
 fn fly(
     mode: Res<CameraMode>,
     time: Res<Time>,
