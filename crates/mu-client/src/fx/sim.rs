@@ -33,6 +33,34 @@ pub struct FxWorld {
     pub pending: Vec<Spawn>,
     /// Habilidades en curso (`AttackTime` de cada personaje).
     pub casts: Vec<Cast>,
+    /// Estelas de las armas.
+    pub blurs: Vec<Blur>,
+}
+
+impl FxWorld {
+    /// `CreateBlur`: añade un punto a la estela del arma de `owner` (o la crea). `frame` es el
+    /// número de fotograma de dibujo (los puntos de un fotograma sustituyen a los del anterior).
+    pub fn create_blur(&mut self, owner: Entity, p1: Vec3, p2: Vec3, light: Vec3, mapping: i32, short: bool, frame: u64) {
+        if let Some(b) = self.blurs.iter_mut().find(|b| b.live && b.owner == owner) {
+            b.light = light;
+            b.mapping = mapping;
+            b.add_sample(p1, p2, frame);
+            return;
+        }
+        let mut b = Blur {
+            owner,
+            p1: vec![],
+            p2: vec![],
+            light,
+            mapping,
+            life: if short { 15 } else { MAX_BLUR_LIFETIME },
+            frame_samples: 0,
+            frame,
+            live: true,
+        };
+        b.add_sample(p1, p2, frame);
+        self.blurs.push(b);
+    }
 }
 
 /// Personajes que pueden seguir los efectos, actualizados por quien los mueve.
@@ -78,7 +106,7 @@ pub fn tick(
     let effect_positions: HashMap<u32, Vec3> = world.effects.iter().map(|e| (e.id, e.position)).collect();
     let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
 
-    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, .. } = world;
+    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, .. } = world;
     let mut ctx = Ctx {
         rng,
         world_time: time.elapsed_secs() * 1000.0,
@@ -111,6 +139,12 @@ pub fn tick(
         }
     }
     casts.retain(|c| c.live);
+
+    // Estelas de las armas (`MoveBlurs`).
+    for b in world_blurs.iter_mut() {
+        b.age();
+    }
+    world_blurs.retain(|b| b.live);
 
     // Efectos (`MoveEffect`): lo propio del tipo y luego `LifeTime -= 1`.
     for e in effects.iter_mut() {

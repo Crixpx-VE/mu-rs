@@ -71,6 +71,28 @@ pub fn collect(
         });
     }
 
+    // Estelas de las armas (`RenderBlurs`): suma, desvaneciéndose hacia lo más viejo.
+    for b in &world.blurs {
+        let n = b.p1.len();
+        if n < 2 {
+            continue;
+        }
+        let tex = b.texture();
+        for j in 0..n - 1 {
+            let (l1, l2) = ((n - j) as f32 / n as f32, (n - j - 1) as f32 / n as f32);
+            let (u1, u2) = (j as f32 / n as f32, (j + 1) as f32 / n as f32);
+            // Un color por cuadrado: la media de sus dos extremos.
+            let l = b.light * (l1 + l2) * 0.5;
+            out.quads.push(QuadDraw {
+                texture: tex,
+                corners: [b.p1[j], b.p2[j], b.p2[j + 1], b.p1[j + 1]],
+                uv: [[u1, 1.0], [u1, 0.0], [u2, 0.0], [u2, 1.0]],
+                color: [l.x, l.y, l.z, 1.0],
+                blend: Blend::Glow,
+            });
+        }
+    }
+
     for e in &world.effects {
         let mut q = e.clone();
         q.position = e.prev_position.lerp(e.position, a);

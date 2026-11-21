@@ -235,6 +235,34 @@ fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec
     local.iter().map(|b| bmd::concat(&parent, b)).collect()
 }
 
+/// `CreateWeaponBlur` para el Dark Knight con espada: en las habilidades de espada (SWORD1-5) a
+/// partir del fotograma 3, la estela va de (0, -20, 0) a (0, -120, 0) del hueso del arma
+/// (`BlurType` 1), con `motion_blur_r` (`BlurMapping` 2), blanca y corta. Cada fotograma se recalcula
+/// la pose 10 veces a lo largo del último trozo de animación (`PlaySpeed`) para que salga continua.
+fn weapon_blur(entity: Entity, p: &Player, s: &Skinned, terrain: Option<&LoadedTerrain>, world: &mut crate::fx::FxWorld, frame: u64) {
+    use crate::fx::core::PLAYER_ATTACK_SKILL_SWORD1;
+    let (Some(fps), Some(_)) = (p.casting, &s.weapon) else { return };
+    let sword = PLAYER_ATTACK_SKILL_SWORD1 as usize;
+    if !(sword..sword + 5).contains(&p.action) || p.frame < 3.0 {
+        return;
+    }
+    let play_speed = fps / crate::fx::sim::TICKS_PER_SECOND;
+    let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+    let origin = Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h);
+    let rot = Quat::from_rotation_z(p.facing);
+    const INTER: usize = 10;
+    let mut f = p.frame - play_speed;
+    for _ in 0..INTER {
+        let bones = s.skeleton.bone_matrices_at(p.action, f);
+        if let Some(m) = bones.get(RIGHT_HAND_BONE) {
+            let a = Vec3::from_array(bmd::transform_point(m, [0.0, -20.0, 0.0]));
+            let b = Vec3::from_array(bmd::transform_point(m, [0.0, -120.0, 0.0]));
+            world.create_blur(entity, origin + rot * a, origin + rot * b, Vec3::ONE, 2, true, frame);
+        }
+        f += play_speed / INTER as f32;
+    }
+}
+
 /// Hueso de la espalda donde van las armas en zona segura (`backBone` de `PlanAttachments`).
 const BACK_BONE: usize = 47;
 
@@ -393,9 +421,13 @@ fn animate(
     time: Res<Time>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut q: Query<(&mut Player, &Skinned, &mut crate::fx::ActorState)>,
+    mut world: ResMut<crate::fx::FxWorld>,
+    mut render_frame: Local<u64>,
+    mut q: Query<(Entity, &mut Player, &Skinned, &mut crate::fx::ActorState)>,
 ) {
-    for (mut p, s, mut actor) in &mut q {
+    *render_frame += 1;
+    for (entity, mut p, s, mut actor) in &mut q {
+        weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         p.frame += p.casting.unwrap_or(ANIM_FPS) * time.delta_secs();
         // La habilidad termina al acabar su animación: vuelve a estar quieto.
         if p.casting.is_some() {

@@ -419,6 +419,82 @@ pub struct SpriteFx {
     pub alpha: f32,
 }
 
+// --- Estela del arma (`Blur`, ZzzEffectBlurSpark.cpp) ---------------------------------------------
+
+/// `MAX_BLUR_TAILS`: puntos como mucho de una estela de arma.
+pub const MAX_BLUR_TAILS: usize = 30;
+/// `MAX_BLUR_LIFETIME`: vida de una estela normal (las "cortas" viven 15).
+pub const MAX_BLUR_LIFETIME: i32 = 30;
+
+/// Estela de un arma: dos listas de puntos (empuñadura `p1` y punta `p2`), la [0] la más nueva.
+#[derive(Clone)]
+pub struct Blur {
+    pub owner: Entity,
+    pub p1: Vec<Vec3>,
+    pub p2: Vec<Vec3>,
+    pub light: Vec3,
+    /// `BlurMapping`: textura `BITMAP_BLUR + n` (3 → `BLUR2`, 4 → `BLUR`, 5 → `BLUR + 3`).
+    pub mapping: i32,
+    pub life: i32,
+    /// Puntos añadidos en el último fotograma (el siguiente los sustituye si no ha pasado un tick).
+    pub frame_samples: usize,
+    pub frame: u64,
+    pub live: bool,
+}
+
+impl Blur {
+    /// `AddBlurSample`: cada fotograma sustituye los puntos del anterior hasta que un tick los fija.
+    pub fn add_sample(&mut self, p1: Vec3, p2: Vec3, frame: u64) {
+        if self.frame != frame {
+            let replaced = self.frame_samples.min(self.p1.len());
+            self.p1.drain(0..replaced);
+            self.p2.drain(0..replaced);
+            self.frame = frame;
+            self.frame_samples = 0;
+        }
+        self.p1.insert(0, p1);
+        self.p2.insert(0, p2);
+        self.p1.truncate(MAX_BLUR_TAILS - 1);
+        self.p2.truncate(MAX_BLUR_TAILS - 1);
+        self.frame_samples = (self.frame_samples + 1).min(self.p1.len());
+    }
+
+    /// `MoveBlurs`: un tick: se pierde lo más viejo y la vida baja.
+    pub fn age(&mut self) {
+        self.frame_samples = 0;
+        self.life -= 1;
+        let shrink = |v: &mut Vec<Vec3>| {
+            // Number -= 1 y desplazar: la [0] se duplica y caen las dos más viejas.
+            if !v.is_empty() {
+                v.pop();
+                if let Some(&first) = v.first() {
+                    v.insert(0, first);
+                    v.pop();
+                }
+            }
+        };
+        shrink(&mut self.p1);
+        shrink(&mut self.p2);
+        if self.life <= 0 {
+            self.p1.pop();
+            self.p2.pop();
+            if self.p1.is_empty() {
+                self.live = false;
+            }
+        }
+    }
+
+    /// Textura según `BlurMapping` (`RenderBlurs`).
+    pub fn texture(&self) -> i32 {
+        match self.mapping {
+            3 => BITMAP_BLUR2,
+            4 => BITMAP_BLUR,
+            5 => BITMAP_BLUR + 3,
+            m => BITMAP_BLUR + m,
+        }
+    }
+}
+
 // --- Habilidades -----------------------------------------------------------------------------------
 
 /// `g_iLimitAttackTime`: cuando `AttackTime` llega aquí se lanza el efecto final de la habilidad.
