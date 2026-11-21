@@ -16,6 +16,8 @@
 //!   --zoom <casillas>        distancia inicial de la cámara de seguimiento (10-17, por defecto 13)
 //!   --sin-vsync              sin límite de fps (para medir rendimiento)
 //!   --invasion <1|3>         empezar con la invasión de dragones (1 = rojos, 3 = dorados)
+//!   --resolucion <AxB>       tamaño de la ventana solo esta vez (si no, `resolucion=` de
+//!                            mu-launcher.txt, o 1024x768). F10 cambia y guarda.
 //!
 //! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps ·
 //! F9 = invasión de dragones (apagada → rojos → dorados).
@@ -29,6 +31,7 @@ mod hud;
 mod invasion;
 mod mainframe;
 mod objects;
+mod settings;
 mod terrain;
 
 use std::path::PathBuf;
@@ -54,6 +57,8 @@ pub struct Args {
     pub no_vsync: bool,
     /// Empezar con la invasión de dragones activa (1 = rojos, 3 = dorados). En el juego: F9.
     pub invasion: u8,
+    /// Resolución de la ventana solo para esta vez (si no, la guardada o 1024×768).
+    pub resolution: Option<(u32, u32)>,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -88,6 +93,7 @@ impl Args {
             zoom: None,
             no_vsync: false,
             invasion: 0,
+            resolution: None,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -103,6 +109,12 @@ impl Args {
                 "--cam" => args.cam = Some(parse_floats(it.next(), "--cam")),
                 "--zoom" => args.zoom = Some(it.next().expect("--zoom <casillas>").parse().expect("número")),
                 "--sin-vsync" => args.no_vsync = true,
+                "--resolucion" => {
+                    args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
+                    if args.resolution.is_none() {
+                        eprintln!("--resolucion: usa algo como 1024x768");
+                    }
+                }
                 "--invasion" => args.invasion = it.next().and_then(|v| v.parse().ok()).unwrap_or(1),
                 otro => eprintln!("argumento desconocido: {otro}"),
             }
@@ -114,6 +126,7 @@ impl Args {
 fn main() {
     let args = Args::parse();
     let title = format!("MU Rust - World{}", args.world);
+    let resolution = args.resolution.or_else(settings::saved_resolution).unwrap_or(settings::DEFAULT_RESOLUTION);
     let headless = args.screenshot.is_some();
 
     let mut app = App::new();
@@ -136,7 +149,10 @@ fn main() {
             WindowPlugin {
                 primary_window: Some(Window {
                     title,
-                    resolution: (1280, 720).into(),
+                    // Tamaño fijo, como el original: se elige entre resoluciones (F10), no se estira.
+                    resolution: settings::window_resolution(resolution),
+                    resizable: false,
+                    enabled_buttons: bevy::window::EnabledButtons { maximize: false, ..default() },
                     present_mode: if args.no_vsync {
                         bevy::window::PresentMode::AutoNoVsync
                     } else {
@@ -158,6 +174,7 @@ fn main() {
             invasion::InvasionPlugin,
             hud::HudPlugin,
             mainframe::MainFramePlugin,
+            settings::SettingsPlugin,
             objects::ObjectsPlugin,
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
