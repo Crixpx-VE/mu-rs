@@ -37,8 +37,9 @@ impl Plugin for ObjectsPlugin {
         app.init_resource::<AnimatedModels>()
             .init_resource::<AnimatedMaterials>()
             .init_resource::<Roofs>()
+            .init_resource::<LoginFades>()
             .add_systems(Update, spawn_objects.run_if(crate::scene::load_step(crate::scene::Step::Objects)))
-            .add_systems(Update, (animate_objects, animate_materials, fade_roofs));
+            .add_systems(Update, (animate_objects, animate_materials, fade_roofs, fade_login_objects));
     }
 }
 
@@ -93,10 +94,166 @@ fn fade_roofs(
 }
 
 /// Al cambiar de mapa: nada del anterior.
-pub fn reset(mut anims: ResMut<AnimatedModels>, mut mats: ResMut<AnimatedMaterials>, mut roofs: ResMut<Roofs>) {
+pub fn reset(
+    mut anims: ResMut<AnimatedModels>,
+    mut mats: ResMut<AnimatedMaterials>,
+    mut roofs: ResMut<Roofs>,
+    mut login: ResMut<LoginFades>,
+) {
     anims.0.clear();
     mats.0.clear();
     *roofs = Roofs::default();
+    *login = LoginFades::default();
+}
+
+/// `LoginSceneCameraDefaults::RENDER_OBJECT_DIST` (`CameraMove.h`).
+const LOGIN_OBJECT_DIST: f32 = 5903.0;
+
+/// Fundido de los objetos del login (`WD_73NEW_LOGIN_SCENE`) según su distancia a la cámara.
+///
+/// `CullObjects` (`ZzzObject.cpp` ≈4205-4246), en cada fotograma, con la distancia en el plano
+/// (x, y) de la cámara al objeto (`TestFrustrum2D` siempre es verdadero en `LOG_IN_SCENE`):
+/// - Tipos 122-124, 126, 127, 129 y 159 a menos de 2·`RENDER_OBJECT_DIST`: `BlendMeshLight` y
+///   `AlphaTarget` suben 0.03·`FPS_ANIMATION_FACTOR` hasta 1, y se dibuja.
+/// - El resto (tipo ≤ `MAX_WORLD_OBJECTS`) a menos de `RENDER_OBJECT_DIST`: sube `AlphaTarget` igual.
+/// - Si no, y `AlphaTarget != 0` y está más lejos que `RENDER_OBJECT_DIST`: `BlendMeshLight`,
+///   `Alpha` y `AlphaTarget` a 0. No se dibuja (ni suelta efectos).
+///
+/// En cada tick `MoveObject` hace `Alpha(o)` (`Alpha += (AlphaTarget − Alpha)·0.1` y
+/// `BlendMeshLight ≤ Alpha`) y, si `Alpha ≥ 0.01`, otra vez en `GMEmpireGuardian4::MoveObject`. Con
+/// `Alpha < 0.01` no se dibuja; por debajo de 1 se dibuja mezclando (y la prueba de alfa del original,
+/// > 0.25, lo quita antes). Las mallas que suman no usan `Alpha`: las de guion `_R` (127, 157) brillan
+/// con `BlendMeshLight`; las de `RENDER_BRIGHT` (37, 70) no cambian.
+#[derive(Resource, Default)]
+pub struct LoginFades {
+    objects: Vec<LoginFade>,
+    /// Tiempo acumulado hacia el próximo tick (25 por segundo).
+    tick: f32,
+}
+
+struct LoginFade {
+    kind: i16,
+    /// Posición (x, y) en MU.
+    position: Vec2,
+    alpha: f32,
+    /// `Alpha` del tick anterior, para interpolar al dibujar.
+    prev_alpha: f32,
+    alpha_target: f32,
+    blend_light: f32,
+    /// (entidad, material propio, modo de alfa original, suma).
+    parts: Vec<(Entity, Handle<ModelMaterial>, AlphaMode, bool)>,
+    /// Índice en `FxWorld::map_objects` si tiene código de efectos.
+    fx: Option<usize>,
+    /// Lo último que se puso en los materiales (para no tocarlos si no cambia).
+    shown: Option<(bool, f32, f32)>,
+}
+
+/// Tipos con malla de guion `_R` (su propia `BlendMesh`, que brilla con `BlendMeshLight`).
+const LOGIN_SCRIPT_BRIGHT: [i16; 2] = [127, 157];
+
+fn fade_login_objects(
+    time: Res<Time>,
+    cameras: Query<&GlobalTransform, With<Camera3d>>,
+    mut fades: ResMut<LoginFades>,
+    mut fx_world: ResMut<crate::fx::FxWorld>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
+    mut visibility: Query<&mut Visibility>,
+) {
+    if fades.objects.is_empty() {
+        return;
+    }
+    let Some(camera) = cameras.iter().next() else { return };
+    let c = camera.translation();
+    let camera_mu = Vec2::new(c.x * MU_SCALE, -c.z * MU_SCALE);
+
+    let dt = time.delta_secs();
+    // `FPS_ANIMATION_FACTOR`: lo que sube cada fotograma va en proporción a los ticks que dura.
+    let factor = dt * objects::TICKS_PER_SECOND;
+    let tick_len = 1.0 / objects::TICKS_PER_SECOND;
+    fades.tick += dt;
+    let mut ticks = 0;
+    while fades.tick >= tick_len && ticks < 8 {
+        fades.tick -= tick_len;
+        ticks += 1;
+    }
+    fades.tick = fades.tick.min(tick_len);
+    let between = fades.tick / tick_len;
+
+    let ramp = |v: &mut f32| {
+        if *v < 1.0 {
+            *v += 0.03 * factor;
+        } else {
+            *v = 1.0;
+        }
+    };
+    for f in fades.objects.iter_mut() {
+        let d = (camera_mu - f.position).length();
+        let special = matches!(f.kind, 122..=124 | 126 | 127 | 129 | 159);
+        let drawn = if special && d < LOGIN_OBJECT_DIST * 2.0 {
+            ramp(&mut f.blend_light);
+            ramp(&mut f.alpha_target);
+            true
+        } else if d < LOGIN_OBJECT_DIST && f.kind <= 160 {
+            ramp(&mut f.alpha_target);
+            true
+        } else {
+            if f.alpha_target != 0.0 && d > LOGIN_OBJECT_DIST {
+                f.blend_light = 0.0;
+                f.alpha = 0.0;
+                f.prev_alpha = 0.0;
+                f.alpha_target = 0.0;
+            }
+            false
+        };
+
+        for _ in 0..ticks {
+            f.prev_alpha = f.alpha;
+            // `Alpha(o)` de `MoveObject` y, si sigue, el de `GMEmpireGuardian4::MoveObject`.
+            for pass in 0..2 {
+                if pass == 1 && f.alpha < 0.01 {
+                    break;
+                }
+                f.alpha += (f.alpha_target - f.alpha) * 0.1;
+                if f.blend_light > f.alpha {
+                    f.blend_light = f.alpha;
+                }
+            }
+        }
+
+        if let Some(m) = f.fx.and_then(|i| fx_world.map_objects.get_mut(i)).filter(|m| m.ty == f.kind as i32) {
+            m.user[crate::fx::kinds::objects_login::SLOT_CULLED] = if drawn { 0.0 } else { 1.0 };
+        }
+
+        let alpha = f.prev_alpha + (f.alpha - f.prev_alpha) * between;
+        let visible = drawn && alpha >= 0.01;
+        let light = if LOGIN_SCRIPT_BRIGHT.contains(&f.kind) { f.blend_light } else { 1.0 };
+        // Se redondea para no rehacer los materiales por cambios que no se ven.
+        let shown = (visible, (alpha * 100.0).round() / 100.0, (light * 100.0).round() / 100.0);
+        if f.shown == Some(shown) {
+            continue;
+        }
+        f.shown = Some(shown);
+        let (visible, alpha, light) = shown;
+        for (entity, handle, original, additive) in &f.parts {
+            let show = visible && (*additive || alpha > ALPHA_REF);
+            if let Ok(mut v) = visibility.get_mut(*entity) {
+                v.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
+            }
+            if !show {
+                continue;
+            }
+            let Some(mut m) = materials.get_mut(handle) else { continue };
+            if *additive {
+                m.base.base_color = Color::linear_rgb(light, light, light);
+            } else if alpha >= 0.99 {
+                m.base.base_color.set_alpha(1.0);
+                m.base.alpha_mode = *original;
+            } else {
+                m.base.base_color.set_alpha(alpha);
+                m.base.alpha_mode = AlphaMode::Blend;
+            }
+        }
+    }
 }
 
 /// Grupos de objetos animados (árboles, banderas, molino...).
@@ -198,6 +355,8 @@ struct MaterialKey {
     additive: bool,
     /// Los materiales con efectos son propios de su (modelo, malla): no se comparten.
     effect_owner: Option<(PathBuf, usize)>,
+    /// Los que se funden por su cuenta (objetos del login) son propios de su objeto.
+    instance: Option<usize>,
 }
 
 #[derive(Default)]
@@ -222,7 +381,10 @@ fn spawn_objects(
     mut fx: ResMut<Emitters>,
     registry: Res<crate::fx::core::Registry>,
     mut fx_world: ResMut<crate::fx::FxWorld>,
+    mut login_fades: ResMut<LoginFades>,
 ) {
+    // En el login cada objeto se funde por su cuenta según la distancia a la cámara.
+    let login = args.world == crate::scene::LOGIN_WORLD;
     let list = match objects::load(&args.data, args.world) {
         Ok(l) => l,
         Err(e) => {
@@ -235,8 +397,19 @@ fn spawn_objects(
     let mut spawned = 0;
     let mut missing: HashMap<i16, String> = HashMap::new();
 
-    for o in &list {
+    for (index, o) in list.iter().enumerate() {
         let rules = objects::model_rules(args.world, o.kind);
+        let mut fade = login.then(|| LoginFade {
+            kind: o.kind,
+            position: Vec2::new(o.position[0], o.position[1]),
+            alpha: 1.0,
+            prev_alpha: 1.0,
+            alpha_target: 1.0,
+            blend_light: 1.0,
+            parts: Vec::new(),
+            fx: None,
+            shown: None,
+        });
         let emitters = objects::emitters(args.world, o.kind);
         let mu_rotation = {
             let [ax, ay, az] = o.angle.map(f32::to_radians);
@@ -301,6 +474,11 @@ fn spawn_objects(
                     if m.actions.first().is_some_and(|a| a.frames > 1) { rules.velocity.fps(o.scale) } else { 0.0 }
                 });
                 fx_world.map_objects.push(fx_object(model, fps / objects::TICKS_PER_SECOND));
+                // Sus efectos también dependen de si `CullObjects` lo dibuja.
+                if let Some(mut f) = fade {
+                    f.fx = Some(fx_world.map_objects.len() - 1);
+                    login_fades.objects.push(f);
+                }
             }
             continue;
         }
@@ -315,6 +493,9 @@ fn spawn_objects(
         let fps = if animated { rules.velocity.fps(o.scale) } else { 0.0 };
         if has_fx {
             fx_world.map_objects.push(fx_object(Some(model.clone()), fps / objects::TICKS_PER_SECOND));
+            if let Some(f) = fade.as_mut() {
+                f.fx = Some(fx_world.map_objects.len() - 1);
+            }
         }
         // Emisores pegados a un hueso (salpicaduras de la fuente): siguen la animación.
         for e in emitters.iter().filter(|e| e.bone.is_some()) {
@@ -340,6 +521,8 @@ fn spawn_objects(
                 t.0.light[y * SIZE + x]
             })
             .unwrap_or([1.0; 3]);
+        // `b->BodyLight` fijo de algunos tipos (en vez de la luz del terreno).
+        let light = rules.body_light.map_or(light, |l| [l; 3]);
         let light = light.map(|v| (v.clamp(0.0, 1.0) * 15.0).round() as u8);
 
         let transform = object_transform(o);
@@ -351,6 +534,7 @@ fn spawn_objects(
                 additive: part.additive,
                 // Los techos tampoco comparten material: se desvanecen por su cuenta.
                 effect_owner: (effect.is_some() || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
+                instance: fade.is_some().then_some(index),
             };
             let material = match c.materials.get(&key) {
                 Some(m) => m.clone(),
@@ -378,8 +562,17 @@ fn spawn_objects(
                     m
                 }
             };
-            commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material), transform, crate::scene::WorldEntity));
+            let original_mode = materials.get(&material).map_or(AlphaMode::Opaque, |m| m.base.alpha_mode);
+            let entity = commands
+                .spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity))
+                .id();
+            if let Some(f) = fade.as_mut() {
+                f.parts.push((entity, material, original_mode, part.additive));
+            }
             spawned += 1;
+        }
+        if let Some(f) = fade {
+            login_fades.objects.push(f);
         }
     }
 

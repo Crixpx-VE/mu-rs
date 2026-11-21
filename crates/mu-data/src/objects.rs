@@ -148,6 +148,8 @@ pub struct ModelRules {
     pub velocity: Velocity,
     /// Techo: se desvanece cuando el personaje entra en la casa (ver [`indoor_tile`]).
     pub fade_indoors: bool,
+    /// `b->BodyLight` fijo (gris) en vez de la luz del terreno bajo el objeto.
+    pub body_light: Option<f32>,
 }
 
 /// Si la textura de suelo `tile` (capa 1) bajo el personaje es "dentro de una casa"
@@ -169,6 +171,7 @@ impl Default for ModelRules {
             scroll: None,
             velocity: Velocity::Fixed(DEFAULT_VELOCITY),
             fade_indoors: false,
+            body_light: None,
         }
     }
 }
@@ -196,6 +199,10 @@ impl ModelRules {
     }
     fn speed(mut self, v: f32) -> Self {
         self.velocity = Velocity::Fixed(v);
+        self
+    }
+    fn body_light(mut self, l: f32) -> Self {
+        self.body_light = Some(l);
         self
     }
 }
@@ -282,6 +289,40 @@ pub fn model_rules(world: u16, kind: i16) -> ModelRules {
 
         // Heaven (WD_10HEAVEN): nubes
         (11, 0..=5) => hidden(),
+
+        // Login (WD_73NEW_LOGIN_SCENE, World74) y selección de personaje (WD_74NEW_CHARACTER_SCENE,
+        // World75): `GMNewTown.cpp` lo pasa todo a `GMEmpireGuardian4.cpp` (y este a
+        // `GMEmpireGuardian1::RenderObjectMesh`). Los efectos están en `fx/kinds/objects_login.rs`.
+        // La animación avanza dos veces por tick: `PlayAnimation(Velocity)` de `MoveObject` y otra vez
+        // en `GMEmpireGuardian4::MoveObject` con `Velocity · factor` (×1 salvo los de abajo).
+        // Puntos de fuego, agua y humo (`MoveObject` / `GMNewTown::CreateObject`).
+        (74 | 75, 79 | 80 | 82..=86 | 129..=132) => hidden(),
+        // `GMUnitedMarketPlace::CreateObject` (la cadena de `MapProcess::CreateObject` no mira el mapa).
+        (74 | 75, 67) => hidden(),
+        (74 | 75, 20) => r().speed(DEFAULT_VELOCITY * 3.0),
+        (74 | 75, 122..=124) => r().speed(DEFAULT_VELOCITY * 4.0),
+        (74 | 75, 128) => r().speed(DEFAULT_VELOCITY * 7.0),
+        // `o->Velocity = 0.02` en `MoveObject` (las dos pasadas).
+        (74 | 75, 36) => r().speed(0.04),
+        // `RenderAfterObjectMesh`: malla 2 con `BlendMesh` 2 y luz `(sin(WT·0.0015) + 1)·0.4 + 0.2`.
+        (74 | 75, 0 | 1 | 3 | 44) => add(2).pulse(0.0015, 0.4, 0.6).speed(DEFAULT_VELOCITY * 2.0),
+        // `GMEmpireGuardian1::RenderObjectMesh`: una malla con `RENDER_BRIGHT` (suma).
+        (74 | 75, 37) => add(1).speed(DEFAULT_VELOCITY * 2.0),
+        // 41: `BodyLight · (sin(WT·0.002)·0.5 + 0.6)` en la malla que suma.
+        (74 | 75, 41) => add(1).pulse(0.002, 0.5, 0.6).speed(DEFAULT_VELOCITY * 2.0),
+        (74 | 75, 49 | 70) => add(0).speed(DEFAULT_VELOCITY * 2.0),
+        // 64: malla 1 con `RENDER_BRIGHT | RENDER_CHROME` dos veces y `BodyLight` (1, 0, 0); `MoveObject`
+        // pone `Velocity = 0.64` (las dos pasadas: 1.28).
+        // TODO(original): el cromado (`BITMAP_CHROME`, UV según la normal) en rojo; aquí suma su textura.
+        (74 | 75, 64) => add(1).speed(1.28),
+        // `GMEmpireGuardian4::RenderObjectMesh`: `BodyLight` = 0.170382 (planos y árboles oscuros).
+        (74 | 75, 96 | 97 | 100) => r().body_light(0.170382).speed(DEFAULT_VELOCITY * 2.0),
+        // Texturas con guion `_R` (`TextureScript` → `getBright`): esa malla es su propia `BlendMesh`.
+        (74 | 75, 127) => add(0).speed(DEFAULT_VELOCITY * 2.0), // Kinglight_R
+        (74 | 75, 157) => add(1).speed(DEFAULT_VELOCITY * 2.0), // Spider_R
+        // TODO(original): 47/48 (`BodyLight` 1.2/1.1 en una malla) y 115/117 (dos `StreamMesh` con
+        // `WorldTime % 25000 · ±0.0004`): no hay ninguno en World74/75.
+        (74 | 75, _) => r().speed(DEFAULT_VELOCITY * 2.0),
 
         _ => r(),
     }

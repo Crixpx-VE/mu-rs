@@ -198,6 +198,10 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
             t.angle = if delta.abs() <= step { t.target_angle.rem_euclid(360.0) } else { (t.angle + step * delta.signum()).rem_euclid(360.0) };
             t.current += forward * target_acc;
             t.tour += (dir * target_acc).extend(0.0);
+            // El original no vuelve a juntar el camino suavizado con el recorrido y se desvía unas
+            // 135 unidades por vuelta: aquí se acerca un 2 % por tick para que no se vaya saliendo.
+            let pull = (t.current - t.tour.truncate()) * 0.02;
+            t.tour += pull.extend(0.0);
             t.tour.z = TOUR_Z;
             let total = dist_origin + dist_target;
             t.level = if total > f32::EPSILON {
