@@ -17,11 +17,11 @@
 //!   --sin-vsync              sin límite de fps (para medir rendimiento)
 //!   --invasion <1|3>         empezar con la invasión de dragones (1 = rojos, 3 = dorados)
 //!   --resolucion <AxB>       tamaño de la ventana solo esta vez (si no, `resolucion=` de
-//!                            mu-launcher.txt, o 1024x768). F10 cambia y guarda.
+//!                            mu-launcher.txt, o 1024x768)
+//!   --fps                    contador de fotogramas
 //!
-//! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps ·
-//! F9 = invasión de dragones (apagada → rojos → dorados) · F7/F8 = volumen de efectos/música ·
-//! Esc = menú de sistema (con las opciones; en el juego también desde el botón de menú de la barra).
+//! Controles, los del original: clic izquierdo = caminar (mantenido, sigue al ratón) · 1-0 = elegir
+//! habilidad · clic derecho = usarla · Esc = menú de sistema · U = menú de ventanas.
 
 mod account;
 mod boids;
@@ -72,7 +72,7 @@ pub struct Args {
     pub zoom: Option<f32>,
     /// Sin sincronía vertical: los fps no se limitan a la frecuencia del monitor (para medir).
     pub no_vsync: bool,
-    /// Empezar con la invasión de dragones activa (1 = rojos, 3 = dorados). En el juego: F9.
+    /// Empezar con la invasión de dragones activa (1 = rojos, 3 = dorados).
     pub invasion: u8,
     /// Resolución de la ventana solo para esta vez (si no, la guardada o 1024×768).
     pub resolution: Option<(u32, u32)>,
@@ -82,6 +82,8 @@ pub struct Args {
     pub direct: bool,
     /// `--ver-titulo`: la pantalla del título se queda a medias (para comprobarla en una captura).
     pub hold_title: bool,
+    /// `--fps`: contador de fotogramas arriba a la izquierda.
+    pub show_fps: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -120,6 +122,7 @@ impl Args {
             skill_test: false,
             direct: false,
             hold_title: false,
+            show_fps: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -140,6 +143,7 @@ impl Args {
                 "--sin-vsync" => args.no_vsync = true,
                 "--probar-habilidades" => args.skill_test = true,
                 "--ver-titulo" => args.hold_title = true,
+                "--fps" => args.show_fps = true,
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
                     if args.resolution.is_none() {
@@ -197,7 +201,7 @@ fn main() {
             WindowPlugin {
                 primary_window: Some(Window {
                     title,
-                    // Tamaño fijo, como el original: se elige entre resoluciones (F10), no se estira.
+                    // Tamaño fijo, como el original: la resolución es de la configuración, no se estira.
                     resolution: settings::window_resolution(resolution),
                     resizable: false,
                     enabled_buttons: bevy::window::EnabledButtons { maximize: false, ..default() },

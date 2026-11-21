@@ -67,7 +67,7 @@ impl Plugin for LoginUiPlugin {
             // En la selección de personaje, el mismo gestor (`CUIMng::CreateCharacterScene`).
             .add_systems(OnEnter(GameScene::CharacterSelect), character::spawn_character_ui)
             .add_systems(OnExit(GameScene::CharacterSelect), (crate::scene::despawn::<LoginUiRoot>, leave))
-            // Tab es de las cajas de texto: que no llegue al cambio de cámara (camera.rs).
+            // Tab es de las cajas de texto.
             .add_systems(PreUpdate, keep_tab.after(bevy::input::InputSystems).run_if(ui_scene()))
             .add_systems(FixedUpdate, logo_tick.run_if(in_state(GameScene::Login)))
             .add_systems(Update, (update_ui, draw_windows).chain().after(crate::charselect::CharSelectSystems).run_if(ui_scene()))
@@ -2039,7 +2039,7 @@ fn update_ui(
     let cursor = window
         .and_then(|w| w.cursor_position())
         .map(|c| (c / scale.0.max(1e-3) / K).floor().as_ivec2());
-    // `g_pOption` y el volumen de sound.rs (F7/F8 pueden cambiarlo mientras tanto).
+    // `g_pOption` y el volumen de sound.rs (las opciones del juego pueden cambiarlo).
     (ui.sfx, ui.music) = crate::sound::volumes(audio.as_deref(), &sound);
     ui.opts = *opts;
     let input = FrameInput {

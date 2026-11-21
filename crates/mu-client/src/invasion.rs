@@ -8,7 +8,7 @@
 //! - una zona más oscura de radio 16 casillas sigue al personaje (luz -0.3, -0.3, -0.2);
 //! - la hierba se mueve 5 veces más rápido (ver `grass.rs`).
 //!
-//! Sin servidor todavía: `F9` lo va cambiando (apagado → rojo → dorado → apagado).
+//! Hasta que lo mande el servidor, solo con `--invasion 1|3`.
 
 use bevy::prelude::*;
 
@@ -25,7 +25,7 @@ impl Plugin for InvasionPlugin {
             .add_systems(Startup, (spawn_label, |args: Res<Args>, mut inv: ResMut<Invasion>| {
                 inv.0 = args.invasion;
             }))
-            .add_systems(Update, (toggle, update_label))
+            .add_systems(Update, update_label)
             .add_systems(FixedUpdate, (darken_around_hero, spawn_meteors.before(crate::fx::sim::tick)));
     }
 }
@@ -37,17 +37,6 @@ pub struct Invasion(pub u8);
 impl Invasion {
     pub fn active(self) -> bool {
         self.0 != 0
-    }
-}
-
-fn toggle(keys: Res<ButtonInput<KeyCode>>, mut inv: ResMut<Invasion>) {
-    if keys.just_pressed(KeyCode::F9) {
-        inv.0 = match inv.0 {
-            0 => 1,
-            1 => 3,
-            _ => 0,
-        };
-        info!("invasión de dragones: {}", inv.0);
     }
 }
 
@@ -81,8 +70,8 @@ fn update_label(inv: Res<Invasion>, mut q: Query<&mut Text, With<InvasionLabel>>
     }
     for mut t in &mut q {
         t.0 = match inv.0 {
-            1 => "Invasión de dragones rojos (F9)".into(),
-            3 => "Invasión de dragones dorados (F9)".into(),
+            1 => "Invasión de dragones rojos".into(),
+            3 => "Invasión de dragones dorados".into(),
             _ => String::new(),
         };
     }

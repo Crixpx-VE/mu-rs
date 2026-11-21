@@ -96,7 +96,8 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
+        app.init_resource::<CurrentSkill>()
+            .add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
             .add_systems(Update, (scripted_walk, hero_input.in_set(HeroInput), cast_skill, walk, animate, light_body).chain());
     }
 }
@@ -139,37 +140,78 @@ const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
     ]
 };
 
-/// Lanza una habilidad: animación del personaje y su `AttackTime` en el motor de efectos.
+/// Habilidad elegida (`Hero->CurrentSkill`): índice en `SKILL_KEYS`.
+#[derive(Resource, Default)]
+pub struct CurrentSkill(pub Option<usize>);
+
+/// Como el original: `1`-`0` eligen la habilidad de ese atajo (`UseHotKey`) y el botón derecho la
+/// usa hacia donde apunta el ratón; en zona segura no se usan (`CheckAttack`). Sin la lista de
+/// habilidades todavía, los atajos traen las del Dark Knight en orden.
+#[allow(clippy::too_many_arguments)]
 fn cast_skill(
     keys: Res<ButtonInput<KeyCode>>,
+    buttons: Res<ButtonInput<MouseButton>>,
     args: Res<Args>,
+    over_ui: Res<crate::mainframe::PointerOverUi>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<IsDefaultUiCamera>>,
+    terrain: Option<Res<LoadedTerrain>>,
+    mut current: ResMut<CurrentSkill>,
     mut auto: Local<usize>,
     mut world: ResMut<crate::fx::FxWorld>,
     mut players: Query<(Entity, &mut Player)>,
 ) {
     let Ok((entity, mut p)) = players.single_mut() else { return };
-    // Las habilidades de las teclas son las del Dark Knight.
-    if p.casting.is_some() || p.class != crate::account::Class::Knight {
+    // Las habilidades de los atajos son las del Dark Knight.
+    if p.class != crate::account::Class::Knight {
         return;
     }
-    // `--probar-habilidades`: una tras otra, sin teclado.
-    let pressed = if args.skill_test {
+    if let Some(i) = SKILL_KEYS.iter().position(|(k, ..)| keys.just_pressed(*k)) {
+        current.0 = Some(i);
+    }
+    if p.casting.is_some() {
+        return;
+    }
+    // `--probar-habilidades`: una tras otra, sin ratón y en cualquier sitio.
+    let (index, target) = if args.skill_test {
         *auto += 1;
-        Some(&SKILL_KEYS[(*auto - 1) % SKILL_KEYS.len()])
+        ((*auto - 1) % SKILL_KEYS.len(), None)
     } else {
-        SKILL_KEYS.iter().find(|(k, ..)| keys.just_pressed(*k))
+        let Some(i) = current.0 else { return };
+        if !buttons.just_pressed(MouseButton::Right) || over_ui.0 {
+            return;
+        }
+        let safe = terrain.as_ref().is_some_and(|t| {
+            t.0.attribute((p.pos.x as usize).min(255), (p.pos.y as usize).min(255)) & mu_data::terrain::attr::SAFE_ZONE != 0
+        });
+        if safe {
+            return;
+        }
+        // Punto del suelo bajo el ratón.
+        let hit = windows.single().ok().zip(cameras.single().ok()).zip(terrain.as_ref()).and_then(|((w, (cam, tf)), t)| {
+            let ray = cam.viewport_to_world(tf, w.cursor_position()?).ok()?;
+            raycast_terrain(&t.0, ray)
+        });
+        (i, hit)
     };
-    let Some(&(_, skill, action, speed)) = pressed else { return };
+    let (_, skill, action, speed) = SKILL_KEYS[index];
     p.path.clear();
     p.pos = Vec2::new(p.pos.x.floor() + 0.5, p.pos.y.floor() + 0.5);
+    // Mira hacia el objetivo.
+    if let Some(t) = target {
+        let d = t - p.pos;
+        if d.length() > 1e-3 {
+            p.facing = d.x.atan2(-d.y);
+        }
+    }
     p.action = action;
     p.frame = 0.0;
     // `PlaySpeed` son fotogramas por tick del original (25 por segundo).
     p.casting = Some(speed * crate::fx::sim::TICKS_PER_SECOND);
-    // Objetivo: un punto 2 casillas por delante (no hay monstruos todavía).
+    // Sin monstruos todavía: el objetivo es el punto del ratón (o 2 casillas por delante).
     let (s, c) = p.facing.sin_cos();
-    let ahead = Vec3::new((p.pos.x + 2.0 * s) * MU_SCALE, (p.pos.y - 2.0 * c) * MU_SCALE, 0.0);
-    world.casts.push(crate::fx::core::Cast::new(entity, skill, None, ahead));
+    let at = target.unwrap_or(Vec2::new(p.pos.x + 2.0 * s, p.pos.y - 2.0 * c));
+    world.casts.push(crate::fx::core::Cast::new(entity, skill, None, Vec3::new(at.x * MU_SCALE, at.y * MU_SCALE, 0.0)));
 }
 
 /// Esqueleto + piezas, compartido por la animación.

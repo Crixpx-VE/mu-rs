@@ -9,8 +9,7 @@
 //! - **Pasos** (`PlayWalkSound`): `Data/Audio/SoundEvents.json` elige el sonido según el mapa y la casilla.
 //!
 //! Volumen de 0 a 10 (por defecto 5, como el original): `volumen_sonido=` y `volumen_musica=` en
-//! `mu-launcher.txt`. `F7` cambia el de los efectos y `F8` el de la música; las ventanas de
-//! opciones lo leen con [`volumes`] y lo cambian con [`SoundQueue::set_sfx_volume`] y
+//! `mu-launcher.txt`. Las ventanas de opciones lo leen con [`volumes`] y lo cambian con [`SoundQueue::set_sfx_volume`] y
 //! [`SoundQueue::set_music_volume`].
 //!
 //! El resto del juego pide sonidos con [`SoundQueue`] (y el motor de efectos con `Ctx::play_sound`).
@@ -34,7 +33,7 @@ impl Plugin for SoundPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SoundQueue>()
             .add_systems(Startup, setup)
-            .add_systems(Update, (change_volume, world_sounds))
+            .add_systems(Update, world_sounds)
             // Al final del fotograma, cuando ya se ha pedido todo.
             .add_systems(PostUpdate, (take_fx_sounds, apply_volume, play_queue).chain().in_set(SoundSystems));
     }
@@ -71,7 +70,7 @@ pub struct SoundQueue {
     music: Option<String>,
     /// `StopMp3`: cortar la música.
     stop_music: bool,
-    /// Volumen nuevo de los efectos y de la música (F7/F8 o la ventana de opciones).
+    /// Volumen nuevo de los efectos y de la música (la ventana de opciones).
     set_sfx: Option<u8>,
     set_music: Option<u8>,
 }
@@ -466,19 +465,6 @@ pub fn footstep(world: i32, tile: u8, safe_zone: bool) -> Option<String> {
 }
 
 static FOOTSTEP: std::sync::OnceLock<Vec<EventRule>> = std::sync::OnceLock::new();
-
-/// `F7`: volumen de los efectos; `F8`: de la música (0, 2, 4, ..., 10 y vuelta a 0).
-fn change_volume(keys: Res<ButtonInput<KeyCode>>, audio: Option<Res<Audio>>, mut queue: ResMut<SoundQueue>) {
-    let Some(audio) = audio else { return };
-    let next = |v: u8| if v >= MAX_VOLUME { 0 } else { (v / 2 * 2 + 2).min(MAX_VOLUME) };
-    let (sfx, music) = volumes(Some(&*audio), &queue);
-    if keys.just_pressed(KeyCode::F7) {
-        queue.set_sfx_volume(next(sfx));
-    }
-    if keys.just_pressed(KeyCode::F8) {
-        queue.set_music_volume(next(music));
-    }
-}
 
 /// Aplica el volumen pedido a lo que ya suena y lo guarda.
 fn apply_volume(

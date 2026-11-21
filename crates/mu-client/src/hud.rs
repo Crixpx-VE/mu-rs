@@ -1,5 +1,5 @@
-//! Información en pantalla. De momento, el contador de fps (arriba a la izquierda).
-//! `F3` lo muestra u oculta.
+//! Información en pantalla para probar: el contador de fps (arriba a la izquierda), solo con
+//! `--fps` (el original no tiene ninguno).
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -9,8 +9,8 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(FrameTimeDiagnosticsPlugin::default())
-            .add_systems(Startup, spawn_fps)
-            .add_systems(Update, (update_fps, toggle_fps));
+            .add_systems(Startup, spawn_fps.run_if(|args: Res<crate::Args>| args.show_fps))
+            .add_systems(Update, update_fps);
     }
 }
 
@@ -48,13 +48,5 @@ fn update_fps(
             (Some(f), Some(ms)) => format!("FPS {f:.0}  ({ms:.1} ms)"),
             _ => "FPS --".into(),
         };
-    }
-}
-
-fn toggle_fps(keys: Res<ButtonInput<KeyCode>>, mut q: Query<&mut Visibility, With<FpsText>>) {
-    if keys.just_pressed(KeyCode::F3) {
-        for mut v in &mut q {
-            v.toggle_visible_hidden();
-        }
     }
 }

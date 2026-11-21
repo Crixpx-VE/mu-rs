@@ -191,6 +191,10 @@ fn update_game_ui(
             open_sys_menu(&mut ui);
         }
         sound.play("SOUND_CLICK01");
+    } else if keys.just_pressed(KeyCode::KeyU) && !ui.sys_menu {
+        // `CNewUIHotKey::UpdateKeyEvent`: `U` abre o cierra el menú de ventanas.
+        ui.window_menu = !ui.window_menu;
+        sound.play("SOUND_CLICK01");
     }
 
     if ui.sys_menu {

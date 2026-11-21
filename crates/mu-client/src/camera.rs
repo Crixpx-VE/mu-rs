@@ -1,13 +1,14 @@
 //! Cámara.
 //!
-//! - **Seguir** (por defecto): vista en diagonal desde arriba, como en MU. Rueda = zoom.
-//! - **Libre**: botón derecho + ratón para mirar, WASD para moverse, Q/E bajar/subir, Shift rápido.
-//!
-//! `Tab` cambia entre las dos. Con `--cam` se empieza en modo libre en esa posición.
+//! - **Seguir** (la del juego): vista en diagonal desde arriba a la distancia fija del original
+//!   (`CameraDistance` 1000: el Main 5.2 vuelve a poner `g_shCameraLevel = 0` en cada fotograma, así
+//!   que ni la rueda ni Ctrl + rueda la cambian).
+//! - **Libre** (solo para probar, con `--cam`): botón derecho + ratón para mirar, WASD para moverse,
+//!   Q/E bajar/subir, Shift rápido.
 //! Con `--screenshot`, hace una captura al arrancar y cierra la app.
 
 use bevy::camera::RenderTarget;
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
@@ -21,7 +22,7 @@ pub struct FlyCameraPlugin;
 impl Plugin for FlyCameraPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn_camera)
-            .add_systems(Update, (toggle_mode, fly, auto_screenshot))
+            .add_systems(Update, (fly, auto_screenshot))
             // Después de mover al personaje (Update), para que la cámara no vaya un fotograma tarde.
             .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate));
     }
@@ -93,39 +94,21 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     }
 }
 
-fn toggle_mode(keys: Res<ButtonInput<KeyCode>>, mut mode: ResMut<CameraMode>, mut q: Query<(&Transform, &mut FlyCamera)>) {
-    if keys.just_pressed(KeyCode::Tab) {
-        *mode = if *mode == CameraMode::Follow { CameraMode::Free } else { CameraMode::Follow };
-        // Al pasar a libre, seguir mirando hacia donde miraba.
-        if let Ok((tf, mut fly)) = q.single_mut() {
-            let (yaw, pitch, _) = tf.rotation.to_euler(EulerRot::YXZ);
-            fly.yaw = yaw;
-            fly.pitch = pitch;
-        }
-    }
-}
 
 fn follow(
     mode: Res<CameraMode>,
-    scroll: Res<AccumulatedMouseScroll>,
     players: Query<&Transform, (With<Player>, Without<FollowCamera>)>,
-    mut cams: Query<(&mut Transform, &mut FollowCamera)>,
+    mut cams: Query<(&mut Transform, &FollowCamera)>,
 ) {
     if *mode != CameraMode::Follow {
         return;
     }
-    let (Ok(player), Ok((mut tf, mut cam))) = (players.single(), cams.single_mut()) else { return };
-    // Zoom por escalones de 100 unidades de MU (1000…1700 en el original).
-    if scroll.delta.y != 0.0 {
-        cam.distance = (cam.distance - scroll.delta.y.signum()).clamp(ZOOM_MIN, ZOOM_MAX);
-    }
+    let (Ok(player), Ok((mut tf, cam))) = (players.single(), cams.single_mut()) else { return };
     *tf = mu_camera(player.translation, cam.distance * MU_SCALE);
 }
 
-/// Escalones de zoom del original (`PLAYER_ZOOM_LADDER`), en casillas: 10…17, por defecto 13.
-const ZOOM_MIN: f32 = 10.0;
-const ZOOM_MAX: f32 = 17.0;
-pub const ZOOM_DEFAULT: f32 = 13.0;
+/// `CameraDistance` del juego en casillas (1000 unidades de MU, `g_shCameraLevel` 0).
+pub const ZOOM_DEFAULT: f32 = 10.0;
 
 /// Campo de visión vertical del juego: `CameraFOV = 35` (`MoveMainCamera` del Main 5.2, en
 /// `gluPerspective`). MuMain lo cambió a 40° en horizontal (unos 30.5° en vertical).

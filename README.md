@@ -25,20 +25,21 @@ Qué tiene:
 - Terreno con sus capas, agua que se mueve, hierba con viento, luces dinámicas en el suelo (fuegos).
 - Objetos del mapa con las reglas del original (mallas aditivas, parpadeos, texturas que se
   desplazan, ocultos), animados, y techos que se desvanecen al entrar en casa.
-- Pájaros/murciélagos/mariposas en bandada; invasión de dragones (F9).
+- Pájaros/murciélagos/mariposas en bandada; invasión de dragones (`--invasion`).
 - Dark Knight con armadura y espada (en la mano, o a la espalda en zona segura), que camina con
   clic, con sus habilidades (teclas 1-0) y la estela del arma.
 - **Motor de efectos** (`src/fx/`) traducido de MuMain: partículas, sprites, estelas ("joints"),
   efectos con modelo y habilidades. Corre a 25 ticks/s como el original y se dibuja interpolado.
   Ver `src/fx/mod.rs`.
 - Barra principal de la interfaz S6 (esferas, experiencia, botones) en la pantalla virtual 640×480.
-- Cámara del original (DefaultCamera), resoluciones fijas (F10), contador de fps (F3).
+- Cámara del original (DefaultCamera), resoluciones fijas (`resolucion=` en `mu-launcher.txt`), contador de fps (`--fps`).
 - Sonido del original: efectos, ambiente y música por mapa, pasos, pájaros, dragones, habilidades.
   Los `.wav`/`.mp3` (`Data/Sound`, `Data/Music`) no vienen con MuMain: salen del cliente completo
   oficial de Webzen (MU Red 1.20.61). Sombras de personaje y bichos, luz de los modelos del original.
 
-Controles: **clic izquierdo** caminar · **rueda** zoom · **Tab** cámara libre · **1-0** habilidades ·
-**F3** fps · **F7/F8** volumen de efectos/música · **F9** invasión de dragones · **F10** resolución.
+Controles, los del cliente original: **clic izquierdo** caminar (mantenido sigue al ratón) ·
+**1-0** elegir habilidad · **clic derecho** usarla (fuera de zona segura) · **Esc** menú de sistema ·
+**U** menú de ventanas.
 
 Opciones de prueba: `--spawn x,y`, `--walk-to x,y`, `--cam ...`, `--zoom N`, `--resolucion AxB`,
 `--sin-vsync`, `--invasion 1|3`, `--probar-habilidades`, `--screenshot archivo.png`.

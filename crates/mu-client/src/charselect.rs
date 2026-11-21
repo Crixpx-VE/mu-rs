@@ -69,7 +69,7 @@ impl Plugin for CharSelectPlugin {
                     .in_set(CharSelectSystems)
                     .run_if(here()),
             )
-            // Donde se coloca la cámara del juego: así manda esta aunque se cambie a la libre (Tab).
+            // Donde se coloca la cámara del juego: así manda esta.
             .add_systems(
                 PostUpdate,
                 place_camera.in_set(crate::camera::CameraMoved).before(TransformSystems::Propagate).run_if(here()),
