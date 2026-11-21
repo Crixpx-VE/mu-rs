@@ -35,6 +35,7 @@ mod mainframe;
 mod model_light;
 mod objects;
 mod settings;
+mod shadow;
 mod terrain;
 
 use std::path::PathBuf;
@@ -188,6 +189,6 @@ fn main() {
             character::CharacterPlugin,
             camera::FlyCameraPlugin,
         ))
-        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin))
+        .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin))
         .run();
 }

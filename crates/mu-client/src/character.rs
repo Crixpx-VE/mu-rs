@@ -123,6 +123,7 @@ fn spawn_player(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    shadow_material: Res<crate::shadow::ShadowMaterial>,
 ) {
     let dir = args.data.join("Player");
     let skeleton = match fs::read(&dir, "player.bmd").and_then(|b| bmd::read(&b)) {
@@ -197,6 +198,7 @@ fn spawn_player(
 
     let player = Player { pos, path: VecDeque::new(), facing: 0.0, action: action::STOP_MALE, frame: 0.0, casting: None };
     let actor = actor_state(&player, &bones, terrain.as_deref());
+    let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
     let mut e = commands.spawn((
         Name::new("Jugador"),
         player_transform(&player, terrain.as_deref()),
@@ -204,6 +206,7 @@ fn spawn_player(
         player,
         Skinned { skeleton, parts, models, weapon },
         BodyMaterials(body_materials),
+        shadow,
         actor,
     ));
     for child in children {
@@ -461,10 +464,10 @@ fn animate(
     mut meshes: ResMut<Assets<Mesh>>,
     mut world: ResMut<crate::fx::FxWorld>,
     mut render_frame: Local<u64>,
-    mut q: Query<(Entity, &mut Player, &Skinned, &mut crate::fx::ActorState)>,
+    mut q: Query<(Entity, &mut Player, &Skinned, &mut crate::fx::ActorState, &crate::shadow::Shadow)>,
 ) {
     *render_frame += 1;
-    for (entity, mut p, s, mut actor) in &mut q {
+    for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         p.frame += p.casting.unwrap_or(ANIM_FPS) * time.delta_secs();
         // La habilidad termina al acabar su animación: vuelve a estar quieto.
@@ -477,8 +480,16 @@ fn animate(
             }
         }
         let bones = s.skeleton.bone_matrices_at(p.action, p.frame);
+        let ground = terrain.as_ref().map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+        let mut sh = crate::shadow::Builder::new(
+            terrain.as_deref().map(|t| &t.0),
+            Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, ground),
+            Quat::from_rotation_z(p.facing),
+            1.0,
+        );
         for (model, mesh, handle) in &s.parts {
             let posed = s.models[*model].pose_with(*mesh, &bones);
+            sh.add(&posed.positions);
             if let Some(mut m) = meshes.get_mut(handle) {
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
@@ -488,12 +499,14 @@ fn animate(
             let wbones = weapon_bones(w, &bones, weapon_on_back(&p, terrain.as_deref()));
             for (i, handle) in handles {
                 let posed = w.pose_with(*i, &wbones);
+                sh.add(&posed.positions);
                 if let Some(mut m) = meshes.get_mut(handle) {
                     m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
                     m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
                 }
             }
         }
+        sh.finish(shadow, &mut meshes);
         *actor = actor_state(&p, &bones, terrain.as_deref());
     }
 }

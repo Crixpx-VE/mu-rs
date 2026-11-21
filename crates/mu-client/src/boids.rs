@@ -96,6 +96,8 @@ struct Boid {
     life: i32,
     bird: Option<Body>,
     dragon_body: Option<Body>,
+    /// Su sombra en el suelo (`RenderBodyShadow`), del modelo que esté activo.
+    shadow: crate::shadow::Shadow,
 }
 
 #[derive(Resource)]
@@ -186,6 +188,7 @@ fn setup_boids(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    shadow_material: Res<crate::shadow::ShadowMaterial>,
 ) {
     let (kind, dir, file) = match args.world {
         1 => (Some(Kind::Bird), "Object1", "Bird01.bmd"),
@@ -227,6 +230,7 @@ fn setup_boids(
             life: 0,
             bird,
             dragon_body,
+            shadow: crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material),
         });
     }
     commands.insert_resource(Boids {
@@ -541,6 +545,7 @@ fn draw_boids(
         let Ok((mut tf, mut vis)) = q.get_mut(body.entity) else { continue };
         if !o.live {
             *vis = Visibility::Hidden;
+            crate::shadow::Builder::new(None, Vec3::ZERO, Quat::IDENTITY, 1.0).finish(&o.shadow, &mut meshes);
             continue;
         }
         *vis = Visibility::Inherited;
@@ -555,13 +560,21 @@ fn draw_boids(
         };
         let n = frames(Some(model), o.action);
         let bones = model.bone_matrices_at(o.action, (o.frame + a * speed) % n);
+        let mut sh = crate::shadow::Builder::new(
+            terrain.as_deref().map(|t| &t.0),
+            pos,
+            Quat::from_rotation_z((angle + 90.0).to_radians()),
+            o.scale,
+        );
         for (mi, h) in &body.parts {
             let posed = model.pose_with(*mi, &bones);
+            sh.add(&posed.positions);
             if let Some(mut m) = meshes.get_mut(h) {
                 m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
             }
         }
+        sh.finish(&o.shadow, &mut meshes);
         // Luz: la del suelo bajo el bicho (las mariposas brillan por sí mismas). Los dragones
         // dorados llevan un brillo metálico en el original; aquí, un tono dorado aproximado.
         let color = if o.dragon && o.golden {

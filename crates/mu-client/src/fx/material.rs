@@ -10,6 +10,7 @@
 //! | `AlphaTest` | `EnableAlphaTest`        | SRC_ALPHA, ONE_MINUS_SRC_ALPHA + alfa > 0.25 | escribe |
 //! | `Opaque`    | `DisableAlphaBlend`      | sin mezcla                             | escribe     |
 //! | `LightMap`  | `EnableLightMap`         | ZERO, SRC_COLOR (multiplica)           | escribe     |
+//! | `Shadow`    | `RenderBodyShadow`       | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | escribe, y no pinta dos veces el mismo punto |
 //!
 //! Siempre sin recorte de caras ocultas (el original las desactiva en casi todos los modos).
 
@@ -45,12 +46,15 @@ pub enum Blend {
     AlphaTest,
     Opaque,
     LightMap,
+    /// Sombra de los modelos en el suelo: se mezcla una sola vez por punto (lo que cae a la misma
+    /// profundidad que algo ya dibujado se descarta), así los trozos que se solapan no oscurecen más.
+    Shadow,
 }
 
 impl Blend {
     /// Escribe en el búfer de profundidad.
     pub fn writes_depth(self) -> bool {
-        matches!(self, Blend::AlphaTest | Blend::Opaque | Blend::LightMap)
+        matches!(self, Blend::AlphaTest | Blend::Opaque | Blend::LightMap | Blend::Shadow)
     }
 }
 
@@ -133,12 +137,16 @@ impl Material for FxMaterial {
         descriptor.primitive.cull_mode = None;
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(blend.writes_depth());
+            if blend == Blend::Shadow {
+                // Profundidad invertida de Bevy: "más cerca" es mayor. Estricto: el mismo punto no pasa dos veces.
+                depth.depth_compare = Some(bevy::render::render_resource::CompareFunction::Greater);
+            }
         }
         let state = match blend {
             Blend::Glow => Some((One, One)),
             Blend::Subtract => Some((Zero, OneMinusSrc)),
             Blend::Blend2 => Some((OneMinusSrc, One)),
-            Blend::Blend3 | Blend::AlphaTest => Some((SrcAlpha, OneMinusSrcAlpha)),
+            Blend::Blend3 | Blend::AlphaTest | Blend::Shadow => Some((SrcAlpha, OneMinusSrcAlpha)),
             Blend::Blend4 => Some((One, OneMinusSrcAlpha)),
             Blend::LightMap => Some((Zero, Src)),
             Blend::Opaque => None,
