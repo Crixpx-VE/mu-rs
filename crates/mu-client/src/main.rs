@@ -26,6 +26,7 @@ mod boids;
 mod camera;
 mod character;
 mod effects;
+mod fx;
 mod grass;
 mod hud;
 mod invasion;
@@ -170,6 +171,7 @@ fn main() {
             terrain::TerrainPlugin,
             grass::GrassPlugin,
             effects::EffectsPlugin,
+            fx::FxPlugin,
             boids::BoidsPlugin,
             invasion::InvasionPlugin,
             hud::HudPlugin,
