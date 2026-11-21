@@ -64,6 +64,9 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     commands.insert_resource(if args.cam.is_some() { CameraMode::Free } else { CameraMode::Follow });
     let mut cam = commands.spawn((
         Camera3d::default(),
+        // Colores tal cual, como el OpenGL del original: sin el `TonyMcMapface` que Bevy pone por
+        // defecto, que aclara las sombras y quita contraste.
+        bevy::core_pipeline::tonemapping::Tonemapping::None,
         Projection::Perspective(PerspectiveProjection {
             fov: mu_fov(),
             near: 0.2,

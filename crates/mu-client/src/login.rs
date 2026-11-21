@@ -14,7 +14,7 @@
 //! La vista es la del S6 original (`MoveMainCamera` de `ZzzScene.cpp` del Main 5.2): altura del ojo
 //! `-300 - 100 + D - 150` con `D = 1100 · nivel · 0.1` (`110 · nivel - 550`), inclinación -112.5° (mira
 //! 22.5° hacia arriba), campo de visión de 65° en vertical y alcance `390 · nivel`. El nivel de
-//! distancia se interpola entre el de cada punto. La niebla negra va del alcance a ×1.25.
+//! distancia se interpola entre el de cada punto." La niebla negra (de MuMain; el original la tiene apagada) va del alcance a ×1.25.
 //!
 //! Por ahora Enter entra al juego (sin servidor todavía).
 
@@ -43,8 +43,12 @@ const MAX_ACCEL: f32 = 100.0;
 const PITCH: f32 = -112.5;
 /// `CameraFOV = 65` (vertical, `gluPerspective`) en el login con el paseo.
 const TOUR_VFOV: f32 = 65.0;
-/// La cámara mira a este punto de la curva por delante de ella (unidades de MU).
-const LOOK_AHEAD: f32 = 600.0;
+/// Distancia con la que se mide el rumbo del camino.
+const HEADING_STEP: f32 = 50.0;
+/// Giro del original (`UpdateTourWayPoint`): como mucho 1° por tick y `diferencia / 30`, a los 25 fps
+/// fijos de entonces. En las curvas cerradas tarda (la primera es de unos 117°).
+const MAX_ROTATE: f32 = 1.0;
+const ROTATE_DIVISOR: f32 = 30.0;
 /// Muestras por tramo para medir la curva.
 const SAMPLES: usize = 64;
 
@@ -151,6 +155,9 @@ struct Tour {
     wait: i32,
     /// Tramo del último punto pasado (para las pausas).
     segment: usize,
+    /// Giro de la cámara (grados de MU) en este tick y en el anterior.
+    yaw: f32,
+    prev_yaw: f32,
 }
 
 fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
@@ -173,7 +180,7 @@ fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
         .collect()
 }
 
-/// Empieza en el último punto, yendo hacia el primero (`SetTourMode(TRUE, FALSE, 0)`).
+/// Empieza en el primer punto, yendo hacia el segundo (`SetTourMode(TRUE, FALSE, 1)` del original).
 fn start_tour(mut commands: Commands, args: Res<Args>) {
     let file = format!("CWScript{}.cws", args.world);
     let points = mu_data::fs::read(&args.data.join(format!("World{}", args.world)), &file)
@@ -184,10 +191,16 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
         warn!("login: sin recorrido de cámara ({file})");
         return;
     };
-    let n = points.len();
     let path = Path::new(points);
-    let s = path.starts[n - 1];
-    commands.insert_resource(Tour { path, s, prev_s: s, wait: 0, segment: n - 1 });
+    let s = path.starts[0];
+    let yaw = heading(&path, s);
+    commands.insert_resource(Tour { path, s, prev_s: s, wait: 0, segment: 0, yaw, prev_yaw: yaw });
+}
+
+/// Rumbo de MU (0 = +Y, 90 = +X, como `CreateAngle`) del camino en `s`.
+fn heading(path: &Path, s: f32) -> f32 {
+    let d = path.at(s + HEADING_STEP) - path.at(s);
+    d.x.atan2(d.y).to_degrees().rem_euclid(360.0)
 }
 
 /// Un tick: avanza por la curva a la velocidad del tramo (y espera en los puntos con pausa).
@@ -195,6 +208,7 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
     let Some(mut t) = tour else { return };
     let t = &mut *t;
     t.prev_s = t.s;
+    t.prev_yaw = t.yaw;
     if t.wait > 0 {
         t.wait -= 1;
         return;
@@ -210,6 +224,14 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
         t.segment = segment;
         t.wait = t.path.points[segment].delay.max(0);
     }
+    let target = heading(&t.path, t.s);
+    let delta = signed_delta(t.yaw, target);
+    let step = (delta.abs() / ROTATE_DIVISOR).min(MAX_ROTATE);
+    t.yaw = if delta.abs() <= step { target } else { (t.yaw + step * delta.signum()).rem_euclid(360.0) };
+}
+
+fn signed_delta(from: f32, to: f32) -> f32 {
+    (to - from + 540.0).rem_euclid(360.0) - 180.0
 }
 
 /// Coloca la cámara entre el tick anterior y este.
@@ -220,10 +242,9 @@ fn place_camera(
 ) {
     let Some(t) = tour else { return };
     let s = t.prev_s + (t.s - t.prev_s) * fixed.overstep_fraction();
+    let a = fixed.overstep_fraction();
     let eye = t.path.at(s);
-    let ahead = t.path.at(s + LOOK_AHEAD) - eye;
-    // Rumbo de MU (0 = +Y, 90 = +X), el mismo que da `CreateAngle`.
-    let yaw = ahead.x.atan2(ahead.y).to_degrees();
+    let yaw = t.prev_yaw + signed_delta(t.prev_yaw, t.yaw) * a;
     let level = t.path.level(s);
     // `CameraPosition[2] = -300 - 100 + D - 150`.
     let height = -300.0 - 100.0 + 1100.0 * level * 0.1 - 150.0;
@@ -231,19 +252,18 @@ fn place_camera(
     let far = 390.0 * level;
     for (mut tf, mut proj, fog) in &mut cameras {
         *tf = crate::camera::mu_view(eye.extend(height), PITCH, yaw);
+        if let Some(mut fog) = fog {
+            fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
+        }
         if let Projection::Perspective(p) = &mut *proj {
             // `gluPerspective(65, aspecto, near 20, far × 1.4)`.
             p.fov = TOUR_VFOV.to_radians();
             p.near = 20.0 / MU_SCALE;
             p.far = far * 1.4 / MU_SCALE;
         }
-        if let Some(mut fog) = fog {
-            // Niebla lineal negra del alcance a ×1.25.
-            fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
-        }
     }
 }
-/// Niebla negra del login (`FogEnable = true`; la distancia la pone `place_camera`).
+/// Niebla negra del login (la distancia la pone `place_camera`).
 fn add_fog(mut commands: Commands, cameras: Query<Entity, With<Camera3d>>) {
     for e in &cameras {
         commands.entity(e).insert(DistanceFog { color: Color::BLACK, ..default() });
