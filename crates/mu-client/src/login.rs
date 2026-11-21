@@ -122,7 +122,7 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     let dir = (target.pos - start.pos).normalize_or_zero();
     let angle = create_angle(0.0, 0.0, dir.x, -dir.y);
     let mut t = Tour { points, index: 0, delay: 0, current, tour, angle, target_angle: angle, ref_angle: angle, level: start.distance, prev: (Vec3::ZERO, 0.0, 0.0), now: (Vec3::ZERO, 0.0, 0.0) };
-    t.now = (t.tour, t.level, t.angle);
+    t.now = (t.current.extend(TOUR_Z), t.level, t.angle);
     t.prev = t.now;
     commands.insert_resource(t);
 }
@@ -198,10 +198,6 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
             t.angle = if delta.abs() <= step { t.target_angle.rem_euclid(360.0) } else { (t.angle + step * delta.signum()).rem_euclid(360.0) };
             t.current += forward * target_acc;
             t.tour += (dir * target_acc).extend(0.0);
-            // El original no vuelve a juntar el camino suavizado con el recorrido y se desvía unas
-            // 135 unidades por vuelta: aquí se acerca un 2 % por tick para que no se vaya saliendo.
-            let pull = (t.current - t.tour.truncate()) * 0.02;
-            t.tour += pull.extend(0.0);
             t.tour.z = TOUR_Z;
             let total = dist_origin + dist_target;
             t.level = if total > f32::EPSILON {
@@ -213,7 +209,9 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
         t.delay += 1;
         break;
     }
-    t.now = (t.tour, t.level, t.angle);
+    // La vista va por el recorrido exacto (`current`): el camino suavizado del original (`tour`) se
+    // desvía unas 135 unidades por vuelta y no se corrige nunca. Las curvas las suaviza el giro.
+    t.now = (t.current.extend(TOUR_Z), t.level, t.angle);
 }
 
 /// Coloca la cámara entre el tick anterior y este.
