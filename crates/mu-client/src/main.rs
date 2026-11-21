@@ -18,6 +18,7 @@
 //!
 //! Controles: clic izquierdo = caminar · rueda = zoom · Tab = cámara libre/seguir · F3 = fps.
 
+mod boids;
 mod camera;
 mod character;
 mod effects;
@@ -146,6 +147,7 @@ fn main() {
             terrain::TerrainPlugin,
             grass::GrassPlugin,
             effects::EffectsPlugin,
+            boids::BoidsPlugin,
             hud::HudPlugin,
             mainframe::MainFramePlugin,
             objects::ObjectsPlugin,
