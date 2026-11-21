@@ -376,13 +376,18 @@ fn build_parts(model: &bmd::Bmd, dir: &Path, additive_mesh: Option<usize>, meshe
         .collect()
 }
 
+/// Umbral de la prueba de alfa del original (`glAlphaFunc(GL_GREATER, 0.25)`).
+pub const ALPHA_REF: f32 = 0.25;
+
 fn object_material(image: Option<(Handle<Image>, AlphaKind)>, additive: bool, light: [u8; 3]) -> StandardMaterial {
     // Misma conversión que el terreno: la luz del original se multiplica en sRGB.
     let l = light.map(|v| (v as f32 / 15.0).powf(2.2));
     let alpha_mode = match (additive, image.as_ref().map(|i| i.1)) {
         (true, _) => AlphaMode::Add,
-        (_, Some(AlphaKind::Cutout)) => AlphaMode::Mask(0.5),
-        (_, Some(AlphaKind::Blend)) => AlphaMode::Blend,
+        // El original dibuja las texturas con alfa con prueba de alfa (> 0.25) y escribiendo
+        // profundidad (`EnableAlphaTest`). Mezclar sin profundidad hace que plantas y hojas
+        // se pinten por encima de lo que tienen delante.
+        (_, Some(AlphaKind::Cutout | AlphaKind::Blend)) => AlphaMode::Mask(ALPHA_REF),
         _ => AlphaMode::Opaque,
     };
     StandardMaterial {

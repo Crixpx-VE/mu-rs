@@ -150,9 +150,9 @@ fn scripted_walk(
 
 fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> StandardMaterial {
     let tex = texture::load(dir, &bmd::texture_file_name(texture_name)).ok();
+    // Igual que los objetos: prueba de alfa y profundidad, como el original.
     let alpha_mode = match tex.as_ref().map(|t| t.alpha_kind()) {
-        Some(AlphaKind::Cutout) => AlphaMode::Mask(0.5),
-        Some(AlphaKind::Blend) => AlphaMode::Blend,
+        Some(AlphaKind::Cutout | AlphaKind::Blend) => AlphaMode::Mask(crate::objects::ALPHA_REF),
         _ => AlphaMode::Opaque,
     };
     StandardMaterial {
