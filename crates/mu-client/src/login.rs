@@ -193,8 +193,21 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     };
     let path = Path::new(points);
     let s = path.starts[0];
-    let yaw = heading(&path, s);
+    let yaw = look_heading(&path, s);
     commands.insert_resource(Tour { path, s, prev_s: s, wait: 0, segment: 0, yaw, prev_yaw: yaw });
+}
+
+/// Distancia de la cámara por detrás del punto del recorrido: `D = 1100 · nivel · 0.1` del original.
+fn behind(path: &Path, s: f32) -> f32 {
+    110.0 * path.level(s)
+}
+
+/// Rumbo de MU (0 = +Y, 90 = +X) desde la cámara (`D` por detrás en el camino) hasta el punto
+/// del recorrido: como en el original, el punto dobla las esquinas antes que la cámara y esta empieza
+/// a girar antes de llegar, pero aquí la cámara sigue por el centro del camino.
+fn look_heading(path: &Path, s: f32) -> f32 {
+    let d = path.at(s) - path.at(s - behind(path, s));
+    d.x.atan2(d.y).to_degrees().rem_euclid(360.0)
 }
 
 /// Rumbo de MU (0 = +Y, 90 = +X, como `CreateAngle`) del camino en `s`.
@@ -224,7 +237,7 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
         t.segment = segment;
         t.wait = t.path.points[segment].delay.max(0);
     }
-    let target = heading(&t.path, t.s);
+    let target = look_heading(&t.path, t.s);
     let delta = signed_delta(t.yaw, target);
     let step = (delta.abs() / ROTATE_DIVISOR).min(MAX_ROTATE);
     t.yaw = if delta.abs() <= step { target } else { (t.yaw + step * delta.signum()).rem_euclid(360.0) };
@@ -243,7 +256,7 @@ fn place_camera(
     let Some(t) = tour else { return };
     let s = t.prev_s + (t.s - t.prev_s) * fixed.overstep_fraction();
     let a = fixed.overstep_fraction();
-    let eye = t.path.at(s);
+    let eye = t.path.at(s - behind(&t.path, s));
     let yaw = t.prev_yaw + signed_delta(t.prev_yaw, t.yaw) * a;
     let level = t.path.level(s);
     // `CameraPosition[2] = -300 - 100 + D - 150`.
