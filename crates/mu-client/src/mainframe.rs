@@ -209,16 +209,16 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
         },
     ));
     bar.with_children(|b| {
-        // Esferas primero: el marco tiene huecos donde se ven.
+        // Primero el marco (JPG opaco, con las esferas vacías dibujadas) y encima el líquido.
+        for (img, x) in [(&menu1, 0.0), (&menu2, 256.0), (&menu3, 384.0)] {
+            if let Some((h, size)) = img {
+                b.spawn(piece(h.clone(), x, FRAME_TOP, size.x, size.y, None));
+            }
+        }
         for (gauge, img) in [(Gauge::Hp, &red), (Gauge::Sd, &sd), (Gauge::Ag, &ag), (Gauge::Mp, &blue)] {
             if let Some((h, _)) = img {
                 let (x, y, w, hgt) = gauge.rect();
                 b.spawn((piece(h.clone(), x, y, w, hgt, Some(Rect::new(0.0, 0.0, w, hgt))), GaugeFill(gauge)));
-            }
-        }
-        for (img, x) in [(&menu1, 0.0), (&menu2, 256.0), (&menu3, 384.0)] {
-            if let Some((h, size)) = img {
-                b.spawn(piece(h.clone(), x, FRAME_TOP, size.x, size.y, None));
             }
         }
         if let Some((h, _)) = &exbar {
@@ -248,10 +248,20 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
     });
 }
 
-/// 1 px de interfaz = 1 unidad de la pantalla virtual de 480 de alto.
+/// Escala de la interfaz: la pantalla virtual de 640×480 tiene que caber entera, así que manda
+/// lo que limite más (el alto en panorámico, el ancho en una ventana estrecha).
+fn ui_scale(window: &Window) -> f32 {
+    (window.height() / VIRTUAL_HEIGHT).min(window.width() / 640.0).max(0.25)
+}
+
+/// 1 px de interfaz = 1 unidad de la pantalla virtual.
 fn update_scale(windows: Query<&Window>, mut scale: ResMut<UiScale>) {
     let Ok(w) = windows.single() else { return };
-    let s = (w.height() / VIRTUAL_HEIGHT).max(0.5);
+    // Minimizada mide 0: se deja como estaba.
+    if w.width() < 1.0 || w.height() < 1.0 {
+        return;
+    }
+    let s = ui_scale(w);
     if (scale.0 - s).abs() > 1e-3 {
         scale.0 = s;
     }
@@ -323,9 +333,10 @@ fn update_numbers(
 /// Cursor en coordenadas de la pantalla virtual 640×480 del original (con la barra centrada).
 fn cursor_virtual(window: &Window) -> Option<Vec2> {
     let c = window.cursor_position()?;
-    let s = window.height() / VIRTUAL_HEIGHT;
+    let s = ui_scale(window);
     let x0 = (window.width() - 640.0 * s) / 2.0;
-    Some(Vec2::new((c.x - x0) / s, c.y / s))
+    // La barra va pegada abajo: y virtual = 480 en el borde inferior de la ventana.
+    Some(Vec2::new((c.x - x0) / s, VIRTUAL_HEIGHT - (window.height() - c.y) / s))
 }
 
 /// Rectángulo (x, y, ancho, alto) del botón `i` en la pantalla virtual.
