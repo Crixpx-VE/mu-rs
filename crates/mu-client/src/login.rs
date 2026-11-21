@@ -42,8 +42,11 @@ const BLEND_DISTANCE: f32 = 300.0;
 /// `kMinTourAccel` / `kMaxTourAccel`.
 const MIN_ACCEL: f32 = 0.1;
 const MAX_ACCEL: f32 = 100.0;
-/// `kTourMaxRotateSpeed` (grados por tick).
-const MAX_ROTATE: f32 = 1.0;
+/// Giro de la cámara (`kTourMaxRotateSpeed` 1° y `diferencia / 30`): MuMain lo aplica una vez por
+/// fotograma, sin ajustarlo a los fps. Aquí va por tick (25 por segundo) con lo que da MuMain a 60 fps:
+/// como mucho 2.4° por tick y `diferencia / 12.5`.
+const MAX_ROTATE: f32 = 1.0 * 60.0 / 25.0;
+const ROTATE_DIVISOR: f32 = 30.0 * 25.0 / 60.0;
 /// `kTourCameraZPosition`.
 const TOUR_Z: f32 = -300.0;
 /// `TOUR_BASE_DISTANCE`.
@@ -127,26 +130,16 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     commands.insert_resource(t);
 }
 
-/// Ojo, inclinación, giro y alcance de la vista (`CalculateCameraPosition` + `SetCameraAngle` de MuMain).
+/// Ojo, inclinación, giro y alcance de la vista: los de MuMain (`DefaultCamera` en modo paseo).
 ///
-/// MuMain pone la cámara en `recorrido + AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0) + (-300, 650)`, un
-/// desplazamiento fijo en el mundo que la saca a un lado del recorrido. Aquí va centrada, justo
-/// detrás en la dirección en la que mira, a la misma distancia hacia atrás que daba eso en el primer
-/// tramo (un cuarto de `D`), con su altura y su inclinación.
+/// `ojo = recorrido + (-300, 650) + AngleMatrixᵀ(0, 0, -45°)·(0, -D, 0)` (un desplazamiento fijo en el
+/// mundo), altura -300 + 950 = 650, inclinación -112.5° + 40° = -72.5° y giro = ángulo - 5°.
 fn view(tour: Vec3, level: f32, angle: f32) -> (Vec3, f32, f32, f32) {
     let d = BASE_DISTANCE * level * 0.1;
-    let yaw = angle + MUMAIN_YAW;
-    // Rumbo de MU: 0 = +Y, 90 = +X.
-    let forward = Vec2::new(yaw.to_radians().sin(), yaw.to_radians().cos());
-    let eye = (tour.truncate() - forward * d * BEHIND).extend(EYE_HEIGHT);
-    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, yaw, MUMAIN_FAR)
+    let (s, c) = (-45f32).to_radians().sin_cos();
+    let eye = (tour.truncate() + Vec2::new(-s * d, -c * d) + MUMAIN_OFFSET.truncate()).extend(TOUR_Z + MUMAIN_OFFSET.z);
+    (eye, FRUSTUM_ANGLE + MUMAIN_PITCH, angle + MUMAIN_YAW, MUMAIN_FAR)
 }
-
-/// Lo que va la cámara por detrás del recorrido, en fracción de `D`.
-const BEHIND: f32 = 0.25;
-/// Altura del ojo. MuMain la deja en 650 (-300 + 950); comparada con el cliente original se ve
-/// algo alta, así que va un poco más baja (el suelo de la sala está a 169.5).
-const EYE_HEIGHT: f32 = 550.0;
 fn signed_delta(from: f32, to: f32) -> f32 {
     let d = to.rem_euclid(360.0) - from.rem_euclid(360.0);
     if d > 180.0 {
@@ -199,7 +192,7 @@ fn step_tour(tour: Option<ResMut<Tour>>) {
                 t.target_angle = create_angle(0.0, 0.0, dir.x, -dir.y);
             }
             let delta = signed_delta(t.angle, t.target_angle);
-            let step = (delta.abs() / 30.0).clamp(0.0, MAX_ROTATE);
+            let step = (delta.abs() / ROTATE_DIVISOR).clamp(0.0, MAX_ROTATE);
             t.angle = if delta.abs() <= step { t.target_angle.rem_euclid(360.0) } else { (t.angle + step * delta.signum()).rem_euclid(360.0) };
             t.current += forward * target_acc;
             t.tour += (dir * target_acc).extend(0.0);
