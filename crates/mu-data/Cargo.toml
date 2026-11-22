@@ -6,4 +6,5 @@ edition.workspace = true
 
 [dependencies]
 image.workspace = true
+lea = "0.5"
 serde_json.workspace = true

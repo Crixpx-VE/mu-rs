@@ -80,12 +80,11 @@ pub fn read(buf: &[u8]) -> Result<Bmd> {
     let version = buf[3];
     let data: Vec<u8> = match version {
         10 => buf[4..].to_vec(),
-        12 => {
+        12 | 15 => {
             let size = i32::from_le_bytes(buf[4..8].try_into().unwrap()) as usize;
             let enc = buf.get(8..8 + size).ok_or_else(|| Error::Format("BMD cortado".into()))?;
-            crypt::map_file_decrypt(enc)
+            if version == 12 { crypt::map_file_decrypt(enc) } else { crypt::lea_decrypt(enc) }
         }
-        15 => return Err(Error::Format("BMD v15 (cifrado LEA, Season 12+) no soportado".into())),
         v => return Err(Error::Format(format!("versión de BMD desconocida: {v}"))),
     };
 
@@ -387,6 +386,28 @@ mod tests {
                     assert!((m1[r][c] - m2[r][c]).abs() < 1e-5, "{a:?} [{r}][{c}] {} vs {}", m1[r][c], m2[r][c]);
                 }
             }
+        }
+    }
+
+    /// BMD v15 (LEA) de un cliente S20 sacado a `MU_S20_DIR`: el mismo modelo que el v10 del S6.
+    #[test]
+    fn bmd_lea_v15() {
+        let Ok(dir) = std::env::var("MU_S20_DIR") else { return };
+        let dir = std::path::Path::new(&dir);
+        let show = |name: &str| {
+            let m = read(&std::fs::read(dir.join(name)).unwrap()).expect(name);
+            let info: Vec<_> = m.meshes.iter().map(|x| (x.vertices.len(), x.triangles.len(), x.texture.clone())).collect();
+            eprintln!("{name}: v{} '{}' {} huesos {} acciones mallas {info:?}", m.version, m.name, m.bones.len(), m.actions.len());
+            m
+        };
+        let s20 = show("Object40.bmd");
+        if let Ok(s6) = std::env::var("MU_S6_OBJECT40") {
+            let s6 = read(&std::fs::read(s6).unwrap()).unwrap();
+            assert_eq!(s20.meshes.len(), s6.meshes.len());
+            assert_eq!(s20.meshes[0].vertices.len(), s6.meshes[0].vertices.len());
+        }
+        if dir.join("Object41.bmd").exists() {
+            show("Object41.bmd");
         }
     }
 
