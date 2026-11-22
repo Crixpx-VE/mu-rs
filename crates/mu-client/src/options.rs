@@ -186,6 +186,7 @@ fn update_game_ui(
     mut exit: MessageWriter<AppExit>,
     mut net: ResMut<crate::net::Net>,
     mut move_window: ResMut<crate::move_window::MoveWindow>,
+    mut char_info: ResMut<crate::char_info::CharInfoWindow>,
 ) {
     let cursor = windows.single().ok().and_then(crate::mainframe::cursor_virtual);
     let (press, held, release) =
@@ -205,6 +206,9 @@ fn update_game_ui(
         } else if move_window.is_open() {
             // `CNewUIMoveCommandWindow::UpdateKeyEvent` (NewUIMoveCommandWindow.cpp:548-560).
             move_window.close();
+        } else if char_info.is_open() {
+            // `CNewUICharacterInfoWindow::UpdateKeyEvent` (NewUICharacterInfoWindow.cpp:185-199).
+            char_info.close();
         } else {
             open_sys_menu(&mut ui);
         }

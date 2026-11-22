@@ -57,7 +57,11 @@ impl Plugin for LoginUiPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "login_logo.wesl");
         let ui_scene = || in_state(GameScene::Login).or_else(in_state(GameScene::CharacterSelect));
-        let leave = |mut c: Commands| {
+        let leave = |mut c: Commands, ui: Option<Res<LoginUi>>| {
+            // El servidor elegido se queda para la ventana del personaje (`g_ServerListManager`).
+            if let Some((name, index, non_pvp)) = ui.and_then(|u| u.selected_server.clone()) {
+                c.insert_resource(crate::char_info::SelectedServer { name, index, non_pvp });
+            }
             c.remove_resource::<LoginUi>();
             c.remove_resource::<LoginTextures>();
         };
