@@ -36,6 +36,9 @@ Qué tiene:
 - Sonido del original: efectos, ambiente y música por mapa, pasos, pájaros, dragones, habilidades.
   Los `.wav`/`.mp3` (`Data/Sound`, `Data/Music`) no vienen con MuMain: salen del cliente completo
   oficial de Webzen (MU Red 1.20.61). Sombras de personaje y bichos, luz de los modelos del original.
+- Inventario del original (**V** o **I**): rejilla de 8×8 y equipo con los objetos en 3D y su brillo
+  por nivel (+3 a +15), excelente y antiguo, cuadro de información, coger y dejar objetos; el equipo
+  se ve en el personaje. Sin servidor no hay inventario: `--inventario-prueba` pone uno de prueba.
 
 Controles, los del cliente original: **clic izquierdo** caminar (mantenido sigue al ratón) ·
 **1-0** elegir habilidad · **clic derecho** usarla (fuera de zona segura) · **Esc** menú de sistema ·

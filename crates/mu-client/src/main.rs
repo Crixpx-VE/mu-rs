@@ -19,6 +19,8 @@
 //!   --resolucion <AxB>       tamaño de la ventana solo esta vez (si no, `resolucion=` de
 //!                            mu-launcher.txt, o 1024x768)
 //!   --fps                    contador de fotogramas
+//!   --inventario-prueba      inventario de prueba (sin servidor no hay): objetos de +0 a +15,
+//!                            excelentes y un antiguo, para ver el inventario (V o I) y el brillo
 //!
 //! Controles, los del original: clic izquierdo = caminar (mantenido, sigue al ratón) · 1-0 = elegir
 //! habilidad · clic derecho = usarla · Esc = menú de sistema · U = menú de ventanas.
@@ -39,8 +41,11 @@ mod fonts;
 mod fx;
 mod gate;
 mod grass;
+mod hero_dress;
 mod hud;
 mod invasion;
+mod inventory;
+mod item_view;
 mod leaves;
 mod logfile;
 mod login;
@@ -99,6 +104,8 @@ pub struct Args {
     pub show_fps: bool,
     /// `--salir-tras <s>`: se cierra solo a los `s` segundos (para medir: la traza se escribe entera).
     pub quit_after: Option<f32>,
+    /// `--inventario-prueba`: el inventario de prueba (inventory.rs).
+    pub test_inventory: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -139,6 +146,7 @@ impl Args {
             hold_title: false,
             show_fps: false,
             quit_after: None,
+            test_inventory: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -160,6 +168,7 @@ impl Args {
                 "--probar-habilidades" => args.skill_test = true,
                 "--ver-titulo" => args.hold_title = true,
                 "--fps" => args.show_fps = true,
+                "--inventario-prueba" => args.test_inventory = true,
                 "--salir-tras" => args.quit_after = it.next().and_then(|v| v.parse().ok()),
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
@@ -267,5 +276,6 @@ fn main() {
         .add_plugins(names::NamesPlugin)
         .add_plugins(chat::ChatPlugin)
         .add_plugins(char_info::CharInfoPlugin)
+        .add_plugins((item_view::ItemViewPlugin, inventory::InventoryPlugin, hero_dress::HeroDressPlugin))
         .run();
 }

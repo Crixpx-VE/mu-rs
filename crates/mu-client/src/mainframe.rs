@@ -13,7 +13,7 @@
 //! - experiencia: `newui_exbar` estirada en (2,473), 629×4 × progreso;
 //! - botones 30×41 en y=429: tienda 489, personaje 519, inventario 549, amigos 579, menú 609
 //!   (`partCharge1/newui_menu_Bt05/01/02/03/04`, fotogramas normal/encima/abierto cada 41 px);
-//!   el de menú abre el menú de ventanas (options.rs);
+//!   el de menú abre el menú de ventanas (options.rs) y el de inventario, el inventario (inventory.rs);
 //! - números: `newui_number1.tga`, dígitos de 12×14 (`RenderNumber`).
 
 use bevy::prelude::*;
@@ -360,6 +360,8 @@ fn button_rect(i: usize) -> Rect {
 const MENU_BUTTON: usize = 4;
 /// Botón del personaje (`m_BtnChaInfo`): el segundo.
 const CHAR_BUTTON: usize = 1;
+/// Botón del inventario (`m_BtnMyInven`): el tercero.
+const INVENTORY_BUTTON: usize = 2;
 
 /// Fotograma del botón: normal, ratón encima o abierto (como en el original, se comprueba
 /// a mano si el cursor está dentro).
@@ -369,6 +371,7 @@ fn update_buttons(
     mut game_ui: ResMut<crate::options::GameUi>,
     mut char_info: ResMut<crate::char_info::CharInfoWindow>,
     mut sound: ResMut<crate::sound::SoundQueue>,
+    mut inventory: ResMut<crate::inventory::Inventory>,
     mut q: Query<(&mut HudButton, &mut ImageNode)>,
 ) {
     // Con una caja de mensajes abierta, la barra no recibe el ratón.
@@ -401,7 +404,15 @@ fn update_buttons(
             }
             continue;
         }
-        if inside && mouse.just_pressed(MouseButton::Left) {
+        if b.index == INVENTORY_BUTTON {
+            // `m_BtnMyInven` (NewUIMainFrameWindow.cpp:769-775): al soltar encima abre o cierra el
+            // inventario (inventory.rs), con `SOUND_CLICK01`; apretado mientras está abierto.
+            if inside && mouse.just_released(MouseButton::Left) {
+                inventory.toggle();
+                sound.play("SOUND_CLICK01");
+            }
+            b.open = inventory.open;
+        } else if inside && mouse.just_pressed(MouseButton::Left) {
             // Sin ventanas todavía: solo se marca como abierto o cerrado.
             b.open = !b.open;
         }
@@ -426,6 +437,7 @@ fn pointer_over_ui(
     move_window: Res<crate::move_window::MoveWindow>,
     chat: Res<crate::chat::Chat>,
     char_info: Res<crate::char_info::CharInfoWindow>,
+    inventory: Res<crate::inventory::Inventory>,
     mut over: ResMut<PointerOverUi>,
 ) {
     let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
@@ -434,6 +446,7 @@ fn pointer_over_ui(
             || move_window.blocks(c)
             || chat.blocks(c)
             || char_info.blocks(c)
+            || inventory.blocks(c)
     });
     if over.0 != on_bar {
         over.0 = on_bar;

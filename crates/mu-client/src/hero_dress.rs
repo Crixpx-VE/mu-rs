@@ -1,0 +1,210 @@
+//! El equipo del inventario puesto en el personaje, con su brillo.
+//!
+//! - **Piezas**: casco, armadura, pantalones, guantes y botas equipados cambian la pieza de la clase
+//!   por el modelo del objeto (`BodyPart[BODYPART_*].Type = MODEL_HELM + índice`...), posado con el
+//!   mismo esqueleto; el arma de la mano derecha, la del objeto (`Weapon[0]`). Las mallas de piel de
+//!   esas piezas (`BITMAP_SKIN`, la cara del casco...) llevan la piel de la clase (`BITMAP_SKIN + Skin`,
+//!   ZzzBMD.cpp:949-953), que es la textura de piel de la pieza de la clase; las `hid*` no se dibujan.
+//! - **Brillo**: las pasadas de `RenderPartObjectEffect` ([`item_passes`]) con la luz del héroe
+//!   (`AbilityLight` = (1, 1, 1), character.rs): la normal va en el tinte de la pieza y el resto son
+//!   entidades más con la misma malla (que posa la animación de siempre) y su material.
+//! - **Cuándo**: al cambiar el equipo (`Inventory::equipment_rev`) o el límite de efectos; también al
+//!   aparecer el personaje en un mapa.
+//!
+//! No están: el arma o el escudo de la mano izquierda, las alas y las mascotas (van enganchados a
+//! huesos con sus propias animaciones), ni los adornos de +15 (`NextGradeObjectRender`).
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use bevy::prelude::*;
+use mu_data::bmd::{self, Bmd};
+use mu_data::items::glow::{GlowLight, item_passes};
+use mu_data::items::{Item, slot};
+use mu_data::objects::render::{self, Bitmap, LookColor, MeshInfo, ObjectDraw, Pass, Saw};
+
+use crate::character::{BodyMaterials, Dress, Player, load_character_dressed};
+use crate::inventory::Inventory;
+use crate::item_view::ItemData;
+use crate::model_light::ModelMaterial;
+use crate::scene::GameScene;
+
+pub struct HeroDressPlugin;
+
+impl Plugin for HeroDressPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, (redress, animate_glow).chain().run_if(in_state(GameScene::Game)));
+    }
+}
+
+/// Materiales del brillo del equipo cuyo color cambia con el tiempo.
+#[derive(Component)]
+pub struct HeroGlow(Vec<(Handle<ModelMaterial>, GlowLight)>);
+
+/// La textura de una malla de una pieza: la suya, la piel de la clase para las de piel de las piezas
+/// del equipo, o ninguna (`hid*`, `BITMAP_HIDE`). Las piezas de la clase, tal cual.
+pub fn part_texture(name: &str, equipped: bool, class_part: &Bmd) -> Option<String> {
+    if !equipped {
+        return Some(name.to_string());
+    }
+    let file = name.rsplit(['\\', '/']).next().unwrap_or(name);
+    if file.starts_with("hid") {
+        return None;
+    }
+    let skin = |f: &str| f.starts_with("ski") || f.to_ascii_lowercase().starts_with("level");
+    if skin(file) {
+        let own = class_part.meshes.iter().map(|m| m.texture.as_str()).find(|t| skin(t.rsplit(['\\', '/']).next().unwrap_or(t)));
+        return Some(own.unwrap_or(name).to_string());
+    }
+    Some(name.to_string())
+}
+
+/// Las pasadas de brillo de las mallas del equipo (para `load_character_dressed`).
+#[derive(Default)]
+pub struct GlowBuilder {
+    bitmaps: HashMap<Bitmap, Option<Handle<Image>>>,
+    pub animated: Vec<(Handle<ModelMaterial>, GlowLight)>,
+}
+
+impl GlowBuilder {
+    /// Pone la luz de la pasada normal en el tinte de `base` y devuelve las demás pasadas de la malla.
+    #[allow(clippy::too_many_arguments)]
+    pub fn passes(
+        &mut self,
+        data: &Path,
+        mesh: &Handle<Mesh>,
+        m: &bmd::Mesh,
+        item: &Item,
+        render_level: u8,
+        base: &Handle<ModelMaterial>,
+        materials: &mut Assets<ModelMaterial>,
+        images: &mut Assets<Image>,
+    ) -> Vec<(Mesh3d, MeshMaterial3d<ModelMaterial>)> {
+        let passes = item_passes(item, [1.0; 3], render_level);
+        let (own, has_alpha) = materials
+            .get(base)
+            .map_or((None, false), |b| (b.base.base_color_texture.clone(), !matches!(b.base.alpha_mode, AlphaMode::Opaque)));
+        if let Some(p0) = passes.first() {
+            let c = p0.light.at(0.0);
+            if let Some(mut b) = materials.get_mut(base) {
+                b.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
+            }
+            if p0.light.animated() {
+                self.animated.push((base.clone(), p0.light));
+            }
+        }
+        let info = MeshInfo { index: 0, texture_index: m.texture_index as i32, script: bmd::texture_script(&m.texture), has_alpha };
+        let draw = ObjectDraw { blend_mesh: -1, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh: -1 };
+        let mut out = Vec::new();
+        for (k, p) in passes.iter().enumerate().skip(1) {
+            let Some(look) = render::resolve(&Pass::body(p.flags), &draw, &info) else { continue };
+            let image = match (look.textured, look.texture) {
+                (false, _) => None,
+                (true, Some(b)) => self.bitmaps.entry(b).or_insert_with(|| crate::objects::load_bitmap(data, b, images)).clone(),
+                (true, None) => own.clone(),
+            };
+            let c = p.light.at(0.0);
+            // Con luz (`LightTransform`): la del héroe por la normal y el color de la pasada en el tinte.
+            let lit = look.color == LookColor::Lit;
+            let mut mat = crate::objects::object_material(image, &look, if lit { [1.0; 3] } else { c }, None, k, false);
+            mat.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
+            let h = materials.add(mat);
+            if p.light.animated() {
+                self.animated.push((h.clone(), p.light));
+            }
+            out.push((Mesh3d(mesh.clone()), MeshMaterial3d(h)));
+        }
+        out
+    }
+}
+
+/// El equipo que se ve en el personaje (`None` = nada puesto).
+fn dress_from(inv: &Inventory, data: &ItemData, render_level: u8) -> Option<Dress> {
+    let piece = |s: u8| inv.equipment[s as usize].and_then(|item| Some((data.model_path(&item)?, item)));
+    let dress = Dress {
+        parts: [piece(slot::HELM), piece(slot::ARMOR), piece(slot::PANTS), piece(slot::GLOVES), piece(slot::BOOTS)],
+        weapon: piece(slot::WEAPON_RIGHT),
+        render_level,
+    };
+    (dress.parts.iter().any(|p| p.is_some()) || dress.weapon.is_some()).then_some(dress)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn redress(
+    mut commands: Commands,
+    args: Res<crate::Args>,
+    inv: Res<Inventory>,
+    data: Res<ItemData>,
+    opts: Res<crate::options::GameOptions>,
+    players: Query<(Entity, &Player, Option<&Children>)>,
+    mesh_children: Query<(), With<Mesh3d>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<ModelMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut last: Local<Option<(u32, u8)>>,
+) {
+    let Ok((e, p, children)) = players.single() else {
+        // Sin personaje (cargando otro mapa): al volver a salir se vuelve a vestir.
+        *last = None;
+        return;
+    };
+    let key = (inv.equipment_rev, opts.render_level);
+    if *last == Some(key) {
+        return;
+    }
+    let first = last.is_none();
+    *last = Some(key);
+    let dress = dress_from(&inv, &data, opts.render_level);
+    // Recién aparecido y sin nada puesto: ya está como lo cargó `spawn_player`.
+    if first && dress.is_none() {
+        return;
+    }
+    let Some(model) = load_character_dressed(&args, p.class, p.action, dress.as_ref(), &mut meshes, &mut materials, &mut images) else {
+        return;
+    };
+    for c in children.into_iter().flatten() {
+        if mesh_children.contains(*c) {
+            commands.entity(*c).despawn();
+        }
+    }
+    commands.entity(e).insert((model.skinned, BodyMaterials(model.materials), HeroGlow(model.glow)));
+    for child in model.children {
+        commands.entity(e).with_child(child);
+    }
+}
+
+/// El color de las pasadas que laten (excelente, +3 a +6, antiguos).
+fn animate_glow(time: Res<Time<Real>>, glows: Query<&HeroGlow>, mut materials: ResMut<Assets<ModelMaterial>>) {
+    let t = time.elapsed_secs() * 1000.0;
+    for g in &glows {
+        for (h, light) in &g.0 {
+            if let Some(mut m) = materials.get_mut(h) {
+                let c = light.at(t);
+                m.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn texturas_de_las_piezas() {
+        let mesh = mu_data::bmd::Mesh {
+            vertices: vec![],
+            normals: vec![],
+            uvs: vec![],
+            triangles: vec![],
+            texture_index: 0,
+            texture: "skin_warrior_01.jpg".into(),
+        };
+        let class = Bmd { version: 10, name: String::new(), meshes: vec![mesh], actions: vec![], bones: vec![] };
+        assert_eq!(part_texture("hide.jpg", true, &class), None);
+        assert_eq!(part_texture("skin_barbarian_01.jpg", true, &class).as_deref(), Some("skin_warrior_01.jpg"));
+        assert_eq!(part_texture("upper_03_m.jpg", true, &class).as_deref(), Some("upper_03_m.jpg"));
+        // Las piezas de la clase no cambian.
+        assert_eq!(part_texture("hide.jpg", false, &class).as_deref(), Some("hide.jpg"));
+    }
+}
