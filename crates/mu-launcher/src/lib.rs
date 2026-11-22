@@ -9,7 +9,11 @@
 //! ```text
 //! GET /manifest        → una línea por archivo: <sha256>\t<tamaño>\t<ruta con '/'>
 //! GET /file/<ruta>     → el archivo (la ruta va codificada con %XX); solo si está en la lista
+//! GET /manifest2       → igual, con el tamaño comprimido: <sha256>\t<tamaño>\t<comprimido>\t<ruta>
+//! GET /z/<sha256>      → el archivo comprimido con zstd (si <comprimido> no es 0)
 //! ```
+//!
+//! Los lanzadores viejos siguen usando `/manifest` y `/file`.
 //!
 //! La carpeta que se publica debe contener solo el juego: todo lo que haya dentro se puede descargar.
 
@@ -28,6 +32,13 @@ pub struct Entry {
     pub path: String,
     pub size: u64,
     pub sha256: String,
+    /// Tamaño comprimido con zstd (`/z/<sha256>`); 0 si no se sirve comprimido.
+    pub packed: u64,
+}
+
+/// ¿Es una huella SHA-256 en hexadecimal?
+pub fn is_sha256(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit())
 }
 
 /// Huella SHA-256 de un archivo, en hexadecimal.
@@ -62,8 +73,26 @@ pub fn parse_manifest(text: &str) -> Option<Vec<Entry>> {
             let sha256 = it.next()?.to_string();
             let size = it.next()?.parse().ok()?;
             let path = it.next()?.to_string();
-            (sha256.len() == 64 && sha256.bytes().all(|c| c.is_ascii_hexdigit()) && is_safe_path(&path))
-                .then_some(Entry { path, size, sha256 })
+            (is_sha256(&sha256) && is_safe_path(&path)).then_some(Entry { path, size, sha256, packed: 0 })
+        })
+        .collect()
+}
+
+/// Lista con el tamaño comprimido (`/manifest2`).
+pub fn format_manifest2(entries: &[Entry]) -> String {
+    entries.iter().map(|e| format!("{}\t{}\t{}\t{}\n", e.sha256, e.size, e.packed, e.path)).collect()
+}
+
+pub fn parse_manifest2(text: &str) -> Option<Vec<Entry>> {
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| {
+            let mut it = l.splitn(4, '\t');
+            let sha256 = it.next()?.to_string();
+            let size = it.next()?.parse().ok()?;
+            let packed = it.next()?.parse().ok()?;
+            let path = it.next()?.to_string();
+            (is_sha256(&sha256) && is_safe_path(&path)).then_some(Entry { path, size, sha256, packed })
         })
         .collect()
 }
@@ -165,9 +194,20 @@ mod tests {
 
     #[test]
     fn lista_ida_y_vuelta() {
-        let e = vec![Entry { path: "Jugar - Lorencia.bat".into(), size: 12, sha256: "a".repeat(64) }];
+        let e = vec![Entry { path: "Jugar - Lorencia.bat".into(), size: 12, sha256: "a".repeat(64), packed: 0 }];
         assert_eq!(parse_manifest(&format_manifest(&e)), Some(e));
         assert_eq!(parse_manifest(&format!("{}\t1\t../x\n", "a".repeat(64))), None);
+    }
+
+    #[test]
+    fn lista2_ida_y_vuelta() {
+        let e = vec![
+            Entry { path: "Data/a b.bmd".into(), size: 1200, sha256: "b".repeat(64), packed: 800 },
+            Entry { path: "x.mp3".into(), size: 5, sha256: "c".repeat(64), packed: 0 },
+        ];
+        assert_eq!(parse_manifest2(&format_manifest2(&e)), Some(e));
+        assert_eq!(parse_manifest2(&format!("{}\t1\t1\t../x\n", "a".repeat(64))), None);
+        assert_eq!(parse_manifest2(&format!("{}\t1\tx\ty\n", "a".repeat(64))), None);
     }
 
     #[test]

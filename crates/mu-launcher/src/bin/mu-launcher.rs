@@ -3,29 +3,44 @@
 //!   mu-launcher [opciones del juego, p. ej. --world 3]
 //!
 //! 1. Pide la lista de archivos al servidor (dirección en `mu-launcher.txt`: `servidor=http://ip:puerto`).
-//! 2. Descarga lo que falte o haya cambiado, comprobando la huella SHA-256 de cada archivo.
+//! 2. Descarga lo que falte o haya cambiado (comprimido, varios a la vez), comprobando la huella
+//!    SHA-256 de cada archivo. Si algo falla, lo vuelve a intentar hasta tenerlo todo.
 //! 3. Abre `mu-client.exe` con las opciones recibidas.
 //! 4. Al cerrarse el juego, sube su registro (`mu-client.log`) al servidor (`POST /log`).
 //!
-//! Si el servidor no responde, abre la versión que ya hay. Si se actualiza a sí mismo,
-//! se vuelve a abrir con la versión nueva.
+//! El juego solo se abre con todos los archivos. Si el servidor no responde, se abre la versión
+//! que ya hay solo si la última actualización terminó entera. Si se actualiza a sí mismo, se
+//! vuelve a abrir con la versión nueva (antes de descargar lo demás).
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
-use mu_launcher::{DEFAULT_PORT, Entry, encode_path, excluded, hash_file, hex, is_safe_path, parse_manifest, to_local};
+use mu_launcher::{
+    DEFAULT_PORT, Entry, encode_path, excluded, hash_file, hex, is_safe_path, parse_manifest, parse_manifest2,
+    to_local,
+};
 use sha2::{Digest, Sha256};
 
 const CONFIG_FILE: &str = "mu-launcher.txt";
 const STATE_FILE: &str = ".mu-launcher-state";
+/// Línea del estado que dice que la última actualización terminó entera.
+const COMPLETE_MARK: &str = "#completo";
 const CLIENT_EXE: &str = "mu-client.exe";
 /// Lo que el juego saca por consola (el registro propio del juego es `mu-client.log`).
 const CONSOLE_LOG: &str = "mu-client-consola.log";
+/// Descargas a la vez.
+const WORKERS: usize = 6;
+/// Intentos por archivo en cada vuelta (luego se vuelve a pedir la lista).
+const ATTEMPTS: u32 = 4;
+/// Espera antes de volver a intentar la actualización entera.
+const RETRY_WAIT: Duration = Duration::from_secs(5);
 
-type Res<T> = Result<T, Box<dyn std::error::Error>>;
+type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
 fn main() {
     let dir = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.to_path_buf())).unwrap_or_default();
@@ -36,17 +51,38 @@ fn main() {
     println!("MU Rust - lanzador {}", env!("CARGO_PKG_VERSION"));
     let url = server_url(&dir);
     match url.clone() {
-        Some(url) => match update(&dir, &url) {
-            Ok(Updated { files: 0, .. }) => println!("El cliente está al día."),
-            Ok(Updated { files, relaunch }) => {
-                println!("Actualizados {files} archivos.");
-                if relaunch {
+        Some(url) => loop {
+            match update(&dir, &url) {
+                Ok(Updated { files: 0, .. }) => {
+                    println!("El cliente está al día.");
+                    break;
+                }
+                Ok(Updated { files, relaunch: false }) => {
+                    println!("Actualizados {files} archivos. El cliente está completo.");
+                    break;
+                }
+                Ok(Updated { relaunch: true, .. }) => {
                     println!("El lanzador se actualizó; abriendo la versión nueva...");
-                    let _ = Command::new(dir.join(self_name())).args(&game_args).spawn();
-                    return;
+                    let code = Command::new(dir.join(self_name()))
+                        .args(&game_args)
+                        .status()
+                        .map_or(1, |s| s.code().unwrap_or(1));
+                    std::process::exit(code);
+                }
+                Err(Failure::Offline(e)) if load_complete(&dir) => {
+                    println!("\nNo se pudo conectar con el servidor de actualizaciones ({e}).");
+                    println!("Se abre la versión que tienes (la última actualización terminó entera).");
+                    break;
+                }
+                Err(Failure::Offline(e) | Failure::Download(e)) => {
+                    println!("\nNo se pudo terminar la actualización: {e}");
+                    println!(
+                        "El juego no se abre hasta tener todos los archivos. Se reintenta en {} s (cierra la ventana para salir).",
+                        RETRY_WAIT.as_secs()
+                    );
+                    std::thread::sleep(RETRY_WAIT);
                 }
             }
-            Err(e) => println!("No se pudo actualizar ({e}). Se abre la versión que tienes."),
         },
         None => println!("Sin servidor en {CONFIG_FILE}; no se buscan actualizaciones."),
     }
@@ -106,18 +142,41 @@ struct Updated {
     relaunch: bool,
 }
 
-/// Lo que se sabe de cada archivo local: (tamaño, fecha) → huella. Evita recalcular 700 MB cada vez.
+enum Failure {
+    /// No se pudo pedir la lista.
+    Offline(String),
+    /// Faltan archivos por bajar.
+    Download(String),
+}
+
+/// Lo que se sabe de cada archivo local: (tamaño, fecha) → huella. Evita recalcular 1 GB cada vez.
 type State = HashMap<String, (u64, u128, String)>;
 
-fn update(dir: &Path, url: &str) -> Res<Updated> {
+/// La lista del servidor: con tamaños comprimidos si el servidor los da, si no la de siempre.
+fn fetch_manifest(agent: &ureq::Agent, url: &str) -> Result<Vec<Entry>, String> {
+    // Ok(None): el servidor es viejo y no tiene `/manifest2`.
+    let get = |path: &str| -> Result<Option<String>, String> {
+        match agent.get(&format!("{url}{path}")).call() {
+            Ok(r) => r.into_string().map(Some).map_err(|e| e.to_string()),
+            Err(ureq::Error::Status(404, _)) => Ok(None),
+            Err(e) => Err(e.to_string()),
+        }
+    };
+    let invalid = || "lista del servidor no válida".to_string();
+    match get("/manifest2")? {
+        Some(text) => parse_manifest2(&text).ok_or_else(invalid),
+        None => parse_manifest(&get("/manifest")?.ok_or_else(invalid)?).ok_or_else(invalid),
+    }
+}
+
+fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(5))
         .timeout_read(Duration::from_secs(30))
         .build();
     print!("Buscando actualizaciones en {url}... ");
-    io::stdout().flush()?;
-    let text = agent.get(&format!("{url}/manifest")).call()?.into_string()?;
-    let manifest = parse_manifest(&text).ok_or("lista del servidor no válida")?;
+    let _ = io::stdout().flush();
+    let manifest = fetch_manifest(&agent, url).map_err(Failure::Offline)?;
     println!("{} archivos en el servidor.", manifest.len());
 
     let mut state = load_state(dir);
@@ -135,7 +194,7 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
             let _ = std::fs::remove_file(to_local(dir, p));
             state.remove(p);
         }
-        save_state(dir, &state);
+        save_state(dir, &state, false);
     }
     let mut pending: Vec<&Entry> = vec![];
     let mut checked = 0usize;
@@ -143,7 +202,7 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
         // Mostrar avance mientras se comprueban archivos que aún no conocemos (la primera vez, todos).
         if checked > 0 && (i % 250 == 0 || i + 1 == manifest.len()) {
             print!("\r  Comprobando archivos  {}  {}/{}", bar(i as u64 + 1, manifest.len() as u64), i + 1, manifest.len());
-            io::stdout().flush()?;
+            let _ = io::stdout().flush();
         }
         let local = to_local(dir, &e.path);
         let current = match std::fs::metadata(&local) {
@@ -153,7 +212,7 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
                     Some((size, s, sha)) if *size == m.len() && *s == stamp => Some(sha.clone()),
                     _ => {
                         checked += 1;
-                        let sha = hash_file(&local)?;
+                        let sha = hash_file(&local).map_err(|e| Failure::Download(e.to_string()))?;
                         state.insert(e.path.clone(), (m.len(), stamp, sha.clone()));
                         Some(sha)
                     }
@@ -165,85 +224,213 @@ fn update(dir: &Path, url: &str) -> Res<Updated> {
             pending.push(e);
         }
     }
-
     if checked > 0 {
         println!(" listo.");
-        // Guardar ya: si se corta la descarga, no hay que volver a comprobarlo todo.
-        save_state(dir, &state);
     }
-    let total: u64 = pending.iter().map(|e| e.size).sum();
-    if !pending.is_empty() {
-        println!("Hay que descargar {} archivos nuevos o cambiados ({:.1} MB):", pending.len(), total as f64 / 1e6);
-        for e in pending.iter().take(10) {
-            println!("  - {}", e.path);
-        }
-        if pending.len() > 10 {
-            println!("  ... y {} más", pending.len() - 10);
-        }
+    if pending.is_empty() {
+        save_state(dir, &state, true);
+        return Ok(Updated { files: 0, relaunch: false });
     }
+    // Desde aquí, hasta que no termine, el cliente no está completo.
+    save_state(dir, &state, false);
+
+    // Si hay lanzador nuevo, primero ese: el nuevo baja lo demás (quizá de otra manera).
     let me = self_name();
-    let mut relaunch = false;
-    let mut done = 0u64;
-    for e in &pending {
-        let local = to_local(dir, &e.path);
-        download(&agent, url, e, &local, &mut done, total)?;
-        if e.path.eq_ignore_ascii_case(&me) {
-            // Windows no deja sobrescribir un .exe abierto, pero sí renombrarlo.
-            std::fs::rename(&local, local.with_extension("exe.old"))?;
-            relaunch = true;
-        }
-        std::fs::rename(local.with_extension(part_ext(&local)), &local)?;
-        let m = std::fs::metadata(&local)?;
-        state.insert(e.path.clone(), (m.len(), stamp(&m), e.sha256.clone()));
-        save_state(dir, &state);
+    if let Some(e) = pending.iter().find(|e| e.path.eq_ignore_ascii_case(&me)) {
+        println!("Hay un lanzador nuevo; se descarga primero.");
+        let done = download_all(dir, url, &agent, &[e], &mut state, &me)?;
+        return Ok(Updated { files: done, relaunch: true });
     }
-    if !pending.is_empty() {
-        println!();
+
+    let wire: u64 = pending.iter().map(|e| wire_size(e)).sum();
+    let total: u64 = pending.iter().map(|e| e.size).sum();
+    println!(
+        "Hay que descargar {} archivos nuevos o cambiados ({:.1} MB, {:.1} MB comprimidos):",
+        pending.len(),
+        total as f64 / 1e6,
+        wire as f64 / 1e6
+    );
+    for e in pending.iter().take(10) {
+        println!("  - {}", e.path);
     }
-    save_state(dir, &state);
-    Ok(Updated { files: pending.len(), relaunch })
+    if pending.len() > 10 {
+        println!("  ... y {} más", pending.len() - 10);
+    }
+    let files = download_all(dir, url, &agent, &pending, &mut state, &me)?;
+    save_state(dir, &state, true);
+    Ok(Updated { files, relaunch: false })
 }
 
-/// Descarga a `<archivo>.part` comprobando tamaño y huella; el que llama lo renombra.
-fn download(agent: &ureq::Agent, url: &str, e: &Entry, local: &Path, done: &mut u64, total: u64) -> Res<()> {
-    if let Some(parent) = local.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let part = local.with_extension(part_ext(local));
-    let mut reader = agent.get(&format!("{url}/file/{}", encode_path(&e.path))).call()?.into_reader();
-    let mut out = io::BufWriter::new(std::fs::File::create(&part)?);
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 1 << 16];
-    let mut got = 0u64;
-    let mut last_shown = 0u64;
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
+/// Lo que viaja por la red de un archivo.
+fn wire_size(e: &Entry) -> u64 {
+    if e.packed > 0 { e.packed } else { e.size }
+}
+
+/// Descarga `pending` con varias conexiones a la vez. Cada archivo se intenta varias veces; si
+/// alguno no llega, devuelve error (y el que llama vuelve a pedir la lista y lo intenta otra vez).
+fn download_all(
+    dir: &Path,
+    url: &str,
+    agent: &ureq::Agent,
+    pending: &[&Entry],
+    state: &mut State,
+    me: &str,
+) -> Result<usize, Failure> {
+    let total: u64 = pending.iter().map(|e| wire_size(e)).sum();
+    let wire = AtomicU64::new(0);
+    let next = AtomicUsize::new(0);
+    let finished = AtomicUsize::new(0);
+    let shared = Mutex::new(std::mem::take(state));
+    let errors: Mutex<Vec<String>> = Mutex::new(vec![]);
+    let current: Mutex<String> = Mutex::new(String::new());
+    let started = Instant::now();
+
+    std::thread::scope(|s| {
+        for _ in 0..WORKERS.min(pending.len()) {
+            s.spawn(|| {
+                while let Some(e) = pending.get(next.fetch_add(1, Ordering::SeqCst)) {
+                    *current.lock().unwrap() = e.path.clone();
+                    let local = to_local(dir, &e.path);
+                    let mut result = Err("sin intentos".to_string());
+                    for attempt in 0..ATTEMPTS {
+                        if attempt > 0 {
+                            std::thread::sleep(Duration::from_secs(1 << attempt));
+                        }
+                        result = download(agent, url, e, &local, &wire).and_then(|()| install(e, &local, me));
+                        if result.is_ok() {
+                            break;
+                        }
+                    }
+                    match result {
+                        Ok(()) => {
+                            if let Ok(m) = std::fs::metadata(&local) {
+                                shared.lock().unwrap().insert(e.path.clone(), (m.len(), stamp(&m), e.sha256.clone()));
+                            }
+                        }
+                        Err(err) => errors.lock().unwrap().push(format!("{}: {err}", e.path)),
+                    }
+                    finished.fetch_add(1, Ordering::SeqCst);
+                }
+            });
         }
-        out.write_all(&buf[..n])?;
-        h.update(&buf[..n]);
-        got += n as u64;
-        *done += n as u64;
-        if *done - last_shown > 1 << 20 || got == e.size {
-            last_shown = *done;
+        // Avance, y guardar el estado de vez en cuando por si se corta.
+        let mut last_save = Instant::now();
+        loop {
+            let n = finished.load(Ordering::SeqCst);
+            let got = wire.load(Ordering::SeqCst);
+            let secs = started.elapsed().as_secs_f64().max(0.1);
             print!(
-                "\r  Descargando  {}  {:.1}/{:.1} MB  {:<40}",
-                bar(*done, total),
-                *done as f64 / 1e6,
+                "\r  Descargando  {}  {:.1}/{:.1} MB  {:.1} MB/s  {}/{}  {:<40}",
+                bar(got, total),
+                got as f64 / 1e6,
                 total as f64 / 1e6,
-                short(&e.path)
+                got as f64 / 1e6 / secs,
+                n,
+                pending.len(),
+                short(&current.lock().unwrap())
             );
-            io::stdout().flush()?;
+            let _ = io::stdout().flush();
+            if n >= pending.len() {
+                break;
+            }
+            if last_save.elapsed() > Duration::from_secs(3) {
+                save_state(dir, &shared.lock().unwrap(), false);
+                last_save = Instant::now();
+            }
+            std::thread::sleep(Duration::from_millis(200));
         }
+    });
+    println!();
+    *state = shared.into_inner().unwrap();
+    save_state(dir, state, false);
+    let errors = errors.into_inner().unwrap();
+    if errors.is_empty() {
+        Ok(pending.len())
+    } else {
+        for e in errors.iter().take(5) {
+            println!("  falló {e}");
+        }
+        Err(Failure::Download(format!("faltan {} de {} archivos", errors.len(), pending.len())))
     }
-    out.flush()?;
-    drop(out);
-    if got != e.size || hex(&h.finalize()) != e.sha256 {
-        let _ = std::fs::remove_file(&part);
-        return Err(format!("{} llegó mal (¿se está publicando una versión nueva?)", e.path).into());
+}
+
+/// Cuenta lo que llega por la red (para el avance); si la descarga falla, lo descuenta.
+struct Counting<'a, R> {
+    inner: R,
+    wire: &'a AtomicU64,
+    got: u64,
+}
+
+impl<R: Read> Read for Counting<'_, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        self.got += n as u64;
+        self.wire.fetch_add(n as u64, Ordering::Relaxed);
+        Ok(n)
     }
-    Ok(())
+}
+
+impl<R> Drop for Counting<'_, R> {
+    fn drop(&mut self) {
+        // El avance cuenta lo que se ha bajado bien: lo de un intento fallido se quita, y el
+        // archivo bueno cuenta lo que dice la lista (ni más ni menos).
+        self.wire.fetch_sub(self.got, Ordering::Relaxed);
+    }
+}
+
+/// Descarga a `<archivo>.part` (descomprimiendo si viene comprimido) y comprueba tamaño y huella.
+fn download(agent: &ureq::Agent, url: &str, e: &Entry, local: &Path, wire: &AtomicU64) -> Result<(), String> {
+    let run = || -> Res<()> {
+        if let Some(parent) = local.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let part = local.with_extension(part_ext(local));
+        let path = if e.packed > 0 { format!("/z/{}", e.sha256) } else { format!("/file/{}", encode_path(&e.path)) };
+        let body = agent.get(&format!("{url}{path}")).call()?.into_reader();
+        let counting = Counting { inner: body, wire, got: 0 };
+        let mut reader: Box<dyn Read + '_> =
+            if e.packed > 0 { Box::new(zstd::stream::read::Decoder::new(counting)?) } else { Box::new(counting) };
+        let mut out = io::BufWriter::new(std::fs::File::create(&part)?);
+        let mut h = Sha256::new();
+        let mut buf = vec![0u8; 1 << 16];
+        let mut got = 0u64;
+        loop {
+            let n = reader.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            got += n as u64;
+            if got > e.size {
+                break;
+            }
+            out.write_all(&buf[..n])?;
+            h.update(&buf[..n]);
+        }
+        drop(reader);
+        out.flush()?;
+        drop(out);
+        if got != e.size || hex(&h.finalize()) != e.sha256 {
+            let _ = std::fs::remove_file(&part);
+            return Err("llegó mal (¿se está publicando una versión nueva?)".into());
+        }
+        wire.fetch_add(wire_size(e), Ordering::Relaxed);
+        Ok(())
+    };
+    run().map_err(|e| e.to_string())
+}
+
+/// Pone en su sitio el `.part` ya comprobado.
+fn install(e: &Entry, local: &Path, me: &str) -> Result<(), String> {
+    let run = || -> io::Result<()> {
+        if e.path.eq_ignore_ascii_case(me) && local.exists() {
+            // Windows no deja sobrescribir un .exe abierto, pero sí renombrarlo.
+            let old = local.with_extension("exe.old");
+            let _ = std::fs::remove_file(&old);
+            std::fs::rename(local, old)?;
+        }
+        std::fs::rename(local.with_extension(part_ext(local)), local)
+    };
+    run().map_err(|e| e.to_string())
 }
 
 fn part_ext(p: &Path) -> String {
@@ -292,9 +479,14 @@ fn load_state(dir: &Path) -> State {
         .collect()
 }
 
-fn save_state(dir: &Path, state: &State) {
-    let text: String =
-        state.iter().map(|(p, (size, stamp, sha))| format!("{sha}\t{size}\t{stamp}\t{p}\n")).collect();
+/// ¿Terminó entera la última actualización?
+fn load_complete(dir: &Path) -> bool {
+    std::fs::read_to_string(dir.join(STATE_FILE)).is_ok_and(|t| t.lines().next() == Some(COMPLETE_MARK))
+}
+
+fn save_state(dir: &Path, state: &State, complete: bool) {
+    let mut text = if complete { format!("{COMPLETE_MARK}\n") } else { String::new() };
+    text.extend(state.iter().map(|(p, (size, stamp, sha))| format!("{sha}\t{size}\t{stamp}\t{p}\n")));
     let _ = std::fs::write(dir.join(STATE_FILE), text);
 }
 

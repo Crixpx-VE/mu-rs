@@ -17,3 +17,5 @@ sha2 = "0.10"
 # HTTP simple, sin TLS. Las descargas se comprueban con la huella SHA-256 de la lista.
 ureq = { version = "2", default-features = false }
 tiny_http = "0.12"
+# Los archivos se sirven comprimidos (nivel 19, se comprimen una vez al publicarlos).
+zstd = "0.13"
