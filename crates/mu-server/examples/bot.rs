@@ -1,11 +1,13 @@
 //! Cliente de prueba sin gráficos: hace lo mismo que el juego contra el servidor.
 //!
 //!   cargo run -p mu-server --example bot -- <cuenta> <contraseña> <personaje> [connect=127.0.0.1:44405] [segundos=3]
-//!                                           [destino de M]
+//!                                           [destino de M] [--decir <texto>] [--susurrar <nombre> <texto>]
+//!                                           [--esperar <segundos antes de hablar>]
 //!
 //! Connect Server → Game Server → login → lista → (crea el personaje si no está) → entra →
 //! camina 3 pasos → (con destino: lo pide como la ventana `M`, espera `MapChanged` y contesta
-//! `ClientReadyAfterMapChange`) → espera mostrando lo que llega (otros jugadores) → sale.
+//! `ClientReadyAfterMapChange`, o el aviso si no puede) → (espera, dice y susurra lo que se le
+//! pida) → espera mostrando lo que llega (otros jugadores, chat, susurros, avisos) → sale.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -74,8 +76,42 @@ fn cs_packet(s: &mut TcpStream, buf: &mut PacketBuffer) -> std::io::Result<conne
     }
 }
 
+/// Lo que llega, en claro para el chat y los avisos.
+fn show(user: &str, m: &ServerMessage) {
+    match m {
+        ServerMessage::ChatMessage { sender, message } => println!("[{user}] CHAT {sender} : {message}"),
+        ServerMessage::WhisperMessage { sender, message } => println!("[{user}] SUSURRO de {sender} : {message}"),
+        ServerMessage::WhisperResult { success } => println!("[{user}] SUSURRO entregado: {success}"),
+        ServerMessage::Notice { kind, text } => println!("[{user}] AVISO ({kind}) {text}"),
+        m => println!("[{user}] llega {m:?}"),
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let a: Vec<String> = std::env::args().skip(1).collect();
+    let mut a: Vec<String> = std::env::args().skip(1).collect();
+    // Opciones con nombre (se quitan de las de posición).
+    let mut say = None;
+    let mut whisper = None;
+    let mut pause = 0.0f32;
+    let mut i = 0;
+    while i < a.len() {
+        match a[i].as_str() {
+            "--decir" if i + 1 < a.len() => {
+                say = Some(a.remove(i + 1));
+                a.remove(i);
+            }
+            "--susurrar" if i + 2 < a.len() => {
+                let text = a.remove(i + 2);
+                whisper = Some((a.remove(i + 1), text));
+                a.remove(i);
+            }
+            "--esperar" if i + 1 < a.len() => {
+                pause = a.remove(i + 1).parse().unwrap_or(0.0);
+                a.remove(i);
+            }
+            _ => i += 1,
+        }
+    }
     let (user, pass, name) = (&a[0], &a[1], &a[2]);
     let cs_addr = a.get(3).map(String::as_str).unwrap_or("127.0.0.1:44405");
     let secs: u64 = a.get(4).and_then(|s| s.parse().ok()).unwrap_or(3);
@@ -142,19 +178,38 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // `GetMoveCommandKey` + `SendRequestMoveMap`.
         key = map_move_key(key);
         c.send(ClientMessage::WarpCommandRequest { key, index })?;
-        let (map, x, y) = c.wait(|m| match m {
-            ServerMessage::MapChanged { map, x, y, .. } => Some((*map, *x, *y)),
+        let changed = c.wait(|m| match m {
+            ServerMessage::MapChanged { map, x, y, .. } => Some(Ok((*map, *x, *y))),
+            ServerMessage::Notice { text, .. } => Some(Err(text.clone())),
             _ => None,
         })?;
-        println!("[{user}] cambia al mapa {map} ({x}, {y})");
-        // `SendRequestFinishLoading` cuando ha cargado.
-        c.send(ClientMessage::ClientReadyAfterMapChange)?;
+        match changed {
+            Ok((map, x, y)) => {
+                println!("[{user}] cambia al mapa {map} ({x}, {y})");
+                // `SendRequestFinishLoading` cuando ha cargado.
+                c.send(ClientMessage::ClientReadyAfterMapChange)?;
+            }
+            Err(text) => println!("[{user}] no puede mover: AVISO {text}"),
+        }
     }
-    let end = Instant::now() + Duration::from_secs(secs);
     c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let mut said = say.is_none() && whisper.is_none();
+    let talk_at = Instant::now() + Duration::from_secs_f32(pause);
+    let end = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < end {
+        if !said && Instant::now() >= talk_at {
+            said = true;
+            if let Some(text) = &say {
+                println!("[{user}] dice: {text}");
+                c.send(ClientMessage::PublicChat { name: name.clone(), message: text.clone() })?;
+            }
+            if let Some((to, text)) = &whisper {
+                println!("[{user}] susurra a {to}: {text}");
+                c.send(ClientMessage::Whisper { target: to.clone(), message: text.clone() })?;
+            }
+        }
         match c.recv() {
-            Ok(Some(m)) => println!("[{user}] llega {m:?}"),
+            Ok(Some(m)) => show(user, &m),
             Ok(None) => {}
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
             Err(e) => return Err(e.into()),

@@ -13,6 +13,14 @@
 //!    desaparece para los del mapa viejo y le llega `MapChanged`; cuando el cliente ha cargado
 //!    (`ClientReadyAfterMapChange`) se ven él y los del mapa nuevo.
 //! 7. Salir (o cortarse): se guarda dónde estaba y desaparece para los demás.
+//! 8. Chat (`PublicChatMessage`): le llega a todos los que lo ven, él incluido, con su nombre (no
+//!    el que diga el paquete), como `ChatMessageNormalProcessor` de OpenMU. Los canales de grupo
+//!    (`~`), gremio (`@`, `@@`) y Gens (`$`) no van a nadie porque aún no hay grupos, gremios ni
+//!    Gens. Lo que empieza por `/` es un comando: solo `/move <mapa>` (como la ventana `M`).
+//! 9. Susurro (`WhisperMessage`): al personaje conectado con ese nombre exacto (`strcmp`); si no
+//!    hay, `WhisperResult` con 0 (el cliente enseña "No users").
+//! 10. Si no puede mover de mapa, se lo dice con un aviso azul (`ServerMessage` tipo 1) con los
+//!    textos de OpenMU (`WarpAction.cs`); el de Icarus es `GlobalText[263]` del cliente.
 //!
 //! De momento "ver" es estar en el mismo mapa (sin radio de visión).
 
@@ -61,7 +69,8 @@ impl InWorld {
             target_x: self.x,
             target_y: self.y,
             rotation: self.rotation,
-            hero_state: 0,
+            // `CharacterHeroState::Normal` (3): sin PK (con 0 el cliente lo pinta como un NPC).
+            hero_state: 3,
         }
     }
 }
@@ -281,6 +290,8 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::WarpCommandRequest { key, index } => warp(s, shared, key, index),
         ClientMessage::ClientReadyAfterMapChange => map_ready(s, shared),
         ClientMessage::Ping { .. } => {}
+        ClientMessage::PublicChat { message, .. } => chat(s, shared, &message),
+        ClientMessage::Whisper { target, message } => whisper(s, shared, &target, &message),
     }
     true
 }
@@ -327,6 +338,8 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
         max_ability: max.ability,
         money: c.money,
         leadership: c.stats.leadership,
+        // `CharacterHeroState::Normal`.
+        hero_state: 3,
         ..Default::default()
     }));
     // La clave para mover de mapa (`GCSendMapMoveChecksum` / `GenerateSeedValue`).
@@ -363,9 +376,7 @@ fn show_each_other(w: &World, id: u16, me: &InWorld) {
     }
 }
 
-/// `WarpCommandRequest` (la ventana `M`): clave, destino, nivel y zen; luego paga, deja el mapa
-/// viejo y le dice al cliente a dónde va (`MapChanged`). Sin respuesta si no se puede (el
-/// original avisa en el chat).
+/// `WarpCommandRequest` (la ventana `M`): primero la clave y luego [`warp_to`].
 fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
     if !s.in_world {
         return;
@@ -377,6 +388,31 @@ fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
         return;
     }
     s.move_key = expected;
+    warp_to(s, shared, index);
+}
+
+/// Un aviso azul en el chat del jugador (`ShowBlueMessageAsync` de OpenMU).
+fn blue_notice(s: &Session, text: impl Into<String>) {
+    s.send(ServerMessage::Notice { kind: game::notice_kind::BLUE, text: text.into() });
+}
+
+/// Por qué no puede ir, como se lo dice al jugador; `None` = no se le dice nada (un destino o una
+/// puerta que no existen son cosa del cliente o de los datos, no del jugador).
+fn refused_message(why: Refused) -> Option<String> {
+    match why {
+        // `WarpAction.CheckRequirements` de OpenMU.
+        Refused::Level { needed } => Some(format!("You need to be level {needed} in order to warp")),
+        Refused::Money { needed } => Some(format!("You need {needed} in order to warp")),
+        // `GlobalText[263]`: lo que dice el cliente original si se intenta sin alas (ZzzInterface.cpp:9301-9305).
+        Refused::NeedsWings => Some("You can enter Icarus only with wings, dinorant, fenrirr".to_string()),
+        Refused::UnknownWarp | Refused::BadGate => None,
+    }
+}
+
+/// Mover al destino `index` de la lista (ventana `M` o `/move`): destino, nivel y zen; luego
+/// paga, deja el mapa viejo y le dice al cliente a dónde va (`MapChanged`). Si no se puede, se lo
+/// dice en el chat (ver [`refused_message`]).
+fn warp_to(s: &Session, shared: &Shared, index: u16) {
     let Some(account) = s.account.clone() else { return };
     let mut w = shared.world.lock().unwrap();
     let Some(me) = w.players.get(&s.id) else { return };
@@ -388,14 +424,17 @@ fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
     let (landing, cost) = match shared.warps.check(index, c.class, c.level, c.money) {
         Ok(ok) => ok,
         Err(why) => {
-            let why = match why {
+            let log = match why {
                 Refused::UnknownWarp => "no existe".to_string(),
                 Refused::Level { needed } => format!("necesita nivel {needed}"),
                 Refused::Money { needed } => format!("necesita {needed} de zen (tiene {})", c.money),
                 Refused::NeedsWings => "Icarus pide alas".to_string(),
                 Refused::BadGate => "puerta inexistente".to_string(),
             };
-            eprintln!("[game] {}: {name} no puede ir al destino {index}: {why}", s.id);
+            eprintln!("[game] {}: {name} no puede ir al destino {index}: {log}", s.id);
+            if let Some(text) = refused_message(why) {
+                blue_notice(s, text);
+            }
             return;
         }
     };
@@ -425,6 +464,90 @@ fn map_ready(s: &Session, shared: &Shared) {
     me.ready = true;
     let Some(me) = w.players.get(&s.id) else { return };
     show_each_other(&w, s.id, me);
+}
+
+/// Canal de un mensaje de chat por su prefijo (`ChatMessageAction.GetMessageType` de OpenMU; el
+/// cliente los pone en NewUIChatInputBox.cpp:478-490 y los quita en `ReceiveChat`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Channel {
+    Normal,
+    Party,
+    Guild,
+    Alliance,
+    Gens,
+    Command,
+}
+
+fn channel(message: &str) -> Channel {
+    if message.starts_with("@@") {
+        Channel::Alliance
+    } else if message.starts_with('@') {
+        Channel::Guild
+    } else if message.starts_with('~') {
+        Channel::Party
+    } else if message.starts_with('$') {
+        Channel::Gens
+    } else if message.starts_with('/') {
+        Channel::Command
+    } else {
+        Channel::Normal
+    }
+}
+
+/// `PublicChatMessage`: a todos los del mapa que están en él (él también, así se ve lo que dice).
+fn chat(s: &Session, shared: &Shared, message: &str) {
+    if !s.in_world {
+        return;
+    }
+    let ch = channel(message);
+    if ch == Channel::Command {
+        command(s, shared, message);
+        return;
+    }
+    let w = shared.world.lock().unwrap();
+    let Some(me) = w.players.get(&s.id).filter(|p| p.ready) else { return };
+    if ch != Channel::Normal {
+        eprintln!("[game] {}: {} habla por el canal {ch:?}, que aún no existe: no le llega a nadie", s.id, me.name);
+        return;
+    }
+    eprintln!("[game] {}: {} dice: {message}", s.id, me.name);
+    let packet = ServerMessage::ChatMessage { sender: me.name.clone(), message: message.to_string() }.encode();
+    for p in w.players.values().filter(|p| p.ready && p.map == me.map) {
+        let _ = p.out.send(packet.clone());
+    }
+}
+
+/// Comandos del chat. Solo `/move <mapa>` (el nombre o el subnombre de la lista de la ventana `M`,
+/// sin mirar mayúsculas, como `GetMapIndexFromMovereq`), con las mismas reglas que la ventana; el
+/// resto se ignora.
+fn command(s: &Session, shared: &Shared, message: &str) {
+    let mut words = message.splitn(2, ' ');
+    let name = words.next().unwrap_or("");
+    let rest = words.next().unwrap_or("").trim();
+    if !name.eq_ignore_ascii_case("/move") {
+        eprintln!("[game] {}: comando desconocido {name:?}", s.id);
+        return;
+    }
+    match shared.warps.find_by_name(rest) {
+        Some(m) => warp_to(s, shared, m.index as u16),
+        None => eprintln!("[game] {}: /move a un mapa que no está en la lista: {rest:?}", s.id),
+    }
+}
+
+/// `WhisperMessage`: al personaje conectado con ese nombre; si no hay, `WhisperResult` 0.
+fn whisper(s: &Session, shared: &Shared, target: &str, message: &str) {
+    if !s.in_world {
+        return;
+    }
+    let w = shared.world.lock().unwrap();
+    let Some(me) = w.players.get(&s.id) else { return };
+    match w.players.values().find(|p| p.name == target) {
+        Some(p) => {
+            eprintln!("[game] {}: {} susurra a {target}: {message}", s.id, me.name);
+            let _ = p.out.send(ServerMessage::WhisperMessage { sender: me.name.clone(), message: message.to_string() }.encode());
+        }
+        None => s.send(ServerMessage::WhisperResult { success: false }),
+    }
 }
 
 fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, directions: Vec<u8>) {
@@ -471,5 +594,29 @@ fn leave(s: &mut Session, shared: &Shared, disconnect: bool) {
         if let Some(a) = s.account.take() {
             w.online.remove(&a);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canales_del_chat() {
+        assert_eq!(channel("hola"), Channel::Normal);
+        assert_eq!(channel("~al grupo"), Channel::Party);
+        assert_eq!(channel("@al gremio"), Channel::Guild);
+        assert_eq!(channel("@@a la alianza"), Channel::Alliance);
+        assert_eq!(channel("$a los Gens"), Channel::Gens);
+        assert_eq!(channel("/move Noria"), Channel::Command);
+        assert_eq!(channel(""), Channel::Normal);
+    }
+
+    #[test]
+    fn avisos_al_no_poder_mover() {
+        assert_eq!(refused_message(Refused::Level { needed: 10 }).as_deref(), Some("You need to be level 10 in order to warp"));
+        assert_eq!(refused_message(Refused::Money { needed: 2000 }).as_deref(), Some("You need 2000 in order to warp"));
+        assert!(refused_message(Refused::NeedsWings).is_some_and(|t| t.contains("Icarus")));
+        assert_eq!(refused_message(Refused::UnknownWarp), None);
     }
 }

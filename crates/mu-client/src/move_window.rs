@@ -290,9 +290,10 @@ struct Row {
     selected: bool,
 }
 
-/// La lista de los datos (`CMoveCommandData::GetMoveCommandDatalist`).
+/// La lista de los datos (`CMoveCommandData::GetMoveCommandDatalist`); el chat la mira para
+/// `/warp` y `/move` (chat.rs).
 #[derive(Resource, Default)]
-struct MoveList(Vec<MoveReq>);
+pub(crate) struct MoveList(pub Vec<MoveReq>);
 
 /// `INTERFACE_MOVEMAP` y lo que guarda `CNewUIMoveCommandWindow`.
 #[derive(Resource, Default)]
@@ -335,6 +336,14 @@ impl MoveWindow {
     fn next_key(&mut self) -> u32 {
         self.key = mu_protocol::game::map_move_key(self.key);
         self.key
+    }
+
+    /// `/warp <mapa>` del chat: `SendRequestMoveMap(GetMoveCommandKey(), índice)` sin la ventana
+    /// (NewUIChatInputBox.cpp:518-529). La respuesta llega como la de la ventana.
+    pub fn request_warp(&mut self, net: &mut crate::net::Net, index: u16) {
+        let key = self.next_key();
+        info!("/warp: índice {index}");
+        net.send(ClientMessage::WarpCommandRequest { key, index });
     }
 }
 

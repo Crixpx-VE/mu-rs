@@ -28,6 +28,8 @@ mod boids;
 mod camera;
 mod character;
 mod charselect;
+mod chat;
+mod chat_log;
 mod cursor;
 mod effects;
 mod fish;
@@ -45,6 +47,7 @@ mod minimap;
 mod net;
 mod model_light;
 mod move_window;
+mod names;
 mod objects;
 mod operate;
 mod options;
@@ -90,6 +93,8 @@ pub struct Args {
     pub hold_title: bool,
     /// `--fps`: contador de fotogramas arriba a la izquierda.
     pub show_fps: bool,
+    /// `--salir-tras <s>`: se cierra solo a los `s` segundos (para medir: la traza se escribe entera).
+    pub quit_after: Option<f32>,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -129,6 +134,7 @@ impl Args {
             direct: false,
             hold_title: false,
             show_fps: false,
+            quit_after: None,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -150,6 +156,7 @@ impl Args {
                 "--probar-habilidades" => args.skill_test = true,
                 "--ver-titulo" => args.hold_title = true,
                 "--fps" => args.show_fps = true,
+                "--salir-tras" => args.quit_after = it.next().and_then(|v| v.parse().ok()),
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
                     if args.resolution.is_none() {
@@ -242,10 +249,17 @@ fn main() {
             camera::FlyCameraPlugin,
         ))
         .add_plugins(fonts::FontsPlugin)
+        .add_systems(Update, |args: Res<Args>, time: Res<Time<Real>>, mut exit: MessageWriter<AppExit>| {
+            if args.quit_after.is_some_and(|s| time.elapsed_secs() >= s) {
+                exit.write(AppExit::Success);
+            }
+        })
         .add_plugins(overlay::OverlayPlugin)
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
         .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin, water_terrain::WaterTerrainPlugin))
         .add_plugins(minimap::MiniMapPlugin)
         .add_plugins(move_window::MoveWindowPlugin)
+        .add_plugins(names::NamesPlugin)
+        .add_plugins(chat::ChatPlugin)
         .run();
 }

@@ -58,6 +58,13 @@ pub struct RemotePlayer {
     light: Vec3,
 }
 
+impl RemotePlayer {
+    /// Animación y fotograma de ahora (para posar otra vez sus piezas, p. ej. el resaltado).
+    pub fn pose_state(&self) -> (usize, f32) {
+        (self.action, self.frame)
+    }
+}
+
 /// Casillas por segundo al caminar (las del jugador).
 const WALK_SPEED: f32 = 3.6;
 
@@ -118,6 +125,7 @@ fn apply(
                         model.skinned,
                         shadow,
                         r,
+                        crate::names::Selectable::player(c.name.clone(), c.hero_state),
                     ));
                     for child in model.children {
                         e.with_child(child);
@@ -217,16 +225,16 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
 }
 
 /// Animación, sombra y la luz del terreno donde está.
-fn animate(
+pub(crate) fn animate(
     time: Res<Time>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
-    mut q: Query<(&mut RemotePlayer, &crate::character::Skinned, &crate::shadow::Shadow)>,
+    mut q: Query<(&mut RemotePlayer, &crate::character::Skinned, &crate::shadow::Shadow, Option<&crate::names::Selectable>)>,
     mut visibility: Query<&mut Visibility, Without<RemotePlayer>>,
 ) {
     let Some(terrain) = terrain else { return };
-    for (mut r, skinned, shadow) in &mut q {
+    for (mut r, skinned, shadow, selectable) in &mut q {
         r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         let ground = terrain.0.height_at(r.pos.x, r.pos.y);
         let mut sh = crate::shadow::Builder::new(
@@ -237,10 +245,11 @@ fn animate(
         );
         skinned.pose(r.action, r.frame, false, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
-        // `BodyLight`: la luz del terreno en su casilla.
+        // `BodyLight`: la luz del terreno en su casilla más `o->Light` (`VectorAdd(Light, o->Light,
+        // c->Light)`, ZzzCharacter.cpp:8909; lo pone `SelectCharacter`, ver `names.rs`).
         let size = mu_data::terrain::SIZE;
         let (x, y) = ((r.pos.x.max(0.0) as usize).min(size - 1), (r.pos.y.max(0.0) as usize).min(size - 1));
-        let light = Vec3::from_array(terrain.0.light[y * size + x]);
+        let light = Vec3::from_array(terrain.0.light[y * size + x]) + selectable.map_or(Vec3::ZERO, |s| s.light);
         if light != r.light {
             r.light = light;
             for h in &r.materials {

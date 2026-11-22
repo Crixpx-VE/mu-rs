@@ -20,6 +20,8 @@ mu-data = { path = "crates/mu-data" }
 bevy = { version = "0.20.1", features = ["wav", "mp3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Anchos de texto con la letra de la interfaz (chat).
+ab_glyph = "0.2.32"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
 # Bevy en debug es muy lento sin optimizar las dependencias.

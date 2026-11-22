@@ -22,6 +22,7 @@ impl Plugin for OperatePlugin {
         app.init_resource::<Operates>().init_resource::<Pointer>().add_systems(
             Update,
             select_operate
+                .after(crate::names::SelectObjects)
                 .before(crate::character::HeroInput)
                 .run_if(in_state(crate::scene::GameScene::Game)),
         );
@@ -179,6 +180,7 @@ fn select_operate(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
+    hovered: Res<crate::names::Hovered>,
     mut operates: ResMut<Operates>,
     mut pointer: ResMut<Pointer>,
     mut materials: ResMut<Assets<ModelMaterial>>,
@@ -186,7 +188,8 @@ fn select_operate(
     pointer.operate = None;
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
     let in_area = crate::mainframe::cursor_virtual(window).is_some_and(|c| c.y < 429.0);
-    if over_ui.0 || !in_area {
+    // Con un personaje bajo el ratón `SelectOperate` no se llama: las luces se quedan como estaban.
+    if over_ui.0 || !in_area || hovered.any() {
         return;
     }
     let Some((origin, dir)) = mouse_ray_mu(window, camera, cam_tf) else { return };
@@ -212,7 +215,7 @@ fn select_operate(
 }
 
 /// `CollisionDetectLineToOBB` con una caja alineada a los ejes (método de las franjas).
-fn ray_hits_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> bool {
+pub(crate) fn ray_hits_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> bool {
     let (mut t0, mut t1) = (0.0f32, f32::INFINITY);
     for a in 0..3 {
         if dir[a].abs() < 1e-8 {

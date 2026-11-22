@@ -101,6 +101,12 @@ impl Warps {
         self.list.iter().find(|m| m.index == index as i32)
     }
 
+    /// El destino con ese nombre o subnombre, sin mirar mayúsculas (`GetMapIndexFromMovereq`,
+    /// NewUIMoveCommandWindow.cpp:953-970, que usa `stricmp`).
+    pub fn find_by_name(&self, name: &str) -> Option<&MoveReq> {
+        self.list.iter().find(|m| m.name.eq_ignore_ascii_case(name) || m.sub_name.eq_ignore_ascii_case(name))
+    }
+
     /// Comprueba si un personaje puede ir a `index` y, si puede, dónde cae y cuánto paga.
     pub fn check(&self, index: u16, class: ClassIndex, level: u16, money: u32) -> Result<(Landing, u32), Refused> {
         let m = self.find(index).ok_or(Refused::UnknownWarp)?;
@@ -181,5 +187,9 @@ mod tests {
         }
         // Noria (3): mapa 3.
         assert_eq!(w.check(3, 1, 10, 2000).unwrap().0.map, 3);
+        // `/move`: por nombre, sin mirar mayúsculas.
+        assert_eq!(w.find_by_name("lorencia").map(|m| m.index), Some(2));
+        assert_eq!(w.find_by_name("NORIA").map(|m| m.index), Some(3));
+        assert!(w.find_by_name("No existe").is_none());
     }
 }

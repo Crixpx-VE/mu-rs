@@ -258,6 +258,16 @@ impl Skinned {
         }
         bones
     }
+
+    /// Los huesos de la pose `action`/`frame` (los mismos que usa [`Skinned::pose`]).
+    pub fn bones_at(&self, action: usize, frame: f32) -> Vec<bmd::Mat34> {
+        self.skeleton.bone_matrices_at(action, frame)
+    }
+
+    /// Las mallas de las piezas del cuerpo, sin el arma: (modelo de la pieza, índice de malla).
+    pub fn body_meshes(&self) -> impl Iterator<Item = (&Bmd, usize)> + '_ {
+        self.parts.iter().map(|(model, mesh, _)| (&self.models[*model], *mesh))
+    }
 }
 
 /// Un personaje cargado: esqueleto y piezas, las mallas (hijas de la entidad del personaje)
@@ -561,24 +571,16 @@ pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<
 #[derive(Component)]
 struct BodyMaterials(Vec<Handle<crate::model_light::ModelMaterial>>);
 
-/// `BodyLight`: la luz del terreno bajo el personaje (`RequestTerrainLight`, interpolada).
+/// `c->Light` del héroe en el juego: `AbilityLight` = (1, 1, 1), sin la luz del terreno
+/// (ZzzCharacter.cpp:8967-8993; las habilidades que la tiñen aún no existen). Los demás
+/// personajes sí llevan la del terreno (remote.rs).
 fn light_body(
-    terrain: Option<Res<LoadedTerrain>>,
-    players: Query<(&Player, &BodyMaterials)>,
+    players: Query<&BodyMaterials, With<Player>>,
     mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
     mut last: Local<Vec4>,
 ) {
-    let Some(t) = terrain else { return };
-    let Ok((p, body)) = players.single() else { return };
-    let size = mu_data::terrain::SIZE;
-    let x = p.pos.x.clamp(0.0, (size - 2) as f32);
-    let y = p.pos.y.clamp(0.0, (size - 2) as f32);
-    let (xi, yi) = (x as usize, y as usize);
-    let (fx, fy) = (x - xi as f32, y - yi as f32);
-    let l = |x: usize, y: usize| Vec3::from_array(t.0.light[y * size + x]);
-    let top = l(xi, yi).lerp(l(xi + 1, yi), fx);
-    let bottom = l(xi, yi + 1).lerp(l(xi + 1, yi + 1), fx);
-    let light = top.lerp(bottom, fy).extend(1.0);
+    let Ok(body) = players.single() else { return };
+    let light = Vec4::ONE;
     if light == *last {
         return;
     }

@@ -42,7 +42,28 @@
 //! servidor → cliente  MapChanged                   C3 0F 1C 0F <cambio de mapa> <mapa u16 BE> <x> <y>
 //!                                                              <rotación> 00 00 00 00 00
 //! servidor → cliente  InventoryMoneyUpdate         C3 08 22 FE <zen u32 BE>
+//! cliente  → servidor PublicChatMessage            C1 len 00 <nombre 10> <texto, UTF-8 con su 00, como mucho 90>
+//! cliente  → servidor WhisperMessage               C1 len 02 <destinatario 10> <texto, UTF-8 con su 00, como mucho 90>
+//! servidor → cliente  ChatMessage                  C1 len 00 <quien habla 10> <texto con su 00>
+//! servidor → cliente  WhisperMessage               C1 len 02 <quien susurra 10> <texto con su 00>
+//! servidor → cliente  WhisperResult                C1 04 0C <0 = no está conectado>
+//! servidor → cliente  ServerMessage (aviso)        C1 len 0D <tipo> <veces> 00 <espera u16 LE> <color u32 LE>
+//!                                                              <velocidad> <texto con su 00>
 //! ```
+//!
+//! # Chat
+//!
+//! `SendChat` y `SendChatWhisper` (wsclientinline.h:328-404) mandan `PCHATING` (WSclient.h:503-507):
+//! el nombre en 10 bytes y el texto con su cero, `min(strlen + 1, MAX_CHAT_SIZE)` bytes
+//! (`MAX_CHAT_SIZE` = 90). El cliente lo pasa a UTF-8 antes de mandarlo (NewUIChatInputBox.cpp:537).
+//! El servidor contesta con la misma estructura y código: `ReceiveChat` (0x00) y
+//! `ReceiveChatWhisper` (0x02), WSclient.cpp:1417-1539. El resultado del susurro (0x0C,
+//! `ReceiveChatWhisperResult`, WSclient.cpp:1541) solo se mira si es 0: "no está".
+//!
+//! El aviso del servidor es `PRECEIVE_NOTICE` (WSclient.h:516-524), sin `pack`: `Result` en el 3,
+//! `Count` en el 4, `Delay` (WORD) en el 6, `Color` (DWORD) en el 8, `Speed` en el 12 y el texto en el
+//! 13 para todos los tipos (`ReceiveNotice`, WSclient.cpp:1577). OpenMU lo manda igual para el S6:
+//! `ServerMessage` con el texto en el 4 pero precedido de nueve "0" (ShowMessagePlugIn.cs).
 //!
 //! # Mover de mapa (`M`)
 //!
@@ -94,6 +115,21 @@ pub const MAX_CHARACTER_LIST: usize = 7;
 pub const MAX_OUT_OF_SCOPE_IDS: usize = 125;
 /// Máximo de personajes en un `AddCharactersToScope` (el contador es un byte).
 pub const MAX_SCOPE_CHARACTERS: usize = 255;
+/// `MAX_CHAT_SIZE` (WSclient.h:12): bytes del texto de un mensaje de chat, con su cero.
+pub const MAX_CHAT_SIZE: usize = 90;
+/// Bytes del texto de un aviso del servidor (sin su cero) para que el paquete quepa en un C1
+/// (2 + 11 + 241 + 1 = 255), como `maxMessageLength` de OpenMU (ShowMessagePlugIn.cs).
+pub const MAX_NOTICE_TEXT: usize = 241;
+
+/// `Result` de `PRECEIVE_NOTICE` (`ReceiveNotice`, WSclient.cpp:1577-1610; `MessageType` en OpenMU).
+pub mod notice_kind {
+    /// Centrado y dorado (`CreateNotice(..., 0)`).
+    pub const GOLDEN_CENTER: u8 = 0;
+    /// Mensaje del sistema, en azul.
+    pub const BLUE: u8 = 1;
+    /// Aviso del gremio (`GlobalText[483]`), centrado en verde.
+    pub const GUILD: u8 = 2;
+}
 
 /// Valores de `CharacterDeleteResponse::result` (`CharacterDeleteResult` en OpenMU).
 pub mod delete_result {
@@ -304,6 +340,12 @@ pub enum ClientMessage {
     /// `SendRequestMoveMap(dwBlockKey, wMapIndex)`: `key` es la siguiente de [`map_move_key`] e
     /// `index` el `MOVEREQINFO::index` elegido en la ventana de mover.
     WarpCommandRequest { key: u32, index: u16 },
+    /// `SendChat`: `name` es el del que habla (`Hero->ID`) y `message` el texto, con el prefijo
+    /// del canal si lo lleva (`~` grupo, `@` gremio, `$` Gens). Se cortan los bytes que pasen de
+    /// [`MAX_CHAT_SIZE`] − 1 (sin partir letras).
+    PublicChat { name: String, message: String },
+    /// `SendChatWhisper`: `target` es a quién se susurra.
+    Whisper { target: String, message: String },
 }
 
 /// Un personaje de la lista de la pantalla de selección.
@@ -406,6 +448,17 @@ pub enum ServerMessage {
     MapChanged { is_map_change: bool, map: u16, x: u8, y: u8, rotation: u8 },
     /// Zen del inventario (`ReceiveGetItem` con `Result` = `GET_ITEM_ZEN` = FE, WSclient.cpp:5607).
     InventoryMoneyUpdate { money: u32 },
+    /// Alguien de alrededor ha hablado (`ReceiveChat`); el texto lleva el prefijo del canal.
+    ChatMessage { sender: String, message: String },
+    /// Un susurro para nosotros (`ReceiveChatWhisper`).
+    WhisperMessage { sender: String, message: String },
+    /// Resultado del último susurro (`ReceiveChatWhisperResult`): `false` = no hay nadie con
+    /// ese nombre.
+    WhisperResult { success: bool },
+    /// Aviso del servidor (`ReceiveNotice`); `kind`: ver [`notice_kind`]. Los campos de la banda
+    /// deslizante (`Count`, `Delay`, `Color`, `Speed`, tipos 10-15) van a cero. Como mucho
+    /// [`MAX_NOTICE_TEXT`] bytes de texto.
+    Notice { kind: u8, text: String },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -422,6 +475,34 @@ fn fixed<const N: usize>(s: &str) -> [u8; N] {
 fn unfixed(b: &[u8]) -> String {
     let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
     String::from_utf8_lossy(&b[..end]).into_owned()
+}
+
+/// Los primeros bytes de `s` que caben en `max` sin partir una letra UTF-8.
+pub fn truncate_utf8(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// `<nombre 10> <texto> 00` detrás de `code` (`PCHATING`): el texto como mucho `max − 1` bytes.
+fn chat_packet(code: u8, name: &str, text: &str, max: usize) -> Vec<u8> {
+    let text = truncate_utf8(text, max - 1);
+    let mut body = Vec::with_capacity(1 + 10 + text.len() + 1);
+    body.push(code);
+    body.extend_from_slice(&fixed::<10>(name));
+    body.extend_from_slice(text.as_bytes());
+    body.push(0);
+    c1(&body)
+}
+
+/// Lee `<nombre 10> <texto>` de un `PCHATING` (el texto acaba en su cero o en el final).
+fn read_chat(d: &[u8]) -> Option<(String, String)> {
+    Some((unfixed(d.get(3..13)?), unfixed(d.get(13..).unwrap_or(&[]))))
 }
 
 /// Paquete C1 de tamaño fijo `len` con código y subcódigo; el resto a cero.
@@ -585,6 +666,8 @@ impl ClientMessage {
                 put_u16_le(&mut p, 8, *index);
                 p
             }
+            Self::PublicChat { name, message } => chat_packet(0x00, name, message, MAX_CHAT_SIZE),
+            Self::Whisper { target, message } => chat_packet(0x02, target, message, MAX_CHAT_SIZE),
         }
     }
 
@@ -592,9 +675,20 @@ impl ClientMessage {
         let p = Packet::parse(bytes)?;
         let d = short_header(&p)?;
         // Paquetes sin subcódigo.
-        if p.code() == 0xD4 {
-            let (rotation, directions) = unpack_steps(d, 5)?;
-            return Some(Self::Walk { source_x: *d.get(3)?, source_y: *d.get(4)?, rotation, directions });
+        match p.code() {
+            0xD4 => {
+                let (rotation, directions) = unpack_steps(d, 5)?;
+                return Some(Self::Walk { source_x: *d.get(3)?, source_y: *d.get(4)?, rotation, directions });
+            }
+            0x00 => {
+                let (name, message) = read_chat(d)?;
+                return Some(Self::PublicChat { name, message });
+            }
+            0x02 => {
+                let (target, message) = read_chat(d)?;
+                return Some(Self::Whisper { target, message });
+            }
+            _ => {}
         }
         match (p.code(), p.sub_code()?) {
             (0xF1, 0x01) if d.len() >= 4 + 10 + 20 + 4 + 5 + 16 => {
@@ -857,6 +951,19 @@ impl ServerMessage {
                 p[4..8].copy_from_slice(&money.to_be_bytes());
                 p
             }
+            Self::ChatMessage { sender, message } => chat_packet(0x00, sender, message, MAX_CHAT_SIZE),
+            Self::WhisperMessage { sender, message } => chat_packet(0x02, sender, message, MAX_CHAT_SIZE),
+            Self::WhisperResult { success } => c1(&[0x0C, *success as u8]),
+            Self::Notice { kind, text } => {
+                // `Result`, `Count`, relleno, `Delay`, `Color` y `Speed` (bytes 3..13) y el texto.
+                let text = truncate_utf8(text, MAX_NOTICE_TEXT);
+                let mut body = vec![0u8; 11];
+                body[0] = 0x0D;
+                body[1] = *kind;
+                body.extend_from_slice(text.as_bytes());
+                body.push(0);
+                c1(&body)
+            }
         }
     }
 
@@ -892,6 +999,20 @@ impl ServerMessage {
                     rotation,
                     directions,
                 });
+            }
+            0x00 => {
+                let (sender, message) = read_chat(short_header(&p)?)?;
+                return Some(Self::ChatMessage { sender, message });
+            }
+            0x02 => {
+                let (sender, message) = read_chat(short_header(&p)?)?;
+                return Some(Self::WhisperMessage { sender, message });
+            }
+            // `PHEADER_DEFAULT::Value`.
+            0x0C => return Some(Self::WhisperResult { success: *short_header(&p)?.get(3)? != 0 }),
+            0x0D => {
+                let d = short_header(&p)?;
+                return Some(Self::Notice { kind: *d.get(3)?, text: unfixed(d.get(13..).unwrap_or(&[])) });
             }
             _ => {}
         }
@@ -1283,6 +1404,71 @@ mod tests {
         }
         let w = ClientMessage::WarpCommandRequest { key: 9, index: 42 };
         assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&w.encode())).unwrap()), Some(w));
+    }
+
+    #[test]
+    fn chat_y_susurros() {
+        let hablar = ida_y_vuelta_cliente(ClientMessage::PublicChat { name: "Guerrero".into(), message: "hola".into() });
+        // `spe.Init(0xC1, 0x00)`, `Hero->ID` en 10 bytes y el texto con su cero.
+        assert_eq!(hablar.len(), 3 + 10 + 5);
+        assert_eq!(&hablar[..3], &[0xC1, 18, 0x00]);
+        assert_eq!(&hablar[3..13], b"Guerrero\0\0");
+        assert_eq!(&hablar[13..], b"hola\0");
+
+        let susurro = ida_y_vuelta_cliente(ClientMessage::Whisper { target: "Elfa".into(), message: "~grupo ñ".into() });
+        assert_eq!(&susurro[..3], &[0xC1, susurro.len() as u8, 0x02]);
+        assert_eq!(*susurro.last().unwrap(), 0);
+
+        // Como mucho `MAX_CHAT_SIZE` bytes de texto con su cero, sin partir letras.
+        let largo = ClientMessage::PublicChat { name: "A".into(), message: "x".repeat(200) }.encode();
+        assert_eq!(largo.len(), 3 + 10 + MAX_CHAT_SIZE);
+        let tildes = ClientMessage::PublicChat { name: "A".into(), message: "é".repeat(60) }.encode();
+        match ClientMessage::decode(&tildes) {
+            Some(ClientMessage::PublicChat { message, .. }) => assert_eq!(message, "é".repeat(44), "88 bytes: 44 letras"),
+            otro => panic!("{otro:?}"),
+        }
+
+        // El original copia `MAX_CHAT_SIZE` bytes aunque el paquete sea más corto: basta el cero.
+        let del_original = [0xC1, 3 + 10 + 4, 0x00, b'P', b'e', b'p', b'e', 0, 0, 0, 0, 0, 0, b'h', b'o', b'l', 0];
+        assert_eq!(
+            ClientMessage::decode(&del_original),
+            Some(ClientMessage::PublicChat { name: "Pepe".into(), message: "hol".into() })
+        );
+
+        let visto = ida_y_vuelta_servidor(ServerMessage::ChatMessage { sender: "Mago".into(), message: "@gremio".into() });
+        assert_eq!(&visto[..3], &[0xC1, visto.len() as u8, 0x00]);
+        let susurrado = ida_y_vuelta_servidor(ServerMessage::WhisperMessage { sender: "Mago".into(), message: "psst".into() });
+        assert_eq!(&susurrado[2..7], &[0x02, b'M', b'a', b'g', b'o']);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::WhisperResult { success: false }), [0xC1, 4, 0x0C, 0]);
+        ida_y_vuelta_servidor(ServerMessage::WhisperResult { success: true });
+        // Vacío: nada más que el cero.
+        ida_y_vuelta_servidor(ServerMessage::ChatMessage { sender: "Mago".into(), message: String::new() });
+
+        // Cifrados de punta a punta (el cliente pasa los C1 por Xor32).
+        let mut client = ClientCrypto::default();
+        let mut server = ServerCrypto::default();
+        let m = ClientMessage::PublicChat { name: "Pepe".into(), message: "¿qué tal?".into() };
+        assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&m.encode())).unwrap()), Some(m));
+        let r = ServerMessage::WhisperMessage { sender: "Pepe".into(), message: "bien".into() };
+        assert_eq!(ServerMessage::decode(&client.decrypt(&server.encrypt(&r.encode())).unwrap()), Some(r));
+    }
+
+    #[test]
+    fn avisos_del_servidor() {
+        let aviso = ida_y_vuelta_servidor(ServerMessage::Notice { kind: notice_kind::BLUE, text: "Hola".into() });
+        // `PRECEIVE_NOTICE` sin `pack`: tipo en el 3 y el texto en el 13.
+        assert_eq!(aviso.len(), 13 + 5);
+        assert_eq!(&aviso[..4], &[0xC1, 18, 0x0D, 1]);
+        assert_eq!(&aviso[4..13], &[0; 9]);
+        assert_eq!(&aviso[13..], b"Hola\0");
+        // Como lo manda OpenMU al S6: el texto en el 4 tras nueve "0".
+        let openmu = c1(&[&[0x0D, 1][..], b"000000000", b"Aviso", &[0]].concat());
+        assert_eq!(ServerMessage::decode(&openmu), Some(ServerMessage::Notice { kind: 1, text: "Aviso".into() }));
+        // Cabe en un C1 aunque el texto sea largo.
+        let largo = ServerMessage::Notice { kind: notice_kind::GOLDEN_CENTER, text: "a".repeat(400) }.encode();
+        assert_eq!(largo.len(), 255);
+        assert_eq!(truncate_utf8("añb", 2), "a", "no parte la ñ");
+        assert_eq!(truncate_utf8("añb", 3), "añ");
     }
 
     #[test]

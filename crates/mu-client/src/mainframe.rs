@@ -339,11 +339,15 @@ fn update_numbers(
 
 /// Cursor en coordenadas de la pantalla virtual 640×480 del original (con la barra centrada).
 pub(crate) fn cursor_virtual(window: &Window) -> Option<Vec2> {
-    let c = window.cursor_position()?;
+    Some(to_virtual(window, window.cursor_position()?))
+}
+
+/// Un punto de la ventana (píxeles lógicos) en la pantalla virtual 640×480 (con la barra centrada).
+pub(crate) fn to_virtual(window: &Window, c: Vec2) -> Vec2 {
     let s = ui_scale(window);
     let x0 = (window.width() - 640.0 * s) / 2.0;
     // La barra va pegada abajo: y virtual = 480 en el borde inferior de la ventana.
-    Some(Vec2::new((c.x - x0) / s, VIRTUAL_HEIGHT - (window.height() - c.y) / s))
+    Vec2::new((c.x - x0) / s, VIRTUAL_HEIGHT - (window.height() - c.y) / s)
 }
 
 /// Rectángulo (x, y, ancho, alto) del botón `i` en la pantalla virtual.
@@ -413,13 +417,12 @@ fn pointer_over_ui(
     windows: Query<&Window>,
     game_ui: Res<crate::options::GameUi>,
     move_window: Res<crate::move_window::MoveWindow>,
+    chat: Res<crate::chat::Chat>,
     mut over: ResMut<PointerOverUi>,
 ) {
-    let on_bar = windows
-        .single()
-        .ok()
-        .and_then(cursor_virtual)
-        .is_some_and(|c| (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c) || move_window.blocks(c));
+    let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
+        (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c) || move_window.blocks(c) || chat.blocks(c)
+    });
     if over.0 != on_bar {
         over.0 = on_bar;
     }

@@ -68,7 +68,11 @@ impl Plugin for MiniMapPlugin {
             .add_systems(OnEnter(GameScene::Game), spawn_minimap)
             .add_systems(OnExit(GameScene::Game), crate::scene::despawn::<MiniMapRoot>)
             // Antes que el resto: se queda el Esc/Tab y tapa las teclas rápidas.
-            .add_systems(PreUpdate, minimap_keys.after(bevy::input::InputSystems).run_if(in_state(GameScene::Game)))
+            .add_systems(
+                PreUpdate,
+                // Después del chat: mientras se escribe, las teclas son suyas (chat.rs).
+                minimap_keys.after(bevy::input::InputSystems).after(crate::chat::ChatKeys).run_if(in_state(GameScene::Game)),
+            )
             .add_systems(Update, (load_minimap, minimap_mouse, draw_minimap).chain().run_if(in_state(GameScene::Game)));
     }
 }
