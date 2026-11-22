@@ -358,6 +358,8 @@ fn button_rect(i: usize) -> Rect {
 
 /// Botón de menú (`m_BtnWindow`): el último de la fila.
 const MENU_BUTTON: usize = 4;
+/// Botón del personaje (`m_BtnChaInfo`): el segundo.
+const CHAR_BUTTON: usize = 1;
 
 /// Fotograma del botón: normal, ratón encima o abierto (como en el original, se comprueba
 /// a mano si el cursor está dentro).
@@ -365,6 +367,7 @@ fn update_buttons(
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut game_ui: ResMut<crate::options::GameUi>,
+    mut char_info: ResMut<crate::char_info::CharInfoWindow>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut q: Query<(&mut HudButton, &mut ImageNode)>,
 ) {
@@ -372,15 +375,19 @@ fn update_buttons(
     let cursor = windows.single().ok().and_then(cursor_virtual).filter(|_| !game_ui.modal());
     for (mut b, mut img) in &mut q {
         let inside = cursor.is_some_and(|c| button_rect(b.index).contains(c));
-        if b.index == MENU_BUTTON {
-            // `m_BtnWindow` (NewUIMainFrameWindow.cpp:817-821): al soltar encima abre o cierra el
-            // menú de ventanas. Abierto: 2 normal, 3 encima y 2 apretado; cerrado: 0, 1 y 2
-            // (`SetButtonInfo`, NewUIMainFrameWindow.cpp:2700-2717).
+        if b.index == MENU_BUTTON || b.index == CHAR_BUTTON {
+            // `m_BtnWindow` (NewUIMainFrameWindow.cpp:817-821) y `m_BtnChaInfo` (782-792): al soltar
+            // encima abren o cierran el menú de ventanas o la ventana del personaje. Abierto: 2
+            // normal, 3 encima y 2 apretado; cerrado: 0, 1 y 2 (`SetBtnState`, 2636-2717).
             if inside && mouse.just_released(MouseButton::Left) {
-                game_ui.toggle_window_menu();
+                if b.index == MENU_BUTTON {
+                    game_ui.toggle_window_menu();
+                } else {
+                    char_info.toggle();
+                }
                 sound.play("SOUND_CLICK01");
             }
-            let open = game_ui.window_menu_open();
+            let open = if b.index == MENU_BUTTON { game_ui.window_menu_open() } else { char_info.is_open() };
             let frame = match (open, inside, mouse.pressed(MouseButton::Left)) {
                 (_, true, true) => 2.0,
                 (true, true, false) => 3.0,
@@ -418,10 +425,15 @@ fn pointer_over_ui(
     game_ui: Res<crate::options::GameUi>,
     move_window: Res<crate::move_window::MoveWindow>,
     chat: Res<crate::chat::Chat>,
+    char_info: Res<crate::char_info::CharInfoWindow>,
     mut over: ResMut<PointerOverUi>,
 ) {
     let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
-        (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x)) || game_ui.blocks(c) || move_window.blocks(c) || chat.blocks(c)
+        (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x))
+            || game_ui.blocks(c)
+            || move_window.blocks(c)
+            || chat.blocks(c)
+            || char_info.blocks(c)
     });
     if over.0 != on_bar {
         over.0 = on_bar;

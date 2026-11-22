@@ -26,6 +26,8 @@
 mod account;
 mod boids;
 mod camera;
+mod char_info;
+mod char_stats;
 mod character;
 mod charselect;
 mod chat;
@@ -261,5 +263,6 @@ fn main() {
         .add_plugins(move_window::MoveWindowPlugin)
         .add_plugins(names::NamesPlugin)
         .add_plugins(chat::ChatPlugin)
+        .add_plugins(char_info::CharInfoPlugin)
         .run();
 }
