@@ -11,6 +11,7 @@ pub mod bmd;
 pub mod crypt;
 pub mod fs;
 pub mod minimap;
+pub mod monsters;
 pub mod objects;
 pub mod path;
 pub mod reader;
