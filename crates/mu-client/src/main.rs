@@ -21,6 +21,7 @@
 //!   --fps                    contador de fotogramas
 //!   --inventario-prueba      inventario de prueba (sin servidor no hay): objetos de +0 a +15,
 //!                            excelentes y un antiguo, para ver el inventario (V o I) y el brillo
+//!   --monstruos-prueba       unos monstruos y NPC del mapa junto al personaje, cambiando de acción
 //!
 //! Controles, los del original: clic izquierdo = caminar (mantenido, sigue al ratón) · 1-0 = elegir
 //! habilidad · clic derecho = usarla · Esc = menú de sistema · U = menú de ventanas.
@@ -54,6 +55,7 @@ mod mainframe;
 mod minimap;
 mod net;
 mod model_light;
+mod monsters;
 mod move_window;
 mod names;
 mod notices;
@@ -106,6 +108,8 @@ pub struct Args {
     pub quit_after: Option<f32>,
     /// `--inventario-prueba`: el inventario de prueba (inventory.rs).
     pub test_inventory: bool,
+    /// `--monstruos-prueba`: unos monstruos del mapa alrededor del héroe, cambiando de acción.
+    pub monster_test: bool,
 }
 
 fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
@@ -147,6 +151,7 @@ impl Args {
             show_fps: false,
             quit_after: None,
             test_inventory: false,
+            monster_test: false,
         };
         let mut it = std::env::args().skip(1);
         while let Some(a) = it.next() {
@@ -169,6 +174,7 @@ impl Args {
                 "--ver-titulo" => args.hold_title = true,
                 "--fps" => args.show_fps = true,
                 "--inventario-prueba" => args.test_inventory = true,
+                "--monstruos-prueba" => args.monster_test = true,
                 "--salir-tras" => args.quit_after = it.next().and_then(|v| v.parse().ok()),
                 "--resolucion" => {
                     args.resolution = it.next().as_deref().and_then(settings::parse_resolution);
@@ -277,5 +283,6 @@ fn main() {
         .add_plugins(chat::ChatPlugin)
         .add_plugins(char_info::CharInfoPlugin)
         .add_plugins((item_view::ItemViewPlugin, inventory::InventoryPlugin, hero_dress::HeroDressPlugin))
+        .add_plugins(monsters::MonstersPlugin)
         .run();
 }

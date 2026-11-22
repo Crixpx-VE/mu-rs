@@ -12,6 +12,7 @@ pub mod crypt;
 pub mod fs;
 pub mod items;
 pub mod minimap;
+pub mod monsters;
 pub mod objects;
 pub mod path;
 pub mod reader;
