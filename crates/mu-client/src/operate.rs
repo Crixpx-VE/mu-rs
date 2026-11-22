@@ -178,7 +178,7 @@ pub fn mouse_ray_mu(window: &Window, camera: &Camera, cam_tf: &GlobalTransform) 
 /// `CheckMouseIn(0, 0, ancho, 429)`) y fuera de las ventanas.
 fn select_operate(
     windows: Query<&Window>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<IsDefaultUiCamera>>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
     hovered: Res<crate::names::Hovered>,
     mut operates: ResMut<Operates>,

@@ -786,7 +786,7 @@ fn hero_input(
     time: Res<Time>,
     buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<&Window>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<IsDefaultUiCamera>>,
     terrain: Option<Res<LoadedTerrain>>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
     operates: Res<crate::operate::Operates>,

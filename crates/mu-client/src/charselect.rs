@@ -102,7 +102,7 @@ fn full_vfov() -> f32 {
     2.0 * ((VFOV / 2.0).to_radians().tan() * 480.0 / VIEW_HEIGHT).atan()
 }
 
-fn setup_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Transform, &mut Projection), (With<Camera3d>, Without<PreviewCamera>)>) {
+fn setup_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Transform, &mut Projection), (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>) {
     for (e, mut tf, mut proj) in &mut cameras {
         commands.entity(e).remove::<DistanceFog>();
         *tf = crate::camera::mu_view(CAMERA_EYE, CAMERA_PITCH, CAMERA_YAW);
@@ -115,7 +115,7 @@ fn setup_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Transfo
 }
 
 /// La cámara no se mueve: se vuelve a poner cada fotograma (como el original), por si algo la tocó.
-fn place_camera(mut cameras: Query<&mut Transform, (With<Camera3d>, Without<PreviewCamera>)>) {
+fn place_camera(mut cameras: Query<&mut Transform, (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>) {
     let view = crate::camera::mu_view(CAMERA_EYE, CAMERA_PITCH, CAMERA_YAW);
     for mut tf in &mut cameras {
         tf.set_if_neq(view);
@@ -123,7 +123,7 @@ fn place_camera(mut cameras: Query<&mut Transform, (With<Camera3d>, Without<Prev
 }
 
 /// Al salir: el campo de visión y el alcance del juego.
-fn restore_camera(mut cameras: Query<&mut Projection, (With<Camera3d>, Without<PreviewCamera>)>) {
+fn restore_camera(mut cameras: Query<&mut Projection, (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>) {
     for mut proj in &mut cameras {
         if let Projection::Perspective(p) = &mut *proj {
             p.fov = crate::camera::mu_fov();
@@ -885,7 +885,7 @@ fn sync_balloons(
 fn layout_ui(
     windows: Query<&Window>,
     scale: Res<UiScale>,
-    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<PreviewCamera>)>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>,
     characters: Query<&SlotCharacter>,
     mut pieces: Query<(&UiPiece, &mut Node, &mut Visibility)>,
 ) {
@@ -981,7 +981,7 @@ fn input(
     mouse: Res<ButtonInput<MouseButton>>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time<Real>>,
-    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, Without<PreviewCamera>)>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>,
     characters: Query<&SlotCharacter>,
     mut buttons: Query<(&CsButton, &mut ImageNode)>,
     sel: Option<ResMut<CharSelect>>,

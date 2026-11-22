@@ -243,7 +243,7 @@ fn signed_delta(from: f32, to: f32) -> f32 {
 fn place_camera(
     tour: Option<Res<Tour>>,
     fixed: Res<Time<Fixed>>,
-    mut cameras: Query<(&mut Transform, &mut Projection, Option<&mut DistanceFog>), With<Camera3d>>,
+    mut cameras: Query<(&mut Transform, &mut Projection, Option<&mut DistanceFog>), (With<Camera3d>, With<IsDefaultUiCamera>)>,
 ) {
     let Some(t) = tour else { return };
     let s = t.prev_s + (t.s - t.prev_s) * fixed.overstep_fraction();
@@ -269,14 +269,14 @@ fn place_camera(
     }
 }
 /// Niebla negra del login (la distancia la pone `place_camera`).
-fn add_fog(mut commands: Commands, cameras: Query<Entity, With<Camera3d>>) {
+fn add_fog(mut commands: Commands, cameras: Query<Entity, (With<Camera3d>, With<IsDefaultUiCamera>)>) {
     for e in &cameras {
         commands.entity(e).insert(DistanceFog { color: Color::BLACK, ..default() });
     }
 }
 
 /// Al salir: sin niebla y con el campo de visión y el alcance del juego.
-fn restore_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Projection), With<Camera3d>>) {
+fn restore_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Projection), (With<Camera3d>, With<IsDefaultUiCamera>)>) {
     for (e, mut proj) in &mut cameras {
         commands.entity(e).remove::<DistanceFog>();
         if let Projection::Perspective(p) = &mut *proj {

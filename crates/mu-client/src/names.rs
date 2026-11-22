@@ -268,7 +268,7 @@ fn select_objects(
     args: Res<crate::Args>,
     keys: Res<ButtonInput<KeyCode>>,
     windows: Query<&Window>,
-    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    cameras: Query<(&Camera, &GlobalTransform), (With<Camera3d>, With<IsDefaultUiCamera>)>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
     terrain: Option<Res<LoadedTerrain>>,
     hero: Query<&Transform, With<Player>>,
@@ -693,7 +693,7 @@ fn name_font(px: f32, bold: bool) -> TextFont {
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn layout_names(
     mut commands: Commands,
-    (windows, scale, cameras): (Query<&Window>, Res<UiScale>, Query<(&Camera, &Transform), With<Camera3d>>),
+    (windows, scale, cameras): (Query<&Window>, Res<UiScale>, Query<(&Camera, &Transform), (With<Camera3d>, With<IsDefaultUiCamera>)>),
     (args, hero_name, terrain, time): (Res<crate::Args>, Option<Res<crate::account::Hero>>, Option<Res<LoadedTerrain>>, Res<Time<Real>>),
     (hovered, hero_info): (Res<Hovered>, Option<Res<crate::account::HeroInfo>>),
     owners: Query<(&Selectable, &Transform), Without<Camera3d>>,
