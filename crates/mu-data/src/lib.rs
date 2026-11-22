@@ -10,6 +10,7 @@
 pub mod bmd;
 pub mod crypt;
 pub mod fs;
+pub mod items;
 pub mod minimap;
 pub mod objects;
 pub mod path;

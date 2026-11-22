@@ -599,7 +599,7 @@ struct Caches {
 }
 
 /// Carga una textura global (`BITMAP_CHROME`...) con el filtro y el modo de repetición del original.
-fn load_bitmap(data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+pub(crate) fn load_bitmap(data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
     load_frame(data, b, 0, images)
 }
 
@@ -1107,7 +1107,7 @@ const PASS_DEPTH_BIAS: f32 = 2.0;
 
 /// Material de una malla en una pasada (`MeshLook`), con `body` = su `BodyLight` y `glow` = su
 /// `BlendMeshLight` si es la `BlendMesh`.
-fn object_material(
+pub(crate) fn object_material(
     image: Option<Handle<Image>>,
     look: &MeshLook,
     body: [f32; 3],

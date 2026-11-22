@@ -278,6 +278,20 @@ pub struct CharacterModel {
     pub materials: Vec<Handle<crate::model_light::ModelMaterial>>,
     /// Huesos de la pose inicial.
     pub bones: Vec<bmd::Mat34>,
+    /// Materiales del brillo del equipo cuyo color cambia con el tiempo (hero_dress.rs).
+    pub glow: Vec<(Handle<crate::model_light::ModelMaterial>, mu_data::items::glow::GlowLight)>,
+}
+
+/// Equipo puesto en vez de las piezas de la clase (`BodyPart[].Type` y `Weapon[0].Type` con el modelo
+/// del objeto): ruta del modelo dentro de `Data` y el objeto (para su brillo). Lo llena hero_dress.rs.
+#[derive(Default, Clone)]
+pub struct Dress {
+    /// Casco, armadura, pantalones, guantes y botas (en el orden de [`BODY_PARTS`]).
+    pub parts: [Option<(std::path::PathBuf, mu_data::items::Item)>; 5],
+    /// El arma de la mano derecha.
+    pub weapon: Option<(std::path::PathBuf, mu_data::items::Item)>,
+    /// `g_pOption->GetRenderLevel()`.
+    pub render_level: u8,
 }
 
 /// Carga `player.bmd` y las piezas sin equipo de la clase (`{Helm,Armor,Pant,Glove,Boot}ClassNN`),
@@ -291,7 +305,21 @@ pub fn load_character(
     materials: &mut Assets<crate::model_light::ModelMaterial>,
     images: &mut Assets<Image>,
 ) -> Option<CharacterModel> {
+    load_character_dressed(args, class, action, None, meshes, materials, images)
+}
+
+/// Como [`load_character`], con el equipo `dress` (sin él, la espada corta del Dark Knight).
+pub fn load_character_dressed(
+    args: &Args,
+    class: crate::account::Class,
+    action: usize,
+    dress: Option<&Dress>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<crate::model_light::ModelMaterial>,
+    images: &mut Assets<Image>,
+) -> Option<CharacterModel> {
     let dir = args.data.join("Player");
+    let mut glow = crate::hero_dress::GlowBuilder::default();
     let skeleton = match fs::read(&dir, "player.bmd").and_then(|b| bmd::read(&b)) {
         Ok(s) => s,
         Err(e) => {
@@ -305,11 +333,20 @@ pub fn load_character(
     let mut parts = vec![];
     let mut children = vec![];
     let mut body_materials = vec![];
-    for part in BODY_PARTS {
+    for (k, part) in BODY_PARTS.into_iter().enumerate() {
         let name = &format!("{part}Class{:02}.bmd", class.skin_file());
-        let Ok(model) = fs::read(&dir, name).and_then(|b| bmd::read(&b)) else {
+        let Ok(class_model) = fs::read(&dir, name).and_then(|b| bmd::read(&b)) else {
             warn!("falta la pieza {name}");
             continue;
+        };
+        // La pieza del equipo (si la hay y se puede leer) en vez de la de la clase.
+        let equipped = dress.and_then(|d| d.parts[k].as_ref()).and_then(|(path, item)| {
+            let (pdir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
+            Some((fs::read(&pdir, file).and_then(|b| bmd::read(&b)).ok()?, pdir, *item))
+        });
+        let (model, pdir, item) = match equipped {
+            Some((m, pdir, item)) => (m, pdir, Some(item)),
+            None => (class_model.clone(), dir.clone(), None),
         };
         let model_index = models.len();
         for i in 0..model.meshes.len() {
@@ -322,18 +359,34 @@ pub fn load_character(
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs);
             let handle = meshes.add(mesh);
-            let material = materials.add(part_material(&dir, &model.meshes[i].texture, images));
+            let texture = crate::hero_dress::part_texture(&model.meshes[i].texture, item.is_some(), &class_model);
+            let Some(texture) = texture else { continue };
+            let material = materials.add(part_material(&pdir, &texture, images));
             body_materials.push(material.clone());
-            children.push((Mesh3d(handle.clone()), MeshMaterial3d(material)));
+            children.push((Mesh3d(handle.clone()), MeshMaterial3d(material.clone())));
+            if let (Some(item), Some(d)) = (item, dress) {
+                children.extend(glow.passes(&args.data, &handle, &model.meshes[i], &item, d.render_level, &material, materials, images));
+            }
             parts.push((model_index, i, handle));
         }
         models.push(model);
     }
 
-    // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true).
+    // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true): la del equipo o, sin equipo,
+    // la espada corta del Dark Knight.
     let item_dir = args.data.join("Item");
     let knight = class == crate::account::Class::Knight;
-    let weapon = knight.then(|| fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok()).flatten().map(|w| {
+    let dressed_weapon = dress.and_then(|d| d.weapon.as_ref()).and_then(|(path, item)| {
+        let (wdir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
+        Some((fs::read(&wdir, file).and_then(|b| bmd::read(&b)).ok()?, wdir, *item))
+    });
+    let default_weapon = (knight && dress.is_none())
+        .then(|| fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok())
+        .flatten()
+        .map(|w| (w, item_dir.clone(), None));
+    let weapon_item = dressed_weapon.as_ref().map(|w| w.2);
+    let weapon_dir = dressed_weapon.as_ref().map_or(item_dir.clone(), |w| w.1.clone());
+    let weapon = dressed_weapon.map(|(w, d, i)| (w, d, Some(i))).or(default_weapon).map(|(w, _, _)| {
         let wbones = weapon_bones(&w, &bones, false);
         let mut handles = vec![];
         for i in 0..w.meshes.len() {
@@ -347,17 +400,26 @@ pub fn load_character(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
-            let material = materials.add(part_material(&item_dir, &w.meshes[i].texture, images));
+            let material = materials.add(part_material(&weapon_dir, &w.meshes[i].texture, images));
             body_materials.push(material.clone());
-            children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material)));
+            children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
+            if let (Some(item), Some(d)) = (weapon_item, dress) {
+                children.extend(glow.passes(&args.data, &mesh, &w.meshes[i], &item, d.render_level, &material, materials, images));
+            }
             handles.push((i, mesh));
         }
         (w, handles)
     });
-    if knight && weapon.is_none() {
+    if knight && dress.is_none() && weapon.is_none() {
         warn!("falta el arma Item/{WEAPON_FILE}");
     }
-    Some(CharacterModel { skinned: Skinned { skeleton, parts, models, weapon }, children, materials: body_materials, bones })
+    Some(CharacterModel {
+        skinned: Skinned { skeleton, parts, models, weapon },
+        children,
+        materials: body_materials,
+        bones,
+        glow: glow.animated,
+    })
 }
 
 /// Piezas del cuerpo sin equipo (`BodyPart[BODYPART_HELM..BOOTS]`).
@@ -380,7 +442,7 @@ fn spawn_player(
         h.class
     });
     let (stop, walk) = (stop_action(class, false), walk_action(class));
-    let Some(CharacterModel { skinned, children, materials: body_materials, bones }) =
+    let Some(CharacterModel { skinned, children, materials: body_materials, bones, .. }) =
         load_character(&args, class, stop, &mut meshes, &mut materials, &mut images)
     else {
         return;
@@ -569,7 +631,7 @@ pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<
 
 /// Materiales del cuerpo y del arma, para darles la luz del sitio donde está el personaje.
 #[derive(Component)]
-struct BodyMaterials(Vec<Handle<crate::model_light::ModelMaterial>>);
+pub(crate) struct BodyMaterials(pub(crate) Vec<Handle<crate::model_light::ModelMaterial>>);
 
 /// `c->Light` del héroe en el juego: `AbilityLight` = (1, 1, 1), sin la luz del terreno
 /// (ZzzCharacter.cpp:8967-8993; las habilidades que la tiñen aún no existen). Los demás
