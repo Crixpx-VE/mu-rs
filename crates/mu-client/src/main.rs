@@ -49,6 +49,7 @@ mod net;
 mod model_light;
 mod move_window;
 mod names;
+mod notices;
 mod objects;
 mod operate;
 mod options;

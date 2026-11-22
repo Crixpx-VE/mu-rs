@@ -45,6 +45,10 @@ pub struct Account {
     pub password_hash: String,
     #[serde(default)]
     pub characters: Vec<Character>,
+    /// Game Master (`CharacterStatus.GameMaster` de OpenMU): puede usar los comandos de GM. Se
+    /// pone a mano en `cuentas.json` (`"game_master": true`).
+    #[serde(default)]
+    pub game_master: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -109,7 +113,11 @@ impl Db {
     pub fn create_account(&mut self, name: &str, password: &str) {
         self.store
             .accounts
-            .insert(name.to_string(), Account { password_hash: hash_password(name, password), characters: Vec::new() });
+            .insert(name.to_string(), Account {
+                password_hash: hash_password(name, password),
+                characters: Vec::new(),
+                game_master: false,
+            });
         self.save();
     }
 

@@ -26,7 +26,7 @@
 //! comandos del chat del cliente salvo `/filter`, `/warp`, `/whisper on|off` y el aviso de Icarus
 //! de `/move`, los gestos de los anillos de transformación (los demás gestos al hablar, de
 //! `CheckChatText`, sí: chat_log.rs y character.rs), filtro de palabrotas (`CheckAbuseFilter`),
-//! avisos dorados del centro (`CreateNotice`), clic derecho en un jugador para susurrarle y el
+//! clic derecho en un jugador para susurrarle y el
 //! texto de ayuda del botón de Gens (no está en Text_eng.bmd).
 
 use std::collections::HashMap;
@@ -41,6 +41,7 @@ use mu_protocol::game::{ClientMessage, ServerMessage, notice_kind};
 
 use crate::Args;
 use crate::chat_log::{ChatInput, ChatLog, InputType, LogEvent, MouseIn, MsgType, Outgoing, SystemLog, WarpName};
+use crate::notices::NoticeColor;
 use crate::scene::GameScene;
 use crate::sound::SoundQueue;
 
@@ -212,6 +213,8 @@ pub struct Chat {
     tick_clock: f32,
     /// `WorldActive` de lo último que se ha dicho con "Welcome to".
     map: Option<u16>,
+    /// Avisos del centro (notices.rs).
+    pub notices: crate::notices::Notices,
 }
 
 impl Chat {
@@ -236,14 +239,15 @@ fn leave_game(mut chat: ResMut<Chat>) {
     chat.tooltip = None;
 }
 
-/// `ChatTime--` y el parpadeo del cursor.
-fn tick(time: Res<Time>, mut chat: ResMut<Chat>) {
+/// `ChatTime--`, `MoveNotices` y el parpadeo del cursor.
+fn tick(time: Res<Time>, mut chat: ResMut<Chat>, metrics: Res<TextMetrics>) {
     let chat = &mut *chat;
     chat.caret_clock += time.delta_secs();
     chat.tick_clock += time.delta_secs() * TICKS;
     while chat.tick_clock >= 1.0 {
         chat.tick_clock -= 1.0;
         chat.input.tick();
+        chat.notices.tick(&|s| metrics.width(s));
     }
 }
 
@@ -305,12 +309,22 @@ fn net_messages(
                 chat.add(&id, crate::chat_log::TEXT_NO_USERS, MsgType::Error, MsgType::Whisper, &metrics);
             }
             ServerMessage::Notice { kind, text } => match *kind {
+                notice_kind::GOLDEN_CENTER => chat.notices.create(text, NoticeColor::Golden, &|s| metrics.width(s)),
+                // `sprintf(Text, GlobalText[483], Notice)` (y la ventana del gremio, que no hay).
+                notice_kind::GUILD => {
+                    let t = crate::notices::TEXT_GUILD_NOTICE.replace("%s", text);
+                    chat.notices.create(&t, NoticeColor::Guild, &|s| metrics.width(s));
+                }
                 // En la selección de personaje el original lo pone en su caja de mensajes del
                 // servidor (`CUIMng::AddServerMsg`), que aquí no hay.
                 notice_kind::BLUE if *scene.get() != GameScene::CharacterSelect => chat.system.add(text, MsgType::System),
                 k => info!("aviso del servidor de tipo {k} sin mostrar: {text}"),
             },
-            ServerMessage::CharacterInformation(info) => welcome(chat, info.map as u16),
+            ServerMessage::CharacterInformation(info) => {
+                // `ClearNotice` (WSclient.cpp:662).
+                chat.notices.clear();
+                welcome(chat, info.map as u16)
+            }
             ServerMessage::MapChanged { is_map_change: true, map, .. } if chat.map != Some(*map) => welcome(chat, *map),
             _ => {}
         }
@@ -680,6 +694,8 @@ enum Piece {
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32, dark: bool },
     /// `RenderText` en (x, y) con su fondo del ancho del texto (más `pad` a cada lado).
     Text { x: f32, y: f32, text: String, color: [u8; 4], bg: Option<[u8; 4]>, bold: bool, pad: f32 },
+    /// `RenderText(320, y, ..., RT3_WRITE_CENTER)` en negrita con su fondo (los avisos del centro).
+    Centered { y: f32, text: String, color: [u8; 4], bg: [u8; 4] },
     /// Una caja de texto: lo de antes y después del cursor, desplazado `scroll`.
     Field { x: f32, y: f32, w: f32, h: f32, before: String, after: String, color: [u8; 4], caret: bool, selected: bool, scroll: f32 },
 }
@@ -693,6 +709,18 @@ impl Chat {
     /// mensajes (6.1) y caja (6.2).
     fn pieces(&self, metrics: &TextMetrics) -> Vec<Piece> {
         let mut out = Vec::new();
+        // `RenderNotices` (antes que la interfaz, ZzzScene.cpp:585).
+        for (i, n) in self.notices.lines().iter().enumerate() {
+            if n.text.is_empty() {
+                continue;
+            }
+            out.push(Piece::Centered {
+                y: 300.0 + 13.0 * i as f32,
+                text: n.text.clone(),
+                color: self.notices.text_color(n.color),
+                bg: [0, 0, 0, 128],
+            });
+        }
         if self.input.show_system {
             for (i, line) in self.system.lines().iter().enumerate() {
                 let [r, g, b] = SystemLog::color(line.kind);
@@ -943,6 +971,28 @@ fn draw(
                     if let Some(bg) = bg {
                         e.insert(BackgroundColor(rgba(*bg)));
                     }
+                }
+                Piece::Centered { y, text, color, bg } => {
+                    // Una fila de todo el ancho que centra el texto (con su fondo del ancho del texto).
+                    let row = Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(0.0),
+                        top: Val::Px(*y),
+                        width: Val::Px(640.0),
+                        height: Val::Px(FONT),
+                        justify_content: JustifyContent::Center,
+                        ..default()
+                    };
+                    p.spawn(row).with_children(|r| {
+                        r.spawn((
+                            Text::new(text.clone()),
+                            text_font(true),
+                            LineHeight::Px(FONT),
+                            TextColor(rgba(*color)),
+                            TextLayout::no_wrap(),
+                            BackgroundColor(rgba(*bg)),
+                        ));
+                    });
                 }
                 Piece::Field { x, y, w, h, before, after, color, caret, selected, scroll } => {
                     let mut node = absolute(*x, *y, *w, *h);

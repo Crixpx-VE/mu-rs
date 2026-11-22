@@ -598,13 +598,27 @@ fn chat(s: &Session, shared: &Shared, message: &str) {
     }
 }
 
-/// Comandos del chat. Solo `/move <mapa>` (el nombre o el subnombre de la lista de la ventana `M`,
-/// sin mirar mayúsculas, como `GetMapIndexFromMovereq`), con las mismas reglas que la ventana; el
-/// resto se ignora.
+/// Comandos del chat:
+/// - `/move <mapa>` (el nombre o el subnombre de la lista de la ventana `M`, sin mirar mayúsculas,
+///   como `GetMapIndexFromMovereq`), con las mismas reglas que la ventana.
+/// - `/goldnotice <texto>`, solo Game Master: aviso dorado en el centro de la pantalla de todos
+///   (`NoticeChatCommandPlugIn` de OpenMU → `MessageType.GoldenCenter`, `ReceiveNotice` tipo 0).
+///
+/// El resto se ignora.
 fn command(s: &Session, shared: &Shared, message: &str) {
     let mut words = message.splitn(2, ' ');
     let name = words.next().unwrap_or("");
     let rest = words.next().unwrap_or("").trim();
+    if name.eq_ignore_ascii_case("/goldnotice") {
+        let gm = s.account.as_deref().is_some_and(|a| shared.db.lock().unwrap().account(a).is_some_and(|a| a.game_master));
+        if !gm {
+            eprintln!("[game] {}: /goldnotice sin ser Game Master", s.id);
+        } else if !rest.is_empty() {
+            eprintln!("[game] {}: aviso dorado: {rest}", s.id);
+            global_notice(shared, game::notice_kind::GOLDEN_CENTER, rest);
+        }
+        return;
+    }
     if !name.eq_ignore_ascii_case("/move") {
         eprintln!("[game] {}: comando desconocido {name:?}", s.id);
         return;
@@ -612,6 +626,15 @@ fn command(s: &Session, shared: &Shared, message: &str) {
     match shared.warps.find_by_name(rest) {
         Some(m) => warp_to(s, shared, m.index as u16),
         None => eprintln!("[game] {}: /move a un mapa que no está en la lista: {rest:?}", s.id),
+    }
+}
+
+/// Un aviso a todos los que están en el mundo, en cualquier mapa (`SendGlobalMessageAsync` de OpenMU).
+fn global_notice(shared: &Shared, kind: u8, text: &str) {
+    let packet = ServerMessage::Notice { kind, text: text.to_string() }.encode();
+    let w = shared.world.lock().unwrap();
+    for p in w.players.values() {
+        let _ = p.out.send(packet.clone());
     }
 }
 
