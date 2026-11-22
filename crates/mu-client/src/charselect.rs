@@ -440,6 +440,7 @@ fn preview(
             PreviewCamera,
             WorldEntity,
             Camera3d::default(),
+            Msaa::Off,
             Camera { order: -1, clear_color: ClearColorConfig::Custom(Color::NONE), is_active: false, ..default() },
             RenderTarget::Image(image.into()),
             bevy::core_pipeline::tonemapping::Tonemapping::None,

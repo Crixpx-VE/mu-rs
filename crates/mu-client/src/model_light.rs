@@ -43,13 +43,22 @@ pub struct ModelParams {
     pub chrome: u32,
     /// 1 = `RENDER_DARK`: el alfa de la textura no cuenta (`GL_ONE_MINUS_SRC_COLOR` solo mira el color).
     pub dark: u32,
-    pub _pad: UVec2,
+    /// 1 = la luz (`BodyLight`) va en el `MeshTag` de cada objeto ([`encode_light`]) y no en el
+    /// material: así los objetos iguales comparten material y se dibujan juntos.
+    pub tag_light: u32,
+    pub _pad: u32,
 }
 
 impl Default for ModelParams {
     fn default() -> Self {
-        Self { tint: Vec4::ONE, chrome: 0, dark: 0, _pad: UVec2::ZERO }
+        Self { tint: Vec4::ONE, chrome: 0, dark: 0, tag_light: 0, _pad: 0 }
     }
+}
+
+/// `BodyLight` (0..1 por canal) en un `MeshTag`: 8 bits por canal.
+pub fn encode_light(light: [f32; 3]) -> u32 {
+    let b = light.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u32);
+    b[0] | (b[1] << 8) | (b[2] << 16)
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -110,6 +119,13 @@ impl ModelLight {
         self
     }
 
+    /// Iluminado por la normal con la luz del `MeshTag` de cada entidad ([`encode_light`]).
+    pub fn lit_by_tag() -> Self {
+        let mut m = Self::lit([1.0; 3]);
+        m.params.tag_light = 1;
+        m
+    }
+
     /// `RENDER_DARK`. El `StandardMaterial` debe ir con `AlphaMode::Add`.
     pub fn with_subtract(mut self, on: bool) -> Self {
         self.subtract = on;
@@ -129,6 +145,11 @@ impl MaterialExtension for ModelLight {
         _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
+        // El sombreador de fragmentos lee el `MeshTag` con el índice de instancia.
+        descriptor.vertex.shader_defs.push("VERTEX_OUTPUT_INSTANCE_INDEX".into());
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment.shader_defs.push("VERTEX_OUTPUT_INSTANCE_INDEX".into());
+        }
         if key.bind_group_data.subtract
             && let Some(fragment) = descriptor.fragment.as_mut()
         {

@@ -885,18 +885,23 @@ fn spawn_objects(
                     (true, None, Some(p)) => TextureSource::Own(p.clone()),
                     (true, None, None) => TextureSource::None,
                 };
+                // Los de sentarse tienen material propio: se iluminan con el ratón encima.
+                let instance = (fade.is_some() || operate.is_some() || look.body_wave.is_some_and(|w| w.timer))
+                    .then_some(index);
+                // La luz iluminada normal va en el `MeshTag` de cada objeto (no en el material), para
+                // que los objetos iguales compartan material y se dibujen de una vez. No en los que
+                // cambian su luz desde el material (propios, `BodyLight` animada).
+                let tag_light = look.color == LookColor::Lit && instance.is_none() && body_anim.is_none();
                 let key = MaterialKey {
                     texture: source.clone(),
-                    light: body.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8),
+                    light: if tag_light { [0; 3] } else { body.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8) },
                     blend: look.blend,
                     color: look.color,
                     chrome: look.chrome,
                     pass,
                     // Los techos tampoco comparten material: se desvanecen por su cuenta.
                     effect_owner: (has_effect || rules.fade_indoors).then(|| (rel.clone(), part.mesh_index)),
-                    // Los de sentarse tienen material propio: se iluminan con el ratón encima.
-                    instance: (fade.is_some() || operate.is_some() || look.body_wave.is_some_and(|w| w.timer))
-                        .then_some(index),
+                    instance,
                 };
                 let material = match c.materials.get(&key) {
                     Some(m) => m.clone(),
@@ -909,6 +914,12 @@ fn spawn_objects(
                             }
                         };
                         let mut mat = object_material(image, &look, body, glow, pass, login_scene);
+                        if tag_light {
+                            let chrome = mat.extension.params.chrome;
+                            let dark = mat.extension.subtract;
+                            mat.extension = ModelLight::lit_by_tag().with_subtract(dark);
+                            mat.extension.params.chrome = chrome;
+                        }
                         // `glColor4f(..., Alpha)` con `EnableAlphaTest`: mezcla con lo de detrás.
                         if look.alpha < 0.99 && look.blend == LookBlend::AlphaTest {
                             mat.base.base_color.set_alpha(look.alpha);
@@ -944,9 +955,14 @@ fn spawn_objects(
                 };
                 let additive = matches!(look.blend, LookBlend::Add | LookBlend::Subtract);
                 let original_mode = materials.get(&material).map_or(AlphaMode::Opaque, |m| m.base.alpha_mode);
-                let entity = commands
-                    .spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity))
-                    .id();
+                let mut e =
+                    commands.spawn((Mesh3d(part.mesh.clone()), MeshMaterial3d(material.clone()), transform, crate::scene::WorldEntity));
+                if tag_light {
+                    // Sin cuantizar: la luz del terreno tal cual (el material ya no la necesita).
+                    let exact = if look.light.is_none() { raw_light } else { body };
+                    e.insert(bevy::mesh::MeshTag::new(crate::model_light::encode_light(exact)));
+                }
+                let entity = e.id();
                 entities.push(entity);
                 if let Some(op) = operate.and_then(|i| operates.0.get_mut(i)) {
                     // Las mallas aditivas y las de color propio no llevan la luz del objeto.

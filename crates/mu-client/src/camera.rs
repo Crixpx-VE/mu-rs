@@ -184,6 +184,10 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
         // Colores tal cual, como el OpenGL del original: sin el `TonyMcMapface` que Bevy pone por
         // defecto, que aclara las sombras y quita contraste.
         bevy::core_pipeline::tonemapping::Tonemapping::None,
+        bevy::core_pipeline::tonemapping::DebandDither::Disabled,
+        // Sin el antialiasing 4× que Bevy pone por defecto: el original no tiene, y cuesta mucho
+        // en tarjetas modestas.
+        Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             fov: mu_fov(),
             near: 0.2,

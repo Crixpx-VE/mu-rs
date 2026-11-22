@@ -12,6 +12,7 @@ import bevy_pbr::render::{
     pbr_fragment::pbr_input_from_standard_material,
     forward_io::{VertexOutput, FragmentOutput},
     mesh_view_bindings::globals,
+    mesh_functions,
 };
 
 struct ModelLight {
@@ -26,7 +27,9 @@ struct ModelParams {
     chrome: u32,
     // 1 = `RENDER_DARK`.
     dark: u32,
-    _pad: vec2<u32>,
+    // 1 = la luz va en el `MeshTag` de la entidad (8 bits por canal).
+    tag_light: u32,
+    _pad: u32,
 };
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> model_light: ModelLight;
@@ -73,10 +76,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     );
     var color = pbr_input.material.base_color;
     if model_light.light.a > 0.5 {
+        var body = model_light.light.rgb;
+        if params.tag_light != 0u {
+            @if(VERTEX_OUTPUT_INSTANCE_INDEX) {
+                let tag = mesh_functions::get_tag(in.instance_index);
+                body = vec3<f32>(f32(tag & 255u), f32((tag >> 8u) & 255u), f32((tag >> 16u) & 255u)) / 255.0;
+            }
+        }
         // Sin girar la normal en las caras de atrás: el original tampoco lo hace.
         let n = normalize(in.world_normal);
         let intensity = max(dot(n, LIGHT_DIR) * 0.8 + 0.4, 0.2);
-        let l = clamp(model_light.light.rgb * intensity, vec3<f32>(0.0), vec3<f32>(1.0));
+        let l = clamp(body * intensity, vec3<f32>(0.0), vec3<f32>(1.0));
         color = vec4<f32>(color.rgb * pow(l, vec3<f32>(2.2)), color.a);
     }
     let tint = clamp(params.tint.rgb, vec3<f32>(0.0), vec3<f32>(1.0));

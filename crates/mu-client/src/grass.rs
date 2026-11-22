@@ -16,13 +16,17 @@
 //! MapManager.cpp:1541-1545 y ZzzLodTerrain.cpp:1584-1585).
 //!
 //! Solo se ve la de las casillas que dibuja el suelo ([`crate::terrain::TerrainCull`]). El viento
-//! depende del tiempo real, así que va igual a cualquier fps. Los vértices se recalculan en CPU cada
-//! fotograma (solo cambia la Y de MU de los de arriba), solo en los bloques que se ven.
+//! depende del tiempo real, así que va igual a cualquier fps. Lo aplica el sombreador de vértices
+//! (`grass_wind.wesl`): la malla no cambia, solo los números del viento de cada fotograma. En los
+//! mapas de hierba sumada (Vulcanus, Doppelganger 2), con otro material, se recalcula en CPU.
 
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension};
 use bevy::prelude::*;
+use bevy::render::render_resource::AsBindGroup;
+use bevy::shader::ShaderRef;
 use mu_data::terrain::{SIZE, Terrain};
 use mu_data::texture;
 
@@ -31,9 +35,36 @@ use crate::terrain::{LayerMaterial, LoadedTerrain, MU_SCALE, TerrainCull, quad_i
 
 pub struct GrassPlugin;
 
+/// Hierba con el viento en el sombreador.
+pub type GrassMaterial = ExtendedMaterial<StandardMaterial, GrassWind>;
+
+/// Los números del viento de este fotograma ([`Wind`]).
+#[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
+pub struct GrassWind {
+    /// x: velocidad, y: escala, z: multiplicador de x, w: `MU_SCALE`.
+    #[uniform(100)]
+    pub wind: Vec4,
+    /// Karutan: x velocidad, y escala del segundo viento, z = 1 si se usa.
+    #[uniform(100)]
+    pub second: Vec4,
+}
+
+impl MaterialExtension for GrassWind {
+    fn vertex_shader() -> ShaderRef {
+        "embedded://mu_client/grass_wind.wesl".into()
+    }
+}
+
+/// Materiales de hierba del mapa (para darles el viento de cada fotograma).
+#[derive(Resource, Default)]
+struct GrassMaterials(Vec<Handle<GrassMaterial>>);
+
 impl Plugin for GrassPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (spawn_grass.run_if(crate::scene::load_step(crate::scene::Step::Grass)), wave_grass))
+        embedded_asset!(app, "grass_wind.wesl");
+        app.add_plugins(MaterialPlugin::<GrassMaterial>::default())
+            .init_resource::<GrassMaterials>()
+            .add_systems(Update, (spawn_grass.run_if(crate::scene::load_step(crate::scene::Step::Grass)), wave_grass))
             .add_systems(
                 PostUpdate,
                 cull_grass.after(crate::terrain::TerrainCulled).before(VisibilitySystems::VisibilityPropagate),
@@ -67,6 +98,12 @@ impl Wind {
         };
         let second = matches!(world as i32 - 1, 80 | 81).then(|| ((ms % 36000) as f32 * 0.008, 15.0));
         Self { speed, scale, x_mult, second }
+    }
+
+    /// Lo mismo para el sombreador ([`GrassWind`]).
+    fn uniforms(&self) -> (Vec4, Vec4) {
+        let second = self.second.map_or(Vec4::ZERO, |(s, k)| Vec4::new(s, k, 1.0, 0.0));
+        (Vec4::new(self.speed, self.scale, self.x_mult, MU_SCALE), second)
     }
 
     /// `TerrainGrassWind[x]` (también ondula el agua).
@@ -117,10 +154,12 @@ fn spawn_grass(
     args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut materials: ResMut<Assets<GrassMaterial>>,
     mut layers: ResMut<Assets<LayerMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut grass_materials: ResMut<GrassMaterials>,
 ) {
+    grass_materials.0.clear();
     let Some(terrain) = terrain else { return };
     let t = &terrain.0;
     if no_grass(args.world) {
@@ -138,14 +177,19 @@ fn spawn_grass(
             // `EnableAlphaBlend`: sumada, sin escribir profundidad.
             Err(layers.add(LayerMaterial::new(image, true)))
         } else {
-            Ok(materials.add(StandardMaterial {
-                base_color_texture: Some(image),
-                unlit: true,
-                cull_mode: None,
-                // Prueba de alfa del original (`AlphaRef` 0.25).
-                alpha_mode: AlphaMode::Mask(0.25),
-                ..default()
-            }))
+            let m = materials.add(ExtendedMaterial {
+                base: StandardMaterial {
+                    base_color_texture: Some(image),
+                    unlit: true,
+                    cull_mode: None,
+                    // Prueba de alfa del original (`AlphaRef` 0.25).
+                    alpha_mode: AlphaMode::Mask(0.25),
+                    ..default()
+                },
+                extension: GrassWind::default(),
+            });
+            grass_materials.0.push(m.clone());
+            Ok(m)
         };
         let mut total = 0;
         for cy in (0..SIZE).step_by(CHUNK) {
@@ -244,10 +288,16 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
         return None;
     }
     let n = pos.len();
+    // Para el sombreador: (x de la columna cuyo viento usa, 1 = vértice de arriba).
+    let mut wind = vec![[0.0f32, 0.0]; n];
+    for &(v, x) in &tops {
+        wind[v as usize] = [x as f32, 1.0];
+    }
     let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos.clone())
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0, 1.0, 0.0]; n])
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uv)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_1, wind)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, color)
         .with_inserted_indices(Indices::U32(idx));
     Some((mesh, pos, tops, tiles))
@@ -281,14 +331,24 @@ fn wave_grass(
     time: Res<Time>,
     args: Res<Args>,
     invasion: Res<crate::invasion::Invasion>,
-    grass: Query<(&GrassMesh, &ViewVisibility)>,
+    grass_materials: Res<GrassMaterials>,
+    mut wind_materials: ResMut<Assets<GrassMaterial>>,
+    grass: Query<(&GrassMesh, &ViewVisibility, Has<MeshMaterial3d<LayerMaterial>>)>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let wind = Wind::new(args.world, crate::terrain::world_ms(&time), invasion.active());
+    // La hierba normal: solo los números del viento.
+    let (w, second) = wind.uniforms();
+    for h in &grass_materials.0 {
+        if let Some(mut m) = wind_materials.get_mut(h) {
+            m.extension.wind = w;
+            m.extension.second = second;
+        }
+    }
     let mut per_x: Option<Vec<f32>> = None;
-    // Solo los bloques que se vieron en el último fotograma.
-    for (g, visible) in &grass {
-        if !visible.get() {
+    // La sumada (otro material): en CPU, solo los bloques que se vieron en el último fotograma.
+    for (g, visible, layered) in &grass {
+        if !visible.get() || !layered {
             continue;
         }
         let w = per_x.get_or_insert_with(|| (0..=SIZE).map(|x| wind.grass(x as f32) / MU_SCALE).collect());
