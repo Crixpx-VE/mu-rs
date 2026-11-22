@@ -35,6 +35,7 @@ mod character;
 mod charselect;
 mod chat;
 mod chat_log;
+mod clipboard;
 mod cursor;
 mod effects;
 mod fish;

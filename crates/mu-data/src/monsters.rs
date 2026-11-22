@@ -219,9 +219,9 @@ pub const BASE: Def = Def {
 };
 
 impl Def {
-    /// Nombre en español (o el que haya).
+    /// Nombre en inglés, como el cliente S6 en inglés (`name_en` solo está si es distinto de `name`).
     pub fn display_name(&self) -> &'static str {
-        if self.name.is_empty() { self.name_en } else { self.name }
+        if self.name_en.is_empty() { self.name } else { self.name_en }
     }
 }
 
@@ -473,7 +473,8 @@ mod tests {
         assert_eq!(defs(9999, 0)[0].model, Model::Monster(0));
         assert_eq!(defs(9999, 0)[0].scale, 0.9);
         // Los nombres.
-        assert_eq!(bull.display_name(), "Toro Luchador");
+        assert_eq!(bull.display_name(), "Bull Fighter");
+        assert_eq!(defs(1, 0)[0].display_name(), "Hound");
         assert_eq!(kind(0), Kind::Monster);
         assert_eq!(kind(240), Kind::Npc);
         assert_eq!(kind(100), Kind::Trap);

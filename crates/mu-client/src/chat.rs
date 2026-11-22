@@ -32,7 +32,6 @@
 use std::collections::HashMap;
 
 use ab_glyph::Font as _;
-use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::AccumulatedMouseScroll;
 use bevy::prelude::*;
@@ -355,7 +354,7 @@ fn chat_keys(
     mut sound: ResMut<SoundQueue>,
     mut players: Query<&mut crate::character::Player>,
 ) {
-    let typed: Vec<Key> = typed.read().filter(|k| k.state == ButtonState::Pressed).map(|k| k.logical_key.clone()).collect();
+    let typed: Vec<Key> = crate::clipboard::typed_keys(typed.read().cloned(), &keys);
     let chat = &mut *chat;
     let was_open = chat.input.open;
     // Con la caja de mensajes del sistema (orden 10) las teclas son suyas; con el chat abierto, el
@@ -465,6 +464,10 @@ fn chat_keys(
                     b.move_to(n);
                 }
                 Key::Tab => chat.input.tab(),
+                Key::Paste => chat.input.focused().paste(&crate::clipboard::get()),
+                Key::Copy => crate::clipboard::set(chat.input.focused().copy_text()),
+                Key::Cut => crate::clipboard::set(&chat.input.focused().cut()),
+                Key::Select => chat.input.focused().select_everything(),
                 _ => continue,
             }
             changed = true;

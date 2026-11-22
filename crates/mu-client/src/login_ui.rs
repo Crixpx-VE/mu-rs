@@ -31,7 +31,6 @@
 use std::collections::HashMap;
 
 use bevy::asset::embedded_asset;
-use bevy::input::ButtonState;
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 use bevy::render::render_resource::{
@@ -947,6 +946,29 @@ impl TextBox {
         let b = self.byte_at(self.caret);
         self.text.insert(b, c);
         self.caret += 1;
+    }
+
+    /// Ctrl+V: el texto del portapapeles en el cursor (hasta llenar la caja).
+    fn paste(&mut self, text: &str) {
+        self.take_selection();
+        for c in crate::clipboard::paste_text(text) {
+            self.insert(c);
+        }
+    }
+
+    /// Ctrl+C: lo seleccionado o, sin selección, todo. Las contraseñas no se copian (`ES_PASSWORD`).
+    fn copy_text(&self) -> Option<&str> {
+        (!self.password).then_some(self.text.as_str())
+    }
+
+    /// Ctrl+X: lo copia y deja la caja vacía (nada en las contraseñas).
+    fn cut(&mut self) -> Option<String> {
+        if self.password {
+            return None;
+        }
+        self.select_all = false;
+        self.caret = 0;
+        Some(std::mem::take(&mut self.text))
     }
 
     fn backspace(&mut self) {
@@ -1895,6 +1917,18 @@ impl LoginUi {
                 Key::Space => b.insert(' '),
                 Key::Backspace => b.backspace(),
                 Key::Delete => b.delete(),
+                Key::Paste => b.paste(&crate::clipboard::get()),
+                Key::Copy => {
+                    if let Some(t) = b.copy_text() {
+                        crate::clipboard::set(t);
+                    }
+                }
+                Key::Cut => {
+                    if let Some(t) = b.cut() {
+                        crate::clipboard::set(&t);
+                    }
+                }
+                Key::Select => b.select_all = !b.text.is_empty(),
                 Key::ArrowLeft => {
                     let c = if b.select_all { 0 } else { b.caret.saturating_sub(1) };
                     b.move_to(c);
@@ -2055,7 +2089,7 @@ fn update_ui(
         esc: keys.just_pressed(KeyCode::Escape),
         enter: keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter),
         ctrl: keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]),
-        keys: typed.read().filter(|k| k.state == ButtonState::Pressed).map(|k| k.logical_key.clone()).collect(),
+        keys: crate::clipboard::typed_keys(typed.read().cloned(), &keys),
         dt: time.delta_secs(),
     };
     ui.update(s, &input);

@@ -688,6 +688,31 @@ impl TextBox {
         self.caret += 1;
     }
 
+    /// Ctrl+V: el texto del portapapeles en el cursor (hasta llenar la caja).
+    pub fn paste(&mut self, text: &str) {
+        self.take_selection();
+        for c in crate::clipboard::paste_text(text) {
+            self.insert(c);
+        }
+    }
+
+    /// Ctrl+C: lo seleccionado o, sin selección, todo (la caja solo sabe seleccionar todo).
+    pub fn copy_text(&self) -> &str {
+        &self.text
+    }
+
+    /// Ctrl+X: lo copia y deja la caja vacía.
+    pub fn cut(&mut self) -> String {
+        self.select_all = false;
+        self.caret = 0;
+        std::mem::take(&mut self.text)
+    }
+
+    /// Ctrl+A.
+    pub fn select_everything(&mut self) {
+        self.select_all = !self.text.is_empty();
+    }
+
     pub fn backspace(&mut self) {
         if self.take_selection() || self.caret == 0 {
             return;

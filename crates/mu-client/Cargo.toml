@@ -9,6 +9,8 @@ mu-data.workspace = true
 mu-protocol.workspace = true
 bevy.workspace = true
 serde.workspace = true
+# Copiar y pegar en las cajas de texto (portapapeles de Windows), solo texto.
+arboard = { version = "3", default-features = false }
 serde_json.workspace = true
 ab_glyph.workspace = true
 
