@@ -9,6 +9,12 @@
 //! - Se cae en una casilla al azar del rectángulo que se pueda pisar (`EncTerrainN.att`), como
 //!   `GetRandomPoint` de OpenMU (ExitGateExtensions.cs) más la comprobación del terreno del
 //!   GameServer original.
+//!
+//! Las puertas a pie (`EnterGateRequest`, [`Warps::enter_gate`]) siguen `WarpGateHandlerPlugIn` y
+//! `WarpGateAction.IsWarpLegitAsync` de OpenMU: una puerta de entrada (`Flag` 1, la que mira
+//! `CheckGate`, ZzzInterface.cpp:7033) del mapa en el que está, el nivel de esa puerta (con la rebaja
+//! de clase) y estar a 12 casillas o menos de su rectángulo (`GateEntryTolerance`: el servidor guarda
+//! la casilla de llegada de cada paseo, no por dónde va). Sin zen. Lleva a su puerta de llegada.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -48,7 +54,14 @@ pub enum Refused {
     NeedsWings,
     /// La puerta no existe en `Gate.bmd`.
     BadGate,
+    /// No es una puerta de entrada del mapa en el que está.
+    NotEntrance,
+    /// Está lejos de la puerta (más de [`GATE_ENTRY_TOLERANCE`] casillas).
+    TooFar,
 }
+
+/// `WarpGateAction.GateEntryTolerance` de OpenMU: casillas que puede estar fuera del rectángulo.
+pub const GATE_ENTRY_TOLERANCE: i32 = 12;
 
 /// Clases con el nivel rebajado a 2/3 (`SettingCanMoveMap`, NewUIMoveCommandWindow.cpp:337-345):
 /// Magic Gladiator (3), Dark Lord (4) y Rage Fighter (6), salvo los destinos de nivel 400.
@@ -70,8 +83,10 @@ impl Warps {
             Vec::new()
         });
         let mut attributes = HashMap::new();
-        for m in &list {
-            let Some(g) = gates.get(m.gate as usize) else { continue };
+        // Los mapas de llegada de la lista y de las puertas de entrada.
+        let targets = list.iter().map(|m| m.gate as usize).chain(gates.iter().filter(|g| g.flag == 1).map(|g| g.target as usize));
+        for target in targets {
+            let Some(g) = gates.get(target) else { continue };
             if attributes.contains_key(&g.map) {
                 continue;
             }
@@ -122,6 +137,36 @@ impl Warps {
             return Err(Refused::NeedsWings);
         }
         Ok((self.land(&gate), m.zen.max(0) as u32))
+    }
+
+    /// `EnterGateRequest`: ¿puede cruzar la puerta `index` quien está en `map` (`pos`, la casilla
+    /// que sabe el servidor)? Si puede, dónde cae (su puerta de llegada).
+    pub fn enter_gate(&self, index: u16, map: u8, pos: (u8, u8), class: ClassIndex, level: u16) -> Result<Landing, Refused> {
+        let gate = *self.gates.get(index as usize).ok_or(Refused::BadGate)?;
+        // `player.SelectedCharacter.CurrentMap.EnterGates` (WarpGateHandlerPlugIn.cs).
+        if gate.flag != 1 || gate.map != map {
+            return Err(Refused::NotEntrance);
+        }
+        // `GetEffectiveMoveLevelRequirement(enterGate.LevelRequirement)`.
+        let needed = required_level(class, gate.level as i32);
+        if (level as i32) < needed {
+            return Err(Refused::Level { needed });
+        }
+        let target = *self.gates.get(gate.target as usize).ok_or(Refused::BadGate)?;
+        if target.x2 == 0 && target.y2 == 0 {
+            return Err(Refused::BadGate);
+        }
+        // `TargetGate.Map.TryGetRequirementError`: Icarus pide alas (aún no hay equipo).
+        if target.map == ICARUS {
+            return Err(Refused::NeedsWings);
+        }
+        let (x1, y1, x2, y2) = gate.area();
+        let t = GATE_ENTRY_TOLERANCE;
+        let near = |p: u8, lo: u8, hi: u8| (p as i32) >= lo as i32 - t && (p as i32) <= hi as i32 + t;
+        if !(near(pos.0, x1, x2) && near(pos.1, y1, y2)) {
+            return Err(Refused::TooFar);
+        }
+        Ok(self.land(&target))
     }
 
     /// Una casilla de la puerta que se pueda pisar: 50 intentos al azar y, si no, la primera.
@@ -191,5 +236,31 @@ mod tests {
         assert_eq!(w.find_by_name("lorencia").map(|m| m.index), Some(2));
         assert_eq!(w.find_by_name("NORIA").map(|m| m.index), Some(3));
         assert!(w.find_by_name("No existe").is_none());
+    }
+
+    #[test]
+    fn puertas_a_pie() {
+        let w = Warps::load(&data());
+        if w.gates.is_empty() {
+            return;
+        }
+        // Lorencia → Dungeon: la 1 (mapa 0, (121,232)-(123,233), nivel 20) lleva a la 2 (mapa 1,
+        // (107,247)-(110,247), mirando a 1).
+        let l = w.enter_gate(1, 0, (122, 232), 1, 20).unwrap();
+        assert_eq!((l.map, l.angle), (1, 1));
+        assert!((107..=110).contains(&l.x) && l.y == 247, "{l:?}");
+        assert_eq!(w.enter_gate(1, 0, (122, 232), 1, 19), Err(Refused::Level { needed: 20 }));
+        assert!(w.enter_gate(1, 0, (122, 232), 4, 13).is_ok(), "Dark Lord: 2/3 de 20 = 13");
+        assert_eq!(w.enter_gate(1, 3, (122, 232), 1, 50), Err(Refused::NotEntrance), "otro mapa");
+        assert_eq!(w.enter_gate(2, 1, (108, 247), 1, 50), Err(Refused::NotEntrance), "puerta de llegada");
+        assert_eq!(w.enter_gate(1, 0, (122, 200), 1, 50), Err(Refused::TooFar));
+        assert!(w.enter_gate(1, 0, (122, 245), 1, 50).is_ok(), "a 12 casillas aún vale");
+        assert_eq!(w.enter_gate(600, 0, (0, 0), 1, 50), Err(Refused::BadGate));
+        // Y de vuelta: la 3 (Dungeon (108,248)-(109,248), sin nivel) a la 4 de Lorencia.
+        let l = w.enter_gate(3, 1, (108, 248), 1, 1).unwrap();
+        assert_eq!(l.map, 0);
+        assert!((121..=123).contains(&l.x) && l.y == 231, "{l:?}");
+        // El Dungeon tiene terreno cargado (para caer en una casilla que se pueda pisar).
+        assert!(w.attributes.contains_key(&1) || w.attributes.is_empty());
     }
 }

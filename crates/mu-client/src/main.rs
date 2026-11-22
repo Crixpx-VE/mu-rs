@@ -35,6 +35,7 @@ mod effects;
 mod fish;
 mod fonts;
 mod fx;
+mod gate;
 mod grass;
 mod hud;
 mod invasion;
@@ -259,6 +260,7 @@ fn main() {
         .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin, water_terrain::WaterTerrainPlugin))
         .add_plugins(minimap::MiniMapPlugin)
         .add_plugins(move_window::MoveWindowPlugin)
+        .add_plugins(gate::GatePlugin)
         .add_plugins(names::NamesPlugin)
         .add_plugins(chat::ChatPlugin)
         .run();

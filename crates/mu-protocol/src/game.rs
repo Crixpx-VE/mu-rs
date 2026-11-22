@@ -36,6 +36,7 @@
 //! servidor → cliente  AddCharactersToScope         C2 len 12 <n> n × [<id u16 BE> <x> <y> <apariencia 18> <nombre 10>
 //!                                                                    <x destino> <y destino> <rotación:4 | héroe:4>
 //!                                                                    <n efectos> <efectos n>]
+//!                                                  (apariencia: byte 0 = clase << 3 | postura)
 //! servidor → cliente  MapObjectOutOfScope          C1 len 14 <n> n × <id u16 BE>
 //! servidor → cliente  MapMoveChecksumKey           C1 08 8E 01 <clave u32 LE>
 //! cliente  → servidor WarpCommandRequest           C1 0A 8E 02 <clave u32 LE> <índice u16 LE>
@@ -49,7 +50,28 @@
 //! servidor → cliente  WhisperResult                C1 04 0C <0 = no está conectado>
 //! servidor → cliente  ServerMessage (aviso)        C1 len 0D <tipo> <veces> 00 <espera u16 LE> <color u32 LE>
 //!                                                              <velocidad> <texto con su 00>
+//! cliente  → servidor EnterGateRequest             C3 08 1C 00 <puerta u16 LE> <x> <y>
+//! cliente  → servidor AnimationRequest             C1 05 18 <dirección> <acción AT_*>
+//! servidor → cliente  ObjectAnimation              C1 09 18 <id u16 BE> <dirección> <acción AT_*> <id objetivo u16 BE>
 //! ```
+//!
+//! # Puertas a pie
+//!
+//! `CheckGate` (ZzzInterface.cpp:7023-7149) mira cada tick si el héroe pisa una puerta de entrada
+//! (`Flag` 1) de su mapa y, si llega al nivel, manda `SendRequestMagicTeleport(&bResult, puerta,
+//! 0, 0)` (wsclientinline.h:655-675): `spe.Init(0xC1, 0x1C)`, un byte nulo, `WORD` puerta y las
+//! dos casillas (solo las usa el teletransporte del mago, con puerta 0), con `Send(TRUE)` (cifrado:
+//! C3, como `EnterGateRequest` de OpenMU). El servidor contesta con `MapChanged` como la ventana `M`.
+//!
+//! # Animaciones (`AT_*`)
+//!
+//! `SendRequestAction(acción, dirección)` (wsclientinline.h: `spe.Init(0xC1, 0x18)`, `BYTE` dirección
+//! y `BYTE` acción) al sentarse, apoyarse o curarse (ZzzInterface.cpp:3700-3733) y con los gestos del
+//! chat (`CheckChatText`, ZzzInterface.cpp:4434-4590). La dirección es
+//! `((Angle + 22.5) / 360 * 8 + 1) % 8`, la misma de `MapChanged` (el que la recibe gira
+//! `(dirección − 1) * 45`). El servidor lo reenvía a los que lo ven (`AnimationHandlerPlugIn` →
+//! `ObjectAnimation` de OpenMU), que lo lee `ReceiveAction` (`PRECEIVE_ACTION`, WSclient.h:728-736 y
+//! WSclient.cpp:3120-3353). Ver [`action`].
 //!
 //! # Chat
 //!
@@ -148,6 +170,57 @@ pub mod logout_kind {
     pub const CLOSE_GAME: u8 = 0;
     pub const BACK_TO_CHARACTER_SELECTION: u8 = 1;
     pub const BACK_TO_SERVER_SELECTION: u8 = 2;
+}
+
+/// Acciones de `AnimationRequest` / `ObjectAnimation` (`enum OptionType`, _enum.h:1498-1545: empieza
+/// en `AT_ATTACK1` = 120 y sigue de uno en uno).
+pub mod action {
+    pub const ATTACK1: u8 = 120;
+    pub const ATTACK2: u8 = 121;
+    pub const STAND1: u8 = 122;
+    pub const STAND2: u8 = 123;
+    pub const DAMAGE1: u8 = 126;
+    pub const SIT1: u8 = 128;
+    pub const POSE1: u8 = 129;
+    pub const HEALING1: u8 = 130;
+    pub const GREETING1: u8 = 131;
+    pub const GOODBYE1: u8 = 132;
+    pub const CLAP1: u8 = 133;
+    pub const GESTURE1: u8 = 134;
+    pub const DIRECTION1: u8 = 135;
+    pub const UNKNOWN1: u8 = 136;
+    pub const CRY1: u8 = 137;
+    pub const CHEER1: u8 = 138;
+    pub const AWKWARD1: u8 = 139;
+    pub const SEE1: u8 = 140;
+    pub const WIN1: u8 = 141;
+    pub const SMILE1: u8 = 142;
+    pub const SLEEP1: u8 = 143;
+    pub const COLD1: u8 = 144;
+    pub const AGAIN1: u8 = 145;
+    pub const RESPECT1: u8 = 146;
+    pub const SALUTE1: u8 = 147;
+    pub const RUSH1: u8 = 148;
+    pub const SCISSORS: u8 = 149;
+    pub const ROCK: u8 = 150;
+    pub const PAPER: u8 = 151;
+    pub const HUSTLE: u8 = 152;
+    pub const PROVOCATION: u8 = 153;
+    pub const LOOK_AROUND: u8 = 154;
+    pub const CHEERS: u8 = 155;
+
+    /// `CharacterPose` de OpenMU (`AnimationHandlerPlugIn`: 0x80/0x6C sentado, 0x81/0x6D apoyado,
+    /// 0x82/0x6E colgado), la que va en los 3 bits bajos del byte 0 de la apariencia y que el cliente
+    /// enseña al aparecer (`Class & 0x07`, WSclient.cpp:2167-2191: 2 `PLAYER_SIT1`, 3 `PLAYER_POSE1`,
+    /// 4 `PLAYER_HEALING1`). 0 = de pie.
+    pub fn pose(action: u8) -> u8 {
+        match action {
+            0x80 | 0x6C => 2,
+            0x81 | 0x6D => 3,
+            0x82 | 0x6E => 4,
+            _ => 0,
+        }
+    }
 }
 
 /// Bits de `CharacterList::unlock_flags` y `CharacterClassCreationUnlock::flags`
@@ -346,6 +419,13 @@ pub enum ClientMessage {
     PublicChat { name: String, message: String },
     /// `SendChatWhisper`: `target` es a quién se susurra.
     Whisper { target: String, message: String },
+    /// `SendRequestMagicTeleport(&bResult, puerta, x, y)` (`EnterGateRequest`): el héroe pisa la
+    /// puerta de entrada `gate` de `Gate.bmd`. `x`/`y` solo valen con `gate` 0 (teletransporte
+    /// del mago); al pisar una puerta van a 0.
+    EnterGate { gate: u16, x: u8, y: u8 },
+    /// `SendRequestAction(acción, dirección)` (`AnimationRequest`): `action` es un `AT_*` (ver
+    /// [`action`]) y `rotation` la dirección 0..7 hacia donde mira.
+    Animation { rotation: u8, action: u8 },
 }
 
 /// Un personaje de la lista de la pantalla de selección.
@@ -416,6 +496,8 @@ pub struct ScopeCharacter {
     pub rotation: u8,
     /// `CharacterHeroState`, nibble bajo del byte 34.
     pub hero_state: u8,
+    /// `CharacterPose` (ver [`action::pose`]): 3 bits bajos del byte 0 de la apariencia.
+    pub pose: u8,
 }
 
 /// Lo que el Game Server manda al cliente (ya descifrado).
@@ -459,6 +541,9 @@ pub enum ServerMessage {
     /// deslizante (`Count`, `Delay`, `Color`, `Speed`, tipos 10-15) van a cero. Como mucho
     /// [`MAX_NOTICE_TEXT`] bytes de texto.
     Notice { kind: u8, text: String },
+    /// Alguien hace una animación (`ReceiveAction`): `direction` como en `MapChanged`, `action` un
+    /// `AT_*` (ver [`action`]) y `target` el id del objetivo (0 si no hay).
+    ObjectAnimation { id: u16, direction: u8, action: u8, target: u16 },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -668,6 +753,15 @@ impl ClientMessage {
             }
             Self::PublicChat { name, message } => chat_packet(0x00, name, message, MAX_CHAT_SIZE),
             Self::Whisper { target, message } => chat_packet(0x02, target, message, MAX_CHAT_SIZE),
+            Self::EnterGate { gate, x, y } => {
+                // `spe.AddNullData(1)` en el byte 3; `Send(TRUE)`: cifrado (C3).
+                let mut p = fixed_c3(8, 0x1C, 0x00);
+                put_u16_le(&mut p, 4, *gate);
+                p[6] = *x;
+                p[7] = *y;
+                p
+            }
+            Self::Animation { rotation, action } => c1(&[0x18, *rotation, *action]),
         }
     }
 
@@ -676,6 +770,9 @@ impl ClientMessage {
         let d = short_header(&p)?;
         // Paquetes sin subcódigo.
         match p.code() {
+            // El byte 3 es el nulo de relleno (OpenMU lo acepta también sin cifrar).
+            0x1C => return Some(Self::EnterGate { gate: get_u16_le(d, 4)?, x: *d.get(6)?, y: *d.get(7)? }),
+            0x18 => return Some(Self::Animation { rotation: *d.get(3)?, action: *d.get(4)? }),
             0xD4 => {
                 let (rotation, directions) = unpack_steps(d, 5)?;
                 return Some(Self::Walk { source_x: *d.get(3)?, source_y: *d.get(4)?, rotation, directions });
@@ -833,7 +930,10 @@ impl ScopeCharacter {
         out.extend_from_slice(&self.id.to_be_bytes());
         out.push(self.x);
         out.push(self.y);
-        out.extend_from_slice(&appearance_for_class(self.class));
+        let mut appearance = appearance_for_class(self.class);
+        // `target[0] |= Pose` (AppearanceSerializer.cs:125 de OpenMU).
+        appearance[0] |= self.pose & 0x07;
+        out.extend_from_slice(&appearance);
         out.extend_from_slice(&fixed::<10>(&self.name));
         out.push(self.target_x);
         out.push(self.target_y);
@@ -859,6 +959,7 @@ impl ScopeCharacter {
             target_y: e[33],
             rotation: e[34] >> 4,
             hero_state: e[34] & 0x0F,
+            pose: e[4] & 0x07,
         };
         Some((c, next))
     }
@@ -964,6 +1065,11 @@ impl ServerMessage {
                 body.push(0);
                 c1(&body)
             }
+            Self::ObjectAnimation { id, direction, action, target } => {
+                let [ih, il] = id.to_be_bytes();
+                let [th, tl] = target.to_be_bytes();
+                c1(&[0x18, ih, il, *direction, *action, th, tl])
+            }
         }
     }
 
@@ -1013,6 +1119,16 @@ impl ServerMessage {
             0x0D => {
                 let d = short_header(&p)?;
                 return Some(Self::Notice { kind: *d.get(3)?, text: unfixed(d.get(13..).unwrap_or(&[])) });
+            }
+            // `PRECEIVE_ACTION`: `KeyH`, `KeyL`, `Angle`, `Action`, `TargetKeyH`, `TargetKeyL`.
+            0x18 => {
+                let d = short_header(&p)?;
+                return Some(Self::ObjectAnimation {
+                    id: get_u16_be(d, 3)?,
+                    direction: *d.get(5)?,
+                    action: *d.get(6)?,
+                    target: get_u16_be(d, 7).unwrap_or(0),
+                });
             }
             _ => {}
         }
@@ -1334,8 +1450,20 @@ mod tests {
                 target_y: 127,
                 rotation: 3,
                 hero_state: 3,
+                pose: 0,
             },
-            ScopeCharacter { id: 456, x: 1, y: 2, class: 20, name: "Invocadora".into(), target_x: 1, target_y: 2, rotation: 0, hero_state: 0 },
+            ScopeCharacter {
+                id: 456,
+                x: 1,
+                y: 2,
+                class: 20,
+                name: "Invocadora".into(),
+                target_x: 1,
+                target_y: 2,
+                rotation: 0,
+                hero_state: 0,
+                pose: 0,
+            },
         ];
         let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(jugadores));
         assert_eq!(wire.len(), 5 + 2 * 36);
@@ -1356,6 +1484,11 @@ mod tests {
             Some(ServerMessage::AddCharactersToScope(v)) => assert_eq!(v[0].name, "Guerrero"),
             otro => panic!("{otro:?}"),
         }
+
+        // Sentado (`CharacterPose::Sitting` = 2): en el byte 0 de la apariencia, bajo la clase.
+        let sentado = ScopeCharacter { id: 9, class: 8, name: "Elfa".into(), pose: 2, ..Default::default() };
+        let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(vec![sentado]));
+        assert_eq!(wire[9], (8 << 3) | 2);
 
         let fuera = ida_y_vuelta_servidor(ServerMessage::MapObjectOutOfScope(vec![1, 0x1234, 0x7FFF]));
         assert_eq!(fuera, [0xC1, 10, 0x14, 3, 0, 1, 0x12, 0x34, 0x7F, 0xFF]);
@@ -1404,6 +1537,42 @@ mod tests {
         }
         let w = ClientMessage::WarpCommandRequest { key: 9, index: 42 };
         assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&w.encode())).unwrap()), Some(w));
+    }
+
+    #[test]
+    fn puertas_a_pie() {
+        let pedir = ida_y_vuelta_cliente(ClientMessage::EnterGate { gate: 1, x: 0, y: 0 });
+        // `spe.Init(0xC1, 0x1C)`, `AddNullData(1)`, `WORD` puerta, x, y; cifrado (C3), 8 como OpenMU.
+        assert_eq!(pedir, [0xC3, 8, 0x1C, 0x00, 1, 0, 0, 0]);
+        let mago = ida_y_vuelta_cliente(ClientMessage::EnterGate { gate: 0x0123, x: 130, y: 125 });
+        assert_eq!(&mago[4..], &[0x23, 0x01, 130, 125]);
+        // Sin cifrar (C1) también se lee, como `WarpGateHandlerPlugIn` (`IsEncryptionExpected` falso).
+        assert_eq!(ClientMessage::decode(&[0xC1, 8, 0x1C, 0, 3, 0, 0, 0]), Some(ClientMessage::EnterGate { gate: 3, x: 0, y: 0 }));
+        assert_eq!(ClientMessage::decode(&[0xC3, 6, 0x1C, 0, 3, 0]), None, "corto");
+        // Cifrado de punta a punta.
+        let mut client = ClientCrypto::default();
+        let mut server = ServerCrypto::default();
+        let m = ClientMessage::EnterGate { gate: 3, x: 0, y: 0 };
+        let wire = client.encrypt(&m.encode());
+        assert_eq!(wire[0], 0xC3);
+        assert_eq!(ClientMessage::decode(&server.decrypt(&wire).unwrap()), Some(m));
+    }
+
+    #[test]
+    fn animaciones() {
+        let sentarse = ida_y_vuelta_cliente(ClientMessage::Animation { rotation: 5, action: action::SIT1 });
+        // `spe << (BYTE)p_Angle << (BYTE)p_Action`.
+        assert_eq!(sentarse, [0xC1, 5, 0x18, 5, 0x80]);
+        let visto = ida_y_vuelta_servidor(ServerMessage::ObjectAnimation { id: 0x1234, direction: 5, action: action::SIT1, target: 0 });
+        // `ObjectAnimation` de OpenMU (9): id BE en el 3, dirección en el 5, acción en el 6, objetivo en el 7.
+        assert_eq!(visto, [0xC1, 9, 0x18, 0x12, 0x34, 5, 0x80, 0, 0]);
+        ida_y_vuelta_servidor(ServerMessage::ObjectAnimation { id: 7, direction: 0, action: action::GREETING1, target: 0x0102 });
+        assert_eq!((action::SIT1, action::POSE1, action::HEALING1, action::GREETING1, action::RUSH1, action::CHEERS), (128, 129, 130, 131, 148, 155));
+        assert_eq!([action::pose(0x80), action::pose(0x81), action::pose(0x82), action::pose(action::GREETING1)], [2, 3, 4, 0]);
+        let mut client = ClientCrypto::default();
+        let mut server = ServerCrypto::default();
+        let m = ClientMessage::Animation { rotation: 1, action: action::POSE1 };
+        assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&m.encode())).unwrap()), Some(m));
     }
 
     #[test]

@@ -1,7 +1,12 @@
 //! Los demás jugadores del mapa, como los manda el servidor:
 //! - `AddCharactersToScope`: aparecen (su clase, sin equipo) en su casilla;
 //! - `ObjectWalked`: caminan los pasos que dio (o, si no vienen, hasta la casilla de llegada);
-//! - `MapObjectOutOfScope`: desaparecen.
+//! - `MapObjectOutOfScope`: desaparecen;
+//! - `ObjectAnimation` (`ReceiveAction`, WSclient.cpp:3120-3353): miran a su dirección, se paran en
+//!   su casilla de llegada (`TargetX/Y`) y ponen la animación de la acción (sentarse, apoyarse,
+//!   curarse, los gestos del chat...). Sentados, apoyados o curándose siguen así hasta que caminan;
+//!   un gesto, hasta que acaba (`PlayerStopAnimationSetting`). Al aparecer, la postura que traen en
+//!   la apariencia (`Class & 0x07`, WSclient.cpp:2167-2191).
 //!
 //! Los mensajes llegan a veces mientras se carga el mapa: se guardan hasta que el juego está listo.
 
@@ -34,7 +39,13 @@ struct Inbox(Vec<ServerMessage>);
 
 fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<Inbox>) {
     for m in from.read() {
-        if matches!(m.0, ServerMessage::AddCharactersToScope(_) | ServerMessage::ObjectWalked { .. } | ServerMessage::MapObjectOutOfScope(_)) {
+        if matches!(
+            m.0,
+            ServerMessage::AddCharactersToScope(_)
+                | ServerMessage::ObjectWalked { .. }
+                | ServerMessage::MapObjectOutOfScope(_)
+                | ServerMessage::ObjectAnimation { .. }
+        ) {
             inbox.0.push(m.0.clone());
         }
     }
@@ -49,6 +60,8 @@ pub struct RemotePlayer {
     /// Posición en casillas (fraccionaria mientras camina).
     pos: Vec2,
     path: VecDeque<(usize, usize)>,
+    /// `TargetX/Y`: la casilla de llegada del último paseo (o la suya al aparecer).
+    target: (u8, u8),
     facing: f32,
     action: usize,
     frame: f32,
@@ -92,6 +105,7 @@ fn apply(
                     if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == c.id) {
                         r.pos = Vec2::new(c.x as f32 + 0.5, c.y as f32 + 0.5);
                         r.path.clear();
+                        r.target = (c.x, c.y);
                         continue;
                     }
                     let class = Class::from_index(game::base_class_index(c.class));
@@ -101,14 +115,24 @@ fn apply(
                         continue;
                     };
                     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
+                    // `Class & 0x07`: 2 sentado, 3 apoyado, 4 curándose (1, aparecer con
+                    // `CreateTeleportEnd`, no se pinta todavía).
+                    let pose = match c.pose {
+                        2 => Some(game::action::SIT1),
+                        3 => Some(game::action::POSE1),
+                        4 => Some(game::action::HEALING1),
+                        _ => None,
+                    };
+                    let action = pose.and_then(|at| crate::character::action::for_at(at, class.female()).flatten()).unwrap_or(stop);
                     let r = RemotePlayer {
                         id: c.id,
                         name: c.name.clone(),
                         class,
                         pos: Vec2::new(c.x as f32 + 0.5, c.y as f32 + 0.5),
                         path: VecDeque::new(),
+                        target: (c.x, c.y),
                         facing: rotation_facing(c.rotation),
-                        action: stop,
+                        action,
                         frame: 0.0,
                         stop,
                         walk,
@@ -165,6 +189,26 @@ fn apply(
                     r.facing = rotation_facing(rotation);
                 }
                 r.path = path;
+                r.target = (target_x, target_y);
+            }
+            ServerMessage::ObjectAnimation { id, direction, action, .. } => {
+                let id = id & game::OBJECT_ID_MASK;
+                let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
+                // `Angle[2] = (Angle - 1) * 45`, `Movement = false` y a su `TargetX/Y`.
+                r.facing = rotation_facing(direction);
+                r.path.clear();
+                r.pos = Vec2::new(r.target.0 as f32 + 0.5, r.target.1 as f32 + 0.5);
+                match crate::character::action::for_at(action, r.class.female()) {
+                    Some(a) => {
+                        // `SetAction` no vuelve a empezar la que ya tiene.
+                        let a = a.unwrap_or(r.stop);
+                        if a != r.action {
+                            r.action = a;
+                            r.frame = 0.0;
+                        }
+                    }
+                    None => debug!("{}: acción {action} sin animación", r.name),
+                }
             }
             ServerMessage::MapObjectOutOfScope(ids) => {
                 for (e, r, shadow) in &remotes {
@@ -215,7 +259,15 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
                 budget = 0.0;
             }
         }
-        let action = if r.path.is_empty() { r.stop } else { r.walk };
+        // Sentado, apoyado o con un gesto sigue así mientras no camine (como el héroe).
+        let keep = crate::character::action::resting(r.action) || crate::character::action::emote(r.action);
+        let action = if !r.path.is_empty() {
+            r.walk
+        } else if keep {
+            r.action
+        } else {
+            r.stop
+        };
         if action != r.action {
             r.action = action;
             r.frame = 0.0;
@@ -236,6 +288,13 @@ pub(crate) fn animate(
     let Some(terrain) = terrain else { return };
     for (mut r, skinned, shadow, selectable) in &mut q {
         r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
+        // Un gesto acaba: parado (`PlayerStopAnimationSetting`). Una acción que `player.bmd` no
+        // tiene (un número cualquiera del servidor), también.
+        let frames = skinned.action_frames(r.action) as f32;
+        if frames == 0.0 || (crate::character::action::emote(r.action) && r.frame >= frames - 1.0) {
+            r.action = r.stop;
+            r.frame = 0.0;
+        }
         let ground = terrain.0.height_at(r.pos.x, r.pos.y);
         let mut sh = crate::shadow::Builder::new(
             Some(&terrain.0),

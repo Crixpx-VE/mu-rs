@@ -543,6 +543,8 @@ fn net_messages(
     remotes: Query<(Entity, &crate::shadow::Shadow), With<crate::remote::RemotePlayer>>,
     mut game_ui: ResMut<crate::options::GameUi>,
     mut net: ResMut<crate::net::Net>,
+    mut gate: ResMut<crate::gate::GateState>,
+    real: Res<Time<Real>>,
 ) {
     for m in from.read() {
         match m.0 {
@@ -588,6 +590,7 @@ fn net_messages(
                         place(&mut p, x, y, facing);
                     }
                     net.send(ClientMessage::ClientReadyAfterMapChange);
+                    gate.finish_loading(real.elapsed_secs_f64());
                 }
             }
             _ => {}
@@ -603,10 +606,17 @@ fn place(p: &mut crate::character::Player, x: u8, y: u8, facing: f32) {
     p.facing = facing;
 }
 
-/// Al terminar de cargar el mapa nuevo: `SendRequestFinishLoading`.
-fn finish_map_change(mut pending: ResMut<MapChangePending>, mut net: ResMut<crate::net::Net>) {
+/// Al terminar de cargar el mapa nuevo: `SendRequestFinishLoading` (que además apunta cuándo, para
+/// las puertas: gate.rs).
+fn finish_map_change(
+    mut pending: ResMut<MapChangePending>,
+    mut net: ResMut<crate::net::Net>,
+    mut gate: ResMut<crate::gate::GateState>,
+    real: Res<Time<Real>>,
+) {
     if std::mem::take(&mut pending.0) {
         net.send(ClientMessage::ClientReadyAfterMapChange);
+        gate.finish_loading(real.elapsed_secs_f64());
     }
 }
 

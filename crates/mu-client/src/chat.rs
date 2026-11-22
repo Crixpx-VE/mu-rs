@@ -24,7 +24,8 @@
 //!
 //! Lo que no hay todavía (ver el informe): grupo, gremio y Gens (sus mensajes no llegan a nadie),
 //! comandos del chat del cliente salvo `/filter`, `/warp`, `/whisper on|off` y el aviso de Icarus
-//! de `/move`, gestos al hablar (`CheckChatText`), filtro de palabrotas (`CheckAbuseFilter`),
+//! de `/move`, los gestos de los anillos de transformación (los demás gestos al hablar, de
+//! `CheckChatText`, sí: chat_log.rs y character.rs), filtro de palabrotas (`CheckAbuseFilter`),
 //! avisos dorados del centro (`CreateNotice`), clic derecho en un jugador para susurrarle y el
 //! texto de ayuda del botón de Gens (no está en Text_eng.bmd).
 
@@ -338,6 +339,7 @@ fn chat_keys(
     mut move_window: ResMut<crate::move_window::MoveWindow>,
     mut net: ResMut<crate::net::Net>,
     mut sound: ResMut<SoundQueue>,
+    mut players: Query<&mut crate::character::Player>,
 ) {
     let typed: Vec<Key> = typed.read().filter(|k| k.state == ButtonState::Pressed).map(|k| k.logical_key.clone()).collect();
     let chat = &mut *chat;
@@ -403,6 +405,11 @@ fn chat_keys(
                 Outgoing::Whisper(target, message) => net.send(ClientMessage::Whisper { target, message }),
                 // Un nombre que no está manda −1 como `WORD` (0xFFFF), como el original.
                 Outgoing::Warp(index) => move_window.request_warp(&mut net, index as u16),
+                Outgoing::Emote(action) => {
+                    if let Ok(mut p) = players.single_mut() {
+                        crate::character::chat_emote(&mut p, action, &mut net);
+                    }
+                }
             }
         }
     } else if was_open && (up || down) {

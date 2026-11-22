@@ -24,12 +24,76 @@ pub mod action {
     pub const STOP_MALE: usize = 1;
     pub const WALK_MALE: usize = 15;
     pub const SIT1: usize = ids::PLAYER_SIT1 as usize;
-    pub const HEALING1: usize = ids::PLAYER_HEALING1 as usize;
-    pub const POSE1: usize = ids::PLAYER_POSE1 as usize;
     /// `PLAYER_SIT1..=PLAYER_POSE_FEMALE1`: sentado, curándose o apoyado (se queda así hasta moverse).
     pub fn resting(a: usize) -> bool {
         (SIT1..=ids::PLAYER_POSE_FEMALE1 as usize).contains(&a)
     }
+
+    /// Los gestos (`PLAYER_GREETING1..=PLAYER_RUSH1`): caen en el `PLAYER_ATTACK_FIST..PLAYER_SHOCK`
+    /// de `PlayerStopAnimationSetting` (ZzzCharacter.cpp:3264-3282), así que al acabar la animación
+    /// vuelve a estar parado (`SetPlayerStop`).
+    pub fn emote(a: usize) -> bool {
+        (ids::PLAYER_GREETING1 as usize..=ids::PLAYER_RUSH1 as usize).contains(&a)
+    }
+
+    /// `ReceiveAction` (WSclient.cpp:3142-3350): la animación de `player.bmd` de una acción `AT_*`
+    /// (las de mujer, uno más; sentarse, dos). `Some(None)` = `AT_STAND1/2` (`SetPlayerStop`);
+    /// `None` = ninguna que se sepa poner (ataques y daño, sin armas ni monstruos todavía).
+    pub fn for_at(at: u8, female: bool) -> Option<Option<usize>> {
+        use mu_protocol::game::action as at_;
+        let f = female as i32;
+        let a = match at {
+            at_::STAND1 | at_::STAND2 => return Some(None),
+            at_::ATTACK1 | at_::ATTACK2 | at_::DAMAGE1 => return None,
+            at_::SIT1 => ids::PLAYER_SIT1 + 2 * f,
+            at_::POSE1 => ids::PLAYER_POSE1 + f,
+            at_::HEALING1 => ids::PLAYER_HEALING1 + f,
+            at_::GREETING1 => ids::PLAYER_GREETING1 + f,
+            at_::GOODBYE1 => ids::PLAYER_GOODBYE1 + f,
+            at_::CLAP1 => ids::PLAYER_CLAP1 + f,
+            at_::GESTURE1 => ids::PLAYER_GESTURE1 + f,
+            at_::DIRECTION1 => ids::PLAYER_DIRECTION1 + f,
+            at_::UNKNOWN1 => ids::PLAYER_UNKNOWN1 + f,
+            at_::CRY1 => ids::PLAYER_CRY1 + f,
+            at_::AWKWARD1 => ids::PLAYER_AWKWARD1 + f,
+            at_::SEE1 => ids::PLAYER_SEE1 + f,
+            at_::CHEER1 => ids::PLAYER_CHEER1 + f,
+            at_::WIN1 => ids::PLAYER_WIN1 + f,
+            at_::SMILE1 => ids::PLAYER_SMILE1 + f,
+            at_::SLEEP1 => ids::PLAYER_SLEEP1 + f,
+            at_::COLD1 => ids::PLAYER_COLD1 + f,
+            at_::AGAIN1 => ids::PLAYER_AGAIN1 + f,
+            at_::RESPECT1 => ids::PLAYER_RESPECT1,
+            at_::SALUTE1 => ids::PLAYER_SALUTE1,
+            at_::RUSH1 => ids::PLAYER_RUSH1,
+            at_::SCISSORS => ids::PLAYER_SCISSORS,
+            at_::ROCK => ids::PLAYER_ROCK,
+            at_::PAPER => ids::PLAYER_PAPER,
+            at_::HUSTLE => ids::PLAYER_HUSTLE,
+            at_::PROVOCATION => ids::PLAYER_PROVOCATION,
+            at_::LOOK_AROUND => ids::PLAYER_LOOK_AROUND,
+            at_::CHEERS => ids::PLAYER_CHEERS,
+            // `default: SetAction(&c->Object, Data->Action)`.
+            other => other as i32,
+        };
+        Some(Some(a as usize))
+    }
+
+    /// `SetActionClass` (ZzzInterface.cpp:4416-4432): solo se pone estando parado (`PLAYER_STOP_MALE..
+    /// =PLAYER_STOP_RIDE_WEAPON`, `PLAYER_STOP_TWO_HAND_SWORD_TWO` o el del Rage Fighter).
+    pub fn standing(a: usize) -> bool {
+        let a = a as i32;
+        (ids::PLAYER_STOP_MALE..=ids::PLAYER_STOP_RIDE_WEAPON).contains(&a)
+            || a == ids::PLAYER_STOP_TWO_HAND_SWORD_TWO
+            || a == ids::PLAYER_STOP_RAGEFIGHTER
+    }
+}
+
+/// `((Angle[2] + 22.5) / 360 * 8 + 1) % 8`: la dirección que mandan `SendRequestAction` y el
+/// `SendCharacterMove` de una casilla (wsclientinline.h:454-457), con el ángulo en [0, 360).
+pub fn facing_direction(facing: f32) -> u8 {
+    let deg = facing.to_degrees().rem_euclid(360.0);
+    (((deg + 22.5) / 360.0 * 8.0 + 1.0) as u32 % 8) as u8
 }
 
 /// Casillas por segundo al caminar.
@@ -76,6 +140,9 @@ pub fn play_speed(a: usize) -> f32 {
         0.33
     } else if a == ids::PLAYER_HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 {
         0.2
+    } else if a == ids::PLAYER_SEE1 || a == ids::PLAYER_SEE_FEMALE1 {
+        // ZzzOpenData.cpp:358-359 (el resto de gestos, `PLAYER_DEFENSE1..=PLAYER_SHOCK`, a 0.32).
+        0.28
     } else if action::resting(a as usize) {
         0.4
     } else {
@@ -257,6 +324,11 @@ impl Skinned {
             }
         }
         bones
+    }
+
+    /// Fotogramas de la animación `action` de `player.bmd` (0 si no la tiene).
+    pub fn action_frames(&self, action: usize) -> usize {
+        self.skeleton.actions.get(action).map_or(0, |a| a.frames)
     }
 
     /// Los huesos de la pose `action`/`frame` (los mismos que usa [`Skinned::pose`]).
@@ -661,6 +733,7 @@ fn hero_input(
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut players: Query<&mut Player>,
     mut net: ResMut<crate::net::Net>,
+    gate: Res<crate::gate::GateState>,
 ) {
     use mu_data::terrain::attr;
     let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
@@ -692,8 +765,9 @@ fn hero_input(
                 success = true;
             }
         }
-        // Ni sobre la interfaz (`MouseOnWindow`) ni mientras hace una habilidad.
-        if success && !over_ui.0 && player.casting.is_none() {
+        // Ni sobre la interfaz (`MouseOnWindow`), ni mientras hace una habilidad, ni cruzando una
+        // puerta (`LoadingWorld > 30`, ZzzInterface.cpp:7192-7195).
+        if success && !over_ui.0 && player.casting.is_none() && !gate.blocks_input() {
             timer.time = 0;
             let here = (player.pos.x as usize, player.pos.y as usize);
             let moving = !player.path.is_empty();
@@ -705,7 +779,7 @@ fn hero_input(
                     player.operate = Some(i);
                     match hero_path(&t.0, here, (tx as usize, ty as usize)) {
                         Some(p) => send_move(&mut player, p, &mut timer, &mut net),
-                        None => operate_action(&mut player, op, &mut sound),
+                        None => operate_action(&mut player, op, &mut sound, &mut net),
                     }
                 }
             } else if let Some(hit) = ray.and_then(|r| raycast_terrain(&t.0, r)) {
@@ -722,11 +796,14 @@ fn hero_input(
     }
 }
 
-/// `Action` con `MOVEMENT_OPERATE` (ZzzInterface.cpp ≈3587): a una casilla o menos del objeto se
-/// sienta, se apoya o se cura, mirando hacia donde mira el objeto si toca, con `SOUND_DROP_ITEM01`
-/// (salvo al curarse).
-fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crate::sound::SoundQueue) {
+/// `Action` con `MOVEMENT_OPERATE` (ZzzInterface.cpp:3587-3737): a una casilla o menos del objeto
+/// se sienta, se apoya o se cura (las mujeres, con las suyas), mirando hacia donde mira el objeto si
+/// toca, y lo dice al servidor (`SendRequestAction`) para que lo vean los demás. Salvo al curarse,
+/// antes le dice que está en la casilla del objeto (`SendCharacterMove` de una casilla, sin pasos) y
+/// suena `SOUND_DROP_ITEM01`.
+fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crate::sound::SoundQueue, net: &mut crate::net::Net) {
     use crate::operate::Act;
+    use mu_protocol::game::{ClientMessage, action as at};
     let (tx, ty) = op.tile();
     let (hx, hy) = (p.pos.x as i32, p.pos.y as i32);
     if (hx - tx).abs().max((hy - ty).abs()) > 1 {
@@ -735,19 +812,50 @@ fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crat
     if op.rule.face && op.rule.act != Act::Nothing {
         p.facing = op.angle.to_radians();
     }
-    let action = match op.rule.act {
-        Act::Sit => Some(action::SIT1),
-        Act::Pose => Some(action::POSE1),
-        Act::Healing => Some(action::HEALING1),
+    let at = match op.rule.act {
+        Act::Sit => Some(at::SIT1),
+        Act::Pose => Some(at::POSE1),
+        Act::Healing => Some(at::HEALING1),
         Act::Nothing => None,
     };
-    if let Some(a) = action {
-        p.action = a;
-        p.frame = 0.0;
+    let dir = facing_direction(p.facing);
+    if op.rule.act != Act::Healing && net.connected() {
+        let (x, y) = (tx.clamp(0, 255) as u8, ty.clamp(0, 255) as u8);
+        net.send(ClientMessage::Walk { source_x: x, source_y: y, rotation: dir, directions: Vec::new() });
+    }
+    if let Some(at) = at {
+        if let Some(Some(a)) = action::for_at(at, p.class.female()) {
+            p.action = a;
+            p.frame = 0.0;
+        }
+        if net.connected() {
+            net.send(ClientMessage::Animation { rotation: dir, action: at });
+        }
     }
     if op.rule.act != Act::Healing {
         p.path.clear();
         sound.play_object("SOUND_DROP_ITEM01");
+    }
+}
+
+/// Un gesto del chat (`SetActionClass` + `SendRequestAction` de `CheckChatText`,
+/// ZzzInterface.cpp:4416-4547): la animación solo si está parado, y el aviso al servidor dos veces
+/// si la pone (una en `SetActionClass` y otra después, como el original) o una si no.
+pub fn chat_emote(p: &mut Player, at: u8, net: &mut crate::net::Net) {
+    use mu_protocol::game::ClientMessage;
+    let dir = facing_direction(p.facing);
+    let connected = net.connected();
+    if action::standing(p.action) && p.path.is_empty() && p.casting.is_none() {
+        if let Some(Some(a)) = action::for_at(at, p.class.female()) {
+            p.action = a;
+            p.frame = 0.0;
+        }
+        if connected {
+            net.send(ClientMessage::Animation { rotation: dir, action: at });
+        }
+    }
+    if connected {
+        net.send(ClientMessage::Animation { rotation: dir, action: at });
     }
 }
 
@@ -779,6 +887,7 @@ fn walk(
     terrain: Option<Res<LoadedTerrain>>,
     operates: Res<crate::operate::Operates>,
     mut sound: ResMut<crate::sound::SoundQueue>,
+    mut net: ResMut<crate::net::Net>,
     mut q: Query<(&mut Player, &mut Transform)>,
 ) {
     for (mut p, mut tf) in &mut q {
@@ -802,10 +911,10 @@ fn walk(
                 budget = 0.0;
             }
         }
-        // Sentado o apoyado sigue así hasta que vuelve a caminar.
+        // Sentado o apoyado sigue así hasta que vuelve a caminar; un gesto, hasta que acaba (`animate`).
         let action = if !p.path.is_empty() {
             p.walk
-        } else if action::resting(p.action) {
+        } else if action::resting(p.action) || action::emote(p.action) {
             p.action
         } else {
             p.stop
@@ -817,7 +926,7 @@ fn walk(
         // Llegó al objeto de sentarse (`MovePath` acaba → `Action`).
         if had_path && p.path.is_empty() && p.casting.is_none() {
             if let Some(op) = p.operate.take().and_then(|i| operates.0.get(i)) {
-                operate_action(&mut p, op, &mut sound);
+                operate_action(&mut p, op, &mut sound, &mut net);
             }
         }
         *tf = player_transform(&p, terrain.as_deref());
@@ -849,8 +958,9 @@ fn animate(
         if p.action == p.walk {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }
-        // La habilidad termina al acabar su animación: vuelve a estar quieto.
-        if p.casting.is_some() {
+        // La habilidad termina al acabar su animación: vuelve a estar quieto. Un gesto también
+        // (`PlayerStopAnimationSetting`).
+        if p.casting.is_some() || action::emote(p.action) {
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
             if p.frame >= frames - 1.0 {
                 p.casting = None;
@@ -915,4 +1025,46 @@ fn nearest_walkable(t: &mu_data::terrain::Terrain, p: Vec2) -> Option<Vec2> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fx::tables::ids;
+    use mu_protocol::game::action as at;
+
+    #[test]
+    fn direccion_de_ida_y_vuelta() {
+        // La que se manda es la que el otro gira con `(dirección - 1) * 45`.
+        for d in 0..8u8 {
+            assert_eq!(facing_direction(direction_facing(d)), d);
+            // Hasta 22.5° de más o de menos sigue siendo la misma.
+            assert_eq!(facing_direction(direction_facing(d) + 0.39), d);
+            assert_eq!(facing_direction(direction_facing(d) - 0.39), d);
+        }
+        assert_eq!(facing_direction(0.0), 1);
+    }
+
+    #[test]
+    fn acciones_recibidas() {
+        let a = |at, female| action::for_at(at, female).flatten().map(|a| a as i32);
+        assert_eq!(a(at::SIT1, false), Some(ids::PLAYER_SIT1));
+        assert_eq!(a(at::SIT1, true), Some(ids::PLAYER_SIT_FEMALE1));
+        assert_eq!(a(at::POSE1, true), Some(ids::PLAYER_POSE_FEMALE1));
+        assert_eq!(a(at::HEALING1, true), Some(ids::PLAYER_HEALING_FEMALE1));
+        assert_eq!(a(at::GREETING1, true), Some(ids::PLAYER_GREETING_FEMALE1));
+        assert_eq!(a(at::GESTURE1, false), Some(ids::PLAYER_GESTURE1));
+        assert_eq!(a(at::DIRECTION1, false), Some(ids::PLAYER_DIRECTION1));
+        assert_eq!(a(at::RESPECT1, true), Some(ids::PLAYER_RESPECT1), "sin versión de mujer");
+        assert_eq!(a(at::CHEERS, true), Some(ids::PLAYER_CHEERS));
+        assert_eq!(action::for_at(at::STAND1, false), Some(None));
+        assert_eq!(action::for_at(at::ATTACK1, false), None);
+        for at in [at::SIT1, at::POSE1, at::HEALING1] {
+            assert!(action::resting(a(at, false).unwrap() as usize) && action::resting(a(at, true).unwrap() as usize));
+        }
+        for at in at::GREETING1..=at::RUSH1 {
+            assert!(action::emote(a(at, false).unwrap() as usize), "{at}");
+        }
+        assert!(action::standing(ids::PLAYER_STOP_FEMALE as usize) && !action::standing(ids::PLAYER_SIT1 as usize));
+    }
 }

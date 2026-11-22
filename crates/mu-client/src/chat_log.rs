@@ -829,9 +829,46 @@ fn illegal_movement(text: &str, list: &[WarpName]) -> Option<&'static str> {
     (w.name.eq_ignore_ascii_case(ICARUS)).then_some(TEXT_ICARUS_NEEDS_WINGS)
 }
 
+/// `CheckChatText` (ZzzInterface.cpp:4434-4547): el gesto (`AT_*`) del primer grupo de palabras que
+/// sale en el texto (`FindText`: en cualquier sitio, mirando mayúsculas), con las de Text_eng.bmd
+/// (`GlobalText[270..=348]` y `[783]`) y las que van escritas tal cual. Las que el original escribe
+/// en coreano no se pueden escribir con el inglés y no están. "the forehead" (`[2228]`) y `[2243]`
+/// piden anillos de transformación: sin equipo no hacen nada.
+pub fn chat_emote(text: &str) -> Option<u8> {
+    use mu_protocol::game::action as at;
+    const TABLE: &[(&[&str], u8)] = &[
+        (&["Hello", "Hi", "Welcome", "Thanks"], at::GREETING1),
+        (&["enjoy the game", "Bye", "bye"], at::GOODBYE1),
+        (&["Good", "Wow", "Nice"], at::CLAP1),
+        (&["Here", "Come"], at::GESTURE1),
+        (&["There", "That"], at::DIRECTION1),
+        (&["Not", "Never", "Do not", "do not"], at::UNKNOWN1),
+        (&[";", "Sorry"], at::AWKWARD1),
+        (&["T_T", "Sad", "Cry"], at::CRY1),
+        (&["-.-", "-_-", "Huh", "Pooh"], at::SEE1),
+        (&["^^", "^.^", "^_^", "Haha", "Hehe", "Hoho", "Hihi"], at::SMILE1),
+        (&["Great", "Oh Yeah", "Oh yeah", "beat it"], at::CHEER1),
+        (&["Win", "Victory"], at::WIN1),
+        (&["Sleep", "Tired"], at::SLEEP1),
+        (&["Cold", "hurt"], at::COLD1),
+        (&["Again", "OK", "Great"], at::AGAIN1),
+        (&["Respect", "Defeated"], at::RESPECT1),
+        (&["Sir"], at::SALUTE1),
+        (&["Rush", "Go go"], at::RUSH1),
+        (&["Hustle", "hustle"], at::HUSTLE),
+        (&["come on"], at::PROVOCATION),
+        // `GlobalText[317]` es "Great", que ya ha cogido `AT_CHEER1`: como en el original, no sale nunca.
+        (&["Great"], at::CHEERS),
+        (&["Look around"], at::LOOK_AROUND),
+    ];
+    TABLE.iter().find(|(words, _)| words.iter().any(|w| text.contains(w))).map(|&(_, a)| a)
+}
+
 /// Lo que sale de pulsar Enter con texto.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outgoing {
+    /// El gesto de `CheckChatText` (`AT_*`), antes de `SendChat` (y aunque `SendChat` no lo mande).
+    Emote(u8),
     /// `SendChat`.
     Chat(String),
     /// `SendChatWhisper(destinatario, texto)`.
@@ -956,6 +993,10 @@ impl ChatInput {
                 let name: String = rest.chars().skip(1).collect();
                 out.push(Outgoing::Warp(map_index_from_movereq(warps, &name)));
             } else {
+                // `CheckChatText` (sin montura: siempre), antes de `SendChat`.
+                if let Some(emote) = chat_emote(&text) {
+                    out.push(Outgoing::Emote(emote));
+                }
                 if let Some(chat) = self.send_chat(&text, system) {
                     out.push(Outgoing::Chat(chat));
                 }
@@ -1305,6 +1346,30 @@ mod tests {
         assert!(input.block_whisper);
         // Vacío: nada.
         assert!(enter(&mut input, "", &mut log, &mut system).is_empty());
+    }
+
+    #[test]
+    fn gestos_al_hablar() {
+        use mu_protocol::game::action as at;
+        assert_eq!(chat_emote("Hello!"), Some(at::GREETING1));
+        assert_eq!(chat_emote("ok Bye"), Some(at::GOODBYE1));
+        assert_eq!(chat_emote("hello"), None, "mira mayúsculas, como `FindText`");
+        assert_eq!(chat_emote("haha ^^"), Some(at::SMILE1));
+        assert_eq!(chat_emote("Great"), Some(at::CHEER1), "el primero que sale");
+        assert_eq!(chat_emote("come on"), Some(at::PROVOCATION));
+        assert_eq!(chat_emote("Look around"), Some(at::LOOK_AROUND));
+        assert_eq!(chat_emote("Thanks; Sorry"), Some(at::GREETING1), "por orden de grupos, no de texto");
+        // Va antes del chat y aunque el chat no salga.
+        let (mut log, mut system) = (ChatLog::default(), SystemLog::default());
+        let mut input = ChatInput::default();
+        assert_eq!(enter(&mut input, "Hi", &mut log, &mut system), [Outgoing::Emote(at::GREETING1), Outgoing::Chat("Hi".into())]);
+        assert_eq!(enter(&mut input, "Hi", &mut log, &mut system), [Outgoing::Emote(at::GREETING1)]);
+        // Susurrando, no.
+        input.whisper.set("Elfa");
+        for _ in 0..70 {
+            input.tick();
+        }
+        assert_eq!(enter(&mut input, "Hi", &mut log, &mut system), [Outgoing::Whisper("Elfa".into(), "Hi".into())]);
     }
 
     #[test]

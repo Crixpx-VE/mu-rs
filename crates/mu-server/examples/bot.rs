@@ -3,11 +3,14 @@
 //!   cargo run -p mu-server --example bot -- <cuenta> <contraseña> <personaje> [connect=127.0.0.1:44405] [segundos=3]
 //!                                           [destino de M] [--decir <texto>] [--susurrar <nombre> <texto>]
 //!                                           [--esperar <segundos antes de hablar>]
+//!                                           [--puerta x,y,puerta ...] [--accion <AT_*>]
 //!
 //! Connect Server → Game Server → login → lista → (crea el personaje si no está) → entra →
 //! camina 3 pasos → (con destino: lo pide como la ventana `M`, espera `MapChanged` y contesta
-//! `ClientReadyAfterMapChange`, o el aviso si no puede) → (espera, dice y susurra lo que se le
-//! pida) → espera mostrando lo que llega (otros jugadores, chat, susurros, avisos) → sale.
+//! `ClientReadyAfterMapChange`, o el aviso si no puede) → (cada `--puerta`: se planta en (x, y)
+//! como hace el cliente al pisarla y pide cruzarla con `EnterGateRequest`, igual que el destino) →
+//! (espera, dice, susurra y hace la animación que se le pida, p. ej. 128 = sentarse) → espera
+//! mostrando lo que llega (otros jugadores, chat, susurros, avisos, animaciones) → sale.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -93,9 +96,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut say = None;
     let mut whisper = None;
     let mut pause = 0.0f32;
+    let mut gates: Vec<(u8, u8, u16)> = Vec::new();
+    let mut animation: Option<u8> = None;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
+            "--puerta" if i + 1 < a.len() => {
+                let v: Vec<u16> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                if let [x, y, g] = v[..] {
+                    gates.push((x as u8, y as u8, g));
+                }
+                a.remove(i);
+            }
+            "--accion" if i + 1 < a.len() => {
+                animation = a.remove(i + 1).parse().ok();
+                a.remove(i);
+            }
             "--decir" if i + 1 < a.len() => {
                 say = Some(a.remove(i + 1));
                 a.remove(i);
@@ -192,8 +208,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(text) => println!("[{user}] no puede mover: AVISO {text}"),
         }
     }
+    for (x, y, gate) in gates {
+        // El cliente camina hasta la puerta: el servidor guarda la casilla de llegada.
+        c.send(ClientMessage::Walk { source_x: x, source_y: y, rotation: 5, directions: vec![] })?;
+        c.send(ClientMessage::EnterGate { gate, x: 0, y: 0 })?;
+        println!("[{user}] pisa la puerta {gate} en ({x}, {y})");
+        let mut notice = None;
+        let changed = c.wait(|m| match m {
+            ServerMessage::MapChanged { is_map_change, map, x, y, .. } => Some((*is_map_change, *map, *x, *y)),
+            ServerMessage::Notice { text, .. } => {
+                notice = Some(text.clone());
+                None
+            }
+            _ => None,
+        })?;
+        if let Some(text) = notice {
+            println!("[{user}] AVISO {text}");
+        }
+        match changed {
+            (true, map, x, y) => {
+                println!("[{user}] cruza la puerta {gate}: mapa {map} ({x}, {y})");
+                c.send(ClientMessage::ClientReadyAfterMapChange)?;
+            }
+            (false, map, x, y) => println!("[{user}] no cruza la puerta {gate}: se queda en el mapa {map} ({x}, {y})"),
+        }
+    }
     c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
-    let mut said = say.is_none() && whisper.is_none();
+    let mut said = say.is_none() && whisper.is_none() && animation.is_none();
     let talk_at = Instant::now() + Duration::from_secs_f32(pause);
     let end = Instant::now() + Duration::from_secs(secs);
     while Instant::now() < end {
@@ -206,6 +247,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some((to, text)) = &whisper {
                 println!("[{user}] susurra a {to}: {text}");
                 c.send(ClientMessage::Whisper { target: to.clone(), message: text.clone() })?;
+            }
+            if let Some(action) = animation {
+                println!("[{user}] hace la acción {action}");
+                c.send(ClientMessage::Animation { rotation: 3, action })?;
             }
         }
         match c.recv() {
