@@ -51,23 +51,24 @@ fn main() {
         None => println!("Sin servidor en {CONFIG_FILE}; no se buscan actualizaciones."),
     }
 
-    let ok = run_client(&dir, &game_args);
+    let (slot, console) = log_slot(&dir);
+    let ok = run_client(&dir, &game_args, &slot, console);
     if let Some(url) = url {
-        send_log(&dir, &url);
+        send_log(&dir, &url, &slot);
     }
     if !ok {
-        println!("\nEl juego se cerró con un error. Mira mu-client.log. Pulsa Enter para salir.");
+        println!("\nEl juego se cerró con un error. Mira {}. Pulsa Enter para salir.", slot.game);
         let _ = io::stdin().lock().lines().next();
     }
 }
 
 /// Sube al servidor el registro del juego (`mu-client.log`) y lo que sacó por consola, para
 /// poder ver qué pasó sin que el jugador tenga que copiarlo.
-fn send_log(dir: &Path, url: &str) {
+fn send_log(dir: &Path, url: &str, slot: &LogSlot) {
     let read = |name: &str| std::fs::read(dir.join(name)).unwrap_or_default();
-    let mut body = b"=== mu-client.log ===\n".to_vec();
-    body.extend(read("mu-client.log"));
-    let console = read(CONSOLE_LOG);
+    let mut body = format!("=== {} ===\n", slot.game).into_bytes();
+    body.extend(read(&slot.game));
+    let console = read(&slot.console);
     if !console.is_empty() {
         body.extend(b"\n=== consola ===\n");
         body.extend(console);
@@ -297,13 +298,45 @@ fn save_state(dir: &Path, state: &State) {
     let _ = std::fs::write(dir.join(STATE_FILE), text);
 }
 
+/// Los dos registros de una partida: el del juego y lo que saca por consola.
+struct LogSlot {
+    game: String,
+    console: String,
+}
+
+/// Con varios juegos abiertos a la vez, cada uno lleva sus propios registros: el primero
+/// `mu-client.log` y `mu-client-consola.log`, el segundo `mu-client-2.log` y
+/// `mu-client-consola-2.log`... Un registro de consola abierto por otro lanzador está en uso
+/// (se abre sin dejar escribir a nadie más), así que se pasa al siguiente.
+fn log_slot(dir: &Path) -> (LogSlot, Option<std::fs::File>) {
+    for n in 1..=16 {
+        let suffix = if n == 1 { String::new() } else { format!("-{n}") };
+        let slot = LogSlot { game: format!("mu-client{suffix}.log"), console: format!("mu-client-consola{suffix}.log") };
+        if let Ok(f) = open_exclusive(&dir.join(&slot.console)) {
+            return (slot, Some(f));
+        }
+    }
+    (LogSlot { game: "mu-client.log".into(), console: CONSOLE_LOG.into() }, None)
+}
+
+#[cfg(windows)]
+fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    // FILE_SHARE_READ: los demás pueden leerlo pero no abrirlo para escribir.
+    std::fs::OpenOptions::new().write(true).create(true).truncate(true).share_mode(1).open(path)
+}
+
+#[cfg(not(windows))]
+fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
+    std::fs::File::create(path)
+}
+
 /// Abre el juego y espera a que se cierre. Devuelve si terminó bien. El juego escribe su
-/// registro en `mu-client.log`; lo que saca por consola va a `mu-client-consola.log`.
-fn run_client(dir: &Path, args: &[String]) -> bool {
+/// registro en `slot.game` (se lo dice `MU_LOG`); lo que saca por consola va a `console`.
+fn run_client(dir: &Path, args: &[String], slot: &LogSlot, log: Option<std::fs::File>) -> bool {
     let exe: PathBuf = dir.join(CLIENT_EXE);
-    let log = std::fs::File::create(dir.join(CONSOLE_LOG)).ok();
     let mut cmd = Command::new(&exe);
-    cmd.args(args).current_dir(dir);
+    cmd.args(args).current_dir(dir).env("MU_LOG", &slot.game);
     if let Some(log) = log {
         if let Ok(log2) = log.try_clone() {
             cmd.stdout(Stdio::from(log)).stderr(Stdio::from(log2));

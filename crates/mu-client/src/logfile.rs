@@ -1,4 +1,5 @@
-//! Registro del juego en `mu-client.log`, junto al ejecutable (se reescribe en cada arranque).
+//! Registro del juego en `mu-client.log` (o el nombre de `MU_LOG`), junto al ejecutable (se
+//! reescribe en cada arranque).
 //!
 //! Guarda todo lo que sale por consola (avisos, errores de la tarjeta gráfica, shaders...),
 //! los fallos que cierran el juego (con dónde pasaron) y, cada 30 s, los fps y dónde está el
@@ -14,12 +15,17 @@ use bevy::log::tracing_subscriber::{Layer, fmt};
 use bevy::log::{BoxedLayer, LogPlugin};
 use bevy::prelude::*;
 
-/// Ruta del registro: junto al ejecutable (o en la carpeta actual si no se sabe).
+/// Ruta del registro: junto al ejecutable (o en la carpeta actual si no se sabe). El lanzador
+/// dice el nombre en `MU_LOG`, distinto para cada juego abierto a la vez.
 pub fn path() -> PathBuf {
+    let name = std::env::var("MU_LOG")
+        .ok()
+        .filter(|n| !n.is_empty() && !n.contains(['/', '\\', ':']))
+        .unwrap_or_else(|| "mu-client.log".into());
     std::env::current_exe()
         .ok()
-        .and_then(|exe| Some(exe.parent()?.join("mu-client.log")))
-        .unwrap_or_else(|| PathBuf::from("mu-client.log"))
+        .and_then(|exe| Some(exe.parent()?.join(&name)))
+        .unwrap_or_else(|| PathBuf::from(&name))
 }
 
 /// Escritor compartido por los mensajes y el gancho de fallos.
