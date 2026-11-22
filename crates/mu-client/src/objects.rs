@@ -1050,7 +1050,15 @@ fn spawn_objects(
         c.materials.len(),
         mat_anims.0.len(),
     );
-    for (kind, why) in missing {
+    // Sin archivo, el original tampoco lo dibuja (`AccessModel` lo salta sin avisar): la Data del S6
+    // pone en algunos mapas tipos sin modelo (Lost Tower 40, login 1/48/75/160-164...).
+    let (absent, broken): (Vec<_>, Vec<_>) = missing.into_iter().partition(|(_, why)| why.starts_with("no existe"));
+    if !absent.is_empty() {
+        let mut kinds: Vec<i16> = absent.into_iter().map(|(k, _)| k).collect();
+        kinds.sort_unstable();
+        info!("tipos sin modelo en la Data (tampoco se ven en el original): {kinds:?}");
+    }
+    for (kind, why) in broken {
         warn!("objeto tipo {kind} no cargado: {why}");
     }
 }
