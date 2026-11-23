@@ -25,7 +25,11 @@ try {
             Start-Sleep -Seconds 1
         }
         Copy-Item $nuevoJuego $juego -Force
-        if (Get-ScheduledTask -TaskName $tareaJuego -ErrorAction SilentlyContinue) {
+        $t = Get-ScheduledTask -TaskName $tareaJuego -ErrorAction SilentlyContinue
+        if ($t -and $t.State -eq 'Disabled') {
+            # Desactivada mientras se prueba el cliente con OpenMU (tarea "mu-openmu", mismos puertos).
+            "publicado: mu-server.exe (tarea '$tareaJuego' desactivada: no se arranca)"
+        } elseif ($t) {
             Start-ScheduledTask -TaskName $tareaJuego
             "publicado: mu-server.exe (servidor de juego reiniciado)"
         } else {

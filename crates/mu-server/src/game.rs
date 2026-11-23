@@ -29,7 +29,11 @@
 //!    (`AnimationHandlerPlugIn` de OpenMU) y se guarda la postura (sentado, apoyado, curándose) para
 //!    los que lo vean aparecer después; caminar la quita.
 //!
-//! De momento "ver" es estar en el mismo mapa (sin radio de visión).
+//! 13. Monstruos y NPC (monsters.rs): cada jugador ve los de su mapa a [`VIEW_RANGE`] casillas o menos
+//!    (`AddMonstersToScope`, y `MapObjectOutOfScope` al alejarse); un bucle de [`TICK`] los hace pasear
+//!    y manda cada paseo (`ObjectWalked`) a los que lo ven.
+//!
+//! Entre jugadores, de momento "ver" es estar en el mismo mapa (sin radio de visión).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -46,6 +50,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
 use crate::classes;
 use crate::db::{CreateError, Db};
+use crate::monsters::{MAX_MONSTERS, Mobs};
 use crate::spawn::Spawns;
 use crate::warp::{Refused, Warps};
 
@@ -65,6 +70,8 @@ struct InWorld {
     ready: bool,
     /// Paquetes para él (en claro; su tarea de escritura los cifra).
     out: UnboundedSender<Vec<u8>>,
+    /// Monstruos y NPC que su cliente tiene creados.
+    mobs_seen: HashSet<u16>,
 }
 
 impl InWorld {
@@ -91,7 +98,17 @@ struct World {
     /// Cuentas conectadas ahora mismo.
     online: HashSet<String>,
     next_id: u16,
+    mobs: Mobs,
 }
+
+/// Casillas a las que un jugador ve a los monstruos (`InfoRange` de la configuración de OpenMU, 12).
+pub const VIEW_RANGE: u8 = 12;
+
+/// Cada cuánto andan y deciden los monstruos.
+const TICK: Duration = Duration::from_millis(50);
+
+/// Ids de los jugadores: por encima de los de los monstruos.
+const FIRST_PLAYER_ID: u16 = MAX_MONSTERS as u16 + 1;
 
 pub struct Shared {
     db: Mutex<Db>,
@@ -102,12 +119,22 @@ pub struct Shared {
 }
 
 impl Shared {
-    pub fn new(db: Db, spawns: Spawns, warps: Warps) -> Self {
-        Self { db: Mutex::new(db), world: Mutex::new(World::default()), spawns, warps, idle_timeout: Duration::from_secs(300) }
+    pub fn new(db: Db, spawns: Spawns, warps: Warps, mobs: Mobs) -> Self {
+        let world = World { mobs, ..Default::default() };
+        Self { db: Mutex::new(db), world: Mutex::new(world), spawns, warps, idle_timeout: Duration::from_secs(300) }
     }
 }
 
 pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> std::io::Result<()> {
+    let ticker = shared.clone();
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(TICK);
+        every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            every.tick().await;
+            tick(&ticker);
+        }
+    });
     loop {
         let (socket, addr) = listener.accept().await?;
         let shared = shared.clone();
@@ -154,9 +181,9 @@ async fn session(socket: TcpStream, shared: &Arc<Shared>) -> std::io::Result<()>
 
     let id = {
         let mut w = shared.world.lock().unwrap();
-        // Ids de 1 a 0x7FFF que no estén en uso.
+        // Ids de `FIRST_PLAYER_ID` a 0x7FFF que no estén en uso.
         loop {
-            w.next_id = if w.next_id >= 0x7FFF { 1 } else { w.next_id + 1 };
+            w.next_id = if w.next_id >= 0x7FFF || w.next_id < FIRST_PLAYER_ID { FIRST_PLAYER_ID } else { w.next_id + 1 };
             if !w.players.contains_key(&w.next_id) {
                 break w.next_id;
             }
@@ -368,12 +395,52 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
         pose: 0,
         ready: true,
         out: s.out.clone(),
+        mobs_seen: HashSet::new(),
     };
     let mut w = shared.world.lock().unwrap();
     show_each_other(&w, s.id, &me);
     eprintln!("[game] {}: {} entra en el mapa {} ({}, {})", s.id, c.name, c.map, c.x, c.y);
     w.players.insert(s.id, me);
+    refresh_mobs(&mut w, s.id);
     s.in_world = true;
+}
+
+/// Los monstruos que `id` tiene que ver ahora: le aparecen los que están a [`VIEW_RANGE`] o menos y le
+/// desaparecen los que ya no.
+fn refresh_mobs(w: &mut World, id: u16) {
+    let World { players, mobs, .. } = w;
+    let Some(p) = players.get_mut(&id).filter(|p| p.ready) else { return };
+    let near = |x: u8, y: u8| x.abs_diff(p.x) <= VIEW_RANGE && y.abs_diff(p.y) <= VIEW_RANGE;
+    let gone: Vec<u16> =
+        p.mobs_seen.iter().copied().filter(|&m| mobs.get(m).is_none_or(|m| m.map != p.map || !near(m.x, m.y))).collect();
+    for chunk in gone.chunks(game::MAX_OUT_OF_SCOPE_IDS) {
+        let _ = p.out.send(ServerMessage::MapObjectOutOfScope(chunk.to_vec()).encode());
+    }
+    for m in &gone {
+        p.mobs_seen.remove(m);
+    }
+    let new: Vec<_> = mobs.list.iter().filter(|m| m.map == p.map && near(m.x, m.y) && !p.mobs_seen.contains(&m.id)).map(|m| m.scope()).collect();
+    for chunk in new.chunks(64) {
+        let _ = p.out.send(ServerMessage::AddMonstersToScope(chunk.to_vec()).encode());
+    }
+    p.mobs_seen.extend(new.iter().map(|m| m.id));
+}
+
+/// Los monstruos dan sus pasos y deciden; luego cada jugador ve los que tiene cerca.
+fn tick(shared: &Shared) {
+    let mut w = shared.world.lock().unwrap();
+    let observed: HashSet<u16> = w.players.values().flat_map(|p| p.mobs_seen.iter().copied()).collect();
+    let walks = w.mobs.tick(std::time::Instant::now(), |id| observed.contains(&id));
+    for walk in walks {
+        let packet = walk.message.encode();
+        for p in w.players.values().filter(|p| p.ready && p.mobs_seen.contains(&walk.id)) {
+            let _ = p.out.send(packet.clone());
+        }
+    }
+    let ids: Vec<u16> = w.players.keys().copied().collect();
+    for id in ids {
+        refresh_mobs(&mut w, id);
+    }
 }
 
 /// `me` (que aún no está en `w.players`, o es `id`) ve a los del mapa y ellos a él.
@@ -486,6 +553,8 @@ fn move_to(s: &Session, shared: &Shared, w: &mut World, account: &str, landing: 
     }
     let Some(me) = w.players.get_mut(&s.id) else { return };
     (me.map, me.x, me.y, me.rotation, me.pose, me.ready) = (landing.map, landing.x, landing.y, landing.angle, 0, false);
+    // El cliente borra todo lo del mapa al cargar el nuevo.
+    me.mobs_seen.clear();
     s.send(ServerMessage::MapChanged { is_map_change: true, map: landing.map as u16, x: landing.x, y: landing.y, rotation: landing.angle });
 }
 
@@ -545,6 +614,7 @@ fn map_ready(s: &Session, shared: &Shared) {
     me.ready = true;
     let Some(me) = w.players.get(&s.id) else { return };
     show_each_other(&w, s.id, me);
+    refresh_mobs(&mut w, s.id);
 }
 
 /// Canal de un mensaje de chat por su prefijo (`ChatMessageAction.GetMessageType` de OpenMU; el

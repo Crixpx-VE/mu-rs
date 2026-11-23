@@ -43,6 +43,7 @@ impl Plugin for MonstersPlugin {
         app.add_message::<MonsterOrder>()
             .init_resource::<Pending>()
             .init_resource::<Cache>()
+            .add_systems(PreUpdate, from_server.after(crate::net::NetSystems))
             .add_systems(OnEnter(GameScene::CharacterSelect), |mut p: ResMut<Pending>| p.0.clear())
             .add_systems(
                 Update,
@@ -116,6 +117,38 @@ struct Pending(Vec<MonsterOrder>);
 
 fn collect(mut from: MessageReader<MonsterOrder>, mut pending: ResMut<Pending>) {
     pending.0.extend(from.read().cloned());
+}
+
+/// Lo que manda el servidor de los monstruos y NPC:
+/// - `AddMonstersToScope` (`ReceiveCreateMonsterViewport`, WSclient.cpp:2512-2639): aparece en su casilla
+///   mirando a `Path >> 4` y, si su casilla de llegada es otra, camina hasta ella (`PathFinding2`);
+/// - `ObjectWalked` (`ReceiveMoveCharacter`): camina hasta la casilla de llegada desde donde esté;
+/// - `MapObjectOutOfScope`: desaparece.
+///
+/// Los mensajes de jugadores también pasan por aquí: las órdenes con un `key` que no es de ningún
+/// monstruo no hacen nada.
+fn from_server(mut from: MessageReader<crate::net::FromServer>, mut pending: ResMut<Pending>) {
+    use mu_protocol::game::{OBJECT_ID_MASK, ServerMessage};
+    for m in from.read() {
+        match &m.0 {
+            ServerMessage::AddMonstersToScope(list) => {
+                for s in list {
+                    let key = s.id & OBJECT_ID_MASK;
+                    pending.0.push(MonsterOrder::Spawn { key, number: s.number, x: s.x, y: s.y, direction: s.rotation });
+                    if (s.target_x, s.target_y) != (s.x, s.y) {
+                        pending.0.push(MonsterOrder::WalkTo { key, x: s.target_x, y: s.target_y });
+                    }
+                }
+            }
+            ServerMessage::ObjectWalked { id, target_x, target_y, .. } => {
+                pending.0.push(MonsterOrder::WalkTo { key: id & OBJECT_ID_MASK, x: *target_x, y: *target_y });
+            }
+            ServerMessage::MapObjectOutOfScope(ids) => {
+                pending.0.extend(ids.iter().map(|id| MonsterOrder::Despawn { key: id & OBJECT_ID_MASK }));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// De dónde salen las velocidades de las acciones.

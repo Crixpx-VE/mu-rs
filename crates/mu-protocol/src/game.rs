@@ -500,9 +500,54 @@ pub struct ScopeCharacter {
     pub pose: u8,
 }
 
+/// Un monstruo o NPC que entra en el área de visión (`PCREATE_MONSTER` de `ReceiveCreateMonsterViewport`,
+/// WSclient.cpp:2512-2639), sin efectos (`s_BuffCount` 0).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScopeMonster {
+    /// Id del objeto como va en el cable: [`NEW_OBJECT_FLAG`] = recién aparecido (`AppearMonster`).
+    pub id: u16,
+    /// Número de monstruo (`Type`, 10 bits: `TypeH & 0x03` y `TypeL`).
+    pub number: u16,
+    pub x: u8,
+    pub y: u8,
+    /// Casilla a la que va (el cliente camina hasta ella con `PathFinding2`).
+    pub target_x: u8,
+    pub target_y: u8,
+    /// `Path >> 4`: el cliente gira `(rotation - 1) * 45` grados.
+    pub rotation: u8,
+}
+
+/// Bytes de un [`ScopeMonster`] sin efectos.
+const SCOPE_MONSTER_LEN: usize = 10;
+
+impl ScopeMonster {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.id.to_be_bytes());
+        out.push(((self.number >> 8) & 0x03) as u8);
+        out.push(self.number as u8);
+        out.extend_from_slice(&[self.x, self.y, self.target_x, self.target_y, self.rotation << 4, 0]);
+    }
+
+    fn read(d: &[u8], i: usize) -> Option<(Self, usize)> {
+        let e = d.get(i..i + SCOPE_MONSTER_LEN)?;
+        let m = Self {
+            id: u16::from_be_bytes([e[0], e[1]]),
+            number: (((e[2] & 0x03) as u16) << 8) | e[3] as u16,
+            x: e[4],
+            y: e[5],
+            target_x: e[6],
+            target_y: e[7],
+            rotation: e[8] >> 4,
+        };
+        Some((m, i + SCOPE_MONSTER_LEN + e[9] as usize))
+    }
+}
+
 /// Lo que el Game Server manda al cliente (ya descifrado).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
+    /// Monstruos y NPC que entran en la vista (`0x13`). Como mucho [`MAX_SCOPE_CHARACTERS`].
+    AddMonstersToScope(Vec<ScopeMonster>),
     GameServerEntered { success: bool, player_id: u16, version: [u8; 5] },
     LoginResponse(LoginResult),
     /// Como mucho [`MAX_CHARACTER_LIST`] personajes (los que sobren no se mandan).
@@ -1001,6 +1046,16 @@ impl ServerMessage {
             Self::CharacterCreationFailed => fixed_c1(5, 0xF3, 0x01),
             Self::CharacterDeleteResponse { result } => c1(&[0xF3, 0x02, *result]),
             Self::CharacterInformation(info) => info.encode(),
+            Self::AddMonstersToScope(monsters) => {
+                let monsters = &monsters[..monsters.len().min(MAX_SCOPE_CHARACTERS)];
+                let mut body = Vec::with_capacity(2 + monsters.len() * SCOPE_MONSTER_LEN);
+                body.push(0x13);
+                body.push(monsters.len() as u8);
+                for m in monsters {
+                    m.write(&mut body);
+                }
+                c2(&body)
+            }
             Self::AddCharactersToScope(characters) => {
                 let characters = &characters[..characters.len().min(MAX_SCOPE_CHARACTERS)];
                 let mut body = Vec::with_capacity(2 + characters.len() * SCOPE_CHARACTER_LEN);
@@ -1088,6 +1143,18 @@ impl ServerMessage {
                     i = next;
                 }
                 return Some(Self::AddCharactersToScope(characters));
+            }
+            0x13 => {
+                let d = long_header(&p)?;
+                let count = *d.get(4)? as usize;
+                let mut monsters = Vec::with_capacity(count);
+                let mut i = 5;
+                for _ in 0..count {
+                    let (m, next) = ScopeMonster::read(d, i)?;
+                    monsters.push(m);
+                    i = next;
+                }
+                return Some(Self::AddMonstersToScope(monsters));
             }
             0x14 => {
                 let d = short_header(&p)?;
@@ -1435,6 +1502,30 @@ mod tests {
             directions: vec![0, 1, 2, 3, 4],
         });
         assert_eq!(con_pasos.len(), 8 + 3);
+    }
+
+    #[test]
+    fn monstruos_que_entran_en_vista() {
+        let bichos = vec![
+            ScopeMonster { id: 0x8000 | 5, number: 3, x: 180, y: 90, target_x: 182, target_y: 91, rotation: 2 },
+            // Número de 10 bits (los del S6 pasan de 255).
+            ScopeMonster { id: 0x0102, number: 0x0215, x: 1, y: 2, target_x: 1, target_y: 2, rotation: 7 },
+        ];
+        let wire = ida_y_vuelta_servidor(ServerMessage::AddMonstersToScope(bichos));
+        assert_eq!(wire.len(), 5 + 2 * 10);
+        assert_eq!(&wire[..5], &[0xC2, 0, 25, 0x13, 2]);
+        assert_eq!(&wire[5..15], &[0x80, 5, 0, 3, 180, 90, 182, 91, 0x20, 0]);
+        assert_eq!(&wire[15..19], &[0x01, 0x02, 0x02, 0x15]);
+
+        // Con efectos (`s_BuffCount` 2) el siguiente empieza después de ellos.
+        let paquete = c2(&[0x13, 2, 0, 1, 0, 3, 10, 10, 10, 10, 0x10, 2, 7, 8, 0, 2, 0, 4, 20, 20, 20, 20, 0x30, 0]);
+        match ServerMessage::decode(&paquete) {
+            Some(ServerMessage::AddMonstersToScope(v)) => {
+                assert_eq!(v.len(), 2);
+                assert_eq!((v[1].id, v[1].number, v[1].rotation), (2, 4, 3));
+            }
+            otro => panic!("{otro:?}"),
+        }
     }
 
     #[test]

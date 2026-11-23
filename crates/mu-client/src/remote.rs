@@ -9,6 +9,8 @@
 //!   la apariencia (`Class & 0x07`, WSclient.cpp:2167-2191).
 //!
 //! Los mensajes llegan a veces mientras se carga el mapa: se guardan hasta que el juego está listo.
+//! Los que hablan de nosotros mismos (el id de `GameServerEntered`, `HeroKey`; OpenMU nos manda en
+//! `AddCharactersToScope`) no crean a nadie.
 
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
@@ -27,6 +29,7 @@ pub struct RemotePlugin;
 impl Plugin for RemotePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Inbox>()
+            .init_resource::<HeroKey>()
             .add_systems(PreUpdate, collect.after(crate::net::NetSystems))
             .add_systems(OnEnter(GameScene::CharacterSelect), |mut inbox: ResMut<Inbox>| inbox.0.clear())
             .add_systems(Update, (apply, walk, animate).chain().run_if(in_state(GameScene::Game)));
@@ -37,8 +40,15 @@ impl Plugin for RemotePlugin {
 #[derive(Resource, Default)]
 struct Inbox(Vec<ServerMessage>);
 
-fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<Inbox>) {
+/// Nuestro id de objeto (`HeroKey`, el de `GameServerEntered`).
+#[derive(Resource, Default)]
+pub struct HeroKey(pub u16);
+
+fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<Inbox>, mut hero: ResMut<HeroKey>) {
     for m in from.read() {
+        if let ServerMessage::GameServerEntered { player_id, .. } = m.0 {
+            hero.0 = player_id & game::OBJECT_ID_MASK;
+        }
         if matches!(
             m.0,
             ServerMessage::AddCharactersToScope(_)
@@ -87,6 +97,7 @@ fn apply(
     args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut inbox: ResMut<Inbox>,
+    hero: Res<HeroKey>,
     mut remotes: Query<(Entity, &mut RemotePlayer, &crate::shadow::Shadow)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
@@ -101,6 +112,9 @@ fn apply(
                 for mut c in list {
                     // `Key >> 15` marca "recién aparecido"; el id son los 15 bits de abajo.
                     c.id &= game::OBJECT_ID_MASK;
+                    if c.id == hero.0 {
+                        continue;
+                    }
                     // Si ya estaba (otra vez en la lista), se coloca de nuevo.
                     if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == c.id) {
                         r.pos = Vec2::new(c.x as f32 + 0.5, c.y as f32 + 0.5);

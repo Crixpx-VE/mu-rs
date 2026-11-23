@@ -235,6 +235,15 @@ pub fn data_world(world: u16) -> u16 {
     }
 }
 
+/// Solo las banderas de las casillas (ver [`attr`]) de `World{world}`, sin alturas ni texturas: lo que
+/// necesita el servidor.
+pub fn load_attributes(data_dir: &Path, world: u16) -> Result<Vec<u16>> {
+    let folder = data_world(world);
+    let dir = fs::find(data_dir, &format!("World{folder}"))
+        .ok_or_else(|| Error::NotFound(data_dir.join(format!("World{folder}"))))?;
+    read_attributes(&fs::read(&dir, &format!("EncTerrain{folder}.att"))?)
+}
+
 /// Carga el terreno de `data_dir/World{world}` (con la carpeta de [`data_world`]).
 pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
     let folder = data_world(world);
