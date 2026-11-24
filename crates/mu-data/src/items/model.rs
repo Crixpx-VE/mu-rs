@@ -660,6 +660,28 @@ fn scale_height(item: &Item, offset: &mut [f32; 3]) -> (f32, f32) {
     (scale, body_height)
 }
 
+/// `o->BlendMesh` and `o->HiddenMesh` that `ItemObjectAttribute` (ZzzObject.cpp:5286-5435) gives an
+/// item drawn on its own: in a window (`RenderObjectScreen`, ZzzInventory.cpp:10584) and linked to a
+/// character (`RenderLinkObject`, ZzzCharacter.cpp:6446). `BlendMesh` -2 = every mesh additive,
+/// -1 = none; otherwise the texture index drawn additive. TODO: the pulsing `BlendMeshLight` and the
+/// random `BlendMeshTexCoordU/V` of some of them are not returned (they stay at 1 and 0).
+pub fn item_object_meshes(item: &Item) -> (i32, i32) {
+    let blend = match (item.group, item.index) {
+        (BOW, 16) | (STAFF, 8) | (STAFF, 6) | (BOW, 6) | (BOW, 13) | (BOW, 14) => -2,
+        (STAFF, 7) | (MACE, 4) | (MACE, 6) | (SHIELD, 14) | (STAFF, 9) | (SWORD, 14) | (SWORD, 10) | (SPEAR, 0) => 1,
+        (SWORD, 5) | (SWORD, 13) | (HELPER, 0) | (SHIELD, 11..=13) => 1,
+        (STAFF, 11) | (STAFF, 5) | (STAFF, 0) => 2,
+        (MACE, 5) | (WING, 3) | (WING, 0) | (WING, 8..=11) | (WING, 20) | (WING, 132) => 0,
+        _ => -1,
+    };
+    let hidden = match (item.group, item.index) {
+        (SHIELD, 16) | (MACE, 7) | (SWORD, 31) => 2,
+        (SPEAR, 10) => 1,
+        _ => -1,
+    };
+    (blend, hidden)
+}
+
 /// How `item` is drawn in an inventory slot (`two_hand` = `ItemAttribute.TwoHand`).
 pub fn screen_pose(item: &Item, two_hand: bool) -> ScreenPose {
     let anchor = anchor(item);
@@ -693,6 +715,16 @@ pub fn item_position(pose: &ScreenPose, rect: [f32; 4], picked: bool) -> [f32; 3
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn mallas_aditivas_de_objetos() {
+        // The Guardian Angel's wings (`fairy2.jpg`, mesh 1) are additive: no black square.
+        assert_eq!(item_object_meshes(&Item::new(HELPER, 0)), (1, -1));
+        assert_eq!(item_object_meshes(&Item::new(HELPER, 1)), (-1, -1));
+        assert_eq!(item_object_meshes(&Item::new(BOW, 16)), (-2, -1));
+        assert_eq!(item_object_meshes(&Item::new(SPEAR, 10)), (-1, 1));
+        assert_eq!(item_object_meshes(&Item::new(WING, 36)), (-1, -1));
+    }
 
     #[test]
     fn nombres_de_los_modelos() {

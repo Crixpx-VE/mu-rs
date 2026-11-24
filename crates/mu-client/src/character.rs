@@ -726,8 +726,13 @@ pub fn load_character_dressed(
         } else {
             weapon_bones(&linked, &bones, false)
         };
+        // `ItemObjectAttribute(Object)` (ZzzCharacter.cpp:6446): the item's `BlendMesh` / `HiddenMesh`.
+        let (blend_mesh, hidden_mesh) = mu_data::items::model::item_object_meshes(&item);
         let mut handles = vec![];
         for i in 0..linked.model.meshes.len() {
+            if i as i32 == hidden_mesh {
+                continue;
+            }
             let posed = linked.model.pose_with(i, &lbones);
             if posed.positions.is_empty() {
                 continue;
@@ -738,7 +743,11 @@ pub fn load_character_dressed(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
-            let material = materials.add(part_material(&dir, &linked.model.meshes[i].texture, images));
+            let mut mat = part_material(&dir, &linked.model.meshes[i].texture, images);
+            if blend_mesh <= -2 || linked.model.meshes[i].texture_index as i32 == blend_mesh {
+                mat.base.alpha_mode = AlphaMode::Add;
+            }
+            let material = materials.add(mat);
             body_materials.push(material.clone());
             children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
             if let (true, Some(d)) = (glows, dress) {
@@ -941,9 +950,27 @@ fn back_matrix(item: &mu_data::items::Item, right_hand: bool) -> bmd::Mat34 {
         _ => link_matrix(base, [-20.0, 5.0, 40.0]),
     };
     if !right_hand && g != SHIELD && (g, i) != (BOW, 20) {
-        m = bmd::concat(&m, &link_matrix([145.0, 0.0, 275.0], [0.0, 10.0, -30.0]));
+        m = concat_into_first(m, &link_matrix([145.0, 0.0, 275.0], [0.0, 10.0, -30.0]));
     }
     m
+}
+
+/// `R_ConcatTransforms(Matrix, mNewRot, Matrix)` (ZzzCharacter.cpp:6730) as the original computes it:
+/// the output is the first input, and `R_ConcatTransforms` (ZzzMathLib.cpp:259-285) writes each
+/// element in order while still reading that row, so every element after the first of a row uses
+/// the already-overwritten ones. That is what puts the left-hand weapons on the back in place;
+/// a true product leaves them floating beside the character.
+fn concat_into_first(mut a: bmd::Mat34, b: &bmd::Mat34) -> bmd::Mat34 {
+    for i in 0..3 {
+        for j in 0..4 {
+            let mut v = a[i][0] * b[0][j] + a[i][1] * b[1][j] + a[i][2] * b[2][j];
+            if j == 3 {
+                v += a[i][3];
+            }
+            a[i][j] = v;
+        }
+    }
+    a
 }
 
 /// `PlaySpeed` of the wings: 1 when flying (0.5 for `MODEL_WING+36`), 0.25 otherwise
@@ -1608,6 +1635,56 @@ mod tests {
         assert_eq!(walk_action_with(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_FLY_CROSSBOW as usize);
         assert_eq!(stand_action(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_STOP_FLY_CROSSBOW as usize);
         assert_eq!(walk_action_with(Class::Knight, &winged(None), true), ids::PLAYER_WALK_MALE as usize);
+    }
+
+    /// A dual-wielding Dark Knight (testgmDk: 0/19 and 0/22) with its swords on the back: both stay
+    /// on the back (bone 47 is at x ≈ 1). Needs the client data: `MU_DATA=... cargo test -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dual_wield_positions() {
+        use mu_data::items::Item;
+        let data = std::path::PathBuf::from(std::env::var_os("MU_DATA").expect("MU_DATA"));
+        let player = bmd::read(&fs::read(&data.join("Player"), "player.bmd").unwrap()).unwrap();
+        let stop = crate::fx::tables::ids::PLAYER_STOP_SWORD as usize;
+        let bones = player.bone_matrices(stop, 0);
+        for b in [33usize, 42, 47] {
+            let m = bones[b];
+            println!("hueso {b} '{}' pos ({:.1}, {:.1}, {:.1})", player.bones[b].name, m[0][3], m[1][3], m[2][3]);
+        }
+        for (file, item) in [("Sword20.bmd", Item::new(0, 19)), ("Sword23.bmd", Item::new(0, 22))] {
+            let Ok(raw) = fs::read(&data.join("Item"), file) else { continue };
+            let model = bmd::read(&raw).unwrap();
+            for hand in 0..2 {
+                for back in [false, true] {
+                    let l = Linked { model: model.clone(), meshes: vec![], item, hand, clock: Default::default() };
+                    let wb = weapon_bones(&l, &bones, back);
+                    let mut lo = [f32::MAX; 3];
+                    let mut hi = [f32::MIN; 3];
+                    for i in 0..model.meshes.len() {
+                        for p in model.pose_with(i, &wb).positions {
+                            for k in 0..3 {
+                                lo[k] = lo[k].min(p[k]);
+                                hi[k] = hi[k].max(p[k]);
+                            }
+                        }
+                    }
+                    println!("{file} mano {hand} espalda {back}: {lo:.0?}..{hi:.0?}");
+                    if back {
+                        assert!(lo[0] > -60.0 && hi[0] < 60.0, "{file} en la mano {hand} sale de la espalda");
+                    }
+                }
+            }
+        }
+    }
+
+    /// `R_ConcatTransforms(Matrix, mNewRot, Matrix)` reads what it already wrote in the row.
+    #[test]
+    fn aliased_concat() {
+        let b = [[2.0, 3.0, 0.0, 5.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let m = concat_into_first(bmd::IDENTITY, &b);
+        // Row 0: 1·2 = 2, then 2·3 (not 1·3), 0, then 2·5 + 0.
+        assert_eq!(m[0], [2.0, 6.0, 0.0, 10.0]);
+        assert_eq!(bmd::concat(&bmd::IDENTITY, &b)[0], [2.0, 3.0, 0.0, 5.0]);
     }
 
     /// The back matrix of a left-hand sword is turned once more; a shield's is not.
