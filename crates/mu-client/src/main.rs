@@ -67,6 +67,7 @@ mod remote;
 mod settings;
 mod shadow;
 mod scene;
+mod shop;
 mod sound;
 mod terrain;
 mod water_terrain;
@@ -285,5 +286,6 @@ fn main() {
         .add_plugins((item_view::ItemViewPlugin, inventory::InventoryPlugin, hero_dress::HeroDressPlugin))
         .add_plugins(monsters::MonstersPlugin)
         .add_plugins(npc::NpcPlugin)
+        .add_plugins(shop::ShopPlugin)
         .run();
 }

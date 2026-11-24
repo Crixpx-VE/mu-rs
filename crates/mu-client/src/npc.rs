@@ -600,8 +600,11 @@ fn esc_key(
     mut net: ResMut<crate::net::Net>,
     mut inv: ResMut<crate::inventory::Inventory>,
     mut sound: ResMut<crate::sound::SoundQueue>,
+    shop: Res<crate::shop::NpcShop>,
 ) {
     if !keys.just_pressed(KeyCode::Escape)
+        // Not while a sale waits for the server (NewUINPCShop.cpp:191).
+        || shop.selling
         || game_ui.modal()
         || game_ui.option_open()
         || game_ui.window_menu_open()

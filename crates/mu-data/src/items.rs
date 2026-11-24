@@ -17,6 +17,7 @@
 pub mod glow;
 pub mod info;
 pub mod model;
+pub mod price;
 
 use std::path::Path;
 
@@ -245,7 +246,9 @@ pub fn read_items_json(files: &[String]) -> Result<ItemTable> {
                 require_vitality: req("vitality"),
                 require_charisma: req("leadership"),
                 require_level: req("level"),
-                value: 0,
+                // `attribute.Value = definition.sellValue; attribute.iZen = definition.buyPrice`
+                // (MuMain Data/GameData/ItemData/ItemAttributeConversion.cpp:68-69).
+                value: n("sellValue") as u16,
                 zen: n("buyPrice") as i32,
                 attack_type: n("attackType") as u8,
                 require_class: [

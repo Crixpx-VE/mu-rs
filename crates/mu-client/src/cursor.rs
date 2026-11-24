@@ -13,7 +13,11 @@
 //! - With the button held, if the last ground click was on a tile without ground or with water
 //!   (`DontMove`): `CursorDontMove`.
 //!
-//! The ground item and repair branches will come with those features. The original only draws it
+//! - Repair mode (the inventory's, or the NPC shop's repair state): `CursorRepair.tga`, turned 45°
+//!   while the left button is held; after a repair tooltip of a damaged item (`RepairEnable` 2)
+//!   it alternates between both (ZzzInterface.cpp:8789-8816).
+//!
+//! The ground item branch will come with that feature. The original only draws it
 //! in login, character selection and the game; here also on the title and loading screens so the
 //! screen is never without a cursor.
 //!
@@ -22,7 +26,7 @@
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::ui::{UiScale, UiSystems};
+use bevy::ui::{UiScale, UiSystems, UiTransform};
 use bevy::window::{CursorOptions, PrimaryWindow};
 
 use crate::Args;
@@ -59,6 +63,8 @@ struct CursorImages {
     sit: Handle<Image>,
     /// `BITMAP_CURSOR+8`.
     dont_move: Handle<Image>,
+    /// `BITMAP_CURSOR+5` (`Interface/CursorRepair.tga`, ZzzOpenData.cpp:4968).
+    repair: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -78,6 +84,7 @@ fn spawn_cursor(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
             ..default()
         },
         ImageNode::new(normal.clone()),
+        UiTransform::IDENTITY,
         // Above the whole UI (the title and loading screens are at 100).
         GlobalZIndex(i32::MAX),
         Visibility::Hidden,
@@ -86,8 +93,9 @@ fn spawn_cursor(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     let sit = load("CursorSitDown.tga");
     let dont_move = load("CursorDontMove.tga");
     let attack = load("CursorAttack.tga");
+    let repair = load("CursorRepair.tga");
     let talk = crate::scene::interface_image(&args, &mut images, "CursorTalk.tga").unwrap_or_default();
-    commands.insert_resource(CursorImages { normal, push, attack, talk, lean, sit, dont_move });
+    commands.insert_resource(CursorImages { normal, push, attack, talk, lean, sit, dont_move, repair });
 }
 
 /// The cursors of `RenderCursor` handled here.
@@ -100,6 +108,11 @@ enum Shape {
     Lean,
     Sit,
     DontMove,
+    /// `RenderBitmap(BITMAP_CURSOR+5, MouseX - 2, MouseY - 2, 24, 24)`.
+    Repair,
+    /// `RenderBitmapRotate(BITMAP_CURSOR+5, MouseX + 5, MouseY + 18, 24, 24, 45)`: centered there
+    /// and turned 45° counterclockwise (GL's y points up).
+    RepairTurned,
 }
 
 /// What is under the mouse, as `RenderCursor` looks at it.
@@ -115,12 +128,16 @@ struct Under {
     pressed: bool,
     /// `DontMove`.
     dont_move: bool,
+    /// The inventory in repair mode or the NPC shop in `SHOP_STATE_REPAIR` (8789-8793).
+    repair_mode: bool,
+    /// `RepairEnable == 2` (8806): `Some(sin(WorldTime · 0.02) > 0)`.
+    repair_blink: Option<bool>,
 }
 
 /// `RenderCursor` (ZzzInterface.cpp:8718-8829), in its order. Not here: `g_iKeyPadEnable` /
 /// `ErrorMessage` (8728), the ground item `CursorGet` (8732-8735; no ground items yet), Kanturu 2's
-/// NPC cursor and Battle Castle's attack one (`BITMAP_CURSOR2`, 8738-8741 and 8762-8765), the
-/// command window cursors (8774-8788) and the repair ones (8789-8816).
+/// NPC cursor and Battle Castle's attack one (`BITMAP_CURSOR2`, 8738-8741 and 8762-8765) and the
+/// command window cursors (8774-8788).
 fn choose(u: Under) -> Shape {
     if u.npc {
         Shape::Talk
@@ -128,6 +145,11 @@ fn choose(u: Under) -> Shape {
         if lean { Shape::Lean } else { Shape::Sit }
     } else if let Some(attack) = u.attack {
         if attack { Shape::Attack } else { Shape::Normal }
+    } else if u.repair_mode {
+        if u.pressed { Shape::RepairTurned } else { Shape::Repair }
+    } else if let Some(up) = u.repair_blink {
+        // `RenderBitmapRotate(..., MouseX + 10, MouseY + 10, 24, 24, 0)` is the plain one's place.
+        if up { Shape::Repair } else { Shape::RepairTurned }
     } else if !u.pressed {
         Shape::Normal
     } else if u.dont_move {
@@ -218,9 +240,10 @@ fn place_cursor(
     operates: Res<crate::operate::Operates>,
     time: Res<Time>,
     aim: Aim,
-    mut q: Query<(&mut Node, &mut ImageNode, &mut Visibility), With<MuCursor>>,
+    shop: Option<Res<crate::shop::NpcShop>>,
+    mut q: Query<(&mut Node, &mut ImageNode, &mut Visibility, &mut UiTransform), With<MuCursor>>,
 ) {
-    let Ok((mut node, mut img, mut vis)) = q.single_mut() else { return };
+    let Ok((mut node, mut img, mut vis, mut turn)) = q.single_mut() else { return };
     let cursor = windows.single().ok().and_then(|w| w.cursor_position());
     let Some(c) = cursor else {
         vis.set_if_neq(Visibility::Hidden);
@@ -228,21 +251,37 @@ fn place_cursor(
     };
     vis.set_if_neq(Visibility::Inherited);
     // Window pixels → UI units (1 unit = 1 pixel of the 480-high screen).
-    let p = c / scale.0.max(1e-3) - Vec2::splat(OFFSET);
-    let (left, top) = (Val::Px(p.x), Val::Px(p.y));
-    if node.left != left || node.top != top {
-        node.left = left;
-        node.top = top;
-    }
-    if let Some(images) = images {
-        let under = Under {
+    let mouse_ui = c / scale.0.max(1e-3);
+    let world_time = time.elapsed_secs_f64() * 1000.0;
+    let inv = &aim.inventory;
+    let shape = {
+        let shop_repair = shop.as_ref().is_some_and(|s| s.open && s.state == crate::shop::ShopState::Repair);
+        choose(Under {
             npc: aim.hovered.npc.is_some(),
             operate: pointer.operate_cursor(&operates),
             attack: aim.attack(),
             pressed: mouse.pressed(MouseButton::Left),
             dont_move: pointer.dont_move,
-        };
-        let shape = choose(under);
+            repair_mode: (inv.open && inv.repair_mode) || shop_repair,
+            repair_blink: (inv.repair_enable == 2).then(|| (world_time * 0.02).sin() > 0.0),
+        })
+    };
+    // The turned hammer is centered at (MouseX + 5, MouseY + 18); `UiTransform` turns clockwise.
+    let (p, angle) = if shape == Shape::RepairTurned {
+        (mouse_ui + Vec2::new(5.0, 18.0) - Vec2::splat(SIZE / 2.0), -45.0f32)
+    } else {
+        (mouse_ui - Vec2::splat(OFFSET), 0.0)
+    };
+    let (left, top) = (Val::Px(p.x), Val::Px(p.y));
+    if node.left != left || node.top != top {
+        node.left = left;
+        node.top = top;
+    }
+    let rotation = Rot2::degrees(angle);
+    if turn.rotation != rotation {
+        turn.rotation = rotation;
+    }
+    if let Some(images) = images {
         let want = match shape {
             Shape::Normal => &images.normal,
             Shape::Push => &images.push,
@@ -251,6 +290,7 @@ fn place_cursor(
             Shape::Lean => &images.lean,
             Shape::Sit => &images.sit,
             Shape::DontMove => &images.dont_move,
+            Shape::Repair | Shape::RepairTurned => &images.repair,
         };
         if img.image != *want {
             img.image = want.clone();
@@ -258,7 +298,7 @@ fn place_cursor(
         // `RenderBitmap(BITMAP_CURSOR+4, …, u, v, 0.5f, 0.5f)`: one quarter of the texture.
         let rect = (shape == Shape::Talk).then(|| {
             let size = images.talk.1;
-            let uv = talk_uv(time.elapsed_secs_f64() * 1000.0);
+            let uv = talk_uv(world_time);
             Rect::from_corners(uv * size, (uv + Vec2::splat(0.5)) * size)
         });
         if img.rect != rect {
@@ -287,13 +327,20 @@ mod tests {
         assert_eq!(choose(Under { pressed: true, ..base }), Shape::Push);
         assert_eq!(choose(Under { pressed: true, dont_move: true, ..base }), Shape::DontMove);
         // The NPC goes before everything else, and the button does not change it.
-        let all = Under { npc: true, operate: Some(true), attack: Some(true), pressed: true, dont_move: true };
+        let all = Under { npc: true, operate: Some(true), attack: Some(true), pressed: true, dont_move: true, ..base };
         assert_eq!(choose(all), Shape::Talk);
         assert_eq!(choose(Under { npc: false, ..all }), Shape::Lean);
         assert_eq!(choose(Under { operate: Some(false), ..base }), Shape::Sit);
         assert_eq!(choose(Under { attack: Some(true), pressed: true, ..base }), Shape::Attack);
         // Over a character that cannot be attacked, the plain cursor even with the button down.
         assert_eq!(choose(Under { attack: Some(false), pressed: true, ..base }), Shape::Normal);
+        // Repair mode: the hammer, turned while the button is held; after the attack cursor.
+        assert_eq!(choose(Under { repair_mode: true, ..base }), Shape::Repair);
+        assert_eq!(choose(Under { repair_mode: true, pressed: true, ..base }), Shape::RepairTurned);
+        assert_eq!(choose(Under { repair_mode: true, attack: Some(true), ..base }), Shape::Attack);
+        // `RepairEnable == 2` outside repair mode: it blinks.
+        assert_eq!(choose(Under { repair_blink: Some(false), ..base }), Shape::RepairTurned);
+        assert_eq!(choose(Under { repair_blink: Some(true), pressed: true, ..base }), Shape::Repair);
     }
 
     #[test]
