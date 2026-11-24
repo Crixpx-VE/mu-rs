@@ -265,7 +265,9 @@ fn sync_views(
             .map(|p| (Pass::body(p.flags), p.light))
             .collect();
         let only: Vec<Pass> = passes.iter().map(|p| p.0).collect();
-        let draw = ObjectDraw { blend_mesh: -1, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh: -1 };
+        // `ItemObjectAttribute` (`RenderObjectScreen`, ZzzInventory.cpp:10584).
+        let (blend_mesh, hidden_mesh) = model::item_object_meshes(&view.item);
+        let draw = ObjectDraw { blend_mesh, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh };
         let mut animated = Vec::new();
         let mut children = Vec::new();
         for part in parts.iter() {
