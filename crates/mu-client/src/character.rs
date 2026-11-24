@@ -1071,6 +1071,7 @@ pub fn in_safe_zone(pos: Vec2, terrain: Option<&LoadedTerrain>) -> bool {
 fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>) -> crate::fx::ActorState {
     let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
     crate::fx::ActorState(crate::fx::Actor {
+        ty: crate::fx::core::MODEL_PLAYER,
         position: Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h),
         angle: Vec3::new(0.0, 0.0, p.facing.to_degrees()),
         scale: p.class.game_scale(),

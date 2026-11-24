@@ -87,6 +87,8 @@ impl Rng {
 /// Snapshot of a character (or monster) this tick, for the effects that follow it.
 #[derive(Clone)]
 pub struct Actor {
+    /// `o->Type`: `MODEL_PLAYER` for characters, `MODEL_MONSTER01 + n` for monsters and NPCs.
+    pub ty: i32,
     pub position: Vec3,
     /// Angles in degrees (the body heading is `angle.z`).
     pub angle: Vec3,
@@ -586,6 +588,33 @@ pub enum Spawn {
     Effect(Effect),
 }
 
+/// What the kinds can see of a live effect (the `Effects[]` lookups: `SearchEffect`...),
+/// as it was at the start of the tick.
+#[derive(Clone, Copy, Debug)]
+pub struct EffectInfo {
+    pub id: u32,
+    pub ty: i32,
+    pub sub_type: i32,
+    pub owner: Option<Target>,
+    pub position: Vec3,
+    pub angle: Vec3,
+}
+
+/// Deletions requested during a tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`). The
+/// original deletes at once; here they are applied when the tick ends.
+#[derive(Clone, Copy, Debug)]
+pub enum Delete {
+    /// `DeleteEffect(Type, Owner, SubType)`: every live effect of that type and owner
+    /// (`sub_type` -1 = any subtype).
+    Effect { ty: i32, owner: Option<Target>, sub_type: i32 },
+    /// One effect by id (`EffectDestructor` of another effect).
+    EffectId(u32),
+    /// `DeleteJoint(Type, Target, SubType)` (`sub_type` -1 = any subtype, `target` `None` = any).
+    Joint { ty: i32, target: Option<Target>, sub_type: i32 },
+    /// `DeleteParticle(Type)`: the first live particle of that type.
+    Particle(i32),
+}
+
 // --- Context ---------------------------------------------------------------------------------------
 
 /// What each effect type's functions see while being created or moved.
@@ -608,6 +637,10 @@ pub struct Ctx<'a> {
     pub world_active: i32,
     /// `PlayBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
     pub sounds: &'a mut Vec<&'static str>,
+    /// Live effects at tick start (for `SearchEffect` and friends).
+    pub effects: &'a [EffectInfo],
+    /// Deletions requested this tick (applied when it ends).
+    pub deletes: &'a mut Vec<Delete>,
 }
 
 impl Ctx<'_> {
@@ -717,6 +750,32 @@ impl Ctx<'_> {
     /// `CreateSprite(Type, Position, Scale, Light, Owner, Rotation, SubType)`: lasts this tick.
     pub fn create_sprite(&mut self, ty: i32, position: Vec3, scale: f32, light: Vec3, rotation: f32, sub_type: i32) {
         self.sprites.push(SpriteFx { ty, position, scale, light, rotation, sub_type, alpha: 1.0 });
+    }
+
+    /// `SearchEffect(Type, Owner, SubType)` / `FindSameEffectOfSameOwner` (`sub_type` -1 = any):
+    /// whether a live effect of that type and owner exists (as of tick start).
+    pub fn search_effect(&self, ty: i32, owner: Option<Target>, sub_type: i32) -> bool {
+        self.effects.iter().any(|e| e.ty == ty && e.owner == owner && (sub_type == -1 || e.sub_type == sub_type))
+    }
+
+    /// `DeleteEffect(Type, Owner, SubType)` (`sub_type` -1 = any). Applied at the end of the tick.
+    pub fn delete_effect(&mut self, ty: i32, owner: Option<Target>, sub_type: i32) {
+        self.deletes.push(Delete::Effect { ty, owner, sub_type });
+    }
+
+    /// `EffectDestructor` of another effect, by id. Applied at the end of the tick.
+    pub fn delete_effect_id(&mut self, id: u32) {
+        self.deletes.push(Delete::EffectId(id));
+    }
+
+    /// `DeleteJoint(Type, Target, SubType)` (`sub_type` -1 = any). Applied at the end of the tick.
+    pub fn delete_joint(&mut self, ty: i32, target: Option<Target>, sub_type: i32) {
+        self.deletes.push(Delete::Joint { ty, target, sub_type });
+    }
+
+    /// `DeleteParticle(Type)`: the first live particle of that type. Applied at the end of the tick.
+    pub fn delete_particle(&mut self, ty: i32) {
+        self.deletes.push(Delete::Particle(ty));
     }
 }
 
@@ -901,6 +960,8 @@ pub struct Registry {
     pub skills: std::collections::HashMap<i32, SkillKind>,
     /// Map objects by (`WorldActive`, object type).
     pub objects: std::collections::HashMap<(i32, i32), ObjectStep>,
+    /// Kinds registered twice (the later one wins): ('p'/'j'/'e', type). Checked by the tests.
+    pub duplicates: Vec<(char, i32)>,
 }
 
 impl Registry {
@@ -912,13 +973,19 @@ impl Registry {
         self.skills.insert(skill, kind);
     }
     pub fn particle(&mut self, ty: i32, kind: ParticleKind) {
-        self.particles.insert(ty, kind);
+        if self.particles.insert(ty, kind).is_some() {
+            self.duplicates.push(('p', ty));
+        }
     }
     pub fn joint(&mut self, ty: i32, kind: JointKind) {
-        self.joints.insert(ty, kind);
+        if self.joints.insert(ty, kind).is_some() {
+            self.duplicates.push(('j', ty));
+        }
     }
     pub fn effect(&mut self, ty: i32, kind: EffectKind) {
-        self.effects.insert(ty, kind);
+        if self.effects.insert(ty, kind).is_some() {
+            self.duplicates.push(('e', ty));
+        }
     }
 }
 

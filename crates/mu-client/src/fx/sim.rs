@@ -105,28 +105,57 @@ pub fn tick(
     time: Res<Time<Fixed>>,
     args: Res<crate::Args>,
 ) {
-    let world = &mut *world;
+    step(
+        &mut world,
+        &registry,
+        &actors,
+        terrain.as_deref().map(|t| &t.0),
+        &mut lights,
+        time.elapsed_secs() * 1000.0,
+        args.world as i32 - 1,
+    );
+}
+
+/// One 25 Hz tick of the whole engine (what [`tick`] runs), without Bevy resources so tests can
+/// drive it. `world_time` is `WorldTime` in ms; `world_active` the original's map number.
+pub fn step(
+    world: &mut FxWorld,
+    registry: &Registry,
+    actors: &Actors,
+    terrain: Option<&mu_data::terrain::Terrain>,
+    lights: &mut TerrainLights,
+    world_time: f32,
+    world_active: i32,
+) {
     world.ticks += 1;
     world.sprites.clear();
     world.earthquake = 0.0;
     let effect_positions: HashMap<u32, Vec3> = world.effects.iter().map(|e| (e.id, e.position)).collect();
+    let effect_infos: Vec<EffectInfo> = world
+        .effects
+        .iter()
+        .map(|e| EffectInfo { id: e.id, ty: e.ty, sub_type: e.sub_type, owner: e.owner, position: e.position, angle: e.angle })
+        .collect();
+    let mut deletes: Vec<Delete> = Vec::new();
     let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
 
     let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, map_objects, ticks, sounds, .. } = world;
     let mut ctx = Ctx {
         rng,
-        world_time: time.elapsed_secs() * 1000.0,
-        terrain: terrain.as_deref().map(|t| &t.0),
+        world_time,
+        terrain,
         hero: actors.hero,
         actors: &actors.map,
         effect_positions: &effect_positions,
         spawns: &mut spawns,
         sprites,
-        lights: &mut lights,
+        lights,
         earthquake,
         next_effect_id,
-        world_active: args.world as i32 - 1,
+        world_active,
         sounds,
+        effects: &effect_infos,
+        deletes: &mut deletes,
     };
 
     // Map objects (`MoveObjects` / `UpdateObjectVisual`): only nearby ones, like the original,
@@ -257,6 +286,34 @@ pub fn tick(
                     if e.live && effects.len() < MAX_EFFECTS {
                         effects.push(e);
                     }
+                }
+            }
+        }
+    }
+
+    // Deletions requested during the tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`).
+    for d in deletes {
+        match d {
+            Delete::Effect { ty, owner, sub_type } => {
+                for e in effects.iter_mut().filter(|e| e.ty == ty && e.owner == owner && (sub_type == -1 || e.sub_type == sub_type)) {
+                    e.live = false;
+                }
+            }
+            Delete::EffectId(id) => {
+                for e in effects.iter_mut().filter(|e| e.id == id) {
+                    e.live = false;
+                }
+            }
+            // ZzzEffectJoint.cpp:2709: a NULL target matches any target.
+            Delete::Joint { ty, target, sub_type } => {
+                let hit = |j: &Joint| j.ty == ty && (target.is_none() || j.target == target) && (sub_type == -1 || j.sub_type == sub_type);
+                for j in joints.iter_mut().filter(|j| hit(j)) {
+                    j.live = false;
+                }
+            }
+            Delete::Particle(ty) => {
+                if let Some(p) = particles.iter_mut().find(|p| p.live && p.ty == ty) {
+                    p.live = false;
                 }
             }
         }
