@@ -24,6 +24,7 @@ pub mod objects_raklion;
 pub mod fire;
 
 pub mod effects_elf;
+pub mod effects_summoner;
 
 use super::core::Registry;
 
@@ -49,4 +50,5 @@ pub fn register_all(r: &mut Registry) {
     objects_raklion::register(r);
     fire::register(r);
     effects_elf::register(r);
+    effects_summoner::register(r);
 }
