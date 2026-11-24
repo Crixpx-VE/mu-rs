@@ -1234,11 +1234,33 @@ pub struct DrawCtx<'a> {
     pub world_time: f32,
     pub tex_info: &'a dyn Fn(i32) -> Option<TexInfo>,
     pub actors: &'a std::collections::HashMap<Entity, Actor>,
+    /// `gMapManager.WorldActive` (Lorencia = 0).
+    pub world_active: i32,
+    /// Effect model files already loaded by the simulation.
+    pub models: &'a super::model_data::ModelData,
 }
 
 impl DrawCtx<'_> {
     pub fn tex(&self, id: i32) -> Option<TexInfo> {
         (self.tex_info)(id)
+    }
+
+    /// The bones of an effect's own model in its (interpolated) pose, if the simulation has
+    /// loaded the model (see [`Ctx::effect_bones`]).
+    pub fn effect_bones(&self, e: &Effect) -> Option<Vec<Mat34>> {
+        let m = self.models.loaded(e.ty)?;
+        if m.bones.is_empty() {
+            return None;
+        }
+        let action = if e.current_action < m.actions.len() { e.current_action } else { 0 };
+        Some(m.bone_matrices_at(action, e.animation_frame))
+    }
+
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` on an effect's own model while drawing.
+    pub fn effect_bone_world(&self, e: &Effect, bone: usize, offset: Vec3) -> Option<Vec3> {
+        let bones = self.effect_bones(e)?;
+        let local = Vec3::from_array(bmd::transform_point(bones.get(bone)?, offset.to_array()));
+        Some(e.position + rotate(e.angle, local * e.scale))
     }
 }
 
