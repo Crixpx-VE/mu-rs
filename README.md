@@ -25,9 +25,9 @@ formulas, timings and numbers are taken from the original client logic, not gues
 
 ## Features
 
-**Overall progress: 44 of 79 features done (56%)**
+**Overall progress: 45 of 79 features done (57%)**
 
-`███████████░░░░░░░░░` 56%
+`███████████░░░░░░░░░` 57%
 
 Checked items work in the client against [OpenMU](https://github.com/MUnique/OpenMU) unless they
 say otherwise; the last section is our own server. The list grows as the game does, so the
@@ -80,7 +80,7 @@ percentage measures what is listed, not the whole original game.
   - [x] Chat, whispers, notices, animations
   - [x] Map travel (M window, walk-in gates)
   - [x] Monsters and NPCs from the server (appear, walk, leave the view)
-  - [ ] Inventory from the server and moving items (in progress)
+  - [x] Inventory from the server and moving items (confirmed by the server)
   - [ ] Talking to NPCs
   - [ ] NPC shops: buy, sell, repair
   - [ ] Vault
