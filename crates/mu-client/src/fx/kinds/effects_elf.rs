@@ -13,8 +13,10 @@
 //! `Draw_RenderObject` (`ZzzObject.cpp` 399-2680), which is what `RenderObject(o)` runs for them.
 //!
 //! Notes:
-//! - Hit tests (`CheckClientArrow`, `CheckCharacterRange`, `AttackCharacterRange`) need client-side
-//!   damage, which does not exist: [`check_client_arrow`] keeps only its `rand()` and leaves TODOs.
+//! - Client-side hits: [`check_client_arrow`] is `CheckClientArrow` (ZzzEffect.cpp:6758) in full
+//!   (stop / explode / pierce on a character, the hero's `AttackCharacterRange`), except the Castle
+//!   Siege no-attack zone. `CheckTargetRange` (ZzzEffect.cpp:366) lists the arrow types only in a
+//!   `break` case, and its only call for them (ZzzEffect.cpp:1929) is commented out: nothing to do.
 //! - `Draw_RenderObject` of some types creates particles/sprites/trails while drawing. In the
 //!   original that happens after `MoveEffect` of a frame and before the next one, so here it runs at
 //!   the START of the next `step` (before `Luminosity`), with the state the draw saw. Mutations done
@@ -30,6 +32,18 @@ use crate::fx::core::*;
 const TW_NOGROUND: u16 = 0x0008;
 /// `WD_39KANTURU_3RD` (`MapManager.h:33`).
 const WD_39KANTURU_3RD: i32 = 39;
+/// `AT_SKILL_PARALYZE` (Main 5.2 `SkillManager.h:43`; MuMain calls it `AT_SKILL_ICE_ARROW`).
+const AT_SKILL_PARALYZE: i32 = 51;
+/// `AT_SKILL_PIERCING` (Main 5.2 `SkillManager.h:44`; MuMain calls it `AT_SKILL_PENETRATION`).
+const AT_SKILL_PIERCING: i32 = 52;
+const _: () = assert!(AT_SKILL_PARALYZE == AT_SKILL_ICE_ARROW && AT_SKILL_PIERCING == AT_SKILL_PENETRATION);
+/// `SOUND_ATTACK01+5` .. `SOUND_ATTACK01+8` (ZzzOpenData.cpp:4624-4627: `eMissileHit1..4.wav`), by
+/// their names in the sound table.
+const SOUND_MISSILE_HIT: [&str; 4] =
+    ["SOUND_ATTACK_MISSILE_HIT1", "SOUND_ATTACK_MISSILE_HIT2", "SOUND_ATTACK_MISSILE_HIT3", "SOUND_ATTACK_MISSILE_HIT4"];
+/// `user[]` slot of `o->AttackPoint[0]` (an `int`; 0 at creation, ZzzEffect.cpp:490). Slots 0..3
+/// hold `EyeLeft`.
+const ATTACK_POINT: usize = 3;
 
 pub fn register(r: &mut Registry) {
     let k = |create: EffectCreate, step: EffectStep, draw: EffectDraw| EffectKind { create: Some(create), step: Some(step), draw: Some(draw) };
@@ -71,12 +85,10 @@ pub fn register(r: &mut Registry) {
     ] {
         r.effect(ty, k(arrow_create, arrow_step, draw_plain));
     }
-    // ZzzObject.cpp:1545: RENDER_TEXTURE|RENDER_CHROME5|RENDER_BRIGHT.
-    r.effect(MODEL_ARROW_SPARK, k(arrow_create, arrow_step, draw_bright));
+    r.effect(MODEL_ARROW_SPARK, k(arrow_create, arrow_step, spark_draw));
     r.effect(MODEL_ARROW_TANKER, k(arrow_create, arrow_step, tanker_draw));
     r.effect(MODEL_ARROW_DARKSTINGER, k(arrow_create, arrow_step, darkstinger_draw));
-    // ZzzObject.cpp:1829: mesh 0 with RENDER_TEXTURE|RENDER_BRIGHT.
-    r.effect(MODEL_ARROW_GAMBLE, k(arrow_create, arrow_step, draw_bright));
+    r.effect(MODEL_ARROW_GAMBLE, k(arrow_create, arrow_step, gamble_draw));
 
     r.effect(MODEL_IRON_RIDER_ARROW, k(iron_rider_create, iron_rider_step, draw_bright));
     r.effect(MODEL_KENTAUROS_ARROW, k(kentauros_create, kentauros_step, draw_bright));
@@ -126,12 +138,23 @@ fn arrow_offset(e: &mut Effect) {
     e.position += rotate(e.angle, Vec3::new(-10.0, -60.0, 135.0));
 }
 
-/// `b->TransformPosition(BoneTransform[bone], p, out)` with the effect's OWN model bones (as left
-/// by `RenderObject`/`Animation`, i.e. in world space).
-/// TODO(original): the engine gives no access to an effect model's bones; the bone is taken as an
-/// identity bone at the model origin (`Position + Angle·(p·Scale)`).
-fn own_bone(e: &Effect, _bone: usize, p: Vec3) -> Vec3 {
-    e.position + rotate(e.angle, p * e.scale)
+/// `b->TransformPosition(BoneTransform[bone], p, out)` with the effect's OWN model bones as left by
+/// `RenderObject`'s `Animation` (translated: world space), or `TransformByObjectBone(out, o, bone)`
+/// after an untranslated `Animation` (the same point). Without the model file (or that bone) the
+/// bone is taken as an identity bone at the model origin (`Position + Angle·(p·Scale)`); no
+/// `rand()` depends on it.
+fn own_bone(e: &Effect, ctx: &mut Ctx, bone: usize, p: Vec3) -> Vec3 {
+    ctx.effect_bone_world(e, bone, p).unwrap_or_else(|| e.position + rotate(e.angle, p * e.scale))
+}
+
+/// `o->Owner == &Hero->Object` (a missing owner is never the hero).
+fn owner_is_hero(e: &Effect, ctx: &Ctx) -> bool {
+    e.owner.is_some() && e.owner == ctx.hero.map(Target::Actor)
+}
+
+/// `o->Type==MODEL_ARROW_BOMB || o->Type==MODEL_ARROW_HOLY` (the types `CheckClientArrow` explodes).
+fn bomb_or_holy(e: &Effect) -> bool {
+    e.ty == MODEL_ARROW_BOMB || e.ty == MODEL_ARROW_HOLY
 }
 
 /// `o->Owner->Live` (an effect owner is alive while it is still in `Effects[]`). A missing owner
@@ -144,52 +167,151 @@ fn owner_live(e: &Effect, ctx: &Ctx) -> bool {
     }
 }
 
-/// `CheckClientArrow(o)` (ZzzEffect.cpp:6758).
+/// `CheckClientArrow(o)` (ZzzEffect.cpp:6758-6911): the arrow stops (`Live = false`), explodes
+/// (`CreateBomb`) or pierces (`BITMAP_FLARE` + the `AttackPoint[0]` countdown) when it reaches a
+/// character. The rest of the type's `MoveEffect` (and the common tail) still runs after a hit,
+/// like the original. (The `MODEL_DARK_SCREAM` `AttackCharacterRange` at its top, 6773-6779, is in
+/// `effects_dl_mg1.rs`: no type of this file has it.)
 fn check_client_arrow(e: &mut Effect, ctx: &mut Ctx) {
     // TODO(original): during Castle Siege (`battleCastle::IsBattleCastleStart()`), inside a
-    // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 2 and return.
+    // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 2 and return (6761-6771).
+    // There is no Castle Siege state yet.
     if e.kind == 0 || e.sub_type == 99 {
-        // TODO(original): CheckCharacterRange(o, 100, PKKey) — on a hit, by the hero's skill
-        // (CharacterAttribute->Skill[o->Skill]): AT_SKILL_PIERCING with SubType 2 →
-        // CreateJoint(BITMAP_FLARE, Position, Position, Angle, 6, o, 30); otherwise Live = false and
-        // (for AT_SKILL_PIERCING always, else only MODEL_ARROW_BOMB / MODEL_ARROW_HOLY with
-        // SubType != 1) CreateBomb(Position, true).
-    } else {
-        // `if (rand()%2 == 0)` is always evaluated.
-        let _ = ctx.rand();
-        // TODO(original): if Owner == Hero: AttackPoint countdown for AT_SKILL_PIERCING, else
-        // AttackCharacterRange(o->Skill, Position, 100 (200 while AttackPoint > 0), Weapon, PKKey);
-        // on a hit: Piercing SubType 2 → AttackPoint = 5 (holy with LifeTime > 14, bomb) or 2 and
-        // CreateJoint(BITMAP_FLARE, ..., 6, o, 30); otherwise Live = false, PlayBuffer(SOUND_ATTACK01
-        // + 5 + rand()%4) for the default case, and CreateBomb for MODEL_ARROW_BOMB / MODEL_ARROW_HOLY.
+        // Another character's arrow (or a `Skill == 2` one, SubType 99): it stops on whoever it
+        // reaches (6781-6823). `CheckCharacterRange(o, 100.f, o->PKKey)` (Kind 0).
+        if ctx.check_character_range(e.position, e.owner, 100.0, 0) {
+            match ctx.hero_skill(e.skill) {
+                AT_SKILL_PIERCING => {
+                    if e.sub_type == 2 {
+                        ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 6, me(e), 30.0);
+                    } else {
+                        e.live = false;
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                AT_SKILL_PARALYZE => {
+                    e.live = false;
+                    if bomb_or_holy(e) {
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                _ => {
+                    e.live = false;
+                    // (Holy SubType 1 does not explode here.)
+                    if bomb_or_holy(e) && e.sub_type != 1 {
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+            }
+        }
+    } else if ctx.rand() % 2 == 0 && owner_is_hero(e, ctx) {
+        // The hero's arrow: the client asks for the damage (6824-6905).
+        let range = 100.0;
+        let skill = ctx.hero_skill(e.skill);
+        if skill == AT_SKILL_PIERCING && e.ty == MODEL_ARROW_BOMB {
+            // The hero exists here (it owns the arrow).
+            if let Some(h) = ctx.hero_actor() {
+                let (dx, dy) = (e.position.x - h.position.x, e.position.y - h.position.y);
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance > 500.0 {
+                    return;
+                }
+            }
+        }
+        let attack_point = e.user[ATTACK_POINT] as i32;
+        // (`PJH_FIX_4_BUGFIX_7`, which adds AT_SKILL_DARK_SCREAM here, is not defined.)
+        if skill == AT_SKILL_PIERCING && attack_point > 0 {
+            // `range = 200.f` is set here but never read (the attack is the `else if`).
+            e.user[ATTACK_POINT] = (attack_point - 1) as f32;
+        } else if ctx.attack_character_range(e.skill, e.position, range, e.weapon, e.pk_key) {
+            match skill {
+                AT_SKILL_PIERCING => {
+                    if e.sub_type == 2 {
+                        let n = if (e.ty == MODEL_ARROW_HOLY && life(e) > 14) || e.ty == MODEL_ARROW_BOMB { 5 } else { 2 };
+                        e.user[ATTACK_POINT] = n as f32;
+                        ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 6, me(e), 30.0);
+                    } else {
+                        e.live = false;
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                AT_SKILL_PARALYZE => {
+                    e.live = false;
+                    if bomb_or_holy(e) {
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                _ => {
+                    e.live = false;
+                    // PlayBuffer(SOUND_ATTACK01+5+rand()%4, o).
+                    // TODO(original): the sound is positioned at `o`; `play_sound` is not positional.
+                    let n = ctx.rand() % 4;
+                    ctx.play_sound(SOUND_MISSILE_HIT[n as usize]);
+                    if bomb_or_holy(e) {
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+            }
+        }
     }
 }
 
 // --- Drawing helpers ------------------------------------------------------------------------------
 
-/// `RenderObject(o)`: nothing when `Alpha < 0.01` (`Calc_RenderObject`, ZzzObject.cpp:245).
-fn render_object(e: &Effect, out: &mut DrawList, bright: bool) {
+/// `RENDER_TEXTURE|RENDER_BRIGHT`.
+const TEXTURE_BRIGHT: u32 = RENDER_TEXTURE | RENDER_BRIGHT;
+
+/// `RenderObject(o)` → `RenderBody(flags, ...)` with `o`'s state (`BodyLight` = `o->Light`); nothing
+/// when `Alpha < 0.01` (`Calc_RenderObject`, ZzzObject.cpp:245). `flags` 0 = `RENDER_TEXTURE`.
+fn render_object(e: &Effect, out: &mut DrawList, flags: u32) {
     if e.alpha < 0.01 {
         return;
     }
     let mut d = ModelDraw::of_effect(e);
-    d.bright = bright;
+    d.render_flags = flags;
     out.models.push(d);
 }
 
 /// `RenderObject(o)` with `RenderBody(RENDER_TEXTURE, ...)` (the `default:` of `RenderEffects` for
 /// `MODEL_SKILL_BEGIN..MODEL_SKILL_END`, or an explicit `case`).
 fn draw_plain(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    render_object(e, out, false);
+    render_object(e, out, 0);
 }
 
 /// `RenderObject(o)` whose `Draw_RenderObject` branch does `VectorCopy(o->Light, b->BodyLight)` +
 /// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)` (multi-shot ZzzObject.cpp:1526, infinity arrows
 /// 1634, iron rider 1644, kentauros 1655).
-/// TODO(original): MODEL_ARROW_SPARK adds RENDER_CHROME5 (1545); MODEL_ARROW_GAMBLE renders only
-/// mesh 0 with BlendMesh 0 and BlendMeshLight = Alpha (1829).
 fn draw_bright(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    render_object(e, out, true);
+    render_object(e, out, TEXTURE_BRIGHT);
+}
+
+/// `MODEL_ARROW_SPARK` (ZzzObject.cpp:1545): `RenderBody(RENDER_TEXTURE|RENDER_CHROME5|RENDER_BRIGHT,
+/// Alpha, BlendMesh, 1.f, ...)`.
+fn spark_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    if e.alpha < 0.01 {
+        return;
+    }
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE | RENDER_CHROME5 | RENDER_BRIGHT;
+    d.blend_mesh_light = 1.0;
+    out.models.push(d);
+}
+
+/// `MODEL_ARROW_GAMBLE` (ZzzObject.cpp:1829): `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0,
+/// Alpha, U, V, HiddenMesh)`. The last argument is `RenderMesh`'s `MeshTexture`; this type's
+/// `HiddenMesh` is always -1 (no texture override).
+fn gamble_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    if e.alpha < 0.01 {
+        return;
+    }
+    let mut d = ModelDraw::of_effect(e);
+    d.mesh = 0;
+    d.render_flags = TEXTURE_BRIGHT;
+    d.blend_mesh = 0;
+    d.blend_mesh_light = e.alpha;
+    d.hidden_mesh = -1;
+    d.texture = e.hidden_mesh;
+    out.models.push(d);
 }
 
 // --- MODEL_ARROW_AUTOLOAD ----------------------------------------------------------------------------
@@ -211,9 +333,9 @@ fn autoload_step(e: &mut Effect, ctx: &mut Ctx) {
     // Draw_RenderObject (ZzzObject.cpp:1614), only for SubType 1 (RenderEffects 18689).
     if e.sub_type == 1 && e.alpha >= 0.01 && life(e) > 15 {
         let light = Vec3::new(1.0, 0.8, 0.3);
-        let p = own_bone(e, 1, Vec3::ZERO);
+        let p = own_bone(e, ctx, 1, Vec3::ZERO);
         ctx.create_particle(BITMAP_LIGHT + 1, p, e.angle, light, 5, 0.6, None);
-        let p = own_bone(e, 3, Vec3::ZERO);
+        let p = own_bone(e, ctx, 3, Vec3::ZERO);
         ctx.create_particle(BITMAP_LIGHT + 1, p, e.angle, light, 5, 0.8, None);
     }
 
@@ -241,7 +363,7 @@ fn autoload_step(e: &mut Effect, ctx: &mut Ctx) {
 /// RenderEffects 18689: only SubType 1. ZzzObject.cpp:1606: RENDER_TEXTURE|RENDER_BRIGHT.
 fn autoload_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type == 1 {
-        render_object(e, out, true);
+        render_object(e, out, TEXTURE_BRIGHT);
     }
 }
 
@@ -276,7 +398,7 @@ fn infinity_step(e: &mut Effect, ctx: &mut Ctx) {
             if idx == 5 {
                 continue;
             }
-            let p2 = own_bone(e, idx, Vec3::ZERO);
+            let p2 = own_bone(e, ctx, idx, Vec3::ZERO);
             ctx.create_joint(BITMAP_FLARE + 1, p2, e.position, e.angle, 16, me(e), 20.0);
         }
     }
@@ -472,16 +594,16 @@ fn piercing_step(e: &mut Effect, ctx: &mut Ctx) {
         return;
     }
     e.gravity += 90.0;
-    match ctx.actor(e.owner) {
-        Some(a) => {
-            e.angle = a.angle;
-            e.head_angle = a.angle;
-        }
-        // TODO(original): `VectorCopy(o->Owner->Angle, o->Angle/HeadAngle)` — the owner is usually
-        // an arrow effect and the engine does not expose other effects' angles; the angle given at
-        // creation (the arrow's) is kept, missing its per-tick spin.
-        None => e.head_angle = e.angle,
+    // `VectorCopy(o->Owner->Angle, o->Angle/HeadAngle)`: the owner is usually the arrow effect
+    // (its angle and position as of the tick start).
+    let owner_angle = match e.owner {
+        Some(Target::Effect(id)) => ctx.effects.iter().find(|i| i.id == id).map(|i| i.angle),
+        _ => ctx.actor(e.owner).map(|a| a.angle),
+    };
+    if let Some(a) = owner_angle {
+        e.angle = a;
     }
+    e.head_angle = e.angle;
     e.start_position = e.position;
     if let Some(p) = ctx.target_position(e.owner) {
         e.position = p;
@@ -493,7 +615,9 @@ fn piercing_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_sprite(BITMAP_SHINY + 1, e.position, scale, Vec3::ONE, rot, 0);
     }
     if common::in_hellas(ctx.world_active) {
-        // TODO(original): if Owner->Owner == Hero: AddWaterWave(x / TERRAIN_SCALE, y / TERRAIN_SCALE, 2, -200).
+        // TODO(original): if Owner->Owner == Hero: AddWaterWave((int)(x / TERRAIN_SCALE),
+        // (int)(y / TERRAIN_SCALE), 2, -200) (ZzzEffect.cpp:11792-11800): the engine has no water
+        // waves.
     }
     e.head_angle.y = e.gravity;
     move_tail(e, ctx);
@@ -503,7 +627,7 @@ fn piercing_step(e: &mut Effect, ctx: &mut Ctx) {
 /// TODO(original): `HeadAngle` (spun by Gravity) is passed to `BMD::Animation`; not reproduced.
 fn piercing_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type != 3 {
-        render_object(e, out, false);
+        render_object(e, out, 0);
     }
 }
 
@@ -570,7 +694,7 @@ fn piercing2_step(e: &mut Effect, ctx: &mut Ctx) {
 /// RenderEffects 18575: nothing for SubTypes 1 and 2.
 fn piercing2_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type != 1 && e.sub_type != 2 {
-        render_object(e, out, false);
+        render_object(e, out, 0);
     }
 }
 
@@ -587,7 +711,7 @@ fn crossbow_create(e: &mut Effect, ctx: &mut Ctx) {
     ctx.create_joint(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 5, me(e), 100.0);
     if e.sub_type != 0 {
         ctx.create_effect(MODEL_PIERCING, e.position, e.angle, e.light, 0, me(e), -1, 0, 0, 0.0);
-        // (AttackPoint[0] = 0: only read by the hit test.)
+        e.user[ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
     // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
@@ -663,7 +787,7 @@ fn holy_step(e: &mut Effect, ctx: &mut Ctx) {
             if life(e) == 13 {
                 ctx.create_effect(MODEL_PIERCING, e.position, e.angle, e.light, 0, me(e), -1, 0, 0, 0.0);
             } else if life(e) == 30 {
-                // (AttackPoint[0] = 0: only read by the hit test.)
+                e.user[ATTACK_POINT] = 0.0;
                 e.kind = 1;
             }
         }
@@ -723,7 +847,7 @@ fn arrow_create(e: &mut Effect, ctx: &mut Ctx) {
 
     if e.sub_type == 2 {
         ctx.create_effect(MODEL_PIERCING, e.position, e.angle, e.light, 0, me(e), -1, 0, 0, 0.0);
-        // (AttackPoint[0] = 0: only read by the hit test.)
+        e.user[ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
     if ty == MODEL_ARROW_NATURE && e.sub_type == 1 {
@@ -903,20 +1027,20 @@ fn darkstinger(e: &mut Effect, ctx: &mut Ctx) {
     let _ = ctx.rand();
     let light = Vec3::new(0.6, 0.7, 0.9);
     // pModel->Animation(...) + TransformByObjectBone(vPos, o, 0), then + Angle·Direction.
-    let v_pos = own_bone(e, 0, Vec3::ZERO) + rotate(e.angle, e.direction);
+    let v_pos = own_bone(e, ctx, 0, Vec3::ZERO) + rotate(e.angle, e.direction);
     ctx.create_sprite(BITMAP_LIGHT, v_pos, 3.0, light, 0.0, 0);
     ctx.create_sprite(BITMAP_LIGHT, v_pos, 2.0, light, 0.0, 0);
     let lt = life(e);
     if matches!(lt, 30 | 28 | 26 | 24) {
         let n = ctx.rand() % 3;
-        let v_pos = own_bone(e, 1, Vec3::ZERO);
+        let v_pos = own_bone(e, ctx, 1, Vec3::ZERO);
         for _ in 0..n {
             ctx.create_effect(MODEL_FEATHER, v_pos, e.angle, light, 0, None, -1, 0, 0, 0.6);
             ctx.create_effect(MODEL_FEATHER, v_pos, e.angle, light, 1, None, -1, 0, 0, 0.6);
         }
     }
     if lt == 30 {
-        let v_pos = own_bone(e, 1, Vec3::ZERO);
+        let v_pos = own_bone(e, ctx, 1, Vec3::ZERO);
         // CreateJoint(BITMAP_FLARE+1, vPos, vPos, Angle, 18, o, 90, 40, 0, 0, -1, Light): the
         // trail's colour comes from the last argument.
         let mut j = Joint::new(BITMAP_FLARE + 1, v_pos, v_pos, e.angle, 18, me(e), 90.0);
@@ -941,26 +1065,22 @@ fn gamble(e: &mut Effect, ctx: &mut Ctx, lum: f32) {
     check_client_arrow(e, ctx);
 }
 
-/// ZzzObject.cpp:1806: mesh 0 with BodyLight (0.7, 0.7, 0.9) and BlendMesh 0, mesh 1 with
-/// (0.3, 0.4, 0.9) and BlendMesh 1 (both with BlendMeshLight 1).
-/// TODO(original): `RenderMesh` picks meshes by index and `HiddenMesh` here hides by texture index
-/// (assumed equal); any further meshes of the model are drawn in both passes instead of none.
+/// ZzzObject.cpp:1806: `RenderMesh(0, RENDER_TEXTURE, Alpha, 0, 1.f, U, V)` with BodyLight
+/// (0.7, 0.7, 0.9) and `RenderMesh(1, RENDER_TEXTURE, Alpha, 1, 1.f, U, V)` with (0.3, 0.4, 0.9).
 fn darkstinger_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.alpha < 0.01 {
         return;
     }
-    let mut a = ModelDraw::of_effect(e);
-    a.light = Vec3::new(0.7, 0.7, 0.9);
-    a.hidden_mesh = 1;
-    a.blend_mesh = 0;
-    a.blend_mesh_light = 1.0;
-    out.models.push(a);
-    let mut b = ModelDraw::of_effect(e);
-    b.light = Vec3::new(0.3, 0.4, 0.9);
-    b.hidden_mesh = 0;
-    b.blend_mesh = 1;
-    b.blend_mesh_light = 1.0;
-    out.models.push(b);
+    for (mesh, light) in [(0, Vec3::new(0.7, 0.7, 0.9)), (1, Vec3::new(0.3, 0.4, 0.9))] {
+        let mut d = ModelDraw::of_effect(e);
+        d.mesh = mesh;
+        d.render_flags = RENDER_TEXTURE;
+        d.light = light;
+        d.blend_mesh = mesh;
+        d.blend_mesh_light = 1.0;
+        d.hidden_mesh = -1;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_ARROW_TANKER / MODEL_ARROW_TANKER_HIT ----------------------------------------------------
@@ -981,19 +1101,20 @@ fn tanker_render_fx(e: &mut Effect, ctx: &mut Ctx) {
     for i in 0..10 {
         let fi = i as f32;
         e.light = Vec3::new(1.0 - fi * 0.1, 0.4 - fi * 0.04, 0.0);
-        let p2 = own_bone(e, 1, Vec3::new(15.0 * fi, 1.5, 0.0));
+        let p2 = own_bone(e, ctx, 1, Vec3::new(15.0 * fi, 1.5, 0.0));
         ctx.create_sprite(BITMAP_SPARK + 1, p2, 3.0 + fi * 0.9, e.light, 0.0, 0);
     }
 }
 
-/// ZzzObject.cpp:2614 + 2658: a normal pass and a bright pass of all meshes with light 1.
+/// ZzzObject.cpp:2614 `RenderBody(RENDER_TEXTURE, ...)` + 2658 `RenderBody(RENDER_TEXTURE|
+/// RENDER_BRIGHT, Alpha, -2, 1.f, U, V, HiddenMesh)` with BodyLight 1.
 fn tanker_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.alpha < 0.01 {
         return;
     }
     out.models.push(ModelDraw::of_effect(e));
     let mut d = ModelDraw::of_effect(e);
-    d.bright = true;
+    d.render_flags = TEXTURE_BRIGHT;
     d.light = Vec3::ONE;
     d.blend_mesh = -2;
     d.blend_mesh_light = 1.0;
@@ -1073,7 +1194,7 @@ fn bomb_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.gravity = -10.0;
     e.life_time = 40.0;
     if e.sub_type == 2 {
-        // (AttackPoint[0] = 0: only read by the hit test.)
+        e.user[ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
     // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
@@ -1093,8 +1214,9 @@ fn bomb_step(e: &mut Effect, ctx: &mut Ctx) {
     common::move_jump(e, ctx);
     if life(e) == 1 {
         common::create_bomb(ctx, e.position, true, 0);
-        // TODO(original): if Owner == Hero && SubType != 99:
-        // AttackCharacterRange(o->Skill, Position, 100, o->Weapon, o->PKKey).
+        if owner_is_hero(e, ctx) && e.sub_type != 99 {
+            ctx.attack_character_range(e.skill, e.position, 100.0, e.weapon, e.pk_key);
+        }
     }
     let light = Vec3::new(lum * 0.6, lum * 0.8, lum * 0.8);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
@@ -1114,7 +1236,7 @@ fn drill_create(e: &mut Effect, ctx: &mut Ctx) {
         e.position.z += 130.0;
         if e.sub_type != 0 {
             ctx.create_effect(MODEL_PIERCING, e.position, e.angle, e.light, 0, me(e), -1, 0, 0, 0.0);
-            // (AttackPoint[0] = 0: only read by the hit test.)
+            e.user[ATTACK_POINT] = 0.0;
             e.kind = 1;
         }
         e.direction = Vec3::new(0.0, -70.0, 0.0);
@@ -1129,7 +1251,7 @@ fn drill_step(e: &mut Effect, ctx: &mut Ctx) {
     // Draw_RenderObject after drawing (ZzzObject.cpp:2640).
     if e.alpha >= 0.01 {
         let light = Vec3::new(1.0, 0.6, 0.4);
-        let p = own_bone(e, 1, Vec3::ZERO);
+        let p = own_bone(e, ctx, 1, Vec3::ZERO);
         let size = (ctx.world_time() * 0.002).sin() * 0.3 + 1.3;
         let rot = rf(ctx, 360);
         ctx.create_sprite(BITMAP_SHINY + 1, p, size, light, rot, 0);
@@ -1258,14 +1380,12 @@ fn kentauros_step(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- MODEL_SUMMON ------------------------------------------------------------------------------------
 
-/// ZzzEffect.cpp:2248. `user[7]` = 1 in Kanturu 3rd (`M39Kanturu3rd::IsInKanturu3rd()`, where
-/// `Draw_RenderObject` draws nothing for it).
+/// ZzzEffect.cpp:2248.
 fn summon_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 60.0;
     e.blend_mesh = 0;
     e.scale = if e.sub_type == 0 { 0.7 } else { 1.2 };
     e.angle.z += rf(ctx, 360);
-    e.user[7] = if ctx.world_active == WD_39KANTURU_3RD { 1.0 } else { 0.0 };
 }
 
 /// ZzzEffect.cpp:10646.
@@ -1277,18 +1397,24 @@ fn summon_step(e: &mut Effect, ctx: &mut Ctx) {
         e.light /= 1.08;
     }
     e.angle.z += 1.0;
-    e.user[7] = if ctx.world_active == WD_39KANTURU_3RD { 1.0 } else { 0.0 };
     move_tail(e, ctx);
 }
 
-/// RenderEffects 18326 → ZzzObject.cpp:515.
-/// TODO(original): mesh 0 is drawn with RENDER_TEXTURE and meshes 1 and 2 with
-/// RENDER_TEXTURE|RENDER_BRIGHT; per-mesh bright is not expressible, so it is one normal pass.
-fn summon_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    if e.user[7] != 0.0 {
+/// RenderEffects 18326 → ZzzObject.cpp:515: nothing in Kanturu 3rd
+/// (`M39Kanturu3rd::IsInKanturu3rd()`); else `RenderMesh(0, RENDER_TEXTURE, ...)` and
+/// `RenderMesh(1 / 2, RENDER_TEXTURE|RENDER_BRIGHT, ...)` with `BodyLight = o->Light`, each with
+/// `Alpha, BlendMesh, BlendMeshLight, U, V`.
+fn summon_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    if ctx.world_active == WD_39KANTURU_3RD || e.alpha < 0.01 {
         return;
     }
-    render_object(e, out, false);
+    for (mesh, flags) in [(0, RENDER_TEXTURE), (1, TEXTURE_BRIGHT), (2, TEXTURE_BRIGHT)] {
+        let mut d = ModelDraw::of_effect(e);
+        d.mesh = mesh;
+        d.render_flags = flags;
+        d.hidden_mesh = -1;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_DARK_ELF_SKILL ----------------------------------------------------------------------------
@@ -1399,4 +1525,142 @@ fn saw_step(e: &mut Effect, ctx: &mut Ctx) {
     e.angle.z -= 30.0;
     common::play_animation(e, ctx);
     common::move_particle(e, false);
+}
+
+// --- Tests: client-side arrow hits (`CheckClientArrow`) ---------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use bevy::math::Vec3;
+    use bevy::prelude::Entity;
+
+    use super::*;
+    use crate::fx::sim::{self, Actors, FxWorld};
+    use crate::terrain::TerrainLights;
+
+    /// Where the hero stands (the arrows are shot from here, angle 0: they fly towards -Y).
+    const HERO_AT: Vec3 = Vec3::new(12800.0, 12800.0, 0.0);
+    const MONSTER_KEY: i32 = 7;
+
+    fn registry() -> Registry {
+        let mut r = Registry::default();
+        crate::fx::kinds::register_all(&mut r);
+        r
+    }
+
+    /// The hero at [`HERO_AT`] and, if `monster_y` is given, a monster at (x, `monster_y`) on the
+    /// arrows' path (they start at x - 10).
+    fn scene(monster_y: Option<f32>) -> (Actors, Entity) {
+        let hero = Entity::PLACEHOLDER;
+        let identity: mu_data::bmd::Mat34 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
+        let mut a = Actors::default();
+        a.map.insert(hero, Actor { position: HERO_AT, bones: Arc::new(vec![identity; 80]), live: true, ..Default::default() });
+        a.hero = Some(hero);
+        if let Some(y) = monster_y {
+            let monster = Actor { kind: KIND_MONSTER, key: MONSTER_KEY, position: Vec3::new(HERO_AT.x - 10.0, y, 0.0), ..Default::default() };
+            a.map.insert(Entity::from_bits(1 << 32 | 5), monster);
+        }
+        (a, hero)
+    }
+
+    /// A world with one effect `ty` shot by the hero (`kind` = the original `Skill` argument, 1 for
+    /// the hero's arrows, `CreateArrows` ZzzEffect.h:90).
+    fn shoot(ty: i32, sub_type: i32, kind: i32, hero: Entity) -> FxWorld {
+        let e = Effect::new(1, ty, HERO_AT, Vec3::ZERO, Vec3::ONE, sub_type, Some(Target::Actor(hero)), -1, kind, 0, 0.0);
+        FxWorld { next_effect_id: 1, pending: vec![Spawn::Effect(e)], ..Default::default() }
+    }
+
+    /// Ticks `world` `ticks` times (the first tick creates the pending effect); returns the tick
+    /// at which effect 1 disappeared, if it did.
+    fn run(world: &mut FxWorld, actors: &Actors, ticks: usize) -> Option<usize> {
+        let registry = registry();
+        let mut lights = TerrainLights::default();
+        for t in 0..ticks {
+            sim::step(world, &registry, actors, None, &mut lights, t as f32 * 40.0, 0);
+            if t > 0 && !world.effects.iter().any(|e| e.id == 1) {
+                return Some(t);
+            }
+        }
+        None
+    }
+
+    fn has_particle(world: &FxWorld, ty: i32) -> bool {
+        world.particles.iter().any(|p| p.ty == ty)
+    }
+
+    /// Another character's arrow (`Kind` 0) stops on the monster in its path
+    /// (`CheckCharacterRange`, ZzzEffect.cpp:6781-6823), long before its 30 ticks.
+    #[test]
+    fn arrow_dies_on_a_monster() {
+        let (actors, hero) = scene(Some(HERO_AT.y - 400.0));
+        let mut world = shoot(MODEL_ARROW, 0, 0, hero);
+        let died = run(&mut world, &actors, 30).expect("the arrow must stop on the monster");
+        assert!(died < 10, "died at tick {died}");
+        // A plain arrow does not explode.
+        assert!(!has_particle(&world, BITMAP_EXPLOTION));
+    }
+
+    /// With nothing in range the arrow flies on along -Y.
+    #[test]
+    fn arrow_flies_on_without_targets() {
+        let (actors, hero) = scene(None);
+        let mut world = shoot(MODEL_ARROW, 0, 0, hero);
+        assert_eq!(run(&mut world, &actors, 10), None);
+        let e = world.effects.iter().find(|e| e.id == 1).expect("the arrow is alive");
+        // Created at y - 60, then 9 moves of 70.
+        assert!((e.position.y - (HERO_AT.y - 60.0 - 9.0 * 70.0)).abs() < 0.5, "{:?}", e.position);
+        // A monster far to the side does not stop it either.
+        let (mut actors, hero) = scene(None);
+        actors.map.insert(Entity::from_bits(1 << 32 | 6), Actor { kind: KIND_MONSTER, position: HERO_AT + Vec3::new(500.0, -300.0, 0.0), ..Default::default() });
+        let mut world = shoot(MODEL_ARROW, 0, 0, hero);
+        assert_eq!(run(&mut world, &actors, 10), None);
+    }
+
+    /// A bomb arrow explodes where it hits (`CreateBomb(o->Position, true)`), not only at the end
+    /// of its life.
+    #[test]
+    fn bomb_arrow_explodes_on_a_monster() {
+        let (actors, hero) = scene(Some(HERO_AT.y - 200.0));
+        let mut world = shoot(MODEL_ARROW_BOMB, 0, 0, hero);
+        let died = run(&mut world, &actors, 40).expect("the bomb arrow must stop on the monster");
+        assert!(died < 10, "died at tick {died}");
+        assert!(has_particle(&world, BITMAP_EXPLOTION), "no explosion");
+    }
+
+    /// The hero's arrow (`Kind` 1, owner = Hero) asks for the damage with `AttackCharacterRange`
+    /// and stops with a hit sound; the holy arrow (it does not move its `Position`) also explodes
+    /// (ZzzEffect.cpp:6896-6901).
+    #[test]
+    fn hero_holy_arrow_hits_explodes_and_sounds() {
+        let (actors, hero) = scene(Some(HERO_AT.y - 50.0));
+        let mut world = shoot(MODEL_ARROW_HOLY, 1, 1, hero);
+        assert!(run(&mut world, &actors, 30).is_some(), "the holy arrow must hit");
+        assert!(has_particle(&world, BITMAP_EXPLOTION), "no explosion");
+        assert!(world.sounds.iter().any(|s| s.starts_with("SOUND_ATTACK_MISSILE_HIT")), "{:?}", world.sounds);
+        assert!(world.attack_requests.iter().any(|r| r.keys == vec![MONSTER_KEY]));
+    }
+
+    /// The same holy arrow shot by someone else (`Kind` 0, SubType 1) stops without exploding.
+    #[test]
+    fn other_holy_arrow_subtype_1_does_not_explode() {
+        let (actors, hero) = scene(Some(HERO_AT.y - 50.0));
+        let mut world = shoot(MODEL_ARROW_HOLY, 1, 0, hero);
+        assert_eq!(run(&mut world, &actors, 30), Some(1));
+        assert!(!has_particle(&world, BITMAP_EXPLOTION));
+    }
+
+    /// Penetration (`AT_SKILL_PIERCING`, SubType 2) goes through the monster and keeps flying.
+    #[test]
+    fn piercing_arrow_goes_through() {
+        let (actors, hero) = scene(Some(HERO_AT.y - 400.0));
+        let mut world = shoot(MODEL_ARROW, 2, 0, hero);
+        world.hero_skills = vec![AT_SKILL_PIERCING];
+        assert_eq!(run(&mut world, &actors, 12), None, "the piercing arrow must not stop");
+        let e = world.effects.iter().find(|e| e.id == 1).expect("alive");
+        assert!(e.position.y < HERO_AT.y - 500.0, "{:?}", e.position);
+        // It did hit the monster on the way (and started the `AttackPoint[0]` countdown).
+        assert!(world.attack_requests.iter().any(|r| r.skill == AT_SKILL_PIERCING && r.keys == vec![MONSTER_KEY]));
+    }
 }
