@@ -464,7 +464,7 @@ fn reset(mut boxes: ResMut<NameBoxes>, mut hovered: ResMut<Hovered>) {
 }
 
 /// Chaos Castle worlds (`InChaosCastle`: `WD_18CHAOS_CASTLE..END` and `WD_53CAOSCASTLE_MASTER_LEVEL`).
-fn in_chaos_castle(world: u16) -> bool {
+pub(crate) fn in_chaos_castle(world: u16) -> bool {
     matches!(world, 19..=24 | 54)
 }
 

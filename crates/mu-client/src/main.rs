@@ -60,6 +60,7 @@ mod monsters;
 mod move_window;
 mod names;
 mod notices;
+mod npc;
 mod objects;
 mod operate;
 mod options;
@@ -285,5 +286,6 @@ fn main() {
         .add_plugins(char_info::CharInfoPlugin)
         .add_plugins((item_view::ItemViewPlugin, inventory::InventoryPlugin, hero_dress::HeroDressPlugin))
         .add_plugins(monsters::MonstersPlugin)
+        .add_plugins(npc::NpcPlugin)
         .run();
 }

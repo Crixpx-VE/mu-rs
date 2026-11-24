@@ -159,13 +159,21 @@ fn action_fps(a: usize) -> f32 {
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HeroInput;
 
+/// The hero walks its path (`MovePath`) and, on arriving, acts (`Action(c, o, false)`).
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HeroWalk;
+
 pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CurrentSkill>()
             .add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
-            .add_systems(Update, (scripted_walk, hero_input.in_set(HeroInput), cast_skill, walk, animate, light_body).chain());
+            .init_resource::<MouseTimer>()
+            .add_systems(
+                Update,
+                (scripted_walk, hero_input.in_set(HeroInput), cast_skill, walk.in_set(HeroWalk), animate, light_body).chain(),
+            );
     }
 }
 
@@ -183,6 +191,8 @@ pub struct Player {
     pub casting: Option<f32>,
     /// `MOVEMENT_OPERATE`: heading to this sitting object (index in `Operates`).
     pub operate: Option<usize>,
+    /// `MOVEMENT_TALK` with `TargetNpc`: heading to the NPC with this scope key (npc.rs).
+    pub talk: Option<u16>,
     pub class: crate::account::Class,
     /// Stand and walk animations of its class.
     pub stop: usize,
@@ -552,6 +562,7 @@ fn spawn_player(
         frame: 0.0,
         casting: None,
         operate: None,
+        talk: None,
         class,
         stop,
         walk,
@@ -727,10 +738,11 @@ fn light_body(
 }
 
 /// The original `MouseUpdateTime` / `MouseUpdateTimeMax` / `MouseLButtonPush`, in 25 Hz ticks.
-#[derive(Default)]
-struct MouseTimer {
+/// A resource because `Action` also sets `MouseUpdateTimeMax` (npc.rs).
+#[derive(Resource, Default)]
+pub(crate) struct MouseTimer {
     time: u32,
-    max: u32,
+    pub(crate) max: u32,
     /// `MouseLButtonPush`: unhandled click (lost when the button is released).
     push: bool,
     /// The button was pressed in the game area (not over the bar or a window).
@@ -752,7 +764,17 @@ fn hero_path(t: &mu_data::terrain::Terrain, from: (usize, usize), to: (usize, us
 
 /// `SendMove`: the time until another click is handled depends on the path length; the path goes to
 /// the server (`SendCharacterMove`: start tile, direction and one step per tile).
-fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTimer, net: &mut crate::net::Net) {
+fn send_move(
+    player: &mut Player,
+    path: Vec<(usize, usize)>,
+    timer: &mut MouseTimer,
+    net: &mut crate::net::Net,
+    npc: &mut crate::npc::NpcTalk,
+) {
+    // `IsImpossibleSendMoveInterface` (ZzzInterface.cpp:3751-3754): not with the Chaos Machine open.
+    if npc.dialog.blocks_move() {
+        return;
+    }
     timer.max = match path.len() {
         0..=2 => 0,
         3 => 5,
@@ -767,6 +789,8 @@ fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTi
         }
     }
     player.path = path.into_iter().skip(1).collect();
+    // `UpdateSendMoveInterface` (ZzzInterface.cpp:3786): walking closes the NPC windows.
+    npc.after_send_move(net);
 }
 
 /// MU angle (that of `Player::facing`) of a step direction (0..7).
@@ -780,6 +804,7 @@ pub fn direction_facing(direction: u8) -> f32 {
 ///   sends the character toward the mouse again: holding the button makes it follow
 ///   the mouse.
 /// - Over a sitting object (and standing still), it walks to it (`MOVEMENT_OPERATE`).
+/// - Over an NPC, it walks next to it and talks on arriving (`MOVEMENT_TALK`, npc.rs).
 /// - On the ground, `DontMove` (cursor `CursorDontMove`) if the tile has no ground, is water...
 ///   (attribute ≥ `TW_NOGROUND` without `TW_ACTION` or `TW_HEIGHT`).
 fn hero_input(
@@ -791,11 +816,12 @@ fn hero_input(
     over_ui: Res<crate::mainframe::PointerOverUi>,
     operates: Res<crate::operate::Operates>,
     mut pointer: ResMut<crate::operate::Pointer>,
-    mut timer: Local<MouseTimer>,
+    mut timer: ResMut<MouseTimer>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut players: Query<&mut Player>,
     mut net: ResMut<crate::net::Net>,
     gate: Res<crate::gate::GateState>,
+    mut npc: crate::npc::NpcTalk,
 ) {
     use mu_data::terrain::attr;
     let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
@@ -839,9 +865,28 @@ fn hero_input(
                 let wall = t.0.attribute(tx.max(0) as usize, ty.max(0) as usize);
                 if (wall == attr::HEIGHT || wall < attr::CHARACTER) && !moving {
                     player.operate = Some(i);
+                    player.talk = None;
                     match hero_path(&t.0, here, (tx as usize, ty as usize)) {
-                        Some(p) => send_move(&mut player, p, &mut timer, &mut net),
+                        Some(p) => send_move(&mut player, p, &mut timer, &mut net, &mut npc),
                         None => operate_action(&mut player, op, &mut sound, &mut net),
+                    }
+                }
+            } else if let Some((key, tile)) = npc.clicked_npc() {
+                // `SelectedNpc` (ZzzInterface.cpp:7528-7571): `MOVEMENT_TALK` with `TargetNpc`, walking
+                // toward the NPC's tile (`PathFinding2` ends next to it) or talking right away if
+                // there is no path (`Action(c, o, true)`). Not yet: the hero's `eBuff_CrywolfNPCHide`
+                // (keeps the movement type, 7533) and the 550-unit reach of the Kanturu entrance NPC
+                // (`MODEL_KANTURU2ND_ENTER_NPC`, 7543-7563).
+                // (`Action` sets `TargetNpc = -1`, 3584: a talk done now leaves nothing pending.)
+                player.operate = None;
+                match npc.path_to(&t.0, here, tile) {
+                    Some(p) => {
+                        player.talk = Some(key);
+                        send_move(&mut player, p, &mut timer, &mut net, &mut npc);
+                    }
+                    None => {
+                        player.talk = None;
+                        npc.act(key);
                     }
                 }
             } else if let Some(hit) = ray.and_then(|r| raycast_terrain(&t.0, r)) {
@@ -850,7 +895,8 @@ fn hero_input(
                 pointer.dont_move = a >= attr::NO_GROUND && a & attr::ACTION == 0 && a & attr::HEIGHT == 0;
                 if let Some(p) = (here != to || !moving).then(|| hero_path(&t.0, here, to)).flatten() {
                     player.operate = None;
-                    send_move(&mut player, p, &mut timer, &mut net);
+                    player.talk = None;
+                    send_move(&mut player, p, &mut timer, &mut net, &mut npc);
                 }
             }
         }
@@ -950,6 +996,7 @@ fn walk(
     operates: Res<crate::operate::Operates>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut net: ResMut<crate::net::Net>,
+    mut talk: ResMut<crate::npc::TalkRequest>,
     mut q: Query<(&mut Player, &mut Transform)>,
 ) {
     for (mut p, mut tf) in &mut q {
@@ -989,6 +1036,11 @@ fn walk(
         if had_path && p.path.is_empty() && p.casting.is_none() {
             if let Some(op) = p.operate.take().and_then(|i| operates.0.get(i)) {
                 operate_action(&mut p, op, &mut sound, &mut net);
+            }
+            // `MOVEMENT_TALK` (ZzzInterface.cpp:7282-7295 → 3397). TODO: an elf with a bow and no
+            // arrows only stops (`!CheckArrow()`, 7292-7293); equipment is not checked here yet.
+            if let Some(key) = p.talk.take() {
+                talk.0 = Some(key);
             }
         }
         *tf = player_transform(&p, terrain.as_deref());
