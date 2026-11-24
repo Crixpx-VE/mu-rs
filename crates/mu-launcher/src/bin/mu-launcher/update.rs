@@ -1,23 +1,20 @@
-//! Launcher: updates the client and starts it.
-//!
-//!   mu-launcher [game options, e.g. --world 3]
+//! Keeping the client up to date. Runs on its own thread and reports to the window through
+//! [`Status`].
 //!
 //! 1. Requests the file list from the server (address in `mu-launcher.txt`: `servidor=http://ip:port`).
 //! 2. Downloads whatever is missing or changed (compressed, several at once), checking each
 //!    file's SHA-256 hash. If something fails, retries until it has everything.
-//! 3. Starts `mu-client.exe` with the received options.
-//! 4. When the game closes, uploads its log (`mu-client.log`) to the server (`POST /log`).
 //!
 //! The game only starts with all files present. If the server doesn't respond, the existing version
-//! is started only if the last update completed fully. If it updates itself, it
-//! restarts with the new version (before downloading the rest).
+//! may start only if the last update completed fully. If the launcher itself changed, it restarts
+//! with the new version (before downloading the rest).
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Read, Write};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::io::{self, Read, Write};
+use std::path::Path;
+use std::process::Command;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use mu_launcher::{
@@ -26,13 +23,10 @@ use mu_launcher::{
 };
 use sha2::{Digest, Sha256};
 
-const CONFIG_FILE: &str = "mu-launcher.txt";
+pub const CONFIG_FILE: &str = "mu-launcher.txt";
 const STATE_FILE: &str = ".mu-launcher-state";
 /// State line saying the last update completed fully.
 const COMPLETE_MARK: &str = "#completo";
-const CLIENT_EXE: &str = "mu-client.exe";
-/// What the game prints to the console (the game's own log is `mu-client.log`).
-const CONSOLE_LOG: &str = "mu-client-consola.log";
 /// Concurrent downloads.
 const WORKERS: usize = 6;
 /// Attempts per file in each round (then the list is requested again).
@@ -42,84 +36,40 @@ const RETRY_WAIT: Duration = Duration::from_secs(5);
 
 type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-fn main() {
-    let dir = std::env::current_exe().ok().and_then(|e| Some(e.parent()?.to_path_buf())).unwrap_or_default();
-    let game_args: Vec<String> = std::env::args().skip(1).collect();
-    let _ = std::env::set_current_dir(&dir);
-    let _ = std::fs::remove_file(dir.join(self_name()).with_extension("exe.old"));
+/// Connection with the update server, as shown in the window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Server {
+    #[default]
+    Connecting,
+    Online,
+    Offline,
+    /// No `servidor=` in `mu-launcher.txt`.
+    None,
+}
 
-    println!("MU Rust - lanzador {}", env!("CARGO_PKG_VERSION"));
-    let url = server_url(&dir);
-    match url.clone() {
-        Some(url) => loop {
-            match update(&dir, &url) {
-                Ok(Updated { files: 0, .. }) => {
-                    println!("El cliente está al día.");
-                    break;
-                }
-                Ok(Updated { files, relaunch: false }) => {
-                    println!("Actualizados {files} archivos. El cliente está completo.");
-                    break;
-                }
-                Ok(Updated { relaunch: true, .. }) => {
-                    println!("El lanzador se actualizó; abriendo la versión nueva...");
-                    let code = Command::new(dir.join(self_name()))
-                        .args(&game_args)
-                        .status()
-                        .map_or(1, |s| s.code().unwrap_or(1));
-                    std::process::exit(code);
-                }
-                Err(Failure::Offline(e)) if load_complete(&dir) => {
-                    println!("\nNo se pudo conectar con el servidor de actualizaciones ({e}).");
-                    println!("Se abre la versión que tienes (la última actualización terminó entera).");
-                    break;
-                }
-                Err(Failure::Offline(e) | Failure::Download(e)) => {
-                    println!("\nNo se pudo terminar la actualización: {e}");
-                    println!(
-                        "El juego no se abre hasta tener todos los archivos. Se reintenta en {} s (cierra la ventana para salir).",
-                        RETRY_WAIT.as_secs()
-                    );
-                    std::thread::sleep(RETRY_WAIT);
-                }
-            }
-        },
-        None => println!("Sin servidor en {CONFIG_FILE}; no se buscan actualizaciones."),
-    }
+/// What the updater is doing, for the window.
+#[derive(Clone, Debug, Default)]
+pub struct Status {
+    pub server: Server,
+    /// Main line ("Comprobando archivos", "Descargando"...).
+    pub title: String,
+    /// Second line (sizes, speed, current file, errors).
+    pub detail: String,
+    /// 0..1 while checking or downloading.
+    pub progress: Option<f32>,
+    /// The client is complete (or may start anyway) and the game can be opened.
+    pub ready: bool,
+}
 
-    let (slot, console) = log_slot(&dir);
-    let ok = run_client(&dir, &game_args, &slot, console);
-    if let Some(url) = url {
-        send_log(&dir, &url, &slot);
-    }
-    if !ok {
-        println!("\nEl juego se cerró con un error. Mira {}. Pulsa Enter para salir.", slot.game);
-        let _ = io::stdin().lock().lines().next();
+pub type Shared = Arc<Mutex<Status>>;
+
+fn set(status: &Shared, f: impl FnOnce(&mut Status)) {
+    if let Ok(mut s) = status.lock() {
+        f(&mut s);
     }
 }
 
-/// Uploads the game log (`mu-client.log`) and its console output to the server, so
-/// what happened can be seen without the player having to copy it.
-fn send_log(dir: &Path, url: &str, slot: &LogSlot) {
-    let read = |name: &str| std::fs::read(dir.join(name)).unwrap_or_default();
-    let mut body = format!("=== {} ===\n", slot.game).into_bytes();
-    body.extend(read(&slot.game));
-    let console = read(&slot.console);
-    if !console.is_empty() {
-        body.extend(b"\n=== consola ===\n");
-        body.extend(console);
-    }
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(5))
-        .timeout_read(Duration::from_secs(20))
-        .build();
-    match agent.post(&format!("{url}/log")).send_bytes(&body) {
-        Ok(_) => println!("Registro del juego enviado."),
-        Err(e) => println!("No se pudo enviar el registro del juego ({e})."),
-    }
-}
-
-fn self_name() -> String {
+pub fn self_name() -> String {
     std::env::current_exe()
         .ok()
         .and_then(|e| Some(e.file_name()?.to_str()?.to_string()))
@@ -127,7 +77,7 @@ fn self_name() -> String {
 }
 
 /// `servidor=...` from `mu-launcher.txt` (or the `MU_UPDATE_URL` variable).
-fn server_url(dir: &Path) -> Option<String> {
+pub fn server_url(dir: &Path) -> Option<String> {
     if let Ok(u) = std::env::var("MU_UPDATE_URL") {
         return Some(u);
     }
@@ -135,6 +85,62 @@ fn server_url(dir: &Path) -> Option<String> {
     let url = text.lines().find_map(|l| l.trim().strip_prefix("servidor="))?.trim().trim_end_matches('/');
     Some(if url.contains("://") { url.to_string() } else { format!("http://{url}") })
         .map(|u| if u.rsplit(':').next().is_some_and(|p| p.parse::<u16>().is_ok()) { u } else { format!("{u}:{DEFAULT_PORT}") })
+}
+
+/// The update loop: retries until the client is complete (or may start offline). If the launcher
+/// itself was updated, starts the new one with the same arguments and exits.
+pub fn run(dir: &Path, url: Option<String>, game_args: &[String], status: &Shared) {
+    let Some(url) = url else {
+        set(status, |s| {
+            s.server = Server::None;
+            s.title = "Listo para jugar".into();
+            s.detail = format!("Sin servidor en {CONFIG_FILE}: no se buscan actualizaciones.");
+            s.ready = true;
+        });
+        return;
+    };
+    loop {
+        match update(dir, &url, status) {
+            Ok(Updated { files, relaunch: false }) => {
+                set(status, |s| {
+                    s.server = Server::Online;
+                    s.title = "Listo para jugar".into();
+                    s.detail = if files == 0 {
+                        "El cliente está al día.".into()
+                    } else {
+                        format!("Se actualizaron {files} archivos. El cliente está completo.")
+                    };
+                    s.progress = Some(1.0);
+                    s.ready = true;
+                });
+                return;
+            }
+            Ok(Updated { relaunch: true, .. }) => {
+                set(status, |s| s.title = "Abriendo el lanzador nuevo...".into());
+                let _ = Command::new(dir.join(self_name())).args(game_args).spawn();
+                std::process::exit(0);
+            }
+            Err(Failure::Offline(e)) if load_complete(dir) => {
+                set(status, |s| {
+                    s.server = Server::Offline;
+                    s.title = "Sin conexión con el servidor".into();
+                    s.detail = format!("Puedes jugar con la versión que tienes (la última actualización terminó entera). ({e})");
+                    s.progress = None;
+                    s.ready = true;
+                });
+                return;
+            }
+            Err(Failure::Offline(e) | Failure::Download(e)) => {
+                for left in (1..=RETRY_WAIT.as_secs()).rev() {
+                    set(status, |s| {
+                        s.title = format!("No se pudo terminar la actualización; se reintenta en {left} s");
+                        s.detail = e.clone();
+                    });
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+            }
+        }
+    }
 }
 
 struct Updated {
@@ -169,15 +175,23 @@ fn fetch_manifest(agent: &ureq::Agent, url: &str) -> Result<Vec<Entry>, String> 
     }
 }
 
-fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(Duration::from_secs(5))
-        .timeout_read(Duration::from_secs(30))
-        .build();
-    print!("Buscando actualizaciones en {url}... ");
-    let _ = io::stdout().flush();
-    let manifest = fetch_manifest(&agent, url).map_err(Failure::Offline)?;
-    println!("{} archivos en el servidor.", manifest.len());
+pub fn agent(read_timeout: Duration) -> ureq::Agent {
+    ureq::AgentBuilder::new().timeout_connect(Duration::from_secs(5)).timeout_read(read_timeout).build()
+}
+
+fn update(dir: &Path, url: &str, status: &Shared) -> Result<Updated, Failure> {
+    let agent = agent(Duration::from_secs(30));
+    set(status, |s| {
+        s.server = Server::Connecting;
+        s.title = "Buscando actualizaciones...".into();
+        s.detail = String::new();
+        s.progress = None;
+    });
+    let manifest = fetch_manifest(&agent, url).map_err(|e| {
+        set(status, |s| s.server = Server::Offline);
+        Failure::Offline(e)
+    })?;
+    set(status, |s| s.server = Server::Online);
 
     let mut state = load_state(dir);
     // What the launcher installed (it's in its state) and the server no longer publishes: deleted.
@@ -189,7 +203,6 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
         .cloned()
         .collect();
     if !gone.is_empty() {
-        println!("Quitando {} archivos que ya no forman parte del cliente.", gone.len());
         for p in &gone {
             let _ = std::fs::remove_file(to_local(dir, p));
             state.remove(p);
@@ -197,12 +210,13 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
         save_state(dir, &state, false);
     }
     let mut pending: Vec<&Entry> = vec![];
-    let mut checked = 0usize;
     for (i, e) in manifest.iter().enumerate() {
-        // Show progress while checking files not yet known (the first time, all of them).
-        if checked > 0 && (i % 250 == 0 || i + 1 == manifest.len()) {
-            print!("\r  Comprobando archivos  {}  {}/{}", bar(i as u64 + 1, manifest.len() as u64), i + 1, manifest.len());
-            let _ = io::stdout().flush();
+        if i % 100 == 0 || i + 1 == manifest.len() {
+            set(status, |s| {
+                s.title = "Comprobando archivos".into();
+                s.detail = format!("{} de {}", i + 1, manifest.len());
+                s.progress = Some((i + 1) as f32 / manifest.len().max(1) as f32);
+            });
         }
         let local = to_local(dir, &e.path);
         let current = match std::fs::metadata(&local) {
@@ -211,7 +225,6 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
                 match state.get(&e.path) {
                     Some((size, s, sha)) if *size == m.len() && *s == stamp => Some(sha.clone()),
                     _ => {
-                        checked += 1;
                         let sha = hash_file(&local).map_err(|e| Failure::Download(e.to_string()))?;
                         state.insert(e.path.clone(), (m.len(), stamp, sha.clone()));
                         Some(sha)
@@ -224,9 +237,6 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
             pending.push(e);
         }
     }
-    if checked > 0 {
-        println!(" listo.");
-    }
     if pending.is_empty() {
         save_state(dir, &state, true);
         return Ok(Updated { files: 0, relaunch: false });
@@ -237,26 +247,12 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
     // If there is a new launcher, that first: the new one downloads the rest (maybe differently).
     let me = self_name();
     if let Some(e) = pending.iter().find(|e| e.path.eq_ignore_ascii_case(&me)) {
-        println!("Hay un lanzador nuevo; se descarga primero.");
-        let done = download_all(dir, url, &agent, &[e], &mut state, &me)?;
+        set(status, |s| s.title = "Actualizando el lanzador".into());
+        let done = download_all(dir, url, &agent, &[e], &mut state, &me, status)?;
         return Ok(Updated { files: done, relaunch: true });
     }
 
-    let wire: u64 = pending.iter().map(|e| wire_size(e)).sum();
-    let total: u64 = pending.iter().map(|e| e.size).sum();
-    println!(
-        "Hay que descargar {} archivos nuevos o cambiados ({:.1} MB, {:.1} MB comprimidos):",
-        pending.len(),
-        total as f64 / 1e6,
-        wire as f64 / 1e6
-    );
-    for e in pending.iter().take(10) {
-        println!("  - {}", e.path);
-    }
-    if pending.len() > 10 {
-        println!("  ... y {} más", pending.len() - 10);
-    }
-    let files = download_all(dir, url, &agent, &pending, &mut state, &me)?;
+    let files = download_all(dir, url, &agent, &pending, &mut state, &me, status)?;
     save_state(dir, &state, true);
     Ok(Updated { files, relaunch: false })
 }
@@ -275,6 +271,7 @@ fn download_all(
     pending: &[&Entry],
     state: &mut State,
     me: &str,
+    status: &Shared,
 ) -> Result<usize, Failure> {
     let total: u64 = pending.iter().map(|e| wire_size(e)).sum();
     let wire = AtomicU64::new(0);
@@ -319,17 +316,17 @@ fn download_all(
             let n = finished.load(Ordering::SeqCst);
             let got = wire.load(Ordering::SeqCst);
             let secs = started.elapsed().as_secs_f64().max(0.1);
-            print!(
-                "\r  Descargando  {}  {:.1}/{:.1} MB  {:.1} MB/s  {}/{}  {:<40}",
-                bar(got, total),
-                got as f64 / 1e6,
-                total as f64 / 1e6,
-                got as f64 / 1e6 / secs,
-                n,
-                pending.len(),
-                short(&current.lock().unwrap())
-            );
-            let _ = io::stdout().flush();
+            let file = short(&current.lock().unwrap()).to_string();
+            set(status, |s| {
+                s.title = format!("Descargando {} de {} archivos", n.min(pending.len()), pending.len());
+                s.detail = format!(
+                    "{:.1} / {:.1} MB   ·   {:.1} MB/s   ·   {file}",
+                    got as f64 / 1e6,
+                    total as f64 / 1e6,
+                    got as f64 / 1e6 / secs
+                );
+                s.progress = Some(if total == 0 { 1.0 } else { (got as f64 / total as f64).min(1.0) as f32 });
+            });
             if n >= pending.len() {
                 break;
             }
@@ -337,20 +334,17 @@ fn download_all(
                 save_state(dir, &shared.lock().unwrap(), false);
                 last_save = Instant::now();
             }
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(100));
         }
     });
-    println!();
     *state = shared.into_inner().unwrap();
     save_state(dir, state, false);
     let errors = errors.into_inner().unwrap();
     if errors.is_empty() {
         Ok(pending.len())
     } else {
-        for e in errors.iter().take(5) {
-            println!("  falló {e}");
-        }
-        Err(Failure::Download(format!("faltan {} de {} archivos", errors.len(), pending.len())))
+        let first = errors.first().cloned().unwrap_or_default();
+        Err(Failure::Download(format!("faltan {} de {} archivos ({first})", errors.len(), pending.len())))
     }
 }
 
@@ -449,19 +443,6 @@ fn short(p: &str) -> &str {
     &p[start..]
 }
 
-/// Text progress bar: `[██████░░░░░░]  45%`.
-fn bar(done: u64, total: u64) -> String {
-    const WIDTH: u64 = 30;
-    let frac = if total == 0 { 1.0 } else { (done as f64 / total as f64).min(1.0) };
-    let filled = (frac * WIDTH as f64).round() as u64;
-    format!(
-        "[{}{}] {:3}%",
-        "█".repeat(filled as usize),
-        "░".repeat((WIDTH - filled) as usize),
-        (frac * 100.0).floor() as u64
-    )
-}
-
 fn stamp(m: &std::fs::Metadata) -> u128 {
     m.modified().ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map_or(0, |d| d.as_nanos())
 }
@@ -490,56 +471,15 @@ fn save_state(dir: &Path, state: &State, complete: bool) {
     let _ = std::fs::write(dir.join(STATE_FILE), text);
 }
 
-/// The two logs of a session: the game's and its console output.
-struct LogSlot {
-    game: String,
-    console: String,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-/// With several games open at once, each has its own logs: the first
-/// `mu-client.log` and `mu-client-consola.log`, the second `mu-client-2.log` and
-/// `mu-client-consola-2.log`... A console log opened by another launcher is in use
-/// (opened without letting anyone else write), so the next one is used.
-fn log_slot(dir: &Path) -> (LogSlot, Option<std::fs::File>) {
-    for n in 1..=16 {
-        let suffix = if n == 1 { String::new() } else { format!("-{n}") };
-        let slot = LogSlot { game: format!("mu-client{suffix}.log"), console: format!("mu-client-consola{suffix}.log") };
-        if let Ok(f) = open_exclusive(&dir.join(&slot.console)) {
-            return (slot, Some(f));
-        }
-    }
-    (LogSlot { game: "mu-client.log".into(), console: CONSOLE_LOG.into() }, None)
-}
-
-#[cfg(windows)]
-fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
-    use std::os::windows::fs::OpenOptionsExt;
-    // FILE_SHARE_READ: others can read it but not open it for writing.
-    std::fs::OpenOptions::new().write(true).create(true).truncate(true).share_mode(1).open(path)
-}
-
-#[cfg(not(windows))]
-fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
-    std::fs::File::create(path)
-}
-
-/// Starts the game and waits for it to close. Returns whether it ended well. The game writes its
-/// log to `slot.game` (told via `MU_LOG`); its console output goes to `console`.
-fn run_client(dir: &Path, args: &[String], slot: &LogSlot, log: Option<std::fs::File>) -> bool {
-    let exe: PathBuf = dir.join(CLIENT_EXE);
-    let mut cmd = Command::new(&exe);
-    cmd.args(args).current_dir(dir).env("MU_LOG", &slot.game);
-    if let Some(log) = log {
-        if let Ok(log2) = log.try_clone() {
-            cmd.stdout(Stdio::from(log)).stderr(Stdio::from(log2));
-        }
-    }
-    println!("Abriendo el juego...");
-    match cmd.status() {
-        Ok(s) => s.success(),
-        Err(e) => {
-            println!("No se pudo abrir {}: {e}", exe.display());
-            false
-        }
+    #[test]
+    fn short_keeps_the_end() {
+        assert_eq!(short("abc"), "abc");
+        let long = format!("{}ñfin.bmd", "x".repeat(50));
+        assert!(short(&long).ends_with("ñfin.bmd"));
+        assert!(short(&long).len() <= 40);
     }
 }

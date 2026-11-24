@@ -8,7 +8,7 @@ repository.workspace = true
 
 [[bin]]
 name = "mu-launcher"
-path = "src/bin/mu-launcher.rs"
+path = "src/bin/mu-launcher/main.rs"
 
 [[bin]]
 name = "mu-update-server"
@@ -21,3 +21,13 @@ ureq = { version = "2", default-features = false }
 tiny_http = "0.12"
 # Files are served compressed (level 19, compressed once when published).
 zstd = "0.13"
+# The launcher window, drawn with wgpu (DirectX 12 / Vulkan, like the game): OpenGL 2 is missing on
+# some machines (virtual machines, old drivers).
+eframe = { version = "0.31", default-features = false, features = ["wgpu", "default_fonts"] }
+# egui-wgpu enables no backend of its own: DirectX 12 (with the WARP software fallback on machines
+# without a GPU); Vulkan is always built in on Windows.
+wgpu = { version = "24", default-features = false, features = ["dx12", "wgsl"] }
+# Background and logo read from the player's client data (OZJ/OZT).
+mu-data.workspace = true
+# Development screenshots of the window (MU_LAUNCHER_SCREENSHOT).
+image.workspace = true
