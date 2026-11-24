@@ -336,7 +336,11 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::ItemMove { .. } => s.send(ServerMessage::ItemMoveFailed),
         ClientMessage::BuyItem { .. } => s.send(ServerMessage::BuyFailed { closed: false }),
         ClientMessage::SellItem { .. } => s.send(ServerMessage::SellResult { result: 0, money: 0 }),
-        ClientMessage::TalkToNpc { .. } | ClientMessage::CloseNpc | ClientMessage::RepairItem { .. } => {}
+        ClientMessage::TalkToNpc { .. }
+        | ClientMessage::CloseNpc
+        | ClientMessage::CloseVault
+        | ClientMessage::CloseCrafting
+        | ClientMessage::RepairItem { .. } => {}
     }
     true
 }
