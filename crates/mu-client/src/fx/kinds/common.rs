@@ -43,20 +43,41 @@ pub fn move_particle_angle(e: &mut Effect, angle: Vec3) {
 }
 
 /// `b->PlayAnimation(...)` of the common tail (ZzzEffect.cpp:18073-18081), only for
-/// `MODEL_BIRD01 <= Type < MODEL_SKILL_END` and while `CurrentAction != 255`.
-/// TODO(original): the engine does not know the action length here, so the end of a non-looping
-/// action (`CurrentAction = 255`, frame stuck at the last key) is not reproduced.
-pub fn play_animation(e: &mut Effect) {
+/// `MODEL_BIRD01 <= Type < MODEL_SKILL_END` and while `CurrentAction != 255`: at the end of the
+/// action the frame stays on `NumAnimationKeys` and `CurrentAction` becomes 255.
+pub fn play_animation(e: &mut Effect, ctx: &mut Ctx) {
     if (MODEL_BIRD01..MODEL_SKILL_END).contains(&e.ty) && e.current_action != 255 {
-        e.animation_frame += e.velocity;
+        let speed = e.velocity;
+        if !play_model_animation(e, ctx, speed)
+            && let Some(frames) = ctx.action_frames(e.ty, e.current_action)
+        {
+            e.animation_frame = frames as f32;
+            e.current_action = 255;
+        }
     }
+}
+
+/// `Models[o->Type].PlayAnimation(&o->AnimationFrame, ..., speed, ...)` (ZzzBMD.cpp:406-478):
+/// `false` when the action ends or wraps. Without the model file (or with an action it does not
+/// have) the original returns `true`; without the file the frame still advances so the kind keeps
+/// running.
+pub fn play_model_animation(e: &mut Effect, ctx: &mut Ctx, speed: f32) -> bool {
+    let Some(m) = ctx.model(e.ty) else {
+        e.animation_frame += speed;
+        return true;
+    };
+    let Some(a) = m.actions.get(e.current_action) else { return true };
+    // `Actions[0].Loop = true` is only set for MODEL_CUNDUN_PHOENIX among effect models
+    // (MapManager.cpp:1019).
+    let hold = e.ty == MODEL_CUNDUN_PHOENIX && e.current_action == 0;
+    crate::fx::model_data::play_animation(&mut e.animation_frame, speed, a.frames, a.lock_positions.is_some(), hold)
 }
 
 /// The common `MoveEffect` tail for the `default:` case (ZzzEffect.cpp:18060-18124):
 /// `PlayAnimation` and `MoveParticle(o, true)`. The `BITMAP_BOSS_LASER..+2` types skip the
 /// `MoveParticle`; the special cases (`MODEL_SAW`, `MODEL_ARROW_HOLY`...) are done by their kinds.
-pub fn move_tail(e: &mut Effect) {
-    play_animation(e);
+pub fn move_tail(e: &mut Effect, ctx: &mut Ctx) {
+    play_animation(e, ctx);
     if e.ty < BITMAP_BOSS_LASER || e.ty > BITMAP_BOSS_LASER + 2 {
         move_particle(e, true);
     }

@@ -148,7 +148,7 @@ fn create_joint_pk(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: V
     let mut nj = Joint::new(ty, pos, target_pos, angle, sub, None, scale);
     nj.pk_key = pk;
     nj.skill = skill;
-    ctx.spawns.push(Spawn::Joint(nj));
+    ctx.spawn_joint(nj);
 }
 
 // --- BITMAP_JOINT_FORCE ------------------------------------------------------------------------------

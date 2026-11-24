@@ -11,15 +11,21 @@
 //! The Gaion swords live in `effects_monsters2_b.rs`.
 //!
 //! Translated from Main 5.2 `ZzzEffect.cpp` (`CreateEffect`, `MoveEffect` and its common tail
-//! 18060-18124, `CheckTargetRange` 366, `RenderEffects`, `RenderEffectShadows`) and the type
-//! branches of `Draw_RenderObject` (`ZzzObject.cpp`) that `RenderObject(o)` runs for them.
+//! 18060-18124, `CheckTargetRange` 366, `RenderEffects`, `RenderEffectShadows`), the type
+//! branches of `Draw_RenderObject` (`ZzzObject.cpp`) that `RenderObject(o)` runs for them and
+//! `RenderHellasObjectMesh` (GMHellas.cpp:513, every map) for the Kundun dragon head and ghost.
 //!
 //! Notes:
 //! - `o->Visible` (set by `RenderEffects`' frustum test) is taken as true in `MoveEffect`.
 //! - The `Scale` argument of `CreateEffect` is read from `e.scale`: the engine already turned a
 //!   0 argument into 0.9 (the original uses the raw 0 where it reads `Scale` again).
-//! - `rand()` inside `RenderEffects`/`RenderEffectShadows` cannot touch the logic generator from a
-//!   draw function: [`draw_rand`] gives a per-frame value instead.
+//! - `rand()` inside `RenderEffects`/`RenderEffectShadows` runs once per rendered frame, outside
+//!   `MoveEffect`; drawing it from the logic generator would add calls the original's move does
+//!   not have and shift every later `rand()` of the tick, so [`draw_rand`] gives a per-frame value
+//!   instead.
+//! - What `RenderObject` does to the effect or creates (state writes, `CreateParticle`,
+//!   `RenderMeshEffect`) happens once per rendered frame after the move: it is done in the step
+//!   instead (once per tick), at the point where the render would run.
 
 use bevy::math::Vec3;
 use mu_data::bmd;
@@ -62,9 +68,9 @@ pub fn register(r: &mut Registry) {
         r.effect(ty, k(Some(broken_ice_create), broken_ice_step, common::draw_default));
     }
 
-    r.effect(MODEL_CUNDUN_DRAGON_HEAD, k(Some(dragon_head_create), dragon_head_step, common::draw_object));
+    r.effect(MODEL_CUNDUN_DRAGON_HEAD, k(Some(dragon_head_create), dragon_head_step, dragon_head_draw));
     r.effect(MODEL_CUNDUN_PHOENIX, k(Some(phoenix_create), phoenix_step, common::draw_object));
-    r.effect(MODEL_CUNDUN_GHOST, k(Some(ghost_create), ghost_step, common::draw_object));
+    r.effect(MODEL_CUNDUN_GHOST, k(Some(ghost_create), ghost_step, ghost_draw));
     r.effect(MODEL_CUNDUN_SKILL, k(Some(cundun_skill_create), cundun_skill_step, common::draw_default));
 
     r.effect(MODEL_CATAPULT, k(Some(catapult_create), catapult_step, common::draw_nothing));
@@ -154,11 +160,12 @@ fn owner_is_hero(e: &Effect, ctx: &Ctx) -> bool {
 }
 
 /// `CheckTargetRange(o)` (ZzzEffect.cpp:366) for the types of this file: within 100 units (2D) of
-/// a live owner, `LifeTime = 1` (none of these types has extra work in its `switch`).
-/// TODO(original): `to->Visible` (frustum) is taken as true.
+/// a live, visible owner, `LifeTime = 1` (none of these types has extra work in its `switch`).
+/// TODO(original): an effect owner's `Visible` (its frustum test in `RenderEffects`) is not in
+/// `EffectInfo`: a live effect owner counts as visible.
 fn check_target_range(e: &mut Effect, ctx: &Ctx) {
     let live = match e.owner {
-        Some(Target::Actor(_)) => ctx.actor(e.owner).is_some_and(|a| a.live),
+        Some(Target::Actor(_)) => ctx.actor(e.owner).is_some_and(|a| a.live && a.visible),
         Some(Target::Effect(id)) => ctx.effects.iter().any(|x| x.id == id),
         None => false,
     };
@@ -175,7 +182,7 @@ fn check_target_range(e: &mut Effect, ctx: &Ctx) {
 /// Only `Luminosity` + the common tail (types with no `case` in `MoveEffect`).
 fn tail_only_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SHADOW_ROOK_* / MODEL_ICE_GIANT_PART5/6: falling body pieces ----------------------------
@@ -218,7 +225,7 @@ fn piece_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.x -= 0.15 * life(e) as f32;
         e.angle.y -= 0.15 * life(e) as f32;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_SAPITRES_ATTACK / _1 / _2 ------------------------------------------------------------
@@ -241,7 +248,7 @@ fn sapitres_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.y += (ctx.rand() % 120 - 60) as f32;
         ctx.create_effect(MODEL_EFFECT_SAPITRES_ATTACK_1, e.position, e.angle, e.light, 0, e.owner, -1, 0, 0, 0.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:4883.
@@ -276,7 +283,7 @@ fn sapitres1_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// The `MODEL_EFFECT_SAPITRES_ATTACK_2` path of the `MODEL_ICE_SMALL` case (ZzzEffect.cpp:2939-3014).
@@ -342,7 +349,7 @@ fn sapitres2_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if sub == 1 {
         e.gravity += 0.5;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_BROKEN_ICE0..3 / MODEL_CONDRA_STONE* / MODEL_NARCONDRA_STONE* ---------------------
@@ -434,15 +441,16 @@ fn broken_ice_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// `RenderObject` (ZzzEffect.cpp:18496, ZzzObject.cpp:1796: `BodyLight = Light`,
-/// `RENDER_TEXTURE|RENDER_BRIGHT`) and the ground light of subtype 1 (ZzzEffect.cpp:19466).
+/// `RenderObject` (ZzzEffect.cpp:18496, ZzzObject.cpp:1796-1799: `BodyLight = Light`,
+/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0, BlendMeshLight, ...)`: mesh 0 is the blend
+/// mesh) and the ground light of subtype 1 (ZzzEffect.cpp:19466).
 fn broken_ice_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
-    d.bright = true;
-    // TODO(original): the BlendMesh argument 0 makes mesh 0 use `BlendMeshLight` instead of `Alpha`.
+    d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    d.blend_mesh = 0;
     out.models.push(d);
     if e.sub_type == 1 {
         let lum = (draw_rand(ctx, e, 1) % 4 + 8) as f32 * 0.1;
@@ -482,7 +490,35 @@ fn dragon_head_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_joint_ex(BITMAP_JOINT_SPIRIT2, pos, pos, angle, 14, None, 100.0, 0, 0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
+}
+
+/// `Sin(WorldTime*0.003)*0.2 + 0.8` of the Kundun dragon head / ghost renders (GMHellas.cpp:540/567).
+fn hellas_eye_light(ctx: &DrawCtx) -> Vec3 {
+    let l = (ctx.world_time * 0.003).sin() * 0.2 + 0.8;
+    Vec3::new(l * 1.0, l * 0.2, l * 0.1)
+}
+
+/// The `CreateSprite(BITMAP_ENERGY, 0.2)` + `CreateSprite(BITMAP_SHINY+1, 0.5)` pair the dragon head
+/// and the ghost put on each eye bone (`b->TransformPosition(BoneTransform[bone], 0, ...)`). Without
+/// the model file nothing is drawn at all, so the sprites are skipped too.
+fn hellas_eyes(e: &Effect, ctx: &DrawCtx, out: &mut DrawList, bones: [usize; 2]) {
+    let light = hellas_eye_light(ctx);
+    for bone in bones {
+        let Some(pos) = ctx.effect_bone_world(e, bone, Vec3::ZERO) else { continue };
+        sprite_glow(out, ctx, BITMAP_ENERGY, pos, 0.2, light, 0.0);
+        sprite_glow(out, ctx, BITMAP_SHINY + 1, pos, 0.5, light, 0.0);
+    }
+}
+
+/// `RenderObject` (ZzzEffect.cpp:18636) → `RenderHellasObjectMesh` (GMHellas.cpp:535-556):
+/// `BodyLight = (0.3, 0.3, 0.3)`, `RenderBody(RENDER_TEXTURE)`, and two lights on bones 3 and 4.
+fn dragon_head_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let mut d = ModelDraw::of_effect(e);
+    d.light = Vec3::splat(0.3);
+    d.render_flags = RENDER_TEXTURE;
+    out.models.push(d);
+    hellas_eyes(e, ctx, out, [3, 4]);
 }
 
 /// ZzzEffect.cpp:3912.
@@ -504,7 +540,7 @@ fn phoenix_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 5.0 {
         e.alpha = life(e) as f32 * 0.2;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:3929.
@@ -516,19 +552,24 @@ fn ghost_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.light = Vec3::splat(0.5);
 }
 
-/// `o->Owner->PKKey` of the ghost's owner, the `MODEL_CUNDUN_SKILL` (subtype 2) that created it.
-/// TODO(original): the engine cannot read another effect's `PKKey`. That skill sets it from 0 to 1
-/// in its move with `LifeTime` 9 (its 32nd tick); it moves before the ghost it created in the same
-/// tick, so from the ghost's 32nd tick (its `LifeTime` ≤ 169) the owner's `PKKey` is no longer 0.
-fn ghost_owner_pk_zero(e: &Effect) -> bool {
-    e.life_time > 169.0
+/// `o->Owner->PKKey == 0` for the ghost's owner, the `MODEL_CUNDUN_SKILL` (subtype 2) that created
+/// it (ZzzEffect.cpp:3949, the only creator). `ctx.effects` is the state at tick start: when the
+/// skill moves first in the same tick (it sets 0 → 1 in its move with `LifeTime` 9), the ghost sees
+/// the change one tick later than the original would. Once the skill has died the original reads
+/// its dead slot, whose last `PKKey` is 1; a missing owner counts as that. A character owner has
+/// no `PKKey` in the snapshot (no caller passes one).
+fn ghost_owner_pk_zero(e: &Effect, ctx: &Ctx) -> bool {
+    match e.owner {
+        Some(Target::Effect(id)) => ctx.effects.iter().find(|x| x.id == id).is_some_and(|x| x.pk_key == 0),
+        _ => false,
+    }
 }
 
 /// ZzzEffect.cpp:13659.
 fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     if e.owner.is_some() {
-        if ghost_owner_pk_zero(e) {
+        if ghost_owner_pk_zero(e, ctx) {
             e.animation_frame = 0.0;
         } else {
             e.owner = None;
@@ -574,7 +615,40 @@ fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
         let quake = (ctx.rand() % 8 - 8) as f32 * 0.1;
         ctx.set_earthquake(quake);
     }
-    move_tail(e);
+    move_tail(e, ctx);
+    ghost_render_side_effects(e, ctx);
+}
+
+/// What `RenderHellasObjectMesh` (GMHellas.cpp:557-589) does to the ghost besides drawing, moved
+/// from the draw to the end of the move (see the module notes): it fades while its animation runs
+/// and puts smoke on bone 6. Without the model file the smoke goes to the effect's position, so
+/// the particle (and its `rand()` calls) still happens.
+fn ghost_render_side_effects(e: &mut Effect, ctx: &mut Ctx) {
+    // No render follows the move in which the effect dies (the engine's `LifeTime -= 1` comes next).
+    if !e.live || e.life_time <= 1.0 {
+        return;
+    }
+    if e.animation_frame > 3.0 && e.alpha > 0.2 {
+        e.alpha -= 0.02;
+    }
+    let pos = ctx.effect_bone_world(e, 6, Vec3::new(2.0, 10.0, 0.0)).unwrap_or(e.position);
+    ctx.create_particle(BITMAP_SMOKE, pos, e.angle, Vec3::new(1.0, 0.2, 0.0), 17, 3.0, None);
+}
+
+/// `RenderObject` (ZzzEffect.cpp:18638) → `RenderHellasObjectMesh` (GMHellas.cpp:557-589):
+/// `BodyLight = 1`, `RenderBody(RENDER_TEXTURE|RENDER_DARK)` twice (subtractive; `BlendMesh` -2
+/// makes every mesh a blend mesh), and two lights on bones 8 and 9.
+/// TODO(original): then `BodyLight = 0` and `RenderPartObjectEdge(b, o, RENDER_COLOR, true, 0.7)`
+/// (ZzzObject.cpp:10387): the body again untextured in black with every vertex pulled to 0.7 of
+/// its offset from its bone (`BoneScale`, ZzzBMD.cpp:246-251); `ModelDraw` has no per-bone vertex
+/// scale.
+fn ghost_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let mut d = ModelDraw::of_effect(e);
+    d.light = Vec3::ONE;
+    d.render_flags = RENDER_TEXTURE | RENDER_DARK;
+    out.models.push(d);
+    out.models.push(d);
+    hellas_eyes(e, ctx, out, [8, 9]);
 }
 
 /// ZzzEffect.cpp:3937.
@@ -616,7 +690,7 @@ fn cundun_skill_step(e: &mut Effect, ctx: &mut Ctx) {
         2 if e.pk_key == 0 && e.life_time < 10.0 => e.pk_key = 1,
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MONSTER01+77 (catapult) ------------------------------------------------------------------
@@ -646,7 +720,7 @@ fn catapult_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 5.0 {
         e.alpha /= 1.3;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_FLY_BIG_STONE1 / 2: catapult stones --------------------------------------------------------
@@ -781,8 +855,8 @@ fn fly_stone_landing(e: &mut Effect, ctx: &mut Ctx) -> Option<Vec3> {
 
 /// ZzzEffect.cpp:13831.
 fn fly_stone1_step(e: &mut Effect, ctx: &mut Ctx) {
+    fly_stone_render_mutation(e, ctx);
     let lum = luminosity(e, ctx);
-    fly_stone_render_mutation(e);
     if e.sub_type == 2 {
         e.position.z -= e.gravity;
         e.gravity += 1.9;
@@ -826,13 +900,13 @@ fn fly_stone1_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.add_terrain_light(e.position.x, e.position.y, Vec3::splat(-0.5), 4.0);
     }
     // Tail: PlayAnimation only (no MoveParticle for the flying stones, ZzzEffect.cpp:18105).
-    common::play_animation(e);
+    common::play_animation(e, ctx);
 }
 
 /// ZzzEffect.cpp:14019.
 fn fly_stone2_step(e: &mut Effect, ctx: &mut Ctx) {
+    fly_stone_render_mutation(e, ctx);
     let lum = luminosity(e, ctx);
-    fly_stone_render_mutation(e);
     if e.sub_type <= 1 {
         fly_stone_flight(e, ctx, lum, false);
     }
@@ -849,38 +923,80 @@ fn fly_stone2_step(e: &mut Effect, ctx: &mut Ctx) {
         light = l;
     }
     ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
-    common::play_animation(e);
+    common::play_animation(e, ctx);
 }
 
-/// What `Draw_RenderObject` does to a landed stone (ZzzObject.cpp:1453/1471), moved here from the
-/// draw: the frame after `HiddenMesh = 99` it bursts and hides.
-fn fly_stone_render_mutation(e: &mut Effect) {
-    if e.hidden_mesh == 99 {
-        e.hidden_mesh = -2;
-        // TODO(original): RenderMeshEffect(0, MODEL_BIG_STONE_PART1/2): for every corner of every
-        // triangle of mesh 0 (world space), `rand()%3==0` → CreateEffect(MODEL_BIG_STONE_PART1 +
-        // rand()%2, vertex, (0,0,0), (1,1,1), 1 for stone 1 / 0 for stone 2). Needs the model's
-        // mesh in the step.
+/// What `Draw_RenderObject` does to a landed stone (ZzzObject.cpp:1453-1457 / 1471-1475), moved
+/// from the render that follows the landing move to the start of the next move: it hides and bursts
+/// into pieces with `RenderMeshEffect(0, MODEL_BIG_STONE_PART1 / PART2)` (ZzzBMD.cpp:1692-1776):
+/// for every corner of every triangle of mesh 0, posed in the world, `rand()%3 == 0` →
+/// `CreateEffect(MODEL_BIG_STONE_PART1 + rand()%2, vertex, (0,0,0), (1,1,1), 1)` for stone 1,
+/// subtype 0 for stone 2. The number of `rand()` calls is the mesh's corner count: without the
+/// model file there is no mesh and no piece.
+fn fly_stone_render_mutation(e: &mut Effect, ctx: &mut Ctx) {
+    if e.hidden_mesh != 99 {
+        return;
+    }
+    e.hidden_mesh = -2;
+    let sub_type = if e.ty == MODEL_FLY_BIG_STONE1 { 1 } else { 0 };
+    for vertex in mesh_world_corners(e, ctx, 0) {
+        if ctx.rand() % 3 == 0 {
+            let ty = MODEL_BIG_STONE_PART1 + ctx.rand() % 2;
+            ctx.create_effect(ty, vertex, Vec3::ZERO, Vec3::ONE, sub_type, None, -1, 0, 0, 0.0);
+        }
     }
 }
 
-/// ZzzObject.cpp:1451.
+/// `VertexTransform[mesh][tp->VertexIndex[k]]` for `k < tp->Polygon` of every triangle of `mesh`
+/// (the loop of `BMD::RenderMeshEffect`, ZzzBMD.cpp:1704-1709): the vertices posed by the effect's
+/// own bones, scaled and placed like `RenderObject`'s `Animation` + `Transform` do.
+fn mesh_world_corners(e: &Effect, ctx: &mut Ctx, mesh: usize) -> Vec<Vec3> {
+    let Some(model) = ctx.model(e.ty) else { return Vec::new() };
+    let bones = ctx.effect_bones(e).unwrap_or_default();
+    let Some(m) = model.meshes.get(mesh) else { return Vec::new() };
+    let mut out = Vec::new();
+    for t in &m.triangles {
+        for &vi in t.vertex.iter().take(usize::from(t.polygon)) {
+            let Some(v) = usize::try_from(vi).ok().and_then(|i| m.vertices.get(i)) else { continue };
+            let local = match usize::try_from(v.bone).ok().and_then(|b| bones.get(b)) {
+                Some(b) => bmd::transform_point(b, v.position),
+                None => v.position,
+            };
+            out.push(e.position + rotate(e.angle, Vec3::from_array(local) * e.scale));
+        }
+    }
+    out
+}
+
+/// ZzzObject.cpp:1451-1467: `BodyLight = 1`, `RenderBody(RENDER_TEXTURE)`; subtypes 0/1 add
+/// `BodyLight = (1, 0.2, 0.1)` and `RenderBody(RENDER_CHROME|RENDER_BRIGHT, Alpha, BlendMesh, 1)`.
+/// At `HiddenMesh` 99 the render bursts it instead ([`fly_stone_render_mutation`]); at -2 the body
+/// draws nothing.
 fn fly_stone1_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.hidden_mesh == 99 || e.hidden_mesh == -2 {
         return;
     }
     let mut d = ModelDraw::of_effect(e);
     d.light = Vec3::ONE;
+    d.render_flags = RENDER_TEXTURE;
     out.models.push(d);
-    // TODO(original): subtypes 0/1 add a RENDER_CHROME|RENDER_BRIGHT pass with BodyLight (1, 0.2, 0.1).
+    if e.sub_type <= 1 {
+        let mut d = ModelDraw::of_effect(e);
+        d.light = Vec3::new(1.0, 0.2, 0.1);
+        d.render_flags = RENDER_CHROME | RENDER_BRIGHT;
+        d.blend_mesh_light = 1.0;
+        out.models.push(d);
+    }
 }
 
-/// ZzzObject.cpp:1469.
+/// ZzzObject.cpp:1469-1479: `RenderBody(RENDER_TEXTURE)` (see [`fly_stone1_draw`]).
 fn fly_stone2_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.hidden_mesh == 99 || e.hidden_mesh == -2 {
         return;
     }
-    out.models.push(ModelDraw::of_effect(e));
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE;
+    out.models.push(d);
 }
 
 // --- MODEL_BIG_STONE_PART1/2, MODEL_WALL_PART1/2, MODEL_GOLEM_STONE: debris --------------------------
@@ -938,7 +1054,7 @@ fn stone_part_step(e: &mut Effect, ctx: &mut Ctx) {
         } else if ctx.rand() % 2 == 0 {
             ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, e.light, 24, 0.2, None);
         }
-        move_tail(e);
+        move_tail(e, ctx);
         return;
     }
     e.position += e.direction;
@@ -973,21 +1089,28 @@ fn stone_part_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.z = height;
         ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, Vec3::new(0.2, 0.5, 0.35), 11, 2.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:1481.
+/// ZzzObject.cpp:1481-1500: `RenderBody(RENDER_TEXTURE)`; subtype 1 with `BodyLight = 1` plus
+/// `BodyLight = (1, 0.2, 0.1)` and `RenderBody(RENDER_CHROME|RENDER_BRIGHT, Alpha, BlendMesh, 1)`,
+/// subtypes 2/3 with `BodyLight = (0.5, 1, 0.3)`.
 fn big_stone_part_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE;
     match e.sub_type {
-        1 => {
-            d.light = Vec3::ONE;
-            // TODO(original): plus a RENDER_CHROME|RENDER_BRIGHT pass with BodyLight (1, 0.2, 0.1).
-        }
+        1 => d.light = Vec3::ONE,
         2 | 3 => d.light = Vec3::new(0.5, 1.0, 0.3),
         _ => {}
     }
     out.models.push(d);
+    if e.sub_type == 1 {
+        let mut d = ModelDraw::of_effect(e);
+        d.light = Vec3::new(1.0, 0.2, 0.1);
+        d.render_flags = RENDER_CHROME | RENDER_BRIGHT;
+        d.blend_mesh_light = 1.0;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_GATE_PART1..3 ---------------------------------------------------------------------------
@@ -1036,7 +1159,7 @@ fn gate_part_step(e: &mut Effect, ctx: &mut Ctx) {
         // is the closest meaningful point.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_TOWER_GATE_PLANE --------------------------------------------------------------------------
@@ -1055,7 +1178,7 @@ fn tower_gate_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.owner.is_some() && e.live {
         e.position.z = e.start_position.z + (ctx.world_time() * 0.001).sin() * 200.0 + 200.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18585: drawn at its position and mirrored around `StartPosition.z + 200`.
@@ -1115,7 +1238,7 @@ fn napin_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_sprite(BITMAP_LIGHT, pos, 8.0, flare, 0.0, 0);
         ctx.create_sprite(BITMAP_LIGHT, pos, 8.0, flare, 0.0, 0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_SKURA_ITEM (cherry blossom item) -----------------------------------------------------
@@ -1138,9 +1261,11 @@ fn skura_step(e: &mut Effect, ctx: &mut Ctx) {
             let light1 = Vec3::splat(0.3);
             let light2 = Vec3::new(1.0, 0.6, 0.8);
             let rot = ctx.world_time() * 0.08;
-            // TODO(original): bones 1 and 2 of the item's own model (posed with its AnimationFrame);
-            // the engine has no effect-model bones in the step, so its origin is used.
-            for (bone_pos, rotation) in [(e.position, rot), (e.position, -rot)] {
+            // Bones 1 and 2 of the item's own model (`b->Animation(BoneTransform, AnimationFrame,
+            // ..., o->Angle)` with `BodyOrigin = o->Position`); without the file, its origin.
+            let bone1 = ctx.effect_bone_world(e, 1, Vec3::ZERO).unwrap_or(e.position);
+            let bone2 = ctx.effect_bone_world(e, 2, Vec3::ZERO).unwrap_or(e.position);
+            for (bone_pos, rotation) in [(bone1, rot), (bone2, -rot)] {
                 ctx.create_sprite(BITMAP_SHINY + 1, bone_pos, 1.8, e.light, rotation, 0);
                 for _ in 0..7 {
                     ctx.create_particle(BITMAP_SHINY + 1, bone_pos, e.angle, e.light, 5, 0.8, me(e));
@@ -1175,18 +1300,19 @@ fn skura_step(e: &mut Effect, ctx: &mut Ctx) {
                 // TODO(original): StopBuffer(SOUND_CHERRYBLOSSOM_EFFECT1, true) before playing it again.
                 ctx.play_sound("SOUND_CHERRYBLOSSOM_EFFECT1");
             }
-            // b->PlayAnimation(..., Velocity / 3).
-            e.animation_frame += e.velocity / 3.0;
+            // b->PlayAnimation(..., Velocity / 3) (ZzzEffect.cpp:15141; its result is not read).
+            common::play_model_animation(e, ctx, e.velocity / 3.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// `RenderObject` → ZzzObject.cpp:715: `RenderBody(RENDER_COLOR, ...)`.
+/// `RenderObject` → ZzzObject.cpp:715-718: `RenderBody(RENDER_COLOR, ...)`, the meshes untextured
+/// in the body light.
 fn skura_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    // TODO(original): RENDER_COLOR draws the meshes untextured in the body light color; drawn
-    // textured here.
-    out.models.push(ModelDraw::of_effect(e));
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_COLOR;
+    out.models.push(d);
 }
 
 // --- MODEL_EFFECT_TRACE ------------------------------------------------------------------------------
@@ -1205,7 +1331,7 @@ fn trace_create(e: &mut Effect, ctx: &mut Ctx) {
         let mut j = Joint::new(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 17, me(e), e.scale);
         j.pk_key = -1;
         j.light = e.light;
-        ctx.spawns.push(Spawn::Joint(j));
+        ctx.spawn_joint(j);
     }
 }
 
@@ -1248,7 +1374,7 @@ fn ice_breath_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_RAKLION_CLOUDS, pos, angle, Vec3::new(0.5, 0.6, 0.94), 1, scale, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5158.
@@ -1267,7 +1393,7 @@ fn fire_breath_step(e: &mut Effect, ctx: &mut Ctx) {
         // The original passes the direction as the Angle argument.
         ctx.create_effect(MODEL_MOONHARVEST_MOON, e.position, dir, e.light, 1, None, -1, 0, 0, 0.3);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_LAVAGIANT_FOOTPRINT_R / V ---------------------------------------------------------------
@@ -1289,7 +1415,7 @@ fn footprint_step(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
     }
     e.light *= 0.93;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18727: `EnableAlphaBlend` + `RenderTerrainAlphaBitmap` (default rotation, alpha
@@ -1339,7 +1465,7 @@ fn projectile_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.y += e.direction.y * e.velocity;
         e.position.z += e.direction.z;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- Door / statue crush pieces ----------------------------------------------------------------------
@@ -1391,7 +1517,7 @@ fn crush_piece_step(e: &mut Effect, ctx: &mut Ctx) {
     if ctx.rand() % 3 == 0 {
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, e.light, 6, 1.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5229 (`Scale` is the argument).
@@ -1407,7 +1533,7 @@ fn crush_ruin_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 40.0 {
         e.alpha -= 0.1;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5239 (LifeTime is not set: whatever the slot had).
@@ -1526,7 +1652,7 @@ fn blow_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.light /= 1.05;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19058.
@@ -1564,7 +1690,7 @@ fn umbrella_die_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_effect(BITMAP_RING_OF_GRADATION, pos, e.angle, Vec3::new(1.0, 0.2, 0.5), 0, e.owner, 0, 0, 0, 1.2);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:6048.
@@ -1596,13 +1722,20 @@ fn umbrella_gold_step(e: &mut Effect, ctx: &mut Ctx) {
         e.gravity = -e.gravity * 0.3;
         e.life_time -= 2.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:2397.
+/// ZzzObject.cpp:2397-2401: `RenderBody(RENDER_TEXTURE)`, then `RenderMesh(0,
+/// RENDER_BRIGHT|RENDER_CHROME)` (`RenderMesh` ignores `HiddenMesh`).
 fn umbrella_gold_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.push(ModelDraw::of_effect(e));
-    // TODO(original): plus mesh 0 with RENDER_BRIGHT|RENDER_CHROME.
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE;
+    out.models.push(d);
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
+    d.mesh = 0;
+    d.hidden_mesh = -1;
+    out.models.push(d);
 }
 
 // --- MODEL_EFFECT_EG_GUARDIANDEFENDER_ATTACK2 -----------------------------------------------------------
@@ -1622,5 +1755,5 @@ fn defender_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     ctx.create_sprite(BITMAP_SHOCK_WAVE, e.position, e.scale, e.light, 0.0, 0);
     ctx.create_particle(BITMAP_FIRE + 2, e.position, e.angle, e.light, 16, 2.5, None);
-    move_tail(e);
+    move_tail(e, ctx);
 }

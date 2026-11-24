@@ -39,7 +39,7 @@ pub fn register(r: &mut Registry) {
     }
     r.effect(MODEL_STORM, k(storm_create, storm_step, storm_draw));
     r.effect(MODEL_STORM2, k(storm2_create, storm2_step, obj));
-    r.effect(MODEL_LASER, k(laser_create, laser_step, dflt));
+    r.effect(MODEL_LASER, k(laser_create, laser_step, laser_draw));
     r.effect(MODEL_SKILL_INFERNO, k(inferno_create, inferno_step, dflt));
     r.effect(MODEL_SKILL_BLAST, k(blast_create, blast_step, dflt));
     r.effect(MODEL_POISON, k(poison_create, poison_step, dflt));
@@ -51,7 +51,7 @@ pub fn register(r: &mut Registry) {
     r.effect(MODEL_WAVE_FORCE, k(wave_force_create, wave_force_step, obj));
     r.effect(MODEL_STAFF + 8, k(staff8_create, staff8_step, obj));
     r.effect(MODEL_SKULL, k(skull_create, skull_step, skull_draw));
-    r.effect(MODEL_WARCRAFT, k(warcraft_create, warcraft_step, dflt));
+    r.effect(MODEL_WARCRAFT, k(warcraft_create, warcraft_step, warcraft_draw));
     r.effect(MODEL_GATE, k(gate_create, gate_step, obj));
     r.effect(MODEL_GATE + 1, k(gate_create, gate_step, obj));
     r.effect(MODEL_STONE_COFFIN, k(coffin_create, coffin_step, coffin_draw));
@@ -78,16 +78,30 @@ fn owner_live(ctx: &Ctx, owner: Option<Target>) -> bool {
     }
 }
 
-/// `g_isCharacterBuff(o->Owner, eDeBuff_Harden)`.
-/// TODO(original): buffs do not exist in mu-rs yet; always false.
-fn owner_hardened(_ctx: &Ctx, _owner: Option<Target>) -> bool {
-    false
+/// `o->Owner->Visible`. A character's comes from its snapshot; an effect owner's `Visible` is
+/// not in `EffectInfo`, so an existing effect counts as visible.
+fn owner_visible(ctx: &Ctx, owner: Option<Target>) -> bool {
+    match owner {
+        Some(Target::Actor(_)) => ctx.actor(owner).is_some_and(|a| a.visible),
+        Some(Target::Effect(id)) => ctx.effects.iter().any(|i| i.id == id),
+        None => false,
+    }
 }
 
-/// `o->Owner->m_bySkillCount` (Hellfire charge).
-/// TODO(original): the character's skill counter is not in `Actor`; its initial value 0 is used.
-fn owner_skill_count(_ctx: &Ctx, _owner: Option<Target>) -> i32 {
-    0
+/// `o->Owner == &Hero->Object` (`Hero` is never NULL in the original, so no owner is not the hero).
+fn owner_is_hero(e: &Effect, ctx: &Ctx) -> bool {
+    ctx.hero.is_some() && e.owner == ctx.hero.map(Target::Actor)
+}
+
+/// `g_isCharacterBuff(o->Owner, eDeBuff_Harden)` (an effect owner has no buffs).
+fn owner_hardened(ctx: &Ctx, owner: Option<Target>) -> bool {
+    ctx.actor(owner).is_some_and(|a| a.has_buff(eDeBuff_Harden))
+}
+
+/// `o->Owner->m_bySkillCount` (Hellfire charge). The original dereferences the owner without a
+/// check; with no character owner (or an effect owner) 0 is used.
+fn owner_skill_count(ctx: &Ctx, owner: Option<Target>) -> i32 {
+    ctx.actor(owner).map_or(0, |a| a.skill_count as i32)
 }
 
 /// `MoveHumming(Position, Angle, TargetPosition, Turn)` (ZzzAI.cpp:131).
@@ -108,8 +122,7 @@ fn rand_forward(ctx: &mut Ctx, k: f32) -> Vec3 {
 
 /// `CheckTargetRange(o)` (ZzzEffect.cpp:366), the parts for `MODEL_SNOW1` and `MODEL_WOOSISTONE`.
 fn check_target_range(e: &mut Effect, ctx: &mut Ctx) {
-    // TODO(original): also requires `Owner->Visible` (frustum test).
-    if !owner_live(ctx, e.owner) {
+    if !owner_live(ctx, e.owner) || !owner_visible(ctx, e.owner) {
         return;
     }
     let Some(to) = ctx.target_position(e.owner) else { return };
@@ -149,7 +162,7 @@ fn check_target_range(e: &mut Effect, ctx: &mut Ctx) {
 /// The `MoveEffect` cases that only fall into the common tail.
 fn plain_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_ICE ------------------------------------------------------------------------------------
@@ -249,7 +262,7 @@ fn ice_step(e: &mut Effect, ctx: &mut Ctx) {
         },
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SNOW1 / MODEL_WOOSISTONE ---------------------------------------------------------------
@@ -268,7 +281,7 @@ fn snow1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
     e.direction.z -= 2.5;
     check_target_range(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:2447.
@@ -319,7 +332,7 @@ fn woosistone_step(e: &mut Effect, ctx: &mut Ctx) {
         e.direction.z -= 2.0;
         check_target_range(e, ctx);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- Fall-through chain: MODEL_BONE1/2, MODEL_BIG_STONE1/2, MODEL_SNOW2/3, MODEL_ICE_SMALL,
@@ -456,17 +469,17 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
             if let Some(p) = ctx.target_position(e.owner) {
                 e.position = p + e.start_position;
             }
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         } else if sub == 11 {
             if e.life_time < 10.0 {
                 e.alpha *= 0.8;
             }
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         } else if sub == 13 || sub == 14 {
             move_bouncing_piece(e, ctx);
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         }
     }
@@ -478,7 +491,7 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
         if let Some(p) = ctx.target_position(e.owner) {
             e.position = p + e.start_position;
         }
-        common::move_tail(e);
+        common::move_tail(e, ctx);
         return;
     }
     // MODEL_ICE_SMALL / METEO1 / METEO2 / BOSS_ATTACK (11113).
@@ -509,7 +522,7 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.z += 20.0;
         e.gravity += 0.5;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BIG_METEO1..3 ------------------------------------------------------------------------------
@@ -555,7 +568,8 @@ fn storm_create(e: &mut Effect, ctx: &mut Ctx) {
             e.blend_mesh = 0;
             e.direction = Vec3::new(0.0, -10.0, 0.0);
             e.position.z = ctx.terrain_height(e.position.x, e.position.y);
-            // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network).
+            // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network packet
+            // counter, not in the engine); `weapon` stays 0 and is the serial of the attack.
         }
         1 => {
             e.life_time = 30.0;
@@ -619,9 +633,12 @@ fn storm_step(e: &mut Effect, ctx: &mut Ctx) {
             let light = Vec3::new(-luminosity * 0.4, -luminosity * 0.3, -luminosity * 0.2);
             ctx.add_terrain_light(e.position.x, e.position.y, light, 5.0);
             // TODO(original): during Castle Siege (battleCastle::IsBattleCastleStart) on a
-            // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 5 and nothing else.
-            // TODO(original): when LifeTime % 15 == 0 and Owner == Hero:
-            // AttackCharacterRange(Skill, Position, 150, Weapon, PKKey).
+            // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 5 and `break` before
+            // the attack below (ZzzEffect.cpp:10579-10589); there is no siege state yet.
+            // ZzzEffect.cpp:10590-10592 (the result is not used).
+            if (e.life_time as i32) % 15 == 0 && owner_is_hero(e, ctx) {
+                ctx.attack_character_range(e.skill, e.position, 150.0, e.weapon, e.pk_key);
+            }
         }
         1 => {
             e.blend_mesh_light = e.life_time * 0.01;
@@ -662,7 +679,7 @@ fn storm_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderEffects` ZzzEffect.cpp:18309: subtypes 3-7 are a ground mark, the rest `RenderObject`.
@@ -744,14 +761,12 @@ fn storm2_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_LASER ------------------------------------------------------------------------------------
 
-/// ZzzEffect.cpp:2009.
-/// TODO(original): `RenderType = RENDER_DARK` (subtractive model): `ModelDraw` has no dark mode,
-/// so it is drawn with the normal `RenderObject` rules.
+/// ZzzEffect.cpp:2009. Both branches set `RenderType = RENDER_DARK` (see [`laser_draw`]).
 fn laser_create(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 || e.sub_type == 3 {
         e.life_time = 1.0;
@@ -779,13 +794,26 @@ fn laser_step(e: &mut Effect, ctx: &mut Ctx) {
         e.direction.y -= e.velocity;
         e.velocity += 1.0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
+}
+
+/// `RenderEffects` `default:` → `RenderObject`, whose first branch is `o->RenderType ==
+/// RENDER_DARK`: `RenderBody(RENDER_TEXTURE|RENDER_DARK, ..., HiddenMesh)` (ZzzObject.cpp:489-492).
+fn render_dark(e: &Effect, out: &mut DrawList) {
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE | RENDER_DARK;
+    out.models.push(d);
+}
+
+/// `MODEL_LASER` is always `RENDER_DARK` (ZzzEffect.cpp:2016, 2025).
+fn laser_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    render_dark(e, out);
 }
 
 // --- MODEL_SKILL_INFERNO ----------------------------------------------------------------------------
 
 /// ZzzEffect.cpp:1534.
-fn inferno_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn inferno_create(e: &mut Effect, ctx: &mut Ctx) {
     let pk_key = e.pk_key;
     let skill_index = e.skill;
     e.blend_mesh = -2;
@@ -858,8 +886,12 @@ fn inferno_create(e: &mut Effect, _ctx: &mut Ctx) {
         }
         _ => {}
     }
-    // TODO(original): if Owner == Hero and SubType < 2: Weapon = CharacterMachine->PacketSerial
-    // and AttackCharacterRange(Skill, Position, 400, Weapon, PKKey).
+    // ZzzEffect.cpp:1617-1622 (the result is not used).
+    if owner_is_hero(e, ctx) && e.sub_type < 2 {
+        // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network packet counter,
+        // not in the engine); `weapon` stays 0.
+        ctx.attack_character_range(e.skill, e.position, 400.0, e.weapon, e.pk_key);
+    }
 }
 
 /// ZzzEffect.cpp:9744.
@@ -926,7 +958,7 @@ fn inferno_step(e: &mut Effect, ctx: &mut Ctx) {
         e.scale += 0.04;
         // `VectorCopy(o->Light, b->BodyLight)`: the draw already uses o->Light as body light.
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SKILL_BLAST (Lightning/Meteor-like blast from the sky) -------------------------------
@@ -943,7 +975,8 @@ fn blast_create(e: &mut Effect, ctx: &mut Ctx) {
     e.angle = Vec3::new(0.0, 20.0, 0.0);
     // (`EyeLeft = Position`: only read by the joint, which follows the effect position here.)
     ctx.create_joint(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 5, Some(Target::Effect(e.id)), 100.0);
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network packet counter, not in
+    // the engine); `weapon` stays 0 and is the serial of the attack in `blast_step`.
 }
 
 /// ZzzEffect.cpp:9693.
@@ -960,12 +993,15 @@ fn blast_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         ctx.create_particle(BITMAP_SHINY + 4, position, e.angle, Vec3::ONE, 0, 1.0, None);
         ctx.create_particle(BITMAP_EXPLOTION, position, e.angle, Vec3::ONE, 0, 1.0, None);
-        // TODO(original): if Owner == Hero: AttackCharacterRange(Skill, Position, 150, Weapon, PKKey).
+        // ZzzEffect.cpp:9707-9708 (the result is not used).
+        if owner_is_hero(e, ctx) {
+            ctx.attack_character_range(e.skill, e.position, 150.0, e.weapon, e.pk_key);
+        }
         e.live = false;
     }
     let light = Vec3::new(luminosity * 0.2, luminosity * 0.4, luminosity * 1.0);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_POISON -------------------------------------------------------------------------------------
@@ -984,7 +1020,7 @@ fn poison_step(e: &mut Effect, ctx: &mut Ctx) {
     e.alpha = e.life_time * 0.1;
     let light = Vec3::new(luminosity * 0.3, luminosity * 1.0, luminosity * 0.6);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BLIZZARD -----------------------------------------------------------------------------------
@@ -1089,19 +1125,23 @@ fn blizzard_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_CIRCLE (Hellfire) ----------------------------------------------------------------------
 
 /// ZzzEffect.cpp:2347.
-fn circle_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn circle_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 45.0;
     e.blend_mesh = 0;
     match e.sub_type {
         0 => {
-            // TODO(original): if Owner == Hero: Weapon = CharacterMachine->PacketSerial++ and
-            // AttackCharacterRange(Skill, Position, 300, Weapon, PKKey).
+            // ZzzEffect.cpp:2352-2356 (the result is not used).
+            if owner_is_hero(e, ctx) {
+                // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network packet
+                // counter, not in the engine); `weapon` stays 0.
+                ctx.attack_character_range(e.skill, e.position, 300.0, e.weapon, e.pk_key);
+            }
         }
         1 | 4 => {
             e.life_time = 45.0;
@@ -1162,15 +1202,17 @@ fn circle_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
-/// `RenderObject` (ZzzObject.cpp:1520): subtypes 2 and 3 with body light (0.5, 0.5, 1).
+/// `RenderObject` (ZzzObject.cpp:1520-1525): subtypes 2 and 3 are
+/// `RenderBody(RENDER_TEXTURE, ..., HiddenMesh, BITMAP_MAGIC_EMBLEM)` with body light (0.5, 0.5, 1).
 fn circle_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     if e.sub_type == 2 || e.sub_type == 3 {
         d.light = Vec3::new(0.5, 0.5, 1.0);
-        // TODO(original): drawn with the texture BITMAP_MAGIC_EMBLEM instead of its own.
+        d.render_flags = RENDER_TEXTURE;
+        d.texture = BITMAP_MAGIC_EMBLEM;
     }
     out.models.push(d);
 }
@@ -1182,7 +1224,7 @@ fn circle_light_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 40.0;
     e.blend_mesh = 0;
     match e.sub_type {
-        // TODO(original): subtype 1 sets RenderType = RENDER_DARK (subtractive); not expressible.
+        // `RenderType = RENDER_DARK` (ZzzEffect.cpp:2379-2380): see `circle_light_draw`.
         1 => {}
         2 => {
             e.life_time = 40.0;
@@ -1254,16 +1296,20 @@ fn circle_light_step(e: &mut Effect, ctx: &mut Ctx) {
         let light = Vec3::splat(e.blend_mesh_light);
         ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
-/// `RenderObject` (ZzzObject.cpp:1514): subtypes 3 and 4 with body light (0.1, 0.1, 10).
+/// `RenderObject`: subtype 1 has `RenderType = RENDER_DARK` (ZzzObject.cpp:489-492); subtypes 3
+/// and 4 have body light (0.1, 0.1, 10) (ZzzObject.cpp:1514-1519, `RenderType` 0 there).
 fn circle_light_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    if e.sub_type == 1 {
+        render_dark(e, out);
+        return;
+    }
     let mut d = ModelDraw::of_effect(e);
     if e.sub_type == 3 || e.sub_type == 4 {
         d.light = Vec3::new(0.1, 0.1, 10.0);
     }
-    // TODO(original): subtype 1 is RENDER_DARK (subtractive).
     out.models.push(d);
 }
 
@@ -1306,7 +1352,7 @@ fn magic_circle_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.scale += 0.01;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_PROTECT ------------------------------------------------------------------------------------
@@ -1326,11 +1372,10 @@ fn protect_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position = p;
     }
     e.angle.z += 10.0;
-    // TODO(original): also dies when `!Owner->Visible`.
-    if !owner_live(ctx, e.owner) {
+    if !owner_live(ctx, e.owner) || !owner_visible(ctx, e.owner) {
         e.live = false;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `BodyLight` (ZzzObject.cpp:213): pulsing white, ignoring `o->Light`.
@@ -1362,7 +1407,7 @@ fn wave_force_step(e: &mut Effect, ctx: &mut Ctx) {
     e.blend_mesh_light = e.life_time / 20.0;
     let light = Vec3::splat(-luminosity * 0.5);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 5.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_STAFF+8 (the falling staff) ----------------------------------------------------------------
@@ -1393,7 +1438,7 @@ fn staff8_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     let light = Vec3::new(luminosity * 0.2, luminosity * 0.4, luminosity * 1.0);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SKULL ----------------------------------------------------------------------------------------
@@ -1465,22 +1510,24 @@ fn skull_step(e: &mut Effect, ctx: &mut Ctx) {
         let light = Vec3::new(luminosity, luminosity * 0.3, luminosity * 0.1);
         ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
-/// `RenderObject` (ZzzObject.cpp:1549): orange body light and two red glowing eyes.
+/// `RenderObject` (ZzzObject.cpp:1549-1566): orange body light and two red glowing eyes at bones 2
+/// and 3 of the skull model (`EyeLeft`/`EyeRight`, `TransformPosition(BoneTransform[2|3], 0)`).
 fn skull_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.light = Vec3::new(1.0, 0.6, 0.3);
     out.models.push(d);
-    // TODO(original): the eyes are at bones 2 and 3 of the skull model (`EyeLeft`/`EyeRight`);
-    // the effect's own bones are not available, so both are drawn at its position. The
-    // BITMAP_SHINY+1 sprites use rotation rand()%360 (no rand() while drawing: 0).
-    let eye = e.position;
-    for _ in 0..2 {
+    // Without the model file the eyes fall back to the effect position.
+    let eye_left = ctx.effect_bone_world(e, 2, Vec3::ZERO).unwrap_or(e.position);
+    let eye_right = ctx.effect_bone_world(e, 3, Vec3::ZERO).unwrap_or(e.position);
+    for eye in [eye_left, eye_right] {
         common::sprite(out, ctx, BITMAP_LIGHT, eye, 1.0, Vec3::new(1.0, 0.0, 0.0), 0.0, Some(Blend::Glow));
     }
-    for _ in 0..2 {
+    // The BITMAP_SHINY+1 sprites use rotation rand()%360; a draw function cannot call rand()
+    // (it would change the simulation's sequence), so 0 is used.
+    for eye in [eye_left, eye_right] {
         common::sprite(out, ctx, BITMAP_SHINY + 1, eye, 0.5, Vec3::splat(0.5), 0.0, Some(Blend::Glow));
     }
 }
@@ -1488,7 +1535,6 @@ fn skull_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
 // --- MODEL_WARCRAFT (Hell Gate) -------------------------------------------------------------------------
 
 /// ZzzEffect.cpp:3104.
-/// TODO(original): `RenderObject` draws only mesh 0 of this model (ZzzObject.cpp:10406).
 fn warcraft_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 50.0;
     e.scale = 0.7;
@@ -1502,7 +1548,20 @@ fn warcraft_step(e: &mut Effect, ctx: &mut Ctx) {
     if let Some(p) = ctx.target_position(e.owner) {
         e.position = p;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
+}
+
+/// `RenderEffects` `default:` → `RenderObject` → `RenderHellasObjectMesh` (GMHellas.cpp:522-534,
+/// called from ZzzObject.cpp:1128 on every map): body light (1, 0.1, 0.1) for subtype 1, else 1,
+/// and `RenderBody(RENDER_TEXTURE, Alpha, BlendMesh, BlendMeshLight, U, V)` without `HiddenMesh`.
+/// (The mesh-0-only `RenderMesh` of ZzzObject.cpp:10406 is `RenderPartObjectEdge`, the selection
+/// outline, which effects do not use.)
+fn warcraft_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let mut d = ModelDraw::of_effect(e);
+    d.light = if e.sub_type == 1 { Vec3::new(1.0, 0.1, 0.1) } else { Vec3::ONE };
+    d.hidden_mesh = -1;
+    d.render_flags = RENDER_TEXTURE;
+    out.models.push(d);
 }
 
 // --- MODEL_GATE / MODEL_GATE+1 (castle gate pieces) ----------------------------------------------------
@@ -1551,7 +1610,7 @@ fn gate_step(e: &mut Effect, ctx: &mut Ctx) {
         // position is used instead.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_STONE_COFFIN / MODEL_STONE_COFFIN+1 ---------------------------------------------------------
@@ -1598,20 +1657,21 @@ fn coffin_step(e: &mut Effect, ctx: &mut Ctx) {
         // The original passes MoveEffect's uninitialized local `Position`; see `gate_step`.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
-/// `RenderObject` (ZzzObject.cpp:1428).
+/// `RenderObject` (ZzzObject.cpp:1428-1450).
 fn coffin_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let mut d = ModelDraw::of_effect(e);
+    let base = ModelDraw::of_effect(e);
+    let pass = |light: Vec3, flags: u32, texture: i32| ModelDraw { light, render_flags: flags, texture, ..base };
     if e.sub_type == 2 || e.sub_type == 3 {
-        d.light = if e.sub_type == 2 { Vec3::new(0.1, 0.3, 0.6) } else { Vec3::new(0.1, 0.6, 0.3) };
-        d.bright = true;
-        // TODO(original): RENDER_BRIGHT|RENDER_CHROME with BITMAP_CHROME (chrome mapping).
+        let light = if e.sub_type == 2 { Vec3::new(0.1, 0.3, 0.6) } else { Vec3::new(0.1, 0.6, 0.3) };
+        out.models.push(pass(light, RENDER_BRIGHT | RENDER_CHROME, BITMAP_CHROME));
+    } else {
+        out.models.push(pass(base.light, RENDER_TEXTURE, -1));
+        out.models.push(pass(Vec3::ONE, RENDER_BRIGHT | RENDER_CHROME, BITMAP_CHROME));
+        out.models.push(pass(Vec3::new(0.3, 0.3, 1.0), RENDER_BRIGHT | RENDER_METAL, BITMAP_CHROME));
     }
-    // TODO(original): other subtypes add two passes: RENDER_BRIGHT|RENDER_CHROME (light 1) and
-    // RENDER_BRIGHT|RENDER_METAL (light 0.3, 0.3, 1) with BITMAP_CHROME.
-    out.models.push(d);
 }
 
 // --- MODEL_SHINE --------------------------------------------------------------------------------------
@@ -1644,7 +1704,7 @@ fn shine_step(e: &mut Effect, ctx: &mut Ctx) {
         let scale = (ctx.rand() % 30 + 50) as f32 / 100.0;
         ctx.create_particle(BITMAP_SHINY, position, e.angle, e.light, 2, scale, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BLOOD --------------------------------------------------------------------------------------
@@ -1723,7 +1783,7 @@ fn dragon_step(e: &mut Effect, ctx: &mut Ctx) {
         e.animation_frame = 0.0;
         e.current_action = 0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_DESAIR ---------------------------------------------------------------------------------------
@@ -1744,14 +1804,18 @@ fn desair_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(MODEL_FEATHER, e.position, e.angle, e.light, 2, None, -1, 0, 0, 1.4);
         ctx.create_effect(MODEL_FEATHER, e.position, e.angle, e.light, 3, None, -1, 0, 0, 1.4);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
+    // `Vector(1.f,1.f,1.f,o->Light)` of its `RenderObject` (ZzzObject.cpp:1533), which runs after
+    // each tick: the feathers of the next ticks get light 1.
+    e.light = Vec3::ONE;
 }
 
-/// `RenderObject` (ZzzObject.cpp:1531): body light 1.
+/// `RenderObject` (ZzzObject.cpp:1531-1536): `o->Light` = 1 (moved to `desair_step`), body light
+/// 1 and `RenderBody(RENDER_TEXTURE|RENDER_DARK, ..., HiddenMesh)`.
 fn desair_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.light = Vec3::ONE;
-    // TODO(original): RENDER_TEXTURE|RENDER_DARK (subtractive), which ModelDraw cannot express.
+    d.render_flags = RENDER_TEXTURE | RENDER_DARK;
     out.models.push(d);
 }
 
@@ -1796,7 +1860,7 @@ fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
     e.angle.x += wave * e.distance / 3.0;
     e.light = Vec3::new(e.blend_mesh_light / 10.0, e.blend_mesh_light / 10.0, e.blend_mesh_light / 4.0);
     ctx.create_particle(BITMAP_LIGHT, e.position, e.angle, e.light, 9, e.scale, None);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_TREE_ATTACK (Aida) ------------------------------------------------------------------------------
@@ -1817,7 +1881,7 @@ fn tree_attack_step(e: &mut Effect, ctx: &mut Ctx) {
         e.alpha -= 0.07;
         e.scale = 1.0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_MAGIC_CAPSULE2 ----------------------------------------------------------------------------------
@@ -1838,14 +1902,19 @@ fn capsule_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 10.0 {
         e.blend_mesh_light = (e.life_time as i32) as f32 * 0.1;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
-/// `RenderEffects` ZzzEffect.cpp:18568 → `RenderObject`.
+/// `RenderEffects` ZzzEffect.cpp:18568 → `RenderObject`: subtype 1 (ZzzObject.cpp:1601-1605) first
+/// draws `RENDER_BRIGHT|RENDER_CHROME4` with `HiddenMesh` 1, then `RENDER_TEXTURE` with its own.
 fn capsule_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    // TODO(original): subtype 1 (ZzzObject.cpp:1601) first draws RENDER_BRIGHT|RENDER_CHROME4 with
-    // HiddenMesh 1, then the normal texture pass.
-    out.models.push(ModelDraw::of_effect(e));
+    let d = ModelDraw::of_effect(e);
+    if e.sub_type == 1 {
+        out.models.push(ModelDraw { hidden_mesh: 1, render_flags: RENDER_BRIGHT | RENDER_CHROME4, ..d });
+        out.models.push(ModelDraw { render_flags: RENDER_TEXTURE, ..d });
+    } else {
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_WATER_WAVE (Kalima sea monster) -------------------------------------------------------------------
@@ -1879,5 +1948,5 @@ fn water_wave_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_WATERFALL_5, e.position, e.angle, light, 1, 1.0, None);
     }
     ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }

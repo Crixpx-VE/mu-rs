@@ -1082,6 +1082,7 @@ fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>
         weapon_bone: RIGHT_HAND_BONE,
         live: true,
         pos_sword: Vec3::ZERO,
+        ..Default::default()
     })
 }
 

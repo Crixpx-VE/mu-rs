@@ -662,6 +662,41 @@ fn play_animation(frame: &mut f32, speed: f32, frames: usize, locked: bool, hold
     true
 }
 
+/// Snapshot for the effects engine and the client-side hit tests (`CharactersClient[]`: Type,
+/// Kind, Key, position, bones, `Dead`).
+fn actor_state(m: &Monster, bones: &[bmd::Mat34], height: f32) -> crate::fx::Actor {
+    use crate::fx::core::{KIND_MONSTER, KIND_NPC, KIND_TRAP, MODEL_MONSTER01};
+    let kind = match m.def.kind() {
+        data::Kind::Npc => KIND_NPC,
+        data::Kind::Trap => KIND_TRAP,
+        // `KIND_TMP` (number 451).
+        data::Kind::Tmp => 128,
+        data::Kind::Monster => KIND_MONSTER,
+    };
+    crate::fx::Actor {
+        // `MODEL_MONSTER01 + n` (ZzzCharacter.cpp `CreateMonster`); NPC and other global models
+        // are not numbered here yet.
+        ty: match m.def.model {
+            Model::Monster(n) => MODEL_MONSTER01 + n as i32,
+            Model::Player => crate::fx::core::MODEL_PLAYER,
+            _ => -1,
+        },
+        kind,
+        key: m.key as i32,
+        position: Vec3::new(m.pos.x * MU_SCALE, m.pos.y * MU_SCALE, height),
+        angle: Vec3::new(0.0, 0.0, m.facing.to_degrees()),
+        scale: m.scale,
+        bones: std::sync::Arc::new(bones.to_vec()),
+        dummy_bones: std::sync::Arc::new(m.skeleton.bones.iter().map(|b| b.dummy).collect()),
+        action: m.action,
+        frame: m.frame,
+        dead: m.dead,
+        light: m.light.max(Vec3::ZERO),
+        velocity: m.play_speed(),
+        ..Default::default()
+    }
+}
+
 /// The frame to draw: with `Loop` finished, the last one (`bone_matrices_at` would wrap to the first).
 fn pose_frame(frame: f32, frames: usize, held: bool) -> f32 {
     if held { frames.saturating_sub(1) as f32 } else { frame }
@@ -780,7 +815,8 @@ fn apply(
                 for child in built.children {
                     e.with_child(child);
                 }
-                e.insert(m);
+                // The snapshot is filled by `animate` (not live until its first pose).
+                e.insert((m, crate::fx::ActorState(crate::fx::Actor { live: false, ..Default::default() })));
                 fresh.insert(key, [e.id(), shadow_entity]);
             }
             MonsterOrder::Action { key, action } => {
@@ -959,12 +995,12 @@ fn animate(
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
-    mut q: Query<(&mut Monster, &crate::shadow::Shadow, Option<&crate::names::Selectable>)>,
+    mut q: Query<(&mut Monster, &crate::shadow::Shadow, Option<&crate::names::Selectable>, Option<&mut crate::fx::ActorState>)>,
     mut visibility: Query<&mut Visibility, Without<Monster>>,
 ) {
     let Some(terrain) = terrain else { return };
     let dt = time.delta_secs();
-    for (mut m, shadow, selectable) in &mut q {
+    for (mut m, shadow, selectable, actor) in &mut q {
         let Some(act) = m.skeleton.actions.get(m.action) else { continue };
         let (frames, locked) = (act.frames, act.lock_positions.is_some());
         if !m.held {
@@ -995,6 +1031,9 @@ fn animate(
         let frame = pose_frame(m.frame, frames, m.held);
         let bones = m.skeleton.bone_matrices_at(m.action, frame);
         let h = monster_height(&m, &terrain);
+        if let Some(mut actor) = actor {
+            actor.0 = actor_state(&m, &bones, h);
+        }
         let mut sh = crate::shadow::Builder::new(
             Some(&terrain.0),
             Vec3::new(m.pos.x * MU_SCALE, m.pos.y * MU_SCALE, h),

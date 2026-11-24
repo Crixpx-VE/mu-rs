@@ -17,20 +17,17 @@
 //! action speeds of `SetAttackSpeed` (`ZzzCharacter.cpp` 893-901). MuMain (`MoveHandlers.cpp`) matches.
 //!
 //! Engine gaps (each one has a `TODO(original)` where it is used):
-//! - `o->Owner->m_sTargetIndex` (the owner's current target character): [`owner_target_position`]
-//!   always answers "no target", which is the original's own `m_sTargetIndex < 0` path. Several
-//!   types then keep re-creating their hit effects every tick (the original only stops them when
-//!   the target branch sets `LifeTime`).
-//! - Buffs (`g_isCharacterBuff`): [`has_buff`] always answers `false`.
-//! - Action lengths (`Actions[...].NumAnimationKeys`): [`past_action_end`] always answers `false`.
 //! - `CharacterAttribute->AttackSpeed` (the Rage Fighter action speeds): [`hero_attack_speed`] = 0.
 //! - Writes to the owner (`o->Owner->Velocity += ..`): not possible on actor snapshots. The owner
 //!   angle shake of the wolf heads is reproduced locally (the original restores it in the same block).
-//! - An effect model's own bones (the punch dummies): taken at the model origin.
-//! - `o->Owner->Light`, `o->Owner->StartPosition`: not in `Actor`.
 //! - Where the original dereferences `o->Owner` without checking it (it would crash), a missing
 //!   owner character kills the effect.
 //! - `StopBuffer` does not exist: only the `PlayBuffer` is requested.
+//! - The owner's pose at Dragon Kick's sub-frames (needs `PriorAction`/`PriorAnimationFrame`).
+//!
+//! Without the game data (tests) the model-dependent parts fall back: action lengths are unknown
+//! (no action ends early), an effect model's own bones are taken at its origin, and the owner's
+//! bone count comes from its snapshot. None of them changes the number of `rand()` calls.
 
 use bevy::math::Vec3;
 
@@ -84,9 +81,6 @@ fn int_life(x: f32) -> f32 {
     x as i32 as f32
 }
 
-/// `o->Owner->Light`. TODO(original): `Actor` has no light; white is used.
-const OWNER_LIGHT: Vec3 = Vec3::ONE;
-
 /// `CharacterAttribute->AttackSpeed` (the hero's). TODO(original): not available here; 0.
 fn hero_attack_speed(_ctx: &Ctx) -> f32 {
     0.0
@@ -114,30 +108,25 @@ const SPEED_DRAGONKICK: f32 = 0.4;
 const SPEED_DRAGONLORE: f32 = 0.3;
 
 /// `CharactersClient[o->Owner->m_sTargetIndex].Object.Position`, or `None` for
-/// `o->Owner->m_sTargetIndex < 0`.
-/// TODO(original): the owner's target index is not in the `Actor` snapshot: always "no target".
-fn owner_target_position(_e: &Effect, _ctx: &Ctx) -> Option<Vec3> {
-    None
+/// `o->Owner->m_sTargetIndex < 0` (no owner character, no target, or a target the client does not
+/// have in `CharactersClient[]`).
+fn owner_target_position(e: &Effect, ctx: &Ctx) -> Option<Vec3> {
+    let target = ctx.actor(e.owner)?.target?;
+    ctx.actors.get(&target).map(|t| t.position)
 }
 
-/// `eBuff_*` used by these types.
-#[derive(Clone, Copy)]
-enum Buff {
-    AttUpOurforces,
-    HpUpOurforces,
-    DefUpOurforces,
-    Cloaking,
+/// `g_isCharacterBuff(o->Owner, buff)`. An effect owner (`OBJECT` of `Effects[]`) never has buffs.
+fn has_buff(ctx: &Ctx, owner: Option<Target>, buff: i32) -> bool {
+    ctx.actor(owner).is_some_and(|a| a.has_buff(buff))
 }
 
-/// `g_isCharacterBuff(o->Owner, buff)`. TODO(original): there is no buff system; always `false`.
-fn has_buff(_ctx: &Ctx, _owner: Option<Target>, _buff: Buff) -> bool {
-    false
-}
-
-/// `o->Owner->AnimationFrame > Models[o->Owner->Type].Actions[action].NumAnimationKeys`.
-/// TODO(original): the action lengths of the owner's model are not available; always `false`.
-fn past_action_end(_a: &Actor, _action: i32) -> bool {
-    false
+/// `o->Owner->AnimationFrame > Models[o->Owner->Type].Actions[action].NumAnimationKeys`
+/// (`false` when the owner's model or that action is not available).
+fn past_action_end(ctx: &mut Ctx, a: &Actor, action: i32) -> bool {
+    usize::try_from(action)
+        .ok()
+        .and_then(|action| ctx.action_frames(a.ty, action))
+        .is_some_and(|keys| a.frame > keys as f32)
 }
 
 /// `o->Owner->Live` (an effect owner is alive while it is still in `Effects[]`); no owner = dead.
@@ -149,11 +138,11 @@ fn owner_live(e: &Effect, ctx: &Ctx) -> bool {
     }
 }
 
-/// `TransformByObjectBone(out, o, 0)` after `Models[o->Type].Animation(...)` on the effect's own
-/// model. TODO(original): the engine has no access to an effect model's bones; the bone is taken
-/// at the model origin (`o->Position`).
-fn own_bone0(e: &Effect) -> Vec3 {
-    e.position
+/// `TransformByObjectBone(out, o, 0)` after `Models[o->Type].Animation(BoneTransform, ...)` on the
+/// effect's own model (an effect has no `BoneTransform` of its own, so the global one is read).
+/// Without the model file the bone is taken at the model origin (`o->Position`).
+fn own_bone0(e: &Effect, ctx: &mut Ctx) -> Vec3 {
+    ctx.effect_bone_world(e, 0, Vec3::ZERO).unwrap_or(e.position)
 }
 
 /// `vPos = Position; vDir = from`, both lowered to the terrain, `VectorNormalize(vPos - vDir)`
@@ -164,10 +153,12 @@ fn ground_dir(ctx: &Ctx, pos: Vec3, from: Vec3) -> Vec3 {
     (p - f).normalize_or_zero()
 }
 
-/// `o->Owner->StartPosition` (set by `CMonkSystem` for the Dark Side dummies, MonkSystem.cpp:689/766).
-/// TODO(original): not in the `Actor` snapshot; without it the drift direction stays zero.
-fn owner_start_position(_a: Option<&Actor>) -> Option<Vec3> {
-    None
+/// `o->Owner->StartPosition` (set by `CMonkSystem` for the Dark Side dummies, MonkSystem.cpp:689/766;
+/// its owners are characters, MonkSystem.cpp:702/782).
+/// TODO(original): an effect owner's `StartPosition` is not visible to other effects; the drift
+/// direction then stays zero.
+fn owner_start_position(a: Option<&Actor>) -> Option<Vec3> {
+    a.map(|a| a.start_position)
 }
 
 /// `switch(rand()%3)`: `BITMAP_FIRE_HIK1` / `BITMAP_FIRE_CURSEDLICH` / `BITMAP_FIRE_HIK3` with the
@@ -204,28 +195,43 @@ fn shaken_angle(ctx: &mut Ctx, angle: Vec3, base: f32) -> Vec3 {
 
 // --- Drawing helpers ------------------------------------------------------------------------------
 
-/// `RenderObject(o)`: nothing when `Alpha < 0.01` (`Calc_RenderObject`, ZzzObject.cpp:245); else the
-/// effect's model with `BodyLight` = `light` and `RENDER_BRIGHT` → `bright`.
-fn model(e: &Effect, light: Vec3, bright: bool) -> Option<ModelDraw> {
+/// `RENDER_TEXTURE|RENDER_BRIGHT`.
+const TEX_BRIGHT: u32 = RENDER_TEXTURE | RENDER_BRIGHT;
+
+/// `RenderObject(o)` → `b->RenderBody(flags, o->Alpha, o->BlendMesh, o->BlendMeshLight,
+/// o->BlendMeshTexCoordU, o->BlendMeshTexCoordV, o->HiddenMesh)`: nothing when `Alpha < 0.01`
+/// (`Calc_RenderObject`, ZzzObject.cpp:245); else the effect's model with `BodyLight` = `light`.
+fn model(e: &Effect, light: Vec3, flags: u32) -> Option<ModelDraw> {
     if e.alpha < 0.01 {
         return None;
     }
     let mut d = ModelDraw::of_effect(e);
     d.light = light;
-    d.bright = bright;
+    d.render_flags = flags;
+    Some(d)
+}
+
+/// `b->RenderMesh(i, RENDER_TEXTURE|RENDER_BRIGHT, o->Alpha, i, o->BlendMeshLight,
+/// o->BlendMeshTexCoordU, o->BlendMeshTexCoordV, texture)` with `BodyLight` = `light`: mesh `i`
+/// alone, being its own blend mesh (`texture` -1 = the mesh's own).
+fn mesh(e: &Effect, light: Vec3, i: i32, texture: i32) -> Option<ModelDraw> {
+    let mut d = model(e, light, TEX_BRIGHT)?;
+    d.mesh = i;
+    d.blend_mesh = i;
+    d.texture = texture;
     Some(d)
 }
 
 /// ZzzObject.cpp:2538-2542: `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)` (wolf head, punch
 /// dummies, dragon kick dummy).
 fn draw_bright(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.extend(model(e, e.light, true));
+    out.models.extend(model(e, e.light, TEX_BRIGHT));
 }
 
 /// ZzzObject.cpp:2543-2554: `BodyLight = Light * 6`, `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)`
 /// (`MODEL_WINDFOCE`, `MODEL_WINDFOCE_MIRROR`).
 fn draw_light6(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.extend(model(e, e.light * 6.0, true));
+    out.models.extend(model(e, e.light * 6.0, TEX_BRIGHT));
 }
 
 // --- MODEL_WOLF_HEAD_EFFECT ------------------------------------------------------------------------
@@ -262,7 +268,7 @@ fn wolf_head_create(e: &mut Effect, ctx: &mut Ctx) {
 fn wolf_head_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     wolf_head_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17056.
@@ -286,8 +292,8 @@ fn wolf_head_move(e: &mut Effect, ctx: &mut Ctx) {
                     p.z += (ctx.rand() % 28 + 6) as f32;
                     ctx.create_joint(BITMAP_PIN_LIGHT, p, p, angle, 0, e.owner, 5.0);
                 }
-                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT, a.position, angle, OWNER_LIGHT, 1, e.owner, -1, 0, 0, 0.0);
-                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT, a.position, angle, OWNER_LIGHT, 2, e.owner, -1, 0, 0, 0.0);
+                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT, a.position, angle, a.light, 1, e.owner, -1, 0, 0, 0.0);
+                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT, a.position, angle, a.light, 2, e.owner, -1, 0, 0, 0.0);
             }
         }
         1 => {
@@ -316,7 +322,7 @@ fn sbumb_create(e: &mut Effect, ctx: &mut Ctx) {
 fn sbumb_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     sbumb_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17106.
@@ -355,13 +361,13 @@ fn down_dummy_create(e: &mut Effect, ctx: &mut Ctx) {
 fn down_dummy_l_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     down_dummy_move(e, ctx, false);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn down_dummy_r_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     down_dummy_move(e, ctx, true);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17133 (left) and 17175 (right).
@@ -375,7 +381,7 @@ fn down_dummy_move(e: &mut Effect, ctx: &mut Ctx, right: bool) {
     if e.animation_frame >= end_frame {
         e.live = false;
         if right {
-            ctx.create_effect(MODEL_DOWN_ATTACK_DUMMY_L, a.position, a.angle, OWNER_LIGHT, 0, e.owner, -1, 0, 0, 0.0);
+            ctx.create_effect(MODEL_DOWN_ATTACK_DUMMY_L, a.position, a.angle, a.light, 0, e.owner, -1, 0, 0, 0.0);
         }
     }
     if e.animation_frame >= hit_frame && e.life_time > 50.0 {
@@ -385,11 +391,13 @@ fn down_dummy_move(e: &mut Effect, ctx: &mut Ctx, right: bool) {
         ctx.play_sound("SOUND_RAGESKILL_STAMP_ATTACK");
         e.life_time = 40.0;
     }
-    let start = own_bone0(e);
+    let start = own_bone0(e, ctx);
     ctx.create_joint(BITMAP_FORCEPILLAR, start, start, e.angle, if right { 1 } else { 0 }, me(e), 50.0);
+    // The second TransformByObjectBone reads the same global BoneTransform (posed with the old
+    // o->Angle) and only the new o->Position.
+    let end = start - e.position + a.position;
     e.angle = a.angle;
     e.position = a.position;
-    let end = own_bone0(e);
     ctx.create_sprite(BITMAP_FLARE, end, 5.0, Vec3::new(0.47, 0.36, 0.24), 0.0, 0);
 }
 
@@ -403,7 +411,7 @@ fn swordeff_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn swordeff_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     swordeff_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17220.
@@ -412,7 +420,7 @@ fn swordeff_move(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
         return;
     };
-    if past_action_end(&a, PLAYER_SKILL_GIANTSWING) {
+    if past_action_end(ctx, &a, PLAYER_SKILL_GIANTSWING) {
         e.live = false;
     }
     let start = a.bone_world(5, Vec3::ZERO);
@@ -548,23 +556,20 @@ fn shockwave01_step(e: &mut Effect, ctx: &mut Ctx) {
             e.position.z = 220.0 + e.scale * 80.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2494-2526: `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0, ...)` once or
-/// twice with `BodyLight = Light * k`.
-/// TODO(original): only mesh 0 is rendered, and subtypes 1, 3, 4 and 5 replace its texture with
-/// `BITMAP_DAMAGE2`; `ModelDraw` can select neither.
+/// twice with `BodyLight = Light * k`, subtypes 1, 3, 4 and 5 with the texture `BITMAP_DAMAGE2`.
 fn shockwave01_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let (k, times) = match e.sub_type {
-        1 => (5.0, 1),
-        2 => (15.0, 2),
-        3 => (1.0, 2),
-        4 | 5 => (1.0, 1),
-        _ => (1.0, 2),
+    let (k, times, texture) = match e.sub_type {
+        1 => (5.0, 1, BITMAP_DAMAGE2),
+        2 => (15.0, 2, -1),
+        3 => (1.0, 2, BITMAP_DAMAGE2),
+        4 | 5 => (1.0, 1, BITMAP_DAMAGE2),
+        _ => (1.0, 2, -1),
     };
-    let Some(mut d) = model(e, e.light * k, true) else { return };
-    d.blend_mesh = 0;
+    let Some(d) = mesh(e, e.light * k, 0, texture) else { return };
     for _ in 0..times {
         out.models.push(d);
     }
@@ -592,13 +597,13 @@ fn shockwave02_step(e: &mut Effect, ctx: &mut Ctx) {
     e.scale += 0.1;
     e.start_position *= 0.95;
     e.position -= e.start_position;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects ZzzEffect.cpp:19098 → ZzzObject.cpp:2527: `BodyLight = Light`, `RenderBody`
 /// (`RENDER_TEXTURE|RENDER_BRIGHT`) twice.
 fn shockwave02_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(d) = model(e, e.light, true) else { return };
+    let Some(d) = model(e, e.light, TEX_BRIGHT) else { return };
     out.models.push(d);
     out.models.push(d);
 }
@@ -619,7 +624,7 @@ fn damage1_create(e: &mut Effect, ctx: &mut Ctx) {
 fn damage1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     damage1_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17353.
@@ -667,13 +672,14 @@ fn spin01_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.light *= 0.9;
     e.alpha = 1.0;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:2533: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)`.
-/// TODO(original): rendered with the texture `BITMAP_DAMAGE1` instead of the model's own.
+/// ZzzObject.cpp:2533: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ..., BITMAP_DAMAGE1)`.
 fn spin01_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.extend(model(e, e.light, true));
+    let Some(mut d) = model(e, e.light, TEX_BRIGHT) else { return };
+    d.texture = BITMAP_DAMAGE1;
+    out.models.push(d);
 }
 
 // --- BITMAP_EVENT_CLOUD -----------------------------------------------------------------------------
@@ -697,7 +703,7 @@ fn event_cloud_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.angle.x = (ctx.world_time() as i32).wrapping_neg() as f32 * 0.5;
     e.light *= 0.9;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects ZzzEffect.cpp:19091: `EnableAlphaBlend` + `RenderTerrainAlphaBitmap`.
@@ -721,7 +727,7 @@ fn windfoce_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn windfoce_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     windfoce_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17409.
@@ -746,11 +752,11 @@ fn windfoce_move(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
         1 => {
-            let buffed = has_buff(ctx, e.owner, Buff::AttUpOurforces)
-                || has_buff(ctx, e.owner, Buff::HpUpOurforces)
-                || has_buff(ctx, e.owner, Buff::DefUpOurforces);
+            let buffed = has_buff(ctx, e.owner, eBuff_Att_up_Ourforces)
+                || has_buff(ctx, e.owner, eBuff_Hp_up_Ourforces)
+                || has_buff(ctx, e.owner, eBuff_Def_up_Ourforces);
             e.life_time = if owner_live(e, ctx) && buffed { 10.0 } else { 0.0 };
-            if has_buff(ctx, e.owner, Buff::Cloaking) {
+            if has_buff(ctx, e.owner, eBuff_Cloaking) {
                 return;
             }
             let fade = (ctx.world_time() * 0.001).sin() + 1.0;
@@ -791,7 +797,7 @@ fn shiny4_step(e: &mut Effect, ctx: &mut Ctx) {
     let y = e.position.y + (ctx.rand() % 100 - 40) as f32;
     let z = e.position.z + (ctx.rand() % 100 + 50) as f32;
     ctx.create_particle(BITMAP_SHINY + 4, Vec3::new(x, y, z), e.angle, e.light, 2, e.scale, None);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- BITMAP_LIGHT_RED -------------------------------------------------------------------------------
@@ -822,7 +828,7 @@ fn light_red_create(e: &mut Effect, ctx: &mut Ctx) {
 fn light_red_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     light_red_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
     // What RenderEffects (ZzzEffect.cpp:19158) does while drawing subtype 0: VectorCopy(o->Owner->
     // Position, o->Position). Moved here (once per tick).
     if let Some(p) = ctx.target_position(e.owner) {
@@ -838,9 +844,9 @@ fn light_red_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// ZzzEffect.cpp:17503.
 fn light_red_move(e: &mut Effect, ctx: &mut Ctx) {
-    let att = has_buff(ctx, e.owner, Buff::AttUpOurforces);
-    let hp = has_buff(ctx, e.owner, Buff::HpUpOurforces);
-    let def = has_buff(ctx, e.owner, Buff::DefUpOurforces);
+    let att = has_buff(ctx, e.owner, eBuff_Att_up_Ourforces);
+    let hp = has_buff(ctx, e.owner, eBuff_Hp_up_Ourforces);
+    let def = has_buff(ctx, e.owner, eBuff_Def_up_Ourforces);
     if owner_live(e, ctx) && (hp || att || def) {
         e.life_time = 10.0;
         if def && ctx.rand() % 70 == 7 && !ctx.search_effect(MODEL_WINDFOCE_MIRROR, e.owner, -1) {
@@ -857,7 +863,7 @@ fn light_red_move(e: &mut Effect, ctx: &mut Ctx) {
         e.life_time = 0.0;
     }
 
-    if has_buff(ctx, e.owner, Buff::Cloaking) && e.sub_type != 3 {
+    if has_buff(ctx, e.owner, eBuff_Cloaking) && e.sub_type != 3 {
         return;
     }
 
@@ -934,12 +940,12 @@ fn mirror_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn mirror_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     mirror_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17565.
 fn mirror_move(e: &mut Effect, ctx: &mut Ctx) {
-    if !owner_live(e, ctx) || !has_buff(ctx, e.owner, Buff::DefUpOurforces) {
+    if !owner_live(e, ctx) || !has_buff(ctx, e.owner, eBuff_Def_up_Ourforces) {
         e.live = false;
         return;
     }
@@ -977,7 +983,7 @@ fn sword_mono_step(e: &mut Effect, ctx: &mut Ctx) {
         };
         ctx.create_effect(MODEL_SHOCKWAVE01, e.position, e.angle, light, 2, e.owner, -1, 0, 0, 1.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_WOLF_HEAD_EFFECT2 ------------------------------------------------------------------------
@@ -1015,7 +1021,7 @@ fn wolf_head2_create(e: &mut Effect, ctx: &mut Ctx) {
 fn wolf_head2_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     wolf_head2_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17611. (Its `else if (o->SubType == 4)` branch is unreachable: 4 is taken by the
@@ -1037,8 +1043,8 @@ fn wolf_head2_move(e: &mut Effect, ctx: &mut Ctx) {
                 let angle = shaken_angle(ctx, a.angle, 2.0);
                 // `SubType == 5 ? 27 : 4` inside the subtype 3 branch: always bone 4.
                 e.position = a.bone_world(4, Vec3::ZERO);
-                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, a.position, angle, OWNER_LIGHT, 4, e.owner, -1, 0, 0, 0.0);
-                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, a.position, angle, OWNER_LIGHT, 6, e.owner, -1, 0, 0, 0.0);
+                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, a.position, angle, a.light, 4, e.owner, -1, 0, 0, 0.0);
+                ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, a.position, angle, a.light, 6, e.owner, -1, 0, 0, 0.0);
             }
         }
         5 => {
@@ -1052,7 +1058,7 @@ fn wolf_head2_move(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzObject.cpp:2486: `BodyLight = (0.4, 0.4, 0.6) * 0.3`, `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT,
 /// ..., BlendMeshLight * 0.5, ...)`. (Its `o->Light = (0.4, 0.4, 0.6)` is already set at creation.)
 fn wolf_head2_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = model(e, Vec3::new(0.4, 0.4, 0.6) * 0.3, true) else { return };
+    let Some(mut d) = model(e, Vec3::new(0.4, 0.4, 0.6) * 0.3, TEX_BRIGHT) else { return };
     d.blend_mesh_light = e.blend_mesh_light * 0.5;
     out.models.push(d);
 }
@@ -1078,16 +1084,14 @@ fn ground01_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => 0.7,
         _ => 0.8,
     };
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2555: `BodyLight = Light * 6`, `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha,
-/// 0, ...)`. TODO(original): only mesh 0 is rendered, and subtype 1 replaces its texture with
-/// `BITMAP_KWAVE2`.
+/// 0, ...)`, subtype 1 with the texture `BITMAP_KWAVE2`.
 fn ground01_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = model(e, e.light * 6.0, true) else { return };
-    d.blend_mesh = 0;
-    out.models.push(d);
+    let texture = if e.sub_type == 1 { BITMAP_KWAVE2 } else { -1 };
+    out.models.extend(mesh(e, e.light * 6.0, 0, texture));
 }
 
 // --- MODEL_DRAGON_KICK_DUMMY ------------------------------------------------------------------------
@@ -1109,7 +1113,7 @@ fn dragon_kick_create(e: &mut Effect, ctx: &mut Ctx) {
 fn dragon_kick_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     dragon_kick_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17691.
@@ -1119,7 +1123,8 @@ fn dragon_kick_move(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
         return;
     };
-    if past_action_end(&a, PLAYER_SKILL_DRAGONKICK) || a.action != PLAYER_SKILL_DRAGONKICK as usize || !a.live {
+    // (The `o->Owner->Live` test comes after the action test in the original; both kill it alike.)
+    if past_action_end(ctx, &a, PLAYER_SKILL_DRAGONKICK) || a.action != PLAYER_SKILL_DRAGONKICK as usize || !a.live {
         e.life_time = 0.0;
         e.live = false;
         return;
@@ -1133,7 +1138,11 @@ fn dragon_kick_move(e: &mut Effect, ctx: &mut Ctx) {
         // The owner model is animated into the global BoneTransform at frame
         // `AnimationFrame - PlaySpeed + i * SpeedPerFrame` and bones 1/2 are read through `o`
         // (o->Position + Owner->Angle-rotated bone).
-        // TODO(original): the owner's pose at those sub-frames is not available; its current pose is used.
+        // TODO(original): `BMD::Animation` (ZzzBMD.cpp:53-173) blends the key
+        // `(int)o->Owner->PriorAnimationFrame` of `o->Owner->PriorAction` with the key
+        // `(int)fAnimationFrame` of `Models[o->Owner->Type].CurrentAction` by the fraction of
+        // `fAnimationFrame`; `Actor` has no PriorAction/PriorAnimationFrame, so the owner's
+        // current pose is used for every sample.
         let start = e.position + (a.bone_world(1, Vec3::ZERO) - a.position);
         let end = e.position + (a.bone_world(2, Vec3::ZERO) - a.position);
         let mut i = 0;
@@ -1199,7 +1208,7 @@ fn lava_create(e: &mut Effect, ctx: &mut Ctx) {
 fn lava_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     lava_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17785.
@@ -1209,7 +1218,7 @@ fn lava_move(e: &mut Effect, ctx: &mut Ctx) {
         e.life_time = 0.0;
         return;
     };
-    if past_action_end(&a, PLAYER_SKILL_DRAGONLORE) || a.action != PLAYER_SKILL_DRAGONLORE as usize {
+    if past_action_end(ctx, &a, PLAYER_SKILL_DRAGONLORE) || a.action != PLAYER_SKILL_DRAGONLORE as usize {
         e.live = false;
         e.life_time = 0.0;
         return;
@@ -1288,8 +1297,13 @@ fn dragon_lower_create(e: &mut Effect, ctx: &mut Ctx) {
 /// change while drawing, moved to the end of the tick.
 fn dragon_lower_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
-    // pModel->PlayAnimation(..., o->Velocity, ...) inside the case (the common tail plays it again).
-    common::play_animation(e);
+    // pModel->PlayAnimation(..., o->Velocity, ...) inside the case, the raw BMD call (the common
+    // tail plays it again and ends the action). With CurrentAction 255 the original would read
+    // Actions[255]; nothing is played then.
+    if e.current_action != 255 {
+        let speed = e.velocity;
+        common::play_model_animation(e, ctx, speed);
+    }
     if e.animation_frame > 1.0 && e.animation_frame < 6.0 {
         let mut temp = e.position;
         temp.z = 250.0;
@@ -1300,11 +1314,13 @@ fn dragon_lower_step(e: &mut Effect, ctx: &mut Ctx) {
         e.life_time = 80.0;
     }
     e.alpha *= 0.96;
-    move_tail(e);
+    move_tail(e, ctx);
 
-    // RenderEffects 19105-19107: PlayAnimation(..., o->Velocity / 6, ...) every rendered frame.
+    // RenderEffects 19105-19107: the raw PlayAnimation(..., o->Velocity / 6, ...) every rendered
+    // frame (wrapping like the BMD call; CurrentAction 255 as above).
     if e.current_action != 255 {
-        e.animation_frame += e.velocity / 6.0;
+        let speed = e.velocity / 6.0;
+        common::play_model_animation(e, ctx, speed);
     }
     // Draw_RenderObject 2572/2579 (only when Calc_RenderObject passes, Alpha >= 0.01) leaves
     // o->Light = (1, 0.2, 0.1), which the next tick's sparks use.
@@ -1316,13 +1332,13 @@ fn dragon_lower_step(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzObject.cpp:2570: meshes 0 and 2 (grandmark2.jpg) with `BodyLight = (1, 0.8, 0.2) * Alpha` and
 /// mesh 1 (lines2.jpg) with `(1, 0.2, 0.1) * Alpha`, all `RENDER_TEXTURE|RENDER_BRIGHT`, each mesh its
 /// own blend mesh scrolling V by `-(int)WorldTime % 2000 * 0.0001`.
-/// TODO(original): `ModelDraw` has one light per model and no UV scroll when bright: the whole model
-/// is drawn with the meshes 0/2 light.
 fn dragon_lower_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = model(e, Vec3::new(1.0, 0.8, 0.2) * e.alpha, true) else { return };
-    d.blend_mesh = 0;
-    d.blend_mesh_tex_coord.y = ((ctx.world_time as i32).wrapping_neg() % 2000) as f32 * 0.0001;
-    out.models.push(d);
+    let v = ((ctx.world_time as i32).wrapping_neg() % 2000) as f32 * 0.0001;
+    for (i, light) in [(0, Vec3::new(1.0, 0.8, 0.2)), (2, Vec3::new(1.0, 0.8, 0.2)), (1, Vec3::new(1.0, 0.2, 0.1))] {
+        let Some(mut d) = mesh(e, light * e.alpha, i, -1) else { return };
+        d.blend_mesh_tex_coord.y = v;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_TARGETMON_EFFECT -------------------------------------------------------------------------
@@ -1336,7 +1352,7 @@ fn targetmon_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn targetmon_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     targetmon_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17903.
@@ -1349,8 +1365,9 @@ fn targetmon_move(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 1 && owner_target_position(e, ctx).is_none() {
         return;
     }
-    // rand() % (NumBones - 1): undefined for a model with one bone; bone 0 then.
-    let n = a.bones.len() as i32 - 1;
+    // rand() % (Models[o->Owner->Type].NumBones - 1) (the owner snapshot's bone count without the
+    // model file): undefined for a model with one bone; bone 0 then.
+    let n = ctx.model_bone_count(a.ty).unwrap_or(a.bones.len()) as i32 - 1;
     let r = ctx.rand();
     let bone = if n > 0 { r % n } else { 0 };
     let p = a.bone_world(bone as usize, Vec3::ZERO);
@@ -1392,7 +1409,7 @@ fn volcano_create(e: &mut Effect, ctx: &mut Ctx) {
 fn volcano_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     volcano_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17942.
@@ -1441,12 +1458,12 @@ fn volcano_move(e: &mut Effect, ctx: &mut Ctx) {
     }
 }
 
-/// ZzzObject.cpp:2585: only subtype 1 is drawn: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE, ...)`.
-/// TODO(original): plus `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, ...)` with the texture
-/// `BITMAP_VOLCANO_CORE`, which `ModelDraw` cannot express.
+/// ZzzObject.cpp:2585: only subtype 1 is drawn: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE, ...)`
+/// and `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0, ...)` with the texture `BITMAP_VOLCANO_CORE`.
 fn volcano_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type == 1 {
-        out.models.extend(model(e, e.light, false));
+        out.models.extend(model(e, e.light, RENDER_TEXTURE));
+        out.models.extend(mesh(e, e.light, 0, BITMAP_VOLCANO_CORE));
     }
 }
 
@@ -1489,10 +1506,10 @@ fn volcano_stone_step(e: &mut Effect, ctx: &mut Ctx) {
 
     let scale = e.scale * (ctx.rand() % 5 + 5) as f32 * 0.1;
     fire(ctx, e.position, e.angle, Vec3::ONE, [0, 4, 0], scale);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2595: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE, ...)`.
 fn volcano_stone_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.extend(model(e, e.light, false));
+    out.models.extend(model(e, e.light, RENDER_TEXTURE));
 }

@@ -15,12 +15,15 @@
 //! Notes:
 //! - `HeadTargetAngle` (the summons' target point) lives in `user[0..3]`.
 //! - The original uses the effect models' OWN bones in a few places (Sahamutt's fire, Neil's blade
-//!   sprites, Lagul's sparkles); the engine has no access to them: see [`own_bone`].
+//!   sprites, Lagul's sparkles). Without the model file (tests have no game data) the bone is an
+//!   identity bone at the model origin; the loops do not depend on the model there, except Lagul's
+//!   `rand() % NumBones`, whose `rand()` is still consumed.
 //! - `MODEL_ARROWSRE06` (created here by Swell of Magic Power) belongs to another batch.
 
-use bevy::math::Vec3;
+use bevy::math::{Vec2, Vec3};
+use mu_data::bmd::{self, Mat34};
 
-use super::common::{create_bomb3, draw_nothing, luminosity, move_tail, owner_actor, rf, sprite};
+use super::common::{create_bomb3, draw_nothing, luminosity, move_tail, owner_actor, play_model_animation, rf, sprite};
 use crate::fx::core::*;
 
 pub fn register(r: &mut Registry) {
@@ -80,22 +83,33 @@ fn set_head_target(e: &mut Effect, v: Vec3) {
     e.user[2] = v.z;
 }
 
-/// `SetAction(o, Action)` (ZzzAI.cpp:444).
-/// TODO(original): SetAction returns without changes when `Action >= NumActions` of the model
-/// (unknown here); the summon models have the actions used.
-fn set_action(e: &mut Effect, action: usize) {
+/// `SetAction(o, Action)` (ZzzAI.cpp:444): nothing when `Action >= NumActions` of the model.
+/// Without the model file the action is set anyway, so the kind keeps running.
+fn set_action(e: &mut Effect, ctx: &mut Ctx, action: usize) {
+    if ctx.model(e.ty).is_some_and(|m| action >= m.actions.len()) {
+        return;
+    }
     if e.current_action != action {
         e.current_action = action;
         e.animation_frame = 0.0;
     }
 }
 
-/// `b->TransformPosition(BoneTransform[bone], p, out)` with the effect's OWN model bones, placed at
-/// `origin` (`BodyOrigin`).
-/// TODO(original): the engine gives no access to an effect model's bones; the bone is taken as an
-/// identity bone at the model origin (`origin + Angle·(p·Scale)`).
-fn own_bone(e: &Effect, origin: Vec3, _bone: usize, p: Vec3) -> Vec3 {
-    origin + rotate(e.angle, p * e.scale)
+/// `b->TransformPosition(BoneTransform[bone], p, out)` with bones of the effect's OWN model (from
+/// `effect_bones`), placed at `origin` (`BodyOrigin`) with the effect's angle and scale. A missing
+/// model or bone is an identity bone at the origin (`origin + Angle·(p·Scale)`).
+fn own_bone(bones: Option<&[Mat34]>, e: &Effect, origin: Vec3, bone: usize, p: Vec3) -> Vec3 {
+    let local = match bones.and_then(|b| b.get(bone)) {
+        Some(m) => Vec3::from_array(bmd::transform_point(m, p.to_array())),
+        None => p,
+    };
+    origin + rotate(e.angle, local * e.scale)
+}
+
+/// `b->RenderMesh(mesh, flags, Alpha, blend_mesh, blend_mesh_light, U, V)` (ZzzBMD.cpp:937) with
+/// `BodyLight = light`: one mesh of the effect's model.
+fn render_mesh(base: &ModelDraw, mesh: i32, flags: u32, blend_mesh: i32, blend_mesh_light: f32, tex: Vec2, light: Vec3) -> ModelDraw {
+    ModelDraw { mesh, render_flags: flags, blend_mesh, blend_mesh_light, blend_mesh_tex_coord: tex, light, hidden_mesh: -1, ..*base }
 }
 
 /// The character owner (or target), cloned so the context can be used mutably afterwards.
@@ -111,7 +125,7 @@ fn joint_lit(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: Vec3, s
     j.pk_key = pk_key;
     j.skill = skill;
     j.light = light;
-    ctx.spawns.push(Spawn::Joint(j));
+    ctx.spawn_joint(j);
 }
 
 /// `RenderObject(o)`: nothing when `Alpha < 0.01` (`Calc_RenderObject`, ZzzObject.cpp:245).
@@ -154,10 +168,10 @@ fn wristring_step(e: &mut Effect, ctx: &mut Ctx) {
             e.life_time = 100.0;
         }
     }
-    // b->PlayAnimation(..., o->Velocity / 5, ...)
-    // TODO(original): PlayAnimation wraps the frame at the action length (unknown here).
-    e.animation_frame += e.velocity / 5.0;
-    move_tail(e);
+    // b->PlayAnimation(..., o->Velocity / 5, ...) (its result is not used).
+    let speed = e.velocity / 5.0;
+    play_model_animation(e, ctx, speed);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SUMMONER_EQUIP_HEAD_SAHAMUTT / NEIL / LAGUL --------------------------------------------------
@@ -200,8 +214,8 @@ fn head_orbit(e: &mut Effect, ctx: &mut Ctx) -> Option<Actor> {
             ctx.delete_effect(e.ty, e.owner, -1);
         }
     } else {
-        // TODO(original): also `Hero->SafeZone` (the hero standing in a safe zone) sets Kind = 1.
-        if (t * 0.0004 + s).sin() < 0.3 {
+        // `Hero->SafeZone || sinf(...) < 0.3f` (no hero yet: not in a safe zone).
+        if ctx.hero_actor().is_some_and(|h| h.safe_zone) || (t * 0.0004 + s).sin() < 0.3 {
             e.kind = 1;
         }
         if e.alpha < 1.0 {
@@ -239,15 +253,14 @@ fn head_sahamutt_step(e: &mut Effect, ctx: &mut Ctx) {
                 let num_bones = a.bones.len() as i32;
                 if num_bones > 0 {
                     let bone = ctx.rand() % num_bones;
-                    // TODO(original): the light is the owner's `o->Light` (not in `Actor`).
-                    ctx.create_effect(BITMAP_FIRE_CURSEDLICH, a.position, a.angle, Vec3::ONE, 0, e.owner, -1, 0, bone, 0.0);
+                    ctx.create_effect(BITMAP_FIRE_CURSEDLICH, a.position, a.angle, a.light, 0, e.owner, -1, 0, bone, 0.0);
                 }
             }
             // `pObject->Live == false` (a missing owner counts as dead): `o->Live = false; break;`
             _ => e.live = false,
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:851.
@@ -280,7 +293,7 @@ fn head_neil_step(e: &mut Effect, ctx: &mut Ctx) {
             _ => e.live = false,
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18430/18436: only SubType 0.
@@ -306,7 +319,7 @@ fn head_lagul_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_CLUD64, e.position, e.angle, light, 10, 1.0, e.owner);
     }
     casting_move(e);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SUMMONER_CASTING_EFFECT1..4 ---------------------------------------------------------------
@@ -352,15 +365,16 @@ fn casting_move(e: &mut Effect) {
 fn casting_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     casting_move(e);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18442 + Draw_RenderObject (ZzzObject.cpp:1718):
-/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh, BlendMeshLight, U, V)`.
-/// TODO(original): the meshes other than the blend mesh are drawn additive (RENDER_BRIGHT); the
-/// engine's `bright` would override the blend mesh, so they are drawn normally.
-fn casting_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    draw_plain(e, ctx, out);
+/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh, BlendMeshLight, U, V, -1)`.
+fn casting_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut m) = model(e) else { return };
+    m.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    m.hidden_mesh = -1;
+    out.models.push(m);
 }
 
 // --- MODEL_SUMMONER_SUMMON_SAHAMUTT --------------------------------------------------------------------
@@ -397,13 +411,13 @@ fn sahamutt_step(e: &mut Effect, ctx: &mut Ctx) {
     let start = e.position;
 
     if life(e) < 20 {
-        set_action(e, 0);
+        set_action(e, ctx, 0);
         e.alpha -= 0.05;
     } else if e.current_action == 0 && e.alpha < 0.3 {
         e.alpha += 0.05;
         aim_at_target(e);
     } else {
-        set_action(e, 1);
+        set_action(e, ctx, 1);
         if e.animation_frame >= 12.0 {
             e.animation_frame = 12.0;
         }
@@ -439,22 +453,29 @@ fn sahamutt_step(e: &mut Effect, ctx: &mut Ctx) {
 
     // Fire on 8 bones of its own model: `pModel->Animation(BoneTransform, ...)` (bones in world
     // space at the model's last `BodyOrigin`, i.e. before this tick's move) + vTempPosition.
+    let bones = ctx.effect_bones(e);
     let light = Vec3::splat(e.alpha * 0.3);
     for bone in [13, 23, 39, 49, 3, 4, 5, 61] {
-        let p = own_bone(e, start, bone, Vec3::ZERO) + temp;
+        let p = own_bone(bones.as_deref(), e, start, bone, Vec3::ZERO) + temp;
         let me = Some(Target::Effect(e.id));
         ctx.create_particle(BITMAP_FIRE_CURSEDLICH, p, e.angle, light, 2, 5.0, me);
         ctx.create_particle(BITMAP_FIRE_CURSEDLICH, p, e.angle, light, 2, 4.0, me);
         ctx.create_particle(BITMAP_FIRE_CURSEDLICH, p, e.angle, light, 2, 3.0, me);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// RenderEffects 18451 + Draw_RenderObject (ZzzObject.cpp:1722): `RenderBody(RENDER_TEXTURE)`.
-/// TODO(original): a second pass `RenderBody(RENDER_BRIGHT|RENDER_CHROME7, Alpha, ..., BlendMeshLight
-/// = Alpha)` adds a chrome shine (no chrome rendering in the engine).
-fn sahamutt_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    draw_plain(e, ctx, out);
+/// RenderEffects 18451 + Draw_RenderObject (ZzzObject.cpp:1722-1725): `RenderBody(RENDER_TEXTURE,
+/// Alpha, BlendMesh, BlendMeshLight, U, V, -1)`, then the chrome shine `RenderBody(RENDER_BRIGHT|
+/// RENDER_CHROME7, Alpha, BlendMesh, Alpha, U, V, -1)`.
+fn sahamutt_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut m) = model(e) else { return };
+    m.render_flags = RENDER_TEXTURE;
+    m.hidden_mesh = -1;
+    out.models.push(m);
+    m.render_flags = RENDER_BRIGHT | RENDER_CHROME7;
+    m.blend_mesh_light = e.alpha;
+    out.models.push(m);
 }
 
 // --- MODEL_SUMMONER_SUMMON_NEIL ---------------------------------------------------------------------------
@@ -506,28 +527,32 @@ fn neil_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         ctx.play_sound("SOUND_SUMMON_REQUIEM");
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// RenderEffects 18454 + Draw_RenderObject (ZzzObject.cpp:1727): meshes 0 and 2 additive with
-/// `BlendMeshLight = Alpha` while `Alpha < 0.7` (normal afterwards); mesh 1 additive red
-/// (`BodyLight = (1, 0, 0)`, `BlendMeshLight = Alpha`); red sprites on bones 51..59.
-/// TODO(original): mesh 1 is tinted (1, 0, 0) (one light per model draw here); the blade trail
-/// `CreateObjectBlur(o, bone 51, bone 59, (1, 0, 0), 2)` sampled 10 times per frame while
-/// `AnimationFrame <= 10` is not drawn (no blurs on effects).
+/// RenderEffects 18454 + Draw_RenderObject (ZzzObject.cpp:1727-1749): meshes 0 and 2 additive with
+/// `BlendMeshLight = Alpha` while `Alpha < 0.7` (normal afterwards); mesh 1 with `BodyLight =
+/// (1, 0, 0)` as its own blend mesh (`BlendMeshLight = Alpha`); red sprites on bones 51..59 of the
+/// pose `RenderObject` computed.
+/// TODO(original): the blade trail `CreateObjectBlur(o, bone 51, bone 59, (1, 0, 0), 2)`, sampled 10
+/// times per frame while `AnimationFrame <= 10` and `CurrentAction == 0` (ZzzObject.cpp:1751-1777),
+/// is not drawn: the engine's blurs only follow characters (`Blur::owner` is an `Entity`).
 fn neil_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut m) = model(e) else { return };
+    let Some(m) = model(e) else { return };
+    let tc = e.blend_mesh_tex_coord;
     if e.alpha < 0.7 {
-        m.blend_mesh = -2;
-        m.blend_mesh_light = e.alpha;
+        out.models.push(render_mesh(&m, 0, RENDER_TEXTURE | RENDER_BRIGHT, 0, e.alpha, tc, m.light));
+        out.models.push(render_mesh(&m, 2, RENDER_TEXTURE | RENDER_BRIGHT, 2, e.alpha, tc, m.light));
     } else {
-        m.blend_mesh = 1;
-        m.blend_mesh_light = e.alpha;
+        out.models.push(render_mesh(&m, 0, RENDER_TEXTURE, e.blend_mesh, e.blend_mesh_light, tc, m.light));
+        out.models.push(render_mesh(&m, 2, RENDER_TEXTURE, e.blend_mesh, e.blend_mesh_light, tc, m.light));
     }
-    out.models.push(m);
+    let red = Vec3::new(1.0, 0.0, 0.0);
+    out.models.push(render_mesh(&m, 1, RENDER_TEXTURE, 1, e.alpha, tc, red));
+    let bones = ctx.effect_bones(e);
     for bone in 51..=59 {
-        let p = own_bone(e, e.position, bone, Vec3::ZERO);
-        render_sprite(out, ctx, BITMAP_LIGHT, p, 1.0, Vec3::new(1.0, 0.0, 0.0));
+        let p = own_bone(bones.as_deref(), e, e.position, bone, Vec3::ZERO);
+        render_sprite(out, ctx, BITMAP_LIGHT, p, 1.0, red);
     }
 }
 
@@ -548,17 +573,17 @@ fn nife_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.alpha < 1.0 {
         e.alpha += 0.05;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// RenderEffects 18457 + Draw_RenderObject (ZzzObject.cpp:1779): meshes 0 and 2 normal, mesh 1
-/// additive (`BlendMesh 1`, `BlendMeshLight = Alpha`).
-/// TODO(original): mesh 1 is tinted (1, 0, 0) and RENDER_BRIGHT; meshes beyond 2 are not drawn.
+/// RenderEffects 18457 + Draw_RenderObject (ZzzObject.cpp:1779-1785): meshes 0 and 2 normal, mesh 1
+/// additive red (`BodyLight = (1, 0, 0)`, `BlendMesh 1`, `BlendMeshLight = Alpha`).
 fn nife_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut m) = model(e) else { return };
-    m.blend_mesh = 1;
-    m.blend_mesh_light = e.alpha;
-    out.models.push(m);
+    let Some(m) = model(e) else { return };
+    let tc = e.blend_mesh_tex_coord;
+    out.models.push(render_mesh(&m, 0, RENDER_TEXTURE, e.blend_mesh, e.blend_mesh_light, tc, m.light));
+    out.models.push(render_mesh(&m, 2, RENDER_TEXTURE, e.blend_mesh, e.blend_mesh_light, tc, m.light));
+    out.models.push(render_mesh(&m, 1, RENDER_TEXTURE | RENDER_BRIGHT, 1, e.alpha, tc, Vec3::new(1.0, 0.0, 0.0)));
 }
 
 // --- MODEL_SUMMONER_SUMMON_NEIL_GROUND1..3 -----------------------------------------------------------------
@@ -578,24 +603,17 @@ fn ground_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.alpha < 1.0 {
         e.alpha += 0.3;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
-/// RenderEffects 18462 + Draw_RenderObject (ZzzObject.cpp:1786): meshes 0 and 1 additive with
-/// `BlendMeshLight = Alpha`; mesh 1 scrolls its U by `-WorldTime·0.001`. Drawn as two passes,
-/// each hiding the other mesh.
-/// TODO(original): only meshes 0 and 1 are drawn; a model with more meshes would show them twice.
+/// RenderEffects 18462 + Draw_RenderObject (ZzzObject.cpp:1786-1790): meshes 0 and 1 additive, each
+/// its own blend mesh with `BlendMeshLight = Alpha`; mesh 1 scrolls its U by `-WorldTime·0.001`.
 fn ground_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut m) = model(e) else { return };
-    m.blend_mesh = -2;
-    m.blend_mesh_light = e.alpha;
-    let mut m0 = m;
-    m0.hidden_mesh = 1;
-    out.models.push(m0);
-    let mut m1 = m;
-    m1.hidden_mesh = 0;
-    m1.blend_mesh_tex_coord.x = -ctx.world_time * 0.001;
-    out.models.push(m1);
+    let Some(m) = model(e) else { return };
+    let tc = e.blend_mesh_tex_coord;
+    let flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    out.models.push(render_mesh(&m, 0, flags, 0, e.alpha, tc, m.light));
+    out.models.push(render_mesh(&m, 1, flags, 1, e.alpha, Vec2::new(-ctx.world_time * 0.001, tc.y), m.light));
 }
 
 // --- MODEL_SUMMONER_SUMMON_LAGUL ---------------------------------------------------------------------------
@@ -644,24 +662,29 @@ fn lagul_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_TWINTAIL_WATER, p, e.angle, light, 1, 1.0, None);
         }
     } else if e.sub_type == 1 {
-        set_action(e, 0);
+        set_action(e, ctx, 0);
         let lt = life(e);
         if lt < 30 {
             e.alpha = lt as f32 / 40.0;
         } else if lt > 144 {
             e.alpha = (160 - lt) as f32 / 20.0;
         }
-
-        // RenderEffects (ZzzEffect.cpp:18484), done once per rendered frame: moved here.
-        if ctx.rand() % 5 == 0 {
-            // rand() % NumBones of its own model (unknown: see own_bone).
-            let _bone = ctx.rand();
-            let p = own_bone(e, e.position, 0, Vec3::ZERO);
-            ctx.create_particle(BITMAP_SMOKE, p, e.angle, Vec3::new(0.6, 0.5, 0.9), 57, 2.0, None);
-            ctx.create_particle(BITMAP_TWINTAIL_WATER, p, e.angle, Vec3::new(0.7, 0.7, 1.0), 1, 1.0, None);
-        }
     }
-    move_tail(e);
+    move_tail(e, ctx);
+
+    // RenderEffects (ZzzEffect.cpp:18484-18492), done once per rendered frame: moved here, after
+    // the move (the state RenderEffects sees) and only if the effect survives this tick's
+    // `LifeTime--` (dead effects are not rendered).
+    if e.sub_type == 1 && e.live && e.life_time - 1.0 > 0.0 && ctx.rand() % 5 == 0 {
+        // `TransformByObjectBone(vPos, o, rand() % NumBones)` on its own model. Without the model
+        // file (or with no bones, where the original would divide by zero) the rand() is still
+        // consumed and the point is the effect's position.
+        let r = ctx.rand();
+        let bone = ctx.model_bone_count(e.ty).filter(|&n| n > 0).map(|n| r as usize % n);
+        let p = bone.and_then(|b| ctx.effect_bone_world(e, b, Vec3::ZERO)).unwrap_or(e.position);
+        ctx.create_particle(BITMAP_SMOKE, p, e.angle, Vec3::new(0.6, 0.5, 0.9), 57, 2.0, None);
+        ctx.create_particle(BITMAP_TWINTAIL_WATER, p, e.angle, Vec3::new(0.7, 0.7, 1.0), 1, 1.0, None);
+    }
 
     // EffectDestructor (ZzzEffect.cpp:240) when it dies this tick.
     // TODO(original): also when another effect deletes it (`DeleteEffect`), which the engine
@@ -673,22 +696,25 @@ fn lagul_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 }
 
-/// RenderEffects 18467 (only SubType 1): sparkles on bones 54..59, then `RenderObject`
-/// (Draw_RenderObject, ZzzObject.cpp:1791: meshes 0 and 1 additive with `BlendMeshLight = Alpha`).
-/// TODO(original): only meshes 0 and 1 are drawn.
+/// RenderEffects 18467 (only SubType 1): sparkles on bones 54..59 (`Animation(..., false, false)` +
+/// `TransformByObjectBone`: the bone scaled and placed at `o->Position`), then `RenderObject`
+/// (Draw_RenderObject, ZzzObject.cpp:1791-1795: meshes 0 and 1 additive, each its own blend mesh
+/// with `BlendMeshLight = Alpha`).
 fn lagul_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type != 1 {
         return;
     }
     let light = Vec3::new(0.2, 0.3, 1.0);
+    let bones = ctx.effect_bones(e);
     for bone in 54..=59 {
-        let p = own_bone(e, e.position, bone, Vec3::ZERO);
+        let p = own_bone(bones.as_deref(), e, e.position, bone, Vec3::ZERO);
         render_sprite(out, ctx, BITMAP_SHINY + 6, p, e.scale * 0.3, light);
     }
-    if let Some(mut m) = model(e) {
-        m.blend_mesh = -2;
-        m.blend_mesh_light = e.alpha;
-        out.models.push(m);
+    if let Some(m) = model(e) {
+        let tc = e.blend_mesh_tex_coord;
+        let flags = RENDER_TEXTURE | RENDER_BRIGHT;
+        out.models.push(render_mesh(&m, 0, flags, 0, e.alpha, tc, m.light));
+        out.models.push(render_mesh(&m, 1, flags, 1, e.alpha, tc, m.light));
     }
 }
 
@@ -708,8 +734,8 @@ fn orb_create(e: &mut Effect, _ctx: &mut Ctx) {
 /// `CheckTargetRange(o)` for `MODEL_LIGHTNING_ORB` (ZzzEffect.cpp:366, 411): on reaching the
 /// target (the owner) it ends and bursts.
 fn orb_check_target_range(e: &mut Effect, ctx: &mut Ctx) {
-    // TODO(original): also requires `to->Visible` (frustum test of the target).
-    let Some(to) = ctx.actor(e.owner).filter(|a| a.live).map(|a| a.position) else { return };
+    // `to != NULL && to->Live && to->Visible`.
+    let Some(to) = ctx.actor(e.owner).filter(|a| a.live && a.visible).map(|a| a.position) else { return };
     let dx = e.position.x - to.x;
     let dy = e.position.y - to.y;
     let range = (dx * dx + dy * dy).sqrt();
@@ -781,7 +807,7 @@ fn orb_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.light /= 1.08;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_CHAIN_LIGHTNING -----------------------------------------------------------------------------------
@@ -802,14 +828,14 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
     if (0..=2).contains(&e.sub_type) {
         chain_move(e, ctx);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn chain_move(e: &mut Effect, ctx: &mut Ctx) {
     let source = actor_of(ctx, e.owner);
     let target = actor_of(ctx, e.target);
-    // TODO(original): also ends when `pTargetChar->Dead`.
-    let (Some(src), Some(tgt)) = (source.filter(|a| a.live), target.filter(|a| a.live)) else {
+    // `pSourceObj->Live == false || pTargetObj->Live == false || pTargetChar->Dead`.
+    let (Some(src), Some(tgt)) = (source.filter(|a| a.live), target.filter(|a| a.live && !a.dead)) else {
         e.life_time = 0.0;
         e.live = false;
         return;
@@ -876,7 +902,7 @@ fn drain_step(e: &mut Effect, ctx: &mut Ctx) {
     if let (Some(src), Some(tgt)) = (actor_of(ctx, e.owner).filter(|a| a.live), actor_of(ctx, e.target).filter(|a| a.live)) {
         drain_move(e, ctx, &src, &tgt);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn drain_move(e: &Effect, ctx: &mut Ctx, src: &Actor, tgt: &Actor) {
@@ -979,7 +1005,7 @@ fn alice_buff_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 3 || e.sub_type == 4 {
         alice_debuff_move(e, ctx);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// SubTypes 0-2: the spinning ring over the target (ZzzEffect.cpp:9268-9388).
@@ -1061,7 +1087,10 @@ fn alice_debuff_move(e: &mut Effect, ctx: &mut Ctx) {
         return;
     }
     let bone = ctx.rand() % num_bones;
-    // TODO(original): skipped when `pModel->Bones[iBone].Dummy` (not known here).
+    // `if (!pModel->Bones[iBone].Dummy)` (only the first bone is tested).
+    if a.is_dummy_bone(bone as usize) {
+        return;
+    }
     let mut p = a.bone_world(bone as usize, Vec3::ZERO);
     if e.sub_type == 3 {
         ctx.create_particle(BITMAP_LIGHT + 2, p, e.angle, e.light, 6, e.scale, None);
@@ -1074,17 +1103,17 @@ fn alice_debuff_move(e: &mut Effect, ctx: &mut Ctx) {
     }
 }
 
-/// RenderEffects 18708 (only SubTypes 0-2) + Draw_RenderObject (ZzzObject.cpp:612):
+/// RenderEffects 18708 (only SubTypes 0-2) + Draw_RenderObject (ZzzObject.cpp:612-621):
 /// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh 0, BlendMeshLight, U, V)`
-/// (`RENDER_DARK` for SubType 1).
-/// TODO(original): SubType 1 is subtractive (RENDER_DARK → `EnableAlphaBlendMinus` on the blend
-/// mesh), drawn additive here; meshes other than mesh 0 are drawn normally instead of bright.
+/// (`RENDER_TEXTURE|RENDER_DARK`, subtractive, for SubType 1).
 fn alice_buff_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if !(0..=2).contains(&e.sub_type) {
         return;
     }
     let Some(mut m) = model(e) else { return };
     m.blend_mesh = 0;
+    m.hidden_mesh = -1;
+    m.render_flags = if e.sub_type == 1 { RENDER_TEXTURE | RENDER_DARK } else { RENDER_TEXTURE | RENDER_BRIGHT };
     out.models.push(m);
 }
 
@@ -1161,7 +1190,7 @@ fn shock_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => shock_burn(e, ctx),
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// SubType 0: the red orb falls from above the caster (ZzzEffect.cpp:9439-9501).
@@ -1293,7 +1322,7 @@ fn swell_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time - 1.0 <= 20.0 {
         e.blend_mesh_light *= 0.86;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn swell_move(e: &mut Effect, ctx: &mut Ctx, a: &Actor) {
@@ -1372,7 +1401,7 @@ fn swell_buff_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.life_time = 999.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18853: a pulsing purple light on every bone of the owner.

@@ -2,7 +2,32 @@
 
 /// (id, folder under Data/, .bmd file, folder of its textures under Data/).
 pub const MODELS: &[(i32, &str, &str, &str)] = &[
+    (164, "Logo", "Logo05.bmd", "Logo"), // MODEL_LOGO+4 (MuMain ZzzOpenData.cpp:1676)
+    (168, "Logo", "NewFace01.bmd", "Logo"), // MODEL_FACE (MuMain ZzzOpenData.cpp:1679)
+    (169, "Logo", "NewFace02.bmd", "Logo"), // MODEL_FACE+1 (MuMain ZzzOpenData.cpp:1679)
+    (170, "Logo", "NewFace03.bmd", "Logo"), // MODEL_FACE+2 (MuMain ZzzOpenData.cpp:1679)
+    (171, "Logo", "NewFace04.bmd", "Logo"), // MODEL_FACE+3 (MuMain ZzzOpenData.cpp:1679)
+    (172, "Logo", "NewFace05.bmd", "Logo"), // MODEL_FACE+4 (MuMain ZzzOpenData.cpp:1679)
+    (173, "Logo", "NewFace06.bmd", "Logo"), // MODEL_FACE+5 (MuMain ZzzOpenData.cpp:1679)
+    (174, "Logo", "NewFace07.bmd", "Logo"), // MODEL_FACE+6 (MuMain ZzzOpenData.cpp:1679)
     (194, "Skill", "youngza.bmd", "Skill"), // MODEL_GM_CHARACTER
+    (195, "Skill", "xmassanta.bmd", "Skill"), // MODEL_XMAS_EVENT_CHA_SSANTA (Event.cpp:42)
+    (196, "Skill", "xmassnowman.bmd", "Skill"), // MODEL_XMAS_EVENT_CHA_SNOWMAN (Event.cpp:45)
+    (197, "Skill", "xmassaum.bmd", "Skill"), // MODEL_XMAS_EVENT_CHA_DEER (Event.cpp:48)
+    (198, "Skill", "santa.bmd", "Skill"), // MODEL_XMAS_EVENT_CHANGE_GIRL (Event.cpp:51)
+    (199, "Skill", "ring.bmd", "Skill"), // MODEL_XMAS_EVENT_EARRING (Event.cpp:54)
+    (200, "Skill", "xmaseicehart.bmd", "Skill"), // MODEL_XMAS_EVENT_ICEHEART (Event.cpp:57)
+    (201, "Skill", "xmasebox.bmd", "Skill"), // MODEL_XMAS_EVENT_BOX (Event.cpp:60)
+    (202, "Skill", "xmasecandy.bmd", "Skill"), // MODEL_XMAS_EVENT_CANDY (Event.cpp:63)
+    (203, "Skill", "xmasetree.bmd", "Skill"), // MODEL_XMAS_EVENT_TREE (Event.cpp:66)
+    (204, "Skill", "xmaseyangbal.bmd", "Skill"), // MODEL_XMAS_EVENT_SOCKS (Event.cpp:69)
+    (205, "Monster", "sulbeksulki.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_BEKSULKI (Event.cpp:224)
+    (206, "Monster", "sulcandy.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_CANDY (Event.cpp:227)
+    (207, "Monster", "sulgreengochu.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_HOTPEPPER_GREEN (Event.cpp:233)
+    (208, "Monster", "sulredgochu.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_HOTPEPPER_RED (Event.cpp:236)
+    (209, "Monster", "sulpeg.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_PIG (Event.cpp:239)
+    (210, "Monster", "sulyutnulre.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_YUT (Event.cpp:242)
+    (211, "Monster", "sulgold.bmd", "Monster"), // MODEL_NEWYEARSDAY_EVENT_MONEY (Event.cpp:230)
     (212, "Effect", "chusukgam.bmd", "Effect"), // MODEL_MOONHARVEST_GAM
     (213, "Effect", "chusukseung1.bmd", "Effect"), // MODEL_MOONHARVEST_SONGPUEN1
     (214, "Effect", "chusukseung2.bmd", "Effect"), // MODEL_MOONHARVEST_SONGPUEN2
@@ -19,6 +44,8 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (230, "Skill", "Poison01.bmd", "Skill"), // MODEL_POISON
     (232, "Skill", "HellGate.bmd", "Skill"), // MODEL_WARCRAFT
     (233, "Skill", "Rider01.bmd", "Skill"), // MODEL_UNICON
+    (235, "Skill", "Stone01.bmd", "Skill"), // MODEL_STONE1 (ZzzOpenData.cpp:3980)
+    (236, "Skill", "Stone02.bmd", "Skill"), // MODEL_STONE1+1 (ZzzOpenData.cpp:3980)
     (237, "Skill", "Ice02.bmd", "Skill"), // MODEL_ICE_SMALL
     (238, "Skill", "Circle01.bmd", "Skill"), // MODEL_CIRCLE
     (239, "Skill", "Circle02.bmd", "Skill"), // MODEL_CIRCLE_LIGHT
@@ -26,6 +53,9 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (241, "Skill", "Magic02.bmd", "Skill"), // MODEL_MAGIC2
     (242, "Skill", "Storm01.bmd", "Skill"), // MODEL_STORM
     (243, "Skill", "Laser01.bmd", "Skill"), // MODEL_LASER
+    (244, "Skill", "Skeleton01.bmd", "Skill"), // MODEL_SKELETON1 (ZzzOpenData.cpp:3989)
+    (245, "Skill", "Skeleton02.bmd", "Skill"), // MODEL_SKELETON1+1 (ZzzOpenData.cpp:3989)
+    (246, "Skill", "Skeleton03.bmd", "Skill"), // MODEL_SKELETON1+2 (ZzzOpenData.cpp:3989)
     (247, "Skill", "Skeleton03.bmd", "Skill"), // MODEL_SKELETON_PCBANG
     (248, "Skill", "Jack.bmd", "Skill"), // MODEL_HALLOWEEN
     (250, "Skill", "hcandyblue.bmd", "Skill"), // MODEL_HALLOWEEN_CANDY_BLUE
@@ -38,6 +68,11 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (257, "Skill", "illusionist.bmd", "Skill"), // MODEL_CURSEDTEMPLE_ILLUSION_PLAYER
     (258, "Skill", "woositone.bmd", "Skill"), // MODEL_WOOSISTONE
     (259, "Skill", "Saw01.bmd", "Skill"), // MODEL_SAW
+    (260, "Skill", "Bone01.bmd", "Skill"), // MODEL_BONE1 (ZzzOpenData.cpp:4017)
+    (261, "Skill", "Bone02.bmd", "Skill"), // MODEL_BONE1+1 (ZzzOpenData.cpp:4017)
+    (262, "Skill", "Snow01.bmd", "Skill"), // MODEL_SNOW1 (ZzzOpenData.cpp:4020)
+    (263, "Skill", "Snow02.bmd", "Skill"), // MODEL_SNOW1+1 (ZzzOpenData.cpp:4020)
+    (264, "Skill", "Snow03.bmd", "Skill"), // MODEL_SNOW1+2 (ZzzOpenData.cpp:4020)
     (266, "Skill", "Arrow01.bmd", "Item/Bow"), // MODEL_ARROW
     (267, "Skill", "ArrowSteel01.bmd", "Skill"), // MODEL_ARROW_STEEL
     (268, "Skill", "ArrowThunder01.bmd", "Skill"), // MODEL_ARROW_THUNDER
@@ -48,6 +83,8 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (273, "Skill", "ArrowBomb01.bmd", "Skill"), // MODEL_ARROW_BOMB
     (274, "Skill", "ArrowWing01.bmd", "Skill"), // MODEL_ARROW_WING
     (275, "Skill", "Protect01.bmd", "Skill"), // MODEL_PROTECT
+    (276, "Skill", "BigStone01.bmd", "Skill"), // MODEL_BIG_STONE1 (ZzzOpenData.cpp:4109)
+    (277, "Skill", "BigStone02.bmd", "Skill"), // MODEL_BIG_STONE1+1 (ZzzOpenData.cpp:4109)
     (283, "Skill", "MagicCircle01.bmd", "Skill"), // MODEL_MAGIC_CIRCLE1
     (288, "Skill", "Ball01.bmd", "Skill"), // MODEL_BALL
     (292, "Skill", "Blast01.bmd", "Skill"), // MODEL_SKILL_BLAST
@@ -91,6 +128,7 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (333, "Skill", "seamanFX.bmd", "Skill"), // MODEL_WATER_WAVE
     (334, "Skill", "Skull.bmd", "Skill"), // MODEL_SKULL
     (335, "Skill", "LaceArrow.bmd", "Item"), // MODEL_LACEARROW
+    (348, "Skill", "ManyFlag.bmd", "Skill"), // MODEL_MANY_FLAG (ZzzOpenData.cpp:4149)
     (349, "Skill", "MuSign.bmd", "Skill"), // MODEL_WEBZEN_MARK
     (350, "Skill", "FlyBigStone1.bmd", "Npc"), // MODEL_FLY_BIG_STONE1
     (351, "Skill", "FlyBigStone2.bmd", "Skill"), // MODEL_FLY_BIG_STONE2
@@ -163,6 +201,12 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (449, "Skill", "nell_nifegrund01.bmd", "Skill"), // MODEL_SUMMONER_SUMMON_NEIL_GROUND1
     (450, "Skill", "nell_nifegrund02.bmd", "Skill"), // MODEL_SUMMONER_SUMMON_NEIL_GROUND2
     (451, "Skill", "nell_nifegrund03.bmd", "Skill"), // MODEL_SUMMONER_SUMMON_NEIL_GROUND3
+    (479, "Monster", "icegiantpart_1.bmd", "Monster"), // MODEL_ICE_GIANT_PART1 (ZzzOpenData.cpp:2397, with MODEL_MONSTER01+147)
+    (480, "Monster", "icegiantpart_2.bmd", "Monster"), // MODEL_ICE_GIANT_PART2 (ZzzOpenData.cpp:2399, with MODEL_MONSTER01+147)
+    (481, "Monster", "icegiantpart_3.bmd", "Monster"), // MODEL_ICE_GIANT_PART3 (ZzzOpenData.cpp:2401, with MODEL_MONSTER01+147)
+    (482, "Monster", "icegiantpart_4.bmd", "Monster"), // MODEL_ICE_GIANT_PART4 (ZzzOpenData.cpp:2403, with MODEL_MONSTER01+147)
+    (483, "Monster", "icegiantpart_5.bmd", "Monster"), // MODEL_ICE_GIANT_PART5 (ZzzOpenData.cpp:2405, with MODEL_MONSTER01+147)
+    (484, "Monster", "icegiantpart_6.bmd", "Monster"), // MODEL_ICE_GIANT_PART6 (ZzzOpenData.cpp:2407, with MODEL_MONSTER01+147)
     (486, "Effect", "Sapiatttres.bmd", "Effect"), // MODEL_EFFECT_SAPITRES_ATTACK_1
     (487, "Effect", "Sapiatttres2.bmd", "Effect"), // MODEL_EFFECT_SAPITRES_ATTACK_2
     (489, "Effect/cherryblossom", "Skura_iteam_event.bmd", "Effect/cherryblossom"), // MODEL_EFFECT_SKURA_ITEM
@@ -179,6 +223,11 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (506, "Effect", "FlameStrike.bmd", "Effect"), // MODEL_EFFECT_FLAME_STRIKE
     (509, "Skill", "gamble_arrows01.bmd", "Skill"), // MODEL_ARROW_GAMBLE
     (537, "Item", "panda.bmd", "Item"), // MODEL_PANDA
+    (542, "Monster", "Boss_Karane_sword_left01.bmd", "Monster"), // MODEL_SWORDLEFT01_EMPIREGUARDIAN_BOSS_GAION_ (GMEmpireGuardian4.cpp:95, monster 504)
+    (543, "Monster", "Boss_Karane_sword_left02.bmd", "Monster"), // MODEL_SWORDLEFT02_EMPIREGUARDIAN_BOSS_GAION_ (GMEmpireGuardian4.cpp:96, monster 504)
+    (544, "Monster", "Boss_Karane_sword_right01.bmd", "Monster"), // MODEL_SWORDRIGHT01_EMPIREGUARDIAN_BOSS_GAION_ (GMEmpireGuardian4.cpp:97, monster 504)
+    (545, "Monster", "Boss_Karane_sword_right02.bmd", "Monster"), // MODEL_SWORDRIGHT02_EMPIREGUARDIAN_BOSS_GAION_ (GMEmpireGuardian4.cpp:98, monster 504)
+    (546, "Monster", "Boss_Karane_sword_main01.bmd", "Monster"), // MODEL_SWORDMAIN01_EMPIREGUARDIAN_BOSS_GAION_ (GMEmpireGuardian4.cpp:99, monster 504)
     (549, "Effect", "japan_gold01.bmd", "Effect"), // MODEL_EFFECT_UMBRELLA_GOLD
     (550, "Effect", "slime_chip.bmd", "Effect"), // MODEL_DOPPELGANGER_SLIME_CHIP
     (551, "Effect", "Karanebos_sword_framestrike.bmd", "Effect"), // MODEL_EMPIREGUARDIANBOSS_FRAMESTRIKE
@@ -212,8 +261,60 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (639, "Effect", "phoenix_shot_effect.bmd", "Effect"), // MODEL_PHOENIX_SHOT
     (641, "Effect", "wind_spin02.bmd", "Effect"), // MODEL_WINDSPIN02
     (642, "Effect", "wind_spin03.bmd", "Effect"), // MODEL_WINDSPIN03
+    (1060, "Npc", "FemaleHead01.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_HEAD (ZzzOpenData.cpp:1877, with MODEL_MERCHANT_FEMALE)
+    (1061, "Npc", "FemaleHead02.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_HEAD+1 (ZzzOpenData.cpp:1877, with MODEL_MERCHANT_FEMALE)
+    (1062, "Npc", "FemaleUpper01.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_UPPER (ZzzOpenData.cpp:1878, with MODEL_MERCHANT_FEMALE)
+    (1063, "Npc", "FemaleUpper02.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_UPPER+1 (ZzzOpenData.cpp:1878, with MODEL_MERCHANT_FEMALE)
+    (1064, "Npc", "FemaleLower01.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_LOWER (ZzzOpenData.cpp:1879, with MODEL_MERCHANT_FEMALE)
+    (1065, "Npc", "FemaleLower02.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_LOWER+1 (ZzzOpenData.cpp:1879, with MODEL_MERCHANT_FEMALE)
+    (1068, "Npc", "FemaleBoots01.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_BOOTS (ZzzOpenData.cpp:1880, with MODEL_MERCHANT_FEMALE)
+    (1069, "Npc", "FemaleBoots02.bmd", "Npc"), // MODEL_MERCHANT_FEMALE_BOOTS+1 (ZzzOpenData.cpp:1880, with MODEL_MERCHANT_FEMALE)
+    (1070, "Npc", "ManHead01.bmd", "Npc"), // MODEL_MERCHANT_MAN_HEAD (ZzzOpenData.cpp:1892, with MODEL_MERCHANT_MAN)
+    (1071, "Npc", "ManHead02.bmd", "Npc"), // MODEL_MERCHANT_MAN_HEAD+1 (ZzzOpenData.cpp:1892, with MODEL_MERCHANT_MAN)
+    (1072, "Npc", "ManUpper01.bmd", "Npc"), // MODEL_MERCHANT_MAN_UPPER (ZzzOpenData.cpp:1893, with MODEL_MERCHANT_MAN)
+    (1073, "Npc", "ManUpper02.bmd", "Npc"), // MODEL_MERCHANT_MAN_UPPER+1 (ZzzOpenData.cpp:1893, with MODEL_MERCHANT_MAN)
+    (1074, "Npc", "ManGloves01.bmd", "Npc"), // MODEL_MERCHANT_MAN_GLOVES (ZzzOpenData.cpp:1894, with MODEL_MERCHANT_MAN)
+    (1075, "Npc", "ManGloves02.bmd", "Npc"), // MODEL_MERCHANT_MAN_GLOVES+1 (ZzzOpenData.cpp:1894, with MODEL_MERCHANT_MAN)
+    (1076, "Npc", "ManBoots01.bmd", "Npc"), // MODEL_MERCHANT_MAN_BOOTS (ZzzOpenData.cpp:1895, with MODEL_MERCHANT_MAN)
+    (1077, "Npc", "ManBoots02.bmd", "Npc"), // MODEL_MERCHANT_MAN_BOOTS+1 (ZzzOpenData.cpp:1895, with MODEL_MERCHANT_MAN)
+    (1078, "Npc", "GirlHead01.bmd", "Npc"), // MODEL_MERCHANT_GIRL_HEAD (ZzzOpenData.cpp:1907, with MODEL_MERCHANT_GIRL)
+    (1079, "Npc", "GirlHead02.bmd", "Npc"), // MODEL_MERCHANT_GIRL_HEAD+1 (ZzzOpenData.cpp:1907, with MODEL_MERCHANT_GIRL)
+    (1080, "Npc", "GirlUpper01.bmd", "Npc"), // MODEL_MERCHANT_GIRL_UPPER (ZzzOpenData.cpp:1908, with MODEL_MERCHANT_GIRL)
+    (1081, "Npc", "GirlUpper02.bmd", "Npc"), // MODEL_MERCHANT_GIRL_UPPER+1 (ZzzOpenData.cpp:1908, with MODEL_MERCHANT_GIRL)
+    (1082, "Npc", "GirlLower01.bmd", "Npc"), // MODEL_MERCHANT_GIRL_LOWER (ZzzOpenData.cpp:1909, with MODEL_MERCHANT_GIRL)
+    (1083, "Npc", "GirlLower02.bmd", "Npc"), // MODEL_MERCHANT_GIRL_LOWER+1 (ZzzOpenData.cpp:1909, with MODEL_MERCHANT_GIRL)
+    (1093, "Npc", "box.bmd", "Npc"), // MODEL_BC_BOX (ZzzOpenData.cpp:2055, with MODEL_BC_NPC2)
+    (1142, "Item/xmas", "snowman_die_head_model.bmd", "Item/xmas"), // MODEL_XMAS2008_SNOWMAN_HEAD (ZzzOpenData.cpp:2190, with MODEL_XMAS2008_SNOWMAN)
+    (1143, "Item/xmas", "snowman_die_body.bmd", "Item/xmas"), // MODEL_XMAS2008_SNOWMAN_BODY (ZzzOpenData.cpp:2191, with MODEL_XMAS2008_SNOWMAN)
     (1162, "Player", "Player.bmd", "Player"), // MODEL_PLAYER
+    (1163, "Player", "Shadow01.bmd", "Player"), // MODEL_SHADOW_BODY (MuMain ZzzOpenData.cpp:121)
     (8383, "Item", "hobakhead.bmd", "Item"), // MODEL_PUMPKIN_OF_LUCK
+    (9362, "Player", "HelmElfC01.bmd", "Player"), // MODEL_HELM2 (MuMain ZzzOpenData.cpp:105)
+    (9363, "Player", "HelmElfC02.bmd", "Player"), // MODEL_HELM2+1 (MuMain ZzzOpenData.cpp:105)
+    (9364, "Player", "ArmorElfC01.bmd", "Player"), // MODEL_ARMOR2 (MuMain ZzzOpenData.cpp:106)
+    (9365, "Player", "ArmorElfC02.bmd", "Player"), // MODEL_ARMOR2+1 (MuMain ZzzOpenData.cpp:106)
+    (9366, "Player", "PantElfC01.bmd", "Player"), // MODEL_PANTS2 (MuMain ZzzOpenData.cpp:107)
+    (9367, "Player", "PantElfC02.bmd", "Player"), // MODEL_PANTS2+1 (MuMain ZzzOpenData.cpp:107)
+    (9368, "Player", "GloveElfC01.bmd", "Player"), // MODEL_GLOVES2 (MuMain ZzzOpenData.cpp:108)
+    (9369, "Player", "GloveElfC02.bmd", "Player"), // MODEL_GLOVES2+1 (MuMain ZzzOpenData.cpp:108)
+    (9370, "Player", "BootElfC01.bmd", "Player"), // MODEL_BOOTS2 (MuMain ZzzOpenData.cpp:109)
+    (9371, "Player", "BootElfC02.bmd", "Player"), // MODEL_BOOTS2+1 (MuMain ZzzOpenData.cpp:109)
+    (9372, "Player", "HelmMonk01.bmd", "Player"), // MODEL_HELM_MONK (MuMain ZzzOpenData.cpp:114)
+    (9373, "Player", "HelmMonk02.bmd", "Player"), // MODEL_HELM_MONK+1 (MuMain ZzzOpenData.cpp:114)
+    (9374, "Player", "HelmMonk03.bmd", "Player"), // MODEL_HELM_MONK+2 (MuMain ZzzOpenData.cpp:114)
+    (9375, "Player", "HelmMonk04.bmd", "Player"), // MODEL_HELM_MONK+3 (MuMain ZzzOpenData.cpp:114)
+    (9376, "Player", "ArmorMonk01.bmd", "Player"), // MODEL_ARMOR_MONK (MuMain ZzzOpenData.cpp:115)
+    (9377, "Player", "ArmorMonk02.bmd", "Player"), // MODEL_ARMOR_MONK+1 (MuMain ZzzOpenData.cpp:115)
+    (9378, "Player", "ArmorMonk03.bmd", "Player"), // MODEL_ARMOR_MONK+2 (MuMain ZzzOpenData.cpp:115)
+    (9379, "Player", "ArmorMonk04.bmd", "Player"), // MODEL_ARMOR_MONK+3 (MuMain ZzzOpenData.cpp:115)
+    (9380, "Player", "PantMonk01.bmd", "Player"), // MODEL_PANTS_MONK (MuMain ZzzOpenData.cpp:116)
+    (9381, "Player", "PantMonk02.bmd", "Player"), // MODEL_PANTS_MONK+1 (MuMain ZzzOpenData.cpp:116)
+    (9382, "Player", "PantMonk03.bmd", "Player"), // MODEL_PANTS_MONK+2 (MuMain ZzzOpenData.cpp:116)
+    (9383, "Player", "PantMonk04.bmd", "Player"), // MODEL_PANTS_MONK+3 (MuMain ZzzOpenData.cpp:116)
+    (9384, "Player", "BootMonk01.bmd", "Player"), // MODEL_BOOTS_MONK (MuMain ZzzOpenData.cpp:117)
+    (9385, "Player", "BootMonk02.bmd", "Player"), // MODEL_BOOTS_MONK+1 (MuMain ZzzOpenData.cpp:117)
+    (9386, "Player", "BootMonk03.bmd", "Player"), // MODEL_BOOTS_MONK+2 (MuMain ZzzOpenData.cpp:117)
+    (9387, "Player", "BootMonk04.bmd", "Player"), // MODEL_BOOTS_MONK+3 (MuMain ZzzOpenData.cpp:117)
     (9508, "Item", "Event02.bmd", "Item"), // MODEL_EVENT
     (9509, "Item", "Event03.bmd", "Item"), // MODEL_EVENT+1
     (9512, "Item", "MagicBox02.bmd", "Item"), // MODEL_EVENT+4
@@ -224,10 +325,10 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (9517, "Item", "MagicBox07.bmd", "Item"), // MODEL_EVENT+9
     (9518, "Item", "MagicBox08.bmd", "Item"), // MODEL_EVENT+10
     (9519, "Item", "EventBloodCastle03.bmd", "Item"), // MODEL_EVENT+11
-    (9520, "Item", "QuestItem3RD.bmd", "Item"), // MODEL_EVENT+12
+    (9520, "Item", "QuestItem3RD00.bmd", "Item"), // MODEL_EVENT+12
     (9521, "Item", "QuestItem3RD01.bmd", "Item"), // MODEL_EVENT+13
-    (9522, "Item", "RingOfLordEvent.bmd", "Item"), // MODEL_EVENT+14
-    (9523, "Item", "MagicRing.bmd", "Item"), // MODEL_EVENT+15
+    (9522, "Item", "RingOfLordEvent00.bmd", "Item"), // MODEL_EVENT+14
+    (9523, "Item", "MagicRing00.bmd", "Item"), // MODEL_EVENT+15
     (9524, "Item", "DarkLordSleeve.bmd", "Item"), // MODEL_EVENT+16
     (9526, "Item", "LifeStoneItem.bmd", "Monster"), // MODEL_EVENT+18
     (9529, "Item", "p03box.bmd", "Item"), // MODEL_EVENT+21
@@ -241,4 +342,363 @@ pub const MODELS: &[(i32, &str, &str, &str)] = &[
     (9616, "Player", "MaskHelmMale07.bmd", "Player"), // MODEL_MASK_HELM+6
     (9618, "Player", "MaskHelmMale09.bmd", "Player"), // MODEL_MASK_HELM+8
     (9619, "Player", "MaskHelmMale10.bmd", "Player"), // MODEL_MASK_HELM+9
+];
+
+/// Models Main 5.2 loads when a map is entered (`CMapManager::Load`, MapManager.cpp:42):
+/// (WorldActive with Lorencia = 0, id, folder under Data/, .bmd file, folder of its textures
+/// under Data/). Only loads that MODELS lacks or that replace its file on that map; the map's
+/// numbered objects (`Object%d`, below MAX_WORLD_OBJECTS) are not listed.
+pub const MAP_MODELS: &[(i32, i32, &str, &str, &str)] = &[
+    (0, 175, "Object1", "Bird01.bmd", "Object1"), // MODEL_BIRD01, MapManager.cpp:52
+    (0, 180, "Object1", "Fish01.bmd", "Object1"), // MODEL_FISH01, MapManager.cpp:54
+    (1, 177, "Object2", "Bat01.bmd", "Object2"), // MODEL_BAT01, MapManager.cpp:61
+    (1, 178, "Object2", "Rat01.bmd", "Object2"), // MODEL_RAT01, MapManager.cpp:63
+    (1, 265, "Object2", "DungeonStone01.bmd", "Object2"), // MODEL_DUNGEON_STONE01, MapManager.cpp:59
+    (2, 373, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP, MapManager.cpp:81
+    (2, 374, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP2, MapManager.cpp:82
+    (2, 375, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP3, MapManager.cpp:83
+    (2, 1103, "Npc", "obj_donkey.bmd", "Npc"), // MODEL_NPC_SERBIS_DONKEY, MapManager.cpp:69
+    (2, 1104, "Npc", "obj_flag.bmd", "Npc"), // MODEL_NPC_SERBIS_FLAG, MapManager.cpp:71
+    (3, 176, "Object1", "Butterfly01.bmd", "Object1"), // MODEL_BUTTERFLY01, MapManager.cpp:95
+    (3, 373, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP, MapManager.cpp:97
+    (3, 374, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP2, MapManager.cpp:98
+    (3, 375, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP3, MapManager.cpp:99
+    (4, 177, "Object2", "Bat01.bmd", "Object2"), // MODEL_BAT01, MapManager.cpp:61
+    (4, 178, "Object2", "Rat01.bmd", "Object2"), // MODEL_RAT01, MapManager.cpp:63
+    (4, 265, "Object2", "DungeonStone01.bmd", "Object2"), // MODEL_DUNGEON_STONE01, MapManager.cpp:59
+    (5, 278, "Object6", "Meteo01.bmd", "Object6"), // MODEL_BIG_METEO1, MapManager.cpp:113
+    (5, 279, "Object6", "Meteo02.bmd", "Object6"), // MODEL_BIG_METEO1+1, MapManager.cpp:113
+    (5, 280, "Object6", "Meteo03.bmd", "Object6"), // MODEL_BIG_METEO1+2, MapManager.cpp:113
+    (5, 281, "Object6", "Meteo04.bmd", "Object6"), // MODEL_BIG_METEO1+3, MapManager.cpp:113
+    (5, 282, "Object6", "Meteo05.bmd", "Object6"), // MODEL_BIG_METEO1+4, MapManager.cpp:113
+    (5, 286, "Object6", "BossHead01.bmd", "Object6"), // MODEL_BOSS_HEAD, MapManager.cpp:115
+    (5, 287, "Object6", "Princess01.bmd", "Object6"), // MODEL_PRINCESS, MapManager.cpp:116
+    (6, 179, "Object7", "Bug01.bmd", "Object7"), // MODEL_BUG01, MapManager.cpp:121
+    (7, 181, "Object8", "Fish02.bmd", "Object8"), // MODEL_FISH01+1, MapManager.cpp:128
+    (7, 182, "Object8", "Fish03.bmd", "Object8"), // MODEL_FISH01+2, MapManager.cpp:128
+    (7, 183, "Object8", "Fish04.bmd", "Object8"), // MODEL_FISH01+3, MapManager.cpp:128
+    (7, 184, "Object8", "Fish05.bmd", "Object8"), // MODEL_FISH01+4, MapManager.cpp:128
+    (7, 185, "Object8", "Fish06.bmd", "Object8"), // MODEL_FISH01+5, MapManager.cpp:128
+    (7, 186, "Object8", "Fish07.bmd", "Object8"), // MODEL_FISH01+6, MapManager.cpp:128
+    (7, 187, "Object8", "Fish08.bmd", "Object8"), // MODEL_FISH01+7, MapManager.cpp:128
+    (7, 188, "Object8", "Fish09.bmd", "Object8"), // MODEL_FISH01+8, MapManager.cpp:128
+    (8, 180, "Object9", "Bug02.bmd", "Object9"), // MODEL_BUG01+1, MapManager.cpp:153
+    (10, 189, "Object11", "cloud.bmd", "Object11"), // MODEL_CLOUD, MapManager.cpp:158
+    (11, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (12, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (13, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (14, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (15, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (16, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (17, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (18, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (19, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (20, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (21, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (22, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (23, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (24, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (24, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (24, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (24, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (24, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (24, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (24, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (24, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (24, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (24, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (24, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (25, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (25, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (25, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (25, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (25, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (25, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (25, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (25, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (25, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (25, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (25, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (26, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (26, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (26, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (26, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (26, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (26, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (26, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (26, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (26, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (26, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (26, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (27, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (27, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (27, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (27, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (27, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (27, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (27, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (27, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (27, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (27, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (27, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (28, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (28, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (28, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (28, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (28, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (28, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (28, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (28, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (28, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (28, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (28, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (29, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (29, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (29, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (29, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (29, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (29, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (29, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (29, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (29, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (29, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (29, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (31, 176, "Object1", "Butterfly01.bmd", "Object1"), // MODEL_BUTTERFLY01, MapManager.cpp:293
+    (33, 176, "Object1", "Butterfly01.bmd", "Object1"), // MODEL_BUTTERFLY01, MapManager.cpp:335
+    (33, 180, "Object9", "Bug02.bmd", "Object9"), // MODEL_BUG01+1, MapManager.cpp:339
+    (33, 372, "Object34", "tree_eff.bmd", "Object34"), // MODEL_TREE_ATTACK, MapManager.cpp:337
+    (34, 284, "Monster", "arrowstusk.bmd", "Monster"), // MODEL_ARROW_TANKER, MapManager.cpp:192
+    (34, 285, "Monster", "arrowstusk.bmd", "Monster"), // MODEL_ARROW_TANKER_HIT, MapManager.cpp:194
+    (34, 382, "Object35", "scorpion.bmd", "Object35"), // MODEL_SCOLPION, MapManager.cpp:185
+    (36, 336, "Monster", "cd71a.bmd", "Monster"), // MODEL_CUNDUN_PART1, MapManager.cpp:993
+    (36, 337, "Monster", "cd71b.bmd", "Monster"), // MODEL_CUNDUN_PART2, MapManager.cpp:995
+    (36, 338, "Monster", "cd71c.bmd", "Monster"), // MODEL_CUNDUN_PART3, MapManager.cpp:997
+    (36, 339, "Monster", "cd71d.bmd", "Monster"), // MODEL_CUNDUN_PART4, MapManager.cpp:999
+    (36, 340, "Monster", "cd71e.bmd", "Monster"), // MODEL_CUNDUN_PART5, MapManager.cpp:1001
+    (36, 341, "Monster", "cd71f.bmd", "Monster"), // MODEL_CUNDUN_PART6, MapManager.cpp:1003
+    (36, 342, "Monster", "cd71g.bmd", "Monster"), // MODEL_CUNDUN_PART7, MapManager.cpp:1005
+    (36, 343, "Monster", "cd71h.bmd", "Monster"), // MODEL_CUNDUN_PART8, MapManager.cpp:1007
+    (36, 344, "Skill", "dragonhead.bmd", "Skill"), // MODEL_CUNDUN_DRAGON_HEAD, MapManager.cpp:1009
+    (36, 345, "Skill", "phoenix.bmd", "Skill"), // MODEL_CUNDUN_PHOENIX, MapManager.cpp:1011
+    (36, 346, "Monster", "cundun_gone.bmd", "Monster"), // MODEL_CUNDUN_GHOST, MapManager.cpp:1013
+    (37, 176, "Object1", "Butterfly01.bmd", "Object1"), // MODEL_BUTTERFLY01, MapManager.cpp:383
+    (38, 404, "SKill", "boswind.bmd", "SKill"), // MODEL_STORM2, MapManager.cpp:435
+    (38, 406, "Skill", "mayatonedo.bmd", "Skill"), // MODEL_STORM3, MapManager.cpp:437
+    (38, 1112, "Npc", "c_mon.bmd", "Npc"), // MODEL_TRAP_CANON, GM_Kanturu_2nd.cpp:1387
+    (39, 404, "SKill", "boswind.bmd", "SKill"), // MODEL_STORM2, MapManager.cpp:476
+    (39, 406, "Skill", "mayatonedo.bmd", "Skill"), // MODEL_STORM3, MapManager.cpp:478
+    (39, 407, "Skill", "arrowsre05.bmd", "Skill"), // MODEL_MAYASTAR, MapManager.cpp:480
+    (39, 408, "Skill", "mayastone01.bmd", "Skill"), // MODEL_MAYASTONE1, MapManager.cpp:482
+    (39, 409, "Skill", "mayastone02.bmd", "Skill"), // MODEL_MAYASTONE2, MapManager.cpp:484
+    (39, 410, "Skill", "mayastone03.bmd", "Skill"), // MODEL_MAYASTONE3, MapManager.cpp:486
+    (39, 411, "Skill", "mayastone04.bmd", "Skill"), // MODEL_MAYASTONE4, MapManager.cpp:488
+    (39, 412, "Skill", "mayastone05.bmd", "Skill"), // MODEL_MAYASTONE5, MapManager.cpp:490
+    (39, 413, "Skill", "mayastonebluefire.bmd", "Skill"), // MODEL_MAYASTONEFIRE, MapManager.cpp:492
+    (39, 414, "Skill", "hendlight02.bmd", "Skill"), // MODEL_MAYAHANDSKILL, MapManager.cpp:494
+    (45, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (46, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (47, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (48, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (49, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (50, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:534
+    (51, 192, "Object52", "sos3bi01.bmd", "Object52"), // MODEL_EAGLE, MapManager.cpp:617
+    (51, 193, "Object52", "typhoonall.bmd", "Object52"), // MODEL_MAP_TORNADO, MapManager.cpp:621
+    (51, 426, "Monster", "totemhead.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART1, MapManager.cpp:624
+    (51, 427, "Monster", "totembody.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART2, MapManager.cpp:626
+    (51, 428, "Monster", "totemleft.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART3, MapManager.cpp:628
+    (51, 429, "Monster", "totemright.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART4, MapManager.cpp:630
+    (51, 430, "Monster", "totemleg.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART5, MapManager.cpp:632
+    (51, 431, "Monster", "totemleg2.bmd", "Monster"), // MODEL_TOTEMGOLEM_PART6, MapManager.cpp:634
+    (52, 190, "Object12", "Crow01.bmd", "Object12"), // MODEL_CROW, MapManager.cpp:173
+    (53, 1089, "Player", "Angel.bmd", "Npc"), // MODEL_ANGEL, MapManager.cpp:980
+    (55, 182, "Object56", "Dragon.bmd", "Object56"), // MODEL_DRAGON, MapManager.cpp:903
+    (56, 452, "Monster", "shadow_pawn_7_ankle_left.bmd", "Monster"), // MODEL_SHADOW_PAWN_ANKLE_LEFT, MapManager.cpp:676
+    (56, 453, "Monster", "shadow_pawn_7_ankle_right.bmd", "Monster"), // MODEL_SHADOW_PAWN_ANKLE_RIGHT, MapManager.cpp:678
+    (56, 454, "Monster", "shadow_pawn_7_belt.bmd", "Monster"), // MODEL_SHADOW_PAWN_BELT, MapManager.cpp:680
+    (56, 455, "Monster", "shadow_pawn_7_chest.bmd", "Monster"), // MODEL_SHADOW_PAWN_CHEST, MapManager.cpp:682
+    (56, 456, "Monster", "shadow_pawn_7_helmet.bmd", "Monster"), // MODEL_SHADOW_PAWN_HELMET, MapManager.cpp:684
+    (56, 457, "Monster", "shadow_pawn_7_knee_left.bmd", "Monster"), // MODEL_SHADOW_PAWN_KNEE_LEFT, MapManager.cpp:686
+    (56, 458, "Monster", "shadow_pawn_7_knee_right.bmd", "Monster"), // MODEL_SHADOW_PAWN_KNEE_RIGHT, MapManager.cpp:688
+    (56, 459, "Monster", "shadow_pawn_7_wrist_left.bmd", "Monster"), // MODEL_SHADOW_PAWN_WRIST_LEFT, MapManager.cpp:690
+    (56, 460, "Monster", "shadow_pawn_7_wrist_right.bmd", "Monster"), // MODEL_SHADOW_PAWN_WRIST_RIGHT, MapManager.cpp:692
+    (56, 461, "Monster", "shadow_knight_7_ankle_left.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_ANKLE_LEFT, MapManager.cpp:694
+    (56, 462, "Monster", "shadow_knight_7_ankle_right.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_ANKLE_RIGHT, MapManager.cpp:696
+    (56, 463, "Monster", "shadow_knight_7_belt.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_BELT, MapManager.cpp:698
+    (56, 464, "Monster", "shadow_knight_7_chest.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_CHEST, MapManager.cpp:700
+    (56, 465, "Monster", "shadow_knight_7_helmet.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_HELMET, MapManager.cpp:702
+    (56, 466, "Monster", "shadow_knight_7_knee_left.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_KNEE_LEFT, MapManager.cpp:704
+    (56, 467, "Monster", "shadow_knight_7_knee_right.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_KNEE_RIGHT, MapManager.cpp:706
+    (56, 468, "Monster", "shadow_knight_7_wrist_left.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_WRIST_LEFT, MapManager.cpp:708
+    (56, 469, "Monster", "shadow_knight_7_wrist_right.bmd", "Monster"), // MODEL_SHADOW_KNIGHT_WRIST_RIGHT, MapManager.cpp:710
+    (56, 470, "Monster", "shadow_rock_7_ankle_left.bmd", "Monster"), // MODEL_SHADOW_ROOK_ANKLE_LEFT, MapManager.cpp:712
+    (56, 471, "Monster", "shadow_rock_7_ankle_right.bmd", "Monster"), // MODEL_SHADOW_ROOK_ANKLE_RIGHT, MapManager.cpp:714
+    (56, 472, "Monster", "shadow_rock_7_belt.bmd", "Monster"), // MODEL_SHADOW_ROOK_BELT, MapManager.cpp:716
+    (56, 473, "Monster", "shadow_rock_7_chest.bmd", "Monster"), // MODEL_SHADOW_ROOK_CHEST, MapManager.cpp:718
+    (56, 474, "Monster", "shadow_rock_7_helmet.bmd", "Monster"), // MODEL_SHADOW_ROOK_HELMET, MapManager.cpp:720
+    (56, 475, "Monster", "shadow_rock_7_knee_left.bmd", "Monster"), // MODEL_SHADOW_ROOK_KNEE_LEFT, MapManager.cpp:722
+    (56, 476, "Monster", "shadow_rock_7_knee_right.bmd", "Monster"), // MODEL_SHADOW_ROOK_KNEE_RIGHT, MapManager.cpp:724
+    (56, 477, "Monster", "shadow_rock_7_wrist_left.bmd", "Monster"), // MODEL_SHADOW_ROOK_WRIST_LEFT, MapManager.cpp:726
+    (56, 478, "Monster", "shadow_rock_7_wrist_right.bmd", "Monster"), // MODEL_SHADOW_ROOK_WRIST_RIGHT, MapManager.cpp:728
+    (56, 565, "Monster", "ex01shadow_rock_7_ankle_left.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_ANKLE_LEFT, MapManager.cpp:730
+    (56, 566, "Monster", "ex01shadow_rock_7_ankle_right.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_ANKLE_RIGHT, MapManager.cpp:732
+    (56, 567, "Monster", "ex01shadow_rock_7_belt.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_BELT, MapManager.cpp:734
+    (56, 568, "Monster", "ex01shadow_rock_7_chest.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_CHEST, MapManager.cpp:736
+    (56, 569, "Monster", "ex01shadow_rock_7_helmet.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_HELMET, MapManager.cpp:738
+    (56, 570, "Monster", "ex01shadow_rock_7_knee_left.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_KNEE_LEFT, MapManager.cpp:740
+    (56, 571, "Monster", "ex01shadow_rock_7_knee_right.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_KNEE_RIGHT, MapManager.cpp:742
+    (56, 572, "Monster", "ex01shadow_rock_7_wrist_left.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_WRIST_LEFT, MapManager.cpp:744
+    (56, 573, "Monster", "ex01shadow_rock_7_wrist_right.bmd", "Monster"), // MODEL_EX01_SHADOW_MASTER_WRIST_RIGHT, MapManager.cpp:746
+    (57, 373, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP, MapManager.cpp:763
+    (57, 374, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP2, MapManager.cpp:764
+    (57, 375, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP3, MapManager.cpp:765
+    (57, 376, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP4, MapManager.cpp:769
+    (57, 377, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP5, MapManager.cpp:770
+    (57, 378, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP6, MapManager.cpp:771
+    (57, 404, "SKill", "boswind.bmd", "SKill"), // MODEL_STORM2, MapManager.cpp:777
+    (57, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:761
+    (58, 373, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP, MapManager.cpp:763
+    (58, 374, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP2, MapManager.cpp:764
+    (58, 375, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP3, MapManager.cpp:765
+    (58, 376, "Npc", "warp01.bmd", "Npc"), // MODEL_WARP4, MapManager.cpp:769
+    (58, 377, "Npc", "warp02.bmd", "Npc"), // MODEL_WARP5, MapManager.cpp:770
+    (58, 378, "Npc", "warp03.bmd", "Npc"), // MODEL_WARP6, MapManager.cpp:771
+    (58, 404, "SKill", "boswind.bmd", "SKill"), // MODEL_STORM2, MapManager.cpp:777
+    (58, 420, "Object47", "Stoneeffec.bmd", "Object47"), // MODEL_FALL_STONE_EFFECT, MapManager.cpp:761
+    (63, 510, "Monster", "pk_manhead_green.bmd", "Monster"), // MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_HEAD, MapManager.cpp:656
+    (63, 511, "Monster", "pk_manhead_red.bmd", "Monster"), // MODEL_PKFIELD_ASSASSIN_EFFECT_RED_HEAD, MapManager.cpp:659
+    (63, 512, "Monster", "assassin_dieg.bmd", "Monster"), // MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_BODY, MapManager.cpp:662
+    (63, 513, "Monster", "assassin_dier.bmd", "Monster"), // MODEL_PKFIELD_ASSASSIN_EFFECT_RED_BODY, MapManager.cpp:665
+    (67, 181, "Object8", "Fish02.bmd", "Object8"), // MODEL_FISH01+1, MapManager.cpp:128
+    (67, 182, "Object8", "Fish03.bmd", "Object8"), // MODEL_FISH01+2, MapManager.cpp:128
+    (67, 183, "Object8", "Fish04.bmd", "Object8"), // MODEL_FISH01+3, MapManager.cpp:128
+    (67, 184, "Object8", "Fish05.bmd", "Object8"), // MODEL_FISH01+4, MapManager.cpp:128
+    (67, 185, "Object8", "Fish06.bmd", "Object8"), // MODEL_FISH01+5, MapManager.cpp:128
+    (67, 186, "Object8", "Fish07.bmd", "Object8"), // MODEL_FISH01+6, MapManager.cpp:128
+    (67, 187, "Object8", "Fish08.bmd", "Object8"), // MODEL_FISH01+7, MapManager.cpp:128
+    (67, 188, "Object8", "Fish09.bmd", "Object8"), // MODEL_FISH01+8, MapManager.cpp:128
+    (68, 176, "Object1", "Butterfly01.bmd", "Object1"), // MODEL_BUTTERFLY01, MapManager.cpp:383
+    (69, 517, "Effect", "choarms_06.bmd", "Effect"), // MODEL_PROJECTILE, MapManager.cpp:817
+    (69, 519, "Effect", "piece01_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE01, MapManager.cpp:819
+    (69, 520, "Effect", "piece01_02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE02, MapManager.cpp:820
+    (69, 521, "Effect", "piece01_03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE03, MapManager.cpp:821
+    (69, 522, "Effect", "piece01_04.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE04, MapManager.cpp:822
+    (69, 523, "Effect", "piece01_05.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE05, MapManager.cpp:823
+    (69, 524, "Effect", "piece01_06.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE06, MapManager.cpp:824
+    (69, 525, "Effect", "piece01_07.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE07, MapManager.cpp:825
+    (69, 526, "Effect", "piece01_08.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE08, MapManager.cpp:826
+    (69, 527, "Effect", "newdoor_break_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE09, MapManager.cpp:827
+    (69, 528, "Effect", "sojghmoon02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE10, MapManager.cpp:845
+    (69, 529, "Effect", "sojghmj01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE11, MapManager.cpp:846
+    (69, 530, "Effect", "sojghmj02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE12, MapManager.cpp:847
+    (69, 531, "Effect", "sojghmj03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE13, MapManager.cpp:848
+    (69, 533, "Effect", "NpcGagoil_Crack01.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE01, MapManager.cpp:837
+    (69, 534, "Effect", "NpcGagoil_Crack02.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE02, MapManager.cpp:838
+    (69, 535, "Effect", "NpcGagoil_Crack03.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE03, MapManager.cpp:839
+    (69, 536, "Effect", "NpcGagoil_Ruin.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE04, MapManager.cpp:840
+    (70, 517, "Effect", "choarms_06.bmd", "Effect"), // MODEL_PROJECTILE, MapManager.cpp:817
+    (70, 519, "Effect", "piece01_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE01, MapManager.cpp:819
+    (70, 520, "Effect", "piece01_02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE02, MapManager.cpp:820
+    (70, 521, "Effect", "piece01_03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE03, MapManager.cpp:821
+    (70, 522, "Effect", "piece01_04.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE04, MapManager.cpp:822
+    (70, 523, "Effect", "piece01_05.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE05, MapManager.cpp:823
+    (70, 524, "Effect", "piece01_06.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE06, MapManager.cpp:824
+    (70, 525, "Effect", "piece01_07.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE07, MapManager.cpp:825
+    (70, 526, "Effect", "piece01_08.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE08, MapManager.cpp:826
+    (70, 527, "Effect", "newdoor_break_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE09, MapManager.cpp:827
+    (70, 528, "Effect", "sojghmoon02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE10, MapManager.cpp:845
+    (70, 529, "Effect", "sojghmj01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE11, MapManager.cpp:846
+    (70, 530, "Effect", "sojghmj02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE12, MapManager.cpp:847
+    (70, 531, "Effect", "sojghmj03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE13, MapManager.cpp:848
+    (70, 533, "Effect", "NpcGagoil_Crack01.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE01, MapManager.cpp:837
+    (70, 534, "Effect", "NpcGagoil_Crack02.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE02, MapManager.cpp:838
+    (70, 535, "Effect", "NpcGagoil_Crack03.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE03, MapManager.cpp:839
+    (70, 536, "Effect", "NpcGagoil_Ruin.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE04, MapManager.cpp:840
+    (71, 517, "Effect", "choarms_06.bmd", "Effect"), // MODEL_PROJECTILE, MapManager.cpp:817
+    (71, 519, "Effect", "piece01_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE01, MapManager.cpp:819
+    (71, 520, "Effect", "piece01_02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE02, MapManager.cpp:820
+    (71, 521, "Effect", "piece01_03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE03, MapManager.cpp:821
+    (71, 522, "Effect", "piece01_04.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE04, MapManager.cpp:822
+    (71, 523, "Effect", "piece01_05.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE05, MapManager.cpp:823
+    (71, 524, "Effect", "piece01_06.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE06, MapManager.cpp:824
+    (71, 525, "Effect", "piece01_07.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE07, MapManager.cpp:825
+    (71, 526, "Effect", "piece01_08.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE08, MapManager.cpp:826
+    (71, 527, "Effect", "newdoor_break_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE09, MapManager.cpp:827
+    (71, 528, "Effect", "sojghmoon02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE10, MapManager.cpp:845
+    (71, 529, "Effect", "sojghmj01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE11, MapManager.cpp:846
+    (71, 530, "Effect", "sojghmj02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE12, MapManager.cpp:847
+    (71, 531, "Effect", "sojghmj03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE13, MapManager.cpp:848
+    (71, 533, "Effect", "NpcGagoil_Crack01.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE01, MapManager.cpp:837
+    (71, 534, "Effect", "NpcGagoil_Crack02.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE02, MapManager.cpp:838
+    (71, 535, "Effect", "NpcGagoil_Crack03.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE03, MapManager.cpp:839
+    (71, 536, "Effect", "NpcGagoil_Ruin.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE04, MapManager.cpp:840
+    (72, 517, "Effect", "choarms_06.bmd", "Effect"), // MODEL_PROJECTILE, MapManager.cpp:817
+    (72, 519, "Effect", "piece01_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE01, MapManager.cpp:819
+    (72, 520, "Effect", "piece01_02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE02, MapManager.cpp:820
+    (72, 521, "Effect", "piece01_03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE03, MapManager.cpp:821
+    (72, 522, "Effect", "piece01_04.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE04, MapManager.cpp:822
+    (72, 523, "Effect", "piece01_05.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE05, MapManager.cpp:823
+    (72, 524, "Effect", "piece01_06.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE06, MapManager.cpp:824
+    (72, 525, "Effect", "piece01_07.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE07, MapManager.cpp:825
+    (72, 526, "Effect", "piece01_08.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE08, MapManager.cpp:826
+    (72, 527, "Effect", "newdoor_break_01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE09, MapManager.cpp:827
+    (72, 528, "Effect", "sojghmoon02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE10, MapManager.cpp:845
+    (72, 529, "Effect", "sojghmj01.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE11, MapManager.cpp:846
+    (72, 530, "Effect", "sojghmj02.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE12, MapManager.cpp:847
+    (72, 531, "Effect", "sojghmj03.bmd", "Effect"), // MODEL_DOOR_CRUSH_EFFECT_PIECE13, MapManager.cpp:848
+    (72, 533, "Effect", "NpcGagoil_Crack01.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE01, MapManager.cpp:837
+    (72, 534, "Effect", "NpcGagoil_Crack02.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE02, MapManager.cpp:838
+    (72, 535, "Effect", "NpcGagoil_Crack03.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE03, MapManager.cpp:839
+    (72, 536, "Effect", "NpcGagoil_Ruin.bmd", "Effect"), // MODEL_STATUE_CRUSH_EFFECT_PIECE04, MapManager.cpp:840
+    (80, 574, "Monster", "condra_7_arm_left.bmd", "Monster"), // MODEL_CONDRA_ARM_L, MapManager.cpp:918
+    (80, 575, "Monster", "condra_7_arm_left_2.bmd", "Monster"), // MODEL_CONDRA_ARM_L2, MapManager.cpp:920
+    (80, 576, "Monster", "condra_7_shoulder_right.bmd", "Monster"), // MODEL_CONDRA_SHOULDER, MapManager.cpp:922
+    (80, 577, "Monster", "condra_7_arm_right.bmd", "Monster"), // MODEL_CONDRA_ARM_R, MapManager.cpp:924
+    (80, 578, "Monster", "condra_7_arm_right_2.bmd", "Monster"), // MODEL_CONDRA_ARM_R2, MapManager.cpp:926
+    (80, 579, "Monster", "condra_7_cone_left.bmd", "Monster"), // MODEL_CONDRA_CONE_L, MapManager.cpp:928
+    (80, 580, "Monster", "condra_7_cone_right.bmd", "Monster"), // MODEL_CONDRA_CONE_R, MapManager.cpp:930
+    (80, 581, "Monster", "condra_7_pelvis.bmd", "Monster"), // MODEL_CONDRA_PELVIS, MapManager.cpp:932
+    (80, 582, "Monster", "condra_7_stomach.bmd", "Monster"), // MODEL_CONDRA_STOMACH, MapManager.cpp:934
+    (80, 583, "Monster", "condra_7_neck.bmd", "Monster"), // MODEL_CONDRA_NECK, MapManager.cpp:936
+    (80, 590, "Monster", "nar_condra_7_arm_left.bmd", "Monster"), // MODEL_NARCONDRA_ARM_L, MapManager.cpp:938
+    (80, 591, "Monster", "nar_condra_7_arm_left_2.bmd", "Monster"), // MODEL_NARCONDRA_ARM_L2, MapManager.cpp:940
+    (80, 592, "Monster", "nar_condra_7_shoulder_left.bmd", "Monster"), // MODEL_NARCONDRA_SHOULDER_L, MapManager.cpp:942
+    (80, 593, "Monster", "nar_condra_7_shoulder_right.bmd", "Monster"), // MODEL_NARCONDRA_SHOULDER_R, MapManager.cpp:944
+    (80, 594, "Monster", "nar_condra_7_arm_right.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R, MapManager.cpp:946
+    (80, 595, "Monster", "nar_condra_7_arm_right_2.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R2, MapManager.cpp:948
+    (80, 596, "Monster", "nar_condra_7_arm_right_3.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R3, MapManager.cpp:950
+    (80, 597, "Monster", "nar_condra_7_cone_1.bmd", "Monster"), // MODEL_NARCONDRA_CONE_1, MapManager.cpp:952
+    (80, 598, "Monster", "nar_condra_7_cone_2.bmd", "Monster"), // MODEL_NARCONDRA_CONE_2, MapManager.cpp:954
+    (80, 599, "Monster", "nar_condra_7_cone_3.bmd", "Monster"), // MODEL_NARCONDRA_CONE_3, MapManager.cpp:956
+    (80, 600, "Monster", "nar_condra_7_cone_4.bmd", "Monster"), // MODEL_NARCONDRA_CONE_4, MapManager.cpp:958
+    (80, 601, "Monster", "nar_condra_7_cone_5.bmd", "Monster"), // MODEL_NARCONDRA_CONE_5, MapManager.cpp:960
+    (80, 602, "Monster", "nar_condra_7_cone_6.bmd", "Monster"), // MODEL_NARCONDRA_CONE_6, MapManager.cpp:962
+    (80, 603, "Monster", "nar_condra_7_pelvis.bmd", "Monster"), // MODEL_NARCONDRA_PELVIS, MapManager.cpp:964
+    (80, 604, "Monster", "nar_condra_7_stomach.bmd", "Monster"), // MODEL_NARCONDRA_STOMACH, MapManager.cpp:966
+    (80, 605, "Monster", "nar_condra_7_neck.bmd", "Monster"), // MODEL_NARCONDRA_NECK, MapManager.cpp:968
+    (81, 574, "Monster", "condra_7_arm_left.bmd", "Monster"), // MODEL_CONDRA_ARM_L, MapManager.cpp:918
+    (81, 575, "Monster", "condra_7_arm_left_2.bmd", "Monster"), // MODEL_CONDRA_ARM_L2, MapManager.cpp:920
+    (81, 576, "Monster", "condra_7_shoulder_right.bmd", "Monster"), // MODEL_CONDRA_SHOULDER, MapManager.cpp:922
+    (81, 577, "Monster", "condra_7_arm_right.bmd", "Monster"), // MODEL_CONDRA_ARM_R, MapManager.cpp:924
+    (81, 578, "Monster", "condra_7_arm_right_2.bmd", "Monster"), // MODEL_CONDRA_ARM_R2, MapManager.cpp:926
+    (81, 579, "Monster", "condra_7_cone_left.bmd", "Monster"), // MODEL_CONDRA_CONE_L, MapManager.cpp:928
+    (81, 580, "Monster", "condra_7_cone_right.bmd", "Monster"), // MODEL_CONDRA_CONE_R, MapManager.cpp:930
+    (81, 581, "Monster", "condra_7_pelvis.bmd", "Monster"), // MODEL_CONDRA_PELVIS, MapManager.cpp:932
+    (81, 582, "Monster", "condra_7_stomach.bmd", "Monster"), // MODEL_CONDRA_STOMACH, MapManager.cpp:934
+    (81, 583, "Monster", "condra_7_neck.bmd", "Monster"), // MODEL_CONDRA_NECK, MapManager.cpp:936
+    (81, 590, "Monster", "nar_condra_7_arm_left.bmd", "Monster"), // MODEL_NARCONDRA_ARM_L, MapManager.cpp:938
+    (81, 591, "Monster", "nar_condra_7_arm_left_2.bmd", "Monster"), // MODEL_NARCONDRA_ARM_L2, MapManager.cpp:940
+    (81, 592, "Monster", "nar_condra_7_shoulder_left.bmd", "Monster"), // MODEL_NARCONDRA_SHOULDER_L, MapManager.cpp:942
+    (81, 593, "Monster", "nar_condra_7_shoulder_right.bmd", "Monster"), // MODEL_NARCONDRA_SHOULDER_R, MapManager.cpp:944
+    (81, 594, "Monster", "nar_condra_7_arm_right.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R, MapManager.cpp:946
+    (81, 595, "Monster", "nar_condra_7_arm_right_2.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R2, MapManager.cpp:948
+    (81, 596, "Monster", "nar_condra_7_arm_right_3.bmd", "Monster"), // MODEL_NARCONDRA_ARM_R3, MapManager.cpp:950
+    (81, 597, "Monster", "nar_condra_7_cone_1.bmd", "Monster"), // MODEL_NARCONDRA_CONE_1, MapManager.cpp:952
+    (81, 598, "Monster", "nar_condra_7_cone_2.bmd", "Monster"), // MODEL_NARCONDRA_CONE_2, MapManager.cpp:954
+    (81, 599, "Monster", "nar_condra_7_cone_3.bmd", "Monster"), // MODEL_NARCONDRA_CONE_3, MapManager.cpp:956
+    (81, 600, "Monster", "nar_condra_7_cone_4.bmd", "Monster"), // MODEL_NARCONDRA_CONE_4, MapManager.cpp:958
+    (81, 601, "Monster", "nar_condra_7_cone_5.bmd", "Monster"), // MODEL_NARCONDRA_CONE_5, MapManager.cpp:960
+    (81, 602, "Monster", "nar_condra_7_cone_6.bmd", "Monster"), // MODEL_NARCONDRA_CONE_6, MapManager.cpp:962
+    (81, 603, "Monster", "nar_condra_7_pelvis.bmd", "Monster"), // MODEL_NARCONDRA_PELVIS, MapManager.cpp:964
+    (81, 604, "Monster", "nar_condra_7_stomach.bmd", "Monster"), // MODEL_NARCONDRA_STOMACH, MapManager.cpp:966
+    (81, 605, "Monster", "nar_condra_7_neck.bmd", "Monster"), // MODEL_NARCONDRA_NECK, MapManager.cpp:968
 ];

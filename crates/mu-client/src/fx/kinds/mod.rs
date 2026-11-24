@@ -4,17 +4,24 @@
 //! Coverage (Main 5.2 with the Rage Fighter code, as MuMain): every `case` type of
 //! `CreateParticle`/`MoveParticles` (98), `CreateJoint`/`MoveJoint` (31) and
 //! `CreateEffect`/`MoveEffect` (447) is registered; `fx::smoke_tests` runs them all.
-//! What remains is inside the kinds, marked `TODO(original)`, and waits for engine systems:
-//! - client-side hits and damage (`CheckClientArrow`, `AttackCharacterRange`), network serials;
-//! - owner state the snapshots lack or cannot write (`Actor` buffs, target index, light, alpha,
-//!   velocity, `Visible`, bone `Dummy` flags), map objects or joints as effect owners;
-//! - bones and mesh vertices of an effect's own model (sparks on a sword's bones, `RenderMeshEffect`);
-//! - `ModelDraw` render modes: chrome/metal, `RENDER_DARK`, texture override, per-mesh light;
-//! - object blurs (`CreateObjectBlur`), water waves (`AddWaterWave`), `StopBuffer`, Castle Siege
-//!   and Kanturu event state, action lengths for `PlayAnimation`;
-//! - `.bmd` files the generated model table does not list (loaded in loops in `MapManager.cpp`,
-//!   `Event.cpp`, `ZzzOpenData.cpp`): those effects run but draw no model yet;
-//! - `MODEL_FENRIR_THUNDER` subtypes 0 and 3 (`objects_kanturu.rs` has only 1 and 2).
+//! Client-side hits (`CheckCharacterRange`, `CheckClientArrow`, `CheckTargetRange`, the range
+//! test of `AttackCharacterRange`), effect models' own bones/vertices/action lengths, the
+//! `RENDER_*` modes and the per-map models are in. What remains is marked in the kinds and waits
+//! for systems outside the effects engine:
+//! - `TODO(combat)`: `SendRequestMagicAttack` (requests are queued in `FxWorld::attack_requests`),
+//!   `CharacterMachine->PacketSerial`, `Hero->CurrentSkill`/`Object.Weapon`; the client does not
+//!   fill `FxWorld::hero_skills` (`CharacterAttribute->Skill[]`) yet;
+//! - data the client does not track yet (the plumbing reads it): buffs, `m_sTargetIndex`,
+//!   `m_bySkillCount`, attack/magic speed, a character owner's `LifeTime`, prior action/frame for
+//!   sub-frame poses, terrain light and the render-level option while drawing;
+//! - writes to characters (`o->Owner->Alpha/Angle/Velocity`, `SetPlayerStop`, shock actions):
+//!   actors are read-only snapshots;
+//! - object blurs on effects (`CreateObjectBlur`/`RemoveObjectBlurs`), water waves and water-surface
+//!   marks (`AddWaterWave`, `RenderWaterTerrain`), `StopBuffer`, positional sounds, Castle Siege and
+//!   Kanturu event state, joints or map objects as effect owners, `RenderPartObjectEdge` bone scale,
+//!   `RENDER_OIL` and `RENDER_DOPPELGANGER` culling;
+//! - `MODEL_BOSS_ATTACK`, `MODEL_BLOOD` and `MODEL_MONSTER01+64`: no `.bmd` is loaded for them in
+//!   either reference.
 
 pub mod common;
 pub mod particles_1;

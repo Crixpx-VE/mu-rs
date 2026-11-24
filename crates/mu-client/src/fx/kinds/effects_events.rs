@@ -20,9 +20,9 @@
 //!   runs at the START of the next `step` (before `Luminosity`), with the state the draw saw.
 //!   `MODEL_MOONHARVEST_MOON`'s `o->m_iAnimation++` (done in `RenderEffects` before its sprites) runs
 //!   at the END of `step`. Sprites created while drawing are pushed directly by the draw function.
-//! - `CreateEffect` called from a `CreateEffect` (`MODEL_HALLOWEEN_EX`) runs the child's code at
-//!   once in the original; the engine defers it to the end of the tick, so the children's `rand()`
-//!   calls come after the parent's loop instead of interleaved.
+//! - `CreateEffect` called from a `CreateEffect` (`MODEL_HALLOWEEN_EX`) runs the child's creation
+//!   code at once, like the original, so each candy's `rand()` calls come right after the
+//!   `rand()%8` that chose it.
 
 use bevy::math::{Vec2, Vec3};
 
@@ -153,7 +153,7 @@ fn halloween_ex_create(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzEffect.cpp:7612: the case only breaks (it dies on its first tick, `LifeTime` is 0).
 fn halloween_ex_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_HALLOWEEN_CANDY_BLUE/ORANGE/YELLOW/RED/HOBAK/STAR ----------------------------------------
@@ -210,7 +210,7 @@ fn candy_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_FIRE, e.position, e.angle, e.light, 5, scale, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS_EVENT_BOX/CANDY/TREE/SOCKS ---------------------------------------------------------
@@ -247,7 +247,7 @@ fn xmas_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 
     e.position += e.direction;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS_EVENT_ICEHEART (Santa transformation) -----------------------------------------------
@@ -269,21 +269,24 @@ fn iceheart_step(e: &mut Effect, ctx: &mut Ctx) {
             e.live = false;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18360 → `RenderObject` → ZzzObject.cpp:1683-1689: `BodyLight` (1, 0.4, 0.4),
-/// `RENDER_TEXTURE|RENDER_BRIGHT` with `StreamMesh = 0` and U = `-(int)WorldTime%2000*0.0005f`.
-/// The bright pass with a scrolling mesh 0 is drawn as mesh 0 being the blend mesh (additive,
-/// light · alpha, with the UV offset); the model has a single mesh.
+/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)` with `StreamMesh = 0` and
+/// U = `-(int)WorldTime%2000*0.0005f`.
+/// `ModelDraw` has no `StreamMesh`: the stream mesh 0 (flat `BodyLight`, additive, offset UVs,
+/// ZzzBMD.cpp:970-986, 1193-1196) is drawn as the blend mesh with `BlendMeshLight` 1, which gives
+/// the same color, blending and UVs (the model's only mesh uses texture 0; `o->BlendMesh` is -1).
 fn iceheart_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if e.alpha < 0.01 {
         return;
     }
     let mut d = ModelDraw::of_effect(e);
     d.light = Vec3::new(1.0, 0.4, 0.4);
+    d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
     d.blend_mesh = 0;
-    d.blend_mesh_light = e.alpha;
+    d.blend_mesh_light = 1.0;
     let u = -(ctx.world_time as i32) % 2000;
     d.blend_mesh_tex_coord = Vec2::new(u as f32 * 0.0005, e.blend_mesh_tex_coord.y);
     out.models.push(d);
@@ -325,40 +328,51 @@ fn snowman_head_step(e: &mut Effect, ctx: &mut Ctx) {
 
         e.position += e.direction;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS2008_SNOWMAN_BODY (the dying snowman's body) -----------------------------------------
 
 /// ZzzEffect.cpp:2573-2586.
-fn snowman_body_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn snowman_body_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 50.0;
     e.scale = 1.3;
     e.velocity = 1.2;
     e.pk_key = -1;
-    // TODO(original): o->Direction = o->Owner->Direction (the snowman's Direction); `Actor` has no
-    // Direction, so it stays (0, 0, 0).
+    // `o->Direction = o->Owner->Direction` (the dying snowman, ZzzObject.cpp:1865); the original
+    // always has an owner.
+    if let Some(a) = ctx.actor(e.owner) {
+        e.direction = a.direction;
+    }
 }
 
-/// ZzzEffect.cpp:11560-11565: `PlayAnimation` of its own model at `Velocity / 5`.
-/// TODO(original): PlayAnimation clamps at the end of a non-looping action (the engine does not
-/// know the action length here). Not in `MODEL_BIRD01..MODEL_SKILL_END`: the tail only moves it.
+/// ZzzEffect.cpp:11560-11565: `PlayAnimation` of its own model at `Velocity / 5` (result unused).
+/// Not in `MODEL_BIRD01..MODEL_SKILL_END`: the tail only moves it.
 fn snowman_body_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    e.animation_frame += e.velocity / 5.0;
-    move_tail(e);
+    let speed = e.velocity / 5.0;
+    let _ = common::play_model_animation(e, ctx, speed);
+    move_tail(e, ctx);
 }
 
-/// ZzzEffect.cpp:18646 → `RenderObject` → ZzzObject.cpp:1899-1905: meshes 0, 2 (and 3, which this
-/// model does not have) normally; mesh 1 as blend mesh with `BlendMeshLight` 0.5.
+/// ZzzEffect.cpp:18646 → `RenderObject` → ZzzObject.cpp:1899-1905: `RenderMesh` 0, 2 and 3 (this
+/// model has no mesh 3: nothing is drawn for it) with the effect's state, then mesh 1 with
+/// `BlendMesh` 1 and `BlendMeshLight` 0.5. The last `RenderMesh` argument is `MeshTexture`, to
+/// which the original passes `o->HiddenMesh` (-1 here: the mesh's own texture).
 fn snowman_body_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.alpha < 0.01 {
         return;
     }
-    let mut d = ModelDraw::of_effect(e);
-    d.blend_mesh = 1;
-    d.blend_mesh_light = 0.5;
-    out.models.push(d);
+    for (mesh, blend_mesh, blend_mesh_light) in [(0, e.blend_mesh, e.blend_mesh_light), (2, e.blend_mesh, e.blend_mesh_light), (3, e.blend_mesh, e.blend_mesh_light), (1, 1, 0.5)] {
+        let mut d = ModelDraw::of_effect(e);
+        d.render_flags = RENDER_TEXTURE;
+        d.mesh = mesh;
+        d.hidden_mesh = -1;
+        d.texture = e.hidden_mesh;
+        d.blend_mesh = blend_mesh;
+        d.blend_mesh_light = blend_mesh_light;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_NEWYEARSDAY_EVENT_BEKSULKI/CANDY/MONEY/HOTPEPPER_GREEN/HOTPEPPER_RED/YUT/PIG ------------
@@ -412,7 +426,7 @@ fn newyear_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 
     e.position += e.direction;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18369 → `RenderObject` → ZzzObject.cpp:1694-1700: `RENDER_TEXTURE`, then a
@@ -421,9 +435,12 @@ fn pig_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if e.alpha < 0.01 {
         return;
     }
-    out.models.push(ModelDraw::of_effect(e));
-    // TODO(original): second pass RENDER_CHROME3|RENDER_BRIGHT (environment-mapped UVs) with
-    // BodyLight (1, 0.4, 0.2); `ModelDraw` has no chrome mapping.
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE;
+    out.models.push(d);
+    d.light = Vec3::new(1.0, 0.4, 0.2);
+    d.render_flags = RENDER_CHROME3 | RENDER_BRIGHT;
+    out.models.push(d);
 }
 
 // --- MODEL_MOONHARVEST_MOON ------------------------------------------------------------------------
@@ -468,7 +485,7 @@ fn moon_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => e.scale += 0.01,
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
     // RenderEffects (ZzzEffect.cpp:18380): `o->m_iAnimation++` once per rendered frame.
     if e.sub_type == 0 {
         e.user[0] += 1.0;
@@ -530,7 +547,7 @@ fn songpyeon_step(e: &mut Effect, ctx: &mut Ctx) {
         e.gravity = -e.gravity * 0.3;
         e.life_time -= 2.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_CURSEDTEMPLE_HOLYITEM / PRODECTION_SKILL / RESTRAINT_SKILL ---------------------------------
@@ -558,12 +575,27 @@ fn holyitem_step(e: &mut Effect, ctx: &mut Ctx) {
             }
             e.light = Vec3::ONE;
             e.position = world;
-            // TODO(original): PlayAnimation with the OWNER's model (Models[o->Owner->Type]) at
-            // Velocity / 3; the wrap at the end of that model's action is not reproduced.
-            e.animation_frame += e.velocity / 3.0;
+            play_owner_animation(e, ctx, e.velocity / 3.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
+}
+
+/// `Models[o->Owner->Type].PlayAnimation(&o->AnimationFrame, ..., speed, ...)`
+/// (ZzzEffect.cpp:12046, 12059): the effect's frame advanced with the CARRIER's model and the
+/// action that model was last animated with (`b->CurrentAction`, the last character of that type
+/// drawn; here the owner's own action, the closest the snapshots give). `Actions[].Loop` is set on
+/// `MODEL_PLAYER`'s `PLAYER_DIE1/DIE2/COME_UP/SKILL_HELL_BEGIN` (ZzzOpenData.cpp:380-384). Without
+/// the model file the frame still advances (see `common::play_model_animation`).
+fn play_owner_animation(e: &mut Effect, ctx: &mut Ctx, speed: f32) {
+    let Some((ty, action)) = ctx.actor(e.owner).map(|a| (a.ty, a.action)) else { return };
+    let Some(m) = ctx.model(ty) else {
+        e.animation_frame += speed;
+        return;
+    };
+    let Some(a) = m.actions.get(action) else { return };
+    let hold = ty == MODEL_PLAYER && [PLAYER_DIE1, PLAYER_DIE2, PLAYER_COME_UP, PLAYER_SKILL_HELL_BEGIN].contains(&(action as i32));
+    let _ = crate::fx::model_data::play_animation(&mut e.animation_frame, speed, a.frames, a.lock_positions.is_some(), hold);
 }
 
 /// ZzzEffect.cpp:18411 → `RenderObject` → ZzzObject.cpp:623-635: two sprites, the body without
@@ -578,19 +610,21 @@ fn holyitem_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     common::sprite(out, ctx, BITMAP_LIGHT, e.position, 3.0, Vec3::new(0.9, 0.4, 0.4), 0.0, glow);
     common::sprite(out, ctx, BITMAP_POUNDING_BALL, e.position, 0.9 + lum, Vec3::new(0.9, 0.6, 0.6), wt / 10.0, glow);
 
-    // RenderBody(RENDER_TEXTURE, ..., HiddenMesh = 0).
+    // RenderBody(RENDER_TEXTURE, Alpha, BlendMesh, BlendMeshLight, U, V, HiddenMesh = 0).
     let mut body = ModelDraw::of_effect(e);
+    body.render_flags = RENDER_TEXTURE;
     body.hidden_mesh = 0;
     out.models.push(body);
 
-    // RenderMesh(0, RENDER_TEXTURE, 0.7, BlendMesh 0, BlendMeshLight·3, U, -WorldTime·0.004): only
-    // mesh 0 (the model has two meshes, so the other one is hidden).
+    // RenderMesh(0, RENDER_TEXTURE, 0.7, BlendMesh 0, BlendMeshLight·3, U, -WorldTime·0.004).
     let mut glow_mesh = ModelDraw::of_effect(e);
+    glow_mesh.render_flags = RENDER_TEXTURE;
+    glow_mesh.mesh = 0;
+    glow_mesh.hidden_mesh = -1;
     glow_mesh.alpha = 0.7;
     glow_mesh.blend_mesh = 0;
     glow_mesh.blend_mesh_light = e.blend_mesh_light * 3.0;
     glow_mesh.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, -wt * 0.004);
-    glow_mesh.hidden_mesh = 1;
     out.models.push(glow_mesh);
 }
 
@@ -608,13 +642,14 @@ fn protection_step(e: &mut Effect, ctx: &mut Ctx) {
             e.angle = owner_angle;
             e.alpha = 0.3;
             e.scale = 1.0;
-            // PlayAnimation of its own model at Velocity / 3 (the tail plays it again at Velocity).
-            // TODO(original): the wrap at the end of the action is not reproduced.
-            e.animation_frame += e.velocity / 3.0;
+            // `effbmd->PlayAnimation(..., Velocity/3, ...)` of its own model, result unused (the
+            // tail plays it again at Velocity).
+            let speed = e.velocity / 3.0;
+            let _ = common::play_model_animation(e, ctx, speed);
             ctx.create_effect(BITMAP_SHOCK_WAVE, owner_position, e.angle, e.light, 10, e.owner, -1, 0, 0, 0.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18412 → `RenderObject` → ZzzObject.cpp:636-641: `BodyLight` (0.3, 0.3, 1),
@@ -625,6 +660,9 @@ fn protection_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     }
     let mut d = ModelDraw::of_effect(e);
     d.light = Vec3::new(0.3, 0.3, 1.0);
+    d.render_flags = RENDER_TEXTURE;
+    d.mesh = 0;
+    d.hidden_mesh = -1;
     d.blend_mesh = 0;
     d.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, -ctx.world_time * 0.0004);
     out.models.push(d);
@@ -644,11 +682,12 @@ fn restraint_step(e: &mut Effect, ctx: &mut Ctx) {
             e.angle = angle;
             e.alpha = 0.6;
             e.scale = 1.0;
-            // TODO(original): the wrap at the end of the action is not reproduced.
-            e.animation_frame += e.velocity / 3.0;
+            // `b->PlayAnimation(..., Velocity/3, ...)` of its own model, result unused.
+            let speed = e.velocity / 3.0;
+            let _ = common::play_model_animation(e, ctx, speed);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18417 → `RenderObject` → ZzzObject.cpp:642-646:
@@ -660,6 +699,9 @@ fn restraint_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let wt = ctx.world_time;
     let lum = (wt * 0.0002).sin() * 0.002;
     let mut d = ModelDraw::of_effect(e);
+    d.render_flags = RENDER_TEXTURE;
+    d.mesh = 0;
+    d.hidden_mesh = -1;
     d.alpha = 0.7;
     d.blend_mesh = 0;
     d.blend_mesh_light = 0.35 + lum;
@@ -699,7 +741,7 @@ fn statue_part_step(e: &mut Effect, ctx: &mut Ctx) {
     } else {
         e.alpha -= 0.01;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_HEAD / RED_HEAD --------------------------------------------
@@ -748,7 +790,7 @@ fn assassin_head_step(e: &mut Effect, ctx: &mut Ctx) {
     // vPosition = Position + Angle·(0, 0, 0) = Position.
     let sub = if e.ty == MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_HEAD { 4 } else { 3 };
     ctx.create_effect(BITMAP_FIRE_CURSEDLICH, e.position, e.angle, Vec3::ONE, sub, Some(Target::Effect(e.id)), -1, 0, 0, 0.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_BODY / RED_BODY --------------------------------------------
@@ -768,5 +810,5 @@ fn assassin_body_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 20.0 {
         e.alpha = 0.1 * e.life_time;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }

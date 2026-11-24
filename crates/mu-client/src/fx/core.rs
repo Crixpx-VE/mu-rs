@@ -84,29 +84,107 @@ impl Rng {
 
 // --- Characters and targets -----------------------------------------------------------------------
 
-/// Snapshot of a character (or monster) this tick, for the effects that follow it.
+/// `o->Kind` of a character (`_define.h:142-149`).
+pub const KIND_PLAYER: i32 = 1;
+pub const KIND_MONSTER: i32 = 2;
+pub const KIND_NPC: i32 = 4;
+pub const KIND_TRAP: i32 = 8;
+
+/// Snapshot of a character (or monster) this tick, for the effects that follow it and for the
+/// client-side range tests (`CharactersClient[]` as `CheckCharacterRange` sees it).
 #[derive(Clone)]
 pub struct Actor {
     /// `o->Type`: `MODEL_PLAYER` for characters, `MODEL_MONSTER01 + n` for monsters and NPCs.
     pub ty: i32,
+    /// `o->Kind`: [`KIND_PLAYER`], [`KIND_MONSTER`], [`KIND_NPC`]...
+    pub kind: i32,
+    /// `c->Key`: the server's object index (-1 if unknown, e.g. the hero before joining).
+    pub key: i32,
     pub position: Vec3,
     /// Angles in degrees (the body heading is `angle.z`).
     pub angle: Vec3,
     pub scale: f32,
     /// Model bones in their current pose (model space).
     pub bones: Arc<Vec<Mat34>>,
+    /// `Bones[i].Dummy` of the model (bones the original skips when spreading effects).
+    pub dummy_bones: Arc<Vec<bool>>,
     pub action: usize,
     pub frame: f32,
     /// Right-hand weapon: model id (`MODEL_SWORD + n`...) and level (+0..+15).
     pub weapon: Option<(i32, u8)>,
     /// Weapon hand bone (`LinkBone`).
     pub weapon_bone: usize,
+    /// `o->Live`.
     pub live: bool,
+    /// `o->Visible` (in the view frustum; the snapshot treats every character in scope as visible).
+    pub visible: bool,
+    /// `c->Dead`.
+    pub dead: bool,
     /// `m_vPosSword`: point computed by the current skill (e.g. Death Stab).
     pub pos_sword: Vec3,
+    /// `o->Light` (the character's body light).
+    pub light: Vec3,
+    /// `o->Alpha`.
+    pub alpha: f32,
+    /// `o->Velocity` (animation speed this tick).
+    pub velocity: f32,
+    /// `o->Direction`.
+    pub direction: Vec3,
+    /// `o->StartPosition`.
+    pub start_position: Vec3,
+    /// `c->m_sTargetIndex` resolved to the targeted character, if the client knows it.
+    pub target: Option<Entity>,
+    /// Active buffs (`eBuffState` values, `g_isCharacterBuff`); empty until the client tracks them.
+    pub buffs: Arc<Vec<i32>>,
+    /// `c->m_bySkillCount`.
+    pub skill_count: u8,
+    /// `c->SafeZone`.
+    pub safe_zone: bool,
+}
+
+impl Default for Actor {
+    fn default() -> Self {
+        Self {
+            ty: MODEL_PLAYER,
+            kind: KIND_PLAYER,
+            key: -1,
+            position: Vec3::ZERO,
+            angle: Vec3::ZERO,
+            scale: 1.0,
+            bones: Arc::new(Vec::new()),
+            dummy_bones: Arc::new(Vec::new()),
+            action: 0,
+            frame: 0.0,
+            weapon: None,
+            weapon_bone: 0,
+            live: true,
+            visible: true,
+            dead: false,
+            pos_sword: Vec3::ZERO,
+            light: Vec3::ONE,
+            alpha: 1.0,
+            velocity: 0.0,
+            direction: Vec3::ZERO,
+            start_position: Vec3::ZERO,
+            target: None,
+            buffs: Arc::new(Vec::new()),
+            skill_count: 0,
+            safe_zone: false,
+        }
+    }
 }
 
 impl Actor {
+    /// `g_isCharacterBuff(o, buff)`.
+    pub fn has_buff(&self, buff: i32) -> bool {
+        self.buffs.contains(&buff)
+    }
+
+    /// `Bones[i].Dummy`.
+    pub fn is_dummy_bone(&self, bone: usize) -> bool {
+        self.dummy_bones.get(bone).copied().unwrap_or(false)
+    }
+
     /// `b->TransformPosition(BoneTransform[bone], offset, out)` with the character's position,
     /// rotation and scale: the point `offset` (in bone axes) in world space.
     pub fn bone_world(&self, bone: usize, offset: Vec3) -> Vec3 {
@@ -598,6 +676,24 @@ pub struct EffectInfo {
     pub owner: Option<Target>,
     pub position: Vec3,
     pub angle: Vec3,
+    pub life_time: f32,
+    pub pk_key: i32,
+    pub kind: i32,
+    pub skill: i32,
+}
+
+/// `SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)` that
+/// `AttackCharacterRange` would send (ZzzEffect.cpp:170-185). Collected for the combat protocol.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AttackRequest {
+    /// `AT_SKILL_*`.
+    pub skill: i32,
+    /// Tile of the hit.
+    pub x: i32,
+    pub y: i32,
+    pub serial: i32,
+    /// `c->Key` of each character hit (at most 5).
+    pub keys: Vec<i32>,
 }
 
 /// Deletions requested during a tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`). The
@@ -616,6 +712,9 @@ pub enum Delete {
 }
 
 // --- Context ---------------------------------------------------------------------------------------
+
+/// How deep creation code may nest (a kind that creates itself forever stops here).
+pub const MAX_CREATE_DEPTH: u32 = 16;
 
 /// What each effect type's functions see while being created or moved.
 pub struct Ctx<'a> {
@@ -641,6 +740,20 @@ pub struct Ctx<'a> {
     pub effects: &'a [EffectInfo],
     /// Deletions requested this tick (applied when it ends).
     pub deletes: &'a mut Vec<Delete>,
+    /// The kinds, so `CreateParticle`/`CreateJoint`/`CreateEffect` run their creation code at once,
+    /// in the middle of the caller's code, like the original (same `rand()` order).
+    pub registry: &'a Registry,
+    /// Effect model files (`Models[o->Type]`: own bones, vertices, action lengths).
+    pub models: &'a mut super::model_data::ModelData,
+    /// `CharacterAttribute->Skill[]`: the hero's skill list by slot (empty until the client gets it).
+    pub hero_skills: &'a [i32],
+    /// `SendRequestMagicAttack` calls of this tick (`AttackCharacterRange`).
+    pub attack_requests: &'a mut Vec<AttackRequest>,
+    /// Free slots left this tick in `Particles[]`, `Joints[]` and `Effects[]` (the original creates
+    /// nothing, and runs no creation code, when the pool is full).
+    pub free: [usize; 3],
+    /// Nesting of creation code (a guard against kinds that create themselves forever).
+    pub depth: u32,
 }
 
 impl Ctx<'_> {
@@ -719,13 +832,13 @@ impl Ctx<'_> {
 
     /// `CreateParticle(Type, Position, Angle, Light, SubType, Scale, Owner)`.
     pub fn create_particle(&mut self, ty: i32, position: Vec3, angle: Vec3, light: Vec3, sub_type: i32, scale: f32, owner: Option<Target>) {
-        self.spawns.push(Spawn::Particle(Particle::new(ty, position, angle, light, sub_type, scale, owner)));
+        self.spawn_particle(Particle::new(ty, position, angle, light, sub_type, scale, owner));
     }
 
     /// `CreateJoint(Type, Position, TargetPosition, Angle, SubType, Target, Scale)`.
     #[allow(clippy::too_many_arguments)]
     pub fn create_joint(&mut self, ty: i32, position: Vec3, target_position: Vec3, angle: Vec3, sub_type: i32, target: Option<Target>, scale: f32) {
-        self.spawns.push(Spawn::Joint(Joint::new(ty, position, target_position, angle, sub_type, target, scale)));
+        self.spawn_joint(Joint::new(ty, position, target_position, angle, sub_type, target, scale));
     }
 
     /// `CreateJoint` with `PKKey` and `SkillIndex` (which the original sometimes passes).
@@ -734,7 +847,7 @@ impl Ctx<'_> {
         let mut j = Joint::new(ty, position, target_position, angle, sub_type, target, scale);
         j.pk_key = pk_key;
         j.skill = skill;
-        self.spawns.push(Spawn::Joint(j));
+        self.spawn_joint(j);
     }
 
     /// `CreateEffect(Type, Position, Angle, Light, SubType, Owner, PKKey, Skill, SkillIndex, ..., Scale)`.
@@ -743,8 +856,185 @@ impl Ctx<'_> {
     pub fn create_effect(&mut self, ty: i32, position: Vec3, angle: Vec3, light: Vec3, sub_type: i32, owner: Option<Target>, pk_key: i32, kind: i32, skill: i32, scale: f32) -> u32 {
         *self.next_effect_id += 1;
         let id = *self.next_effect_id;
-        self.spawns.push(Spawn::Effect(Effect::new(id, ty, position, angle, light, sub_type, owner, pk_key, kind, skill, scale)));
+        self.spawn_effect(Effect::new(id, ty, position, angle, light, sub_type, owner, pk_key, kind, skill, scale));
         id
+    }
+
+    /// Creates an already built particle: its kind's creation code runs now (as inside the
+    /// original `CreateParticle`), then it joins `Particles[]` at the end of the tick.
+    pub fn spawn_particle(&mut self, mut p: Particle) {
+        if self.free[0] == 0 || self.depth > MAX_CREATE_DEPTH {
+            return;
+        }
+        self.free[0] -= 1;
+        if let Some(create) = self.registry.particles.get(&p.ty).and_then(|k| k.create) {
+            self.depth += 1;
+            create(&mut p, self);
+            self.depth -= 1;
+        }
+        p.prev_position = p.position;
+        p.prev_scale = p.scale;
+        p.prev_light = p.light;
+        if p.live {
+            self.spawns.push(Spawn::Particle(p));
+        }
+    }
+
+    /// Creates an already built trail (e.g. with its light set): see [`Ctx::spawn_particle`].
+    pub fn spawn_joint(&mut self, mut j: Joint) {
+        if self.free[1] == 0 || self.depth > MAX_CREATE_DEPTH {
+            return;
+        }
+        self.free[1] -= 1;
+        if let Some(create) = self.registry.joints.get(&j.ty).and_then(|k| k.create) {
+            self.depth += 1;
+            create(&mut j, self);
+            self.depth -= 1;
+        }
+        if j.create_tails && j.tails.is_empty() {
+            j.tails.push(j.make_tail());
+        }
+        if j.live {
+            self.spawns.push(Spawn::Joint(j));
+        }
+    }
+
+    /// Creates an already built effect: see [`Ctx::spawn_particle`].
+    pub fn spawn_effect(&mut self, mut e: Effect) {
+        if self.free[2] == 0 || self.depth > MAX_CREATE_DEPTH {
+            return;
+        }
+        self.free[2] -= 1;
+        if let Some(create) = self.registry.effects.get(&e.ty).and_then(|k| k.create) {
+            self.depth += 1;
+            create(&mut e, self);
+            self.depth -= 1;
+        }
+        e.prev_position = e.position;
+        e.prev_angle = e.angle;
+        if e.live {
+            self.spawns.push(Spawn::Effect(e));
+        }
+    }
+
+    /// Creates whatever a [`Spawn`] holds (requests from outside the engine).
+    pub fn spawn(&mut self, s: Spawn) {
+        match s {
+            Spawn::Particle(p) => self.spawn_particle(p),
+            Spawn::Joint(j) => self.spawn_joint(j),
+            Spawn::Effect(e) => self.spawn_effect(e),
+        }
+    }
+
+    // --- Characters in range (`CharactersClient[]`) ----------------------------------------------
+
+    /// Characters in a fixed order (the original walks `CharactersClient[]` by slot; here by
+    /// server key, then entity).
+    fn characters(&self) -> Vec<(Entity, &Actor)> {
+        let mut v: Vec<(Entity, &Actor)> = self.actors.iter().map(|(e, a)| (*e, a)).collect();
+        v.sort_by_key(|(e, a)| (a.key, e.to_bits()));
+        v
+    }
+
+    /// `CheckCharacterRange(so, Range, PKKey, Kind)` (ZzzEffect.cpp:43-65): whether a live,
+    /// visible, not dead character other than the effect's owner is within `range` (2D) of
+    /// `position`. The hero only counts when `kind` is `KIND_MONSTER`; `kind` != 0 also skips the
+    /// characters of that kind. (`PKKey` is not used by the original.)
+    pub fn check_character_range(&self, position: Vec3, owner: Option<Target>, range: f32, kind: i32) -> bool {
+        self.characters().into_iter().any(|(e, o)| {
+            if !o.live || (kind != 0 && kind == o.kind) || owner == Some(Target::Actor(e)) {
+                return false;
+            }
+            let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
+            let distance = (dx * dx + dy * dy).sqrt();
+            o.visible && (Some(e) != self.hero || kind == KIND_MONSTER) && !o.dead && distance <= range
+        })
+    }
+
+    /// `CharacterAttribute->Skill[index]`: the hero's skill in that slot (0 if unknown).
+    pub fn hero_skill(&self, index: i32) -> i32 {
+        usize::try_from(index).ok().and_then(|i| self.hero_skills.get(i)).copied().unwrap_or(0)
+    }
+
+    /// `AttackCharacterRange(Index, Position, Range, Serial, PKKey, SkillSerialNum)`
+    /// (ZzzEffect.cpp:108-189): the hero's projectile hits up to 5 monsters (or the player whose
+    /// key is `pk_key`) within `range`; the request it would send is queued in
+    /// [`Ctx::attack_requests`]. Returns whether anything was hit.
+    pub fn attack_character_range(&mut self, index: i32, position: Vec3, range: f32, serial: i32, pk_key: i32) -> bool {
+        let skill = self.hero_skill(index);
+        // TODO(original): in Castle Siege during the battle (`InBattleCastle() &&
+        // IsBattleCastleStart()`, ZzzEffect.cpp:116-124) nothing is hit inside `TW_NOATTACKZONE`
+        // and players count as enemies (`DamageChr`). There is no siege state yet.
+        let damage_chr = false;
+        let mut keys = Vec::new();
+        for (e, o) in self.characters() {
+            if !o.live || !o.visible || Some(e) == self.hero || o.dead {
+                continue;
+            }
+            let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
+            let distance = (dx * dx + dy * dy).sqrt();
+            if distance <= range && (o.kind == KIND_MONSTER || (o.kind == KIND_PLAYER && (o.key == pk_key || damage_chr))) {
+                // TODO(original): Twister / Evil Spirit set `c->StormTime = 10` on the victim
+                // (ZzzEffect.cpp:142-158): no client-side victim state yet.
+                keys.push(o.key);
+                if keys.len() >= 5 {
+                    break;
+                }
+            }
+        }
+        if keys.is_empty() {
+            return false;
+        }
+        // Multi Shot sends nothing (ZzzEffect.cpp:178-184).
+        if skill != AT_SKILL_MULTI_SHOT {
+            // TODO(combat): SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey,
+            // SkillSerialNum) (ZzzEffect.cpp:172-182); the combat protocol does not exist yet.
+            self.attack_requests.push(AttackRequest {
+                skill,
+                x: (position.x / 100.0) as i32,
+                y: (position.y / 100.0) as i32,
+                serial,
+                keys,
+            });
+        }
+        true
+    }
+
+    // --- Effect models (`Models[o->Type]`) ---------------------------------------------------------
+
+    /// `Models[ty]` (its `.bmd`), loaded on first use.
+    pub fn model(&mut self, ty: i32) -> Option<std::sync::Arc<bmd::Bmd>> {
+        self.models.get(ty)
+    }
+
+    /// `Models[ty].Actions[action].NumAnimationKeys`.
+    pub fn action_frames(&mut self, ty: i32, action: usize) -> Option<usize> {
+        self.model(ty)?.actions.get(action).map(|a| a.frames)
+    }
+
+    /// The bones of an effect's own model in its current pose (`b->Animation(BoneTransform,
+    /// o->AnimationFrame, ...)`), in model space.
+    pub fn effect_bones(&mut self, e: &Effect) -> Option<Vec<Mat34>> {
+        let m = self.model(e.ty)?;
+        if m.bones.is_empty() {
+            return None;
+        }
+        let action = if e.current_action < m.actions.len() { e.current_action } else { 0 };
+        Some(m.bone_matrices_at(action, e.animation_frame))
+    }
+
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` on an effect's own model, with the
+    /// effect's position, angle and scale (the same convention as [`Actor::bone_world`]).
+    pub fn effect_bone_world(&mut self, e: &Effect, bone: usize, offset: Vec3) -> Option<Vec3> {
+        let bones = self.effect_bones(e)?;
+        let m = bones.get(bone)?;
+        let local = Vec3::from_array(bmd::transform_point(m, offset.to_array()));
+        Some(e.position + rotate(e.angle, local * e.scale))
+    }
+
+    /// `Models[ty].NumBones`.
+    pub fn model_bone_count(&mut self, ty: i32) -> Option<usize> {
+        Some(self.model(ty)?.bones.len())
     }
 
     /// `CreateSprite(Type, Position, Scale, Light, Owner, Rotation, SubType)`: lasts this tick.
@@ -834,7 +1124,37 @@ pub struct ModelDraw {
     pub hidden_mesh: i32,
     /// `RENDER_BRIGHT`: whole model additive.
     pub bright: bool,
+    /// Extra `RENDER_*` flags of `RenderMesh`/`RenderPartObject` (ZzzBMD.h:10-30): [`RENDER_CHROME`]
+    /// (and CHROME2..7), [`RENDER_METAL`], [`RENDER_DARK`] (subtractive), [`RENDER_BRIGHT`]... 0 = the
+    /// default (`RENDER_TEXTURE`, plus what `bright` and `blend_mesh` say).
+    pub render_flags: u32,
+    /// `RenderMesh`'s `Texture` argument: a `BITMAP_*` drawn instead of the mesh's own texture
+    /// (-1 = the mesh's texture).
+    pub texture: i32,
+    /// Draw only this mesh, by mesh index (`RenderMesh(i, ...)`); -1 = every mesh. Push several
+    /// `ModelDraw`s to give meshes their own light or flags.
+    pub mesh: i32,
 }
+
+/// `RENDER_*` flags (ZzzBMD.h:10-30).
+pub const RENDER_COLOR: u32 = 0x0000_0001;
+pub const RENDER_TEXTURE: u32 = 0x0000_0002;
+pub const RENDER_CHROME: u32 = 0x0000_0004;
+pub const RENDER_METAL: u32 = 0x0000_0008;
+pub const RENDER_LIGHTMAP: u32 = 0x0000_0010;
+pub const RENDER_BRIGHT: u32 = 0x0000_0040;
+pub const RENDER_DARK: u32 = 0x0000_0080;
+pub const RENDER_EXTRA: u32 = 0x0000_0100;
+pub const RENDER_CHROME2: u32 = 0x0000_0200;
+pub const RENDER_WAVE: u32 = 0x0000_0400;
+pub const RENDER_CHROME3: u32 = 0x0000_0800;
+pub const RENDER_CHROME4: u32 = 0x0000_1000;
+pub const RENDER_NODEPTH: u32 = 0x0000_2000;
+pub const RENDER_CHROME5: u32 = 0x0000_4000;
+pub const RENDER_OIL: u32 = 0x0000_8000;
+pub const RENDER_CHROME6: u32 = 0x0001_0000;
+pub const RENDER_CHROME7: u32 = 0x0002_0000;
+pub const RENDER_DOPPELGANGER: u32 = 0x0004_0000;
 
 impl ModelDraw {
     pub fn new(model: i32, position: Vec3, angle: Vec3, scale: f32) -> Self {
@@ -852,6 +1172,9 @@ impl ModelDraw {
             blend_mesh_tex_coord: Vec2::ZERO,
             hidden_mesh: -1,
             bright: false,
+            render_flags: 0,
+            texture: -1,
+            mesh: -1,
         }
     }
 
@@ -871,6 +1194,9 @@ impl ModelDraw {
             blend_mesh_tex_coord: e.blend_mesh_tex_coord,
             hidden_mesh: e.hidden_mesh,
             bright: false,
+            render_flags: 0,
+            texture: -1,
+            mesh: -1,
         }
     }
 }
@@ -908,11 +1234,33 @@ pub struct DrawCtx<'a> {
     pub world_time: f32,
     pub tex_info: &'a dyn Fn(i32) -> Option<TexInfo>,
     pub actors: &'a std::collections::HashMap<Entity, Actor>,
+    /// `gMapManager.WorldActive` (Lorencia = 0).
+    pub world_active: i32,
+    /// Effect model files already loaded by the simulation.
+    pub models: &'a super::model_data::ModelData,
 }
 
 impl DrawCtx<'_> {
     pub fn tex(&self, id: i32) -> Option<TexInfo> {
         (self.tex_info)(id)
+    }
+
+    /// The bones of an effect's own model in its (interpolated) pose, if the simulation has
+    /// loaded the model (see [`Ctx::effect_bones`]).
+    pub fn effect_bones(&self, e: &Effect) -> Option<Vec<Mat34>> {
+        let m = self.models.loaded(e.ty)?;
+        if m.bones.is_empty() {
+            return None;
+        }
+        let action = if e.current_action < m.actions.len() { e.current_action } else { 0 };
+        Some(m.bone_matrices_at(action, e.animation_frame))
+    }
+
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` on an effect's own model while drawing.
+    pub fn effect_bone_world(&self, e: &Effect, bone: usize, offset: Vec3) -> Option<Vec3> {
+        let bones = self.effect_bones(e)?;
+        let local = Vec3::from_array(bmd::transform_point(bones.get(bone)?, offset.to_array()));
+        Some(e.position + rotate(e.angle, local * e.scale))
     }
 }
 

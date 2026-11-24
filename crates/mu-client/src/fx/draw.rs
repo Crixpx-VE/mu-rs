@@ -28,6 +28,7 @@ pub fn collect(
     mut textures: ResMut<FxTextures>,
     mut images: ResMut<Assets<Image>>,
     mut frame: ResMut<FrameDraw>,
+    args: Res<crate::Args>,
 ) {
     let a = fixed.overstep_fraction();
     let tex = RefCell::new((&mut *textures, &mut *images));
@@ -36,7 +37,13 @@ pub fn collect(
         let (textures, images) = &mut *t;
         textures.info(id, images)
     };
-    let ctx = DrawCtx { world_time: fixed.elapsed_secs() * 1000.0, tex_info: &tex_info, actors: &actors.map };
+    let ctx = DrawCtx {
+        world_time: fixed.elapsed_secs() * 1000.0,
+        tex_info: &tex_info,
+        actors: &actors.map,
+        world_active: args.world as i32 - 1,
+        models: &world.models,
+    };
     let mut out = DrawList::default();
 
     for p in &world.particles {

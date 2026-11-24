@@ -1,5 +1,6 @@
 // Effect material: texture × vertex color × tint, with the original's blend modes
-// (chosen in `FxMaterial::specialize`). Unlit: MU effects are not lit.
+// (chosen in `FxMaterial::specialize`). Unlit: MU effects are not lit. With `FX_UNTEXTURED` the
+// texture is not sampled.
 
 import bevy_pbr::render::forward_io::VertexOutput;
 
@@ -16,7 +17,12 @@ struct FxParams {
 
 @fragment
 fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
-    var c = textureSample(fx_texture, fx_sampler, in.uv + params.uv_offset) * params.tint;
+    // `DisableTexture` (`RENDER_COLOR`, untextured `RENDER_BRIGHT`): the color alone.
+    var c = params.tint;
+    @if(!FX_UNTEXTURED)
+    {
+        c = textureSample(fx_texture, fx_sampler, in.uv + params.uv_offset) * params.tint;
+    }
     @if(VERTEX_COLORS)
     {
         c = c * in.color;

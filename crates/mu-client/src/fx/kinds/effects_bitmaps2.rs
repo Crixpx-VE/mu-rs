@@ -157,7 +157,7 @@ fn gathering_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_JOINT_THUNDER (lightning storm emitter) ----------------------------------------------------
@@ -226,7 +226,7 @@ fn joint_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_LIGHT, v_pos, Vec3::ZERO, Vec3::new(0.2, 0.2, 0.8), 5, random, None);
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_JOINT_THUNDER+1 ------------------------------------------------------------------------------
@@ -253,7 +253,7 @@ fn joint_thunder1_step(e: &mut Effect, ctx: &mut Ctx) {
         let scale = 50.0 + (ctx.rand() % 10) as f32;
         ctx.create_joint(BITMAP_JOINT_THUNDER + 1, position, position, e.angle, 5, None, scale);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRECRACKERRISE ------------------------------------------------------------------------------
@@ -271,7 +271,7 @@ fn firecracker_rise_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time as i32 % 5 == 0 && ctx.rand() % 3 == 0 {
         ctx.create_effect(BITMAP_FIRECRACKER, e.position, e.angle, e.light, 0, None, -1, 0, 0, 0.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRECRACKER (a rocket) -----------------------------------------------------------------------
@@ -302,7 +302,7 @@ fn firecracker_step(e: &mut Effect, ctx: &mut Ctx) {
     ctx.create_particle(BITMAP_FIRECRACKER, e.position, e.angle, e.light, -1, 1.0, None);
     let light = Vec3::new(luminosity * 0.4, luminosity * 0.3, luminosity * 0.2);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 1.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRECRACKER0001 (Christmas firecracker: spirit trails) ---------------------------------------
@@ -322,7 +322,7 @@ fn firecracker1_step(e: &mut Effect, ctx: &mut Ctx) {
         let position = Vec3::new(x, y, e.position.z);
         ctx.create_joint_ex(BITMAP_JOINT_SPIRIT, position, position, e.angle, 25, me(e), 1.0, -1, e.sub_type);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRECRACKER0002 (Christmas firecracker: the burst) -------------------------------------------
@@ -374,7 +374,7 @@ fn firecracker2_step(e: &mut Effect, ctx: &mut Ctx) {
         let scale = 0.5 + (ctx.rand() % 5) as f32 * 0.1;
         ctx.create_effect(BITMAP_FIRECRACKER0003, position, e.angle, v_light, 0, me(e), -1, 0, 0, scale);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRECRACKER0003 (Christmas firecracker: animated star sprite) --------------------------------
@@ -400,7 +400,7 @@ fn firecracker3_step(e: &mut Effect, ctx: &mut Ctx) {
         6
     };
     ctx.create_sprite(BITMAP_FIRECRACKER0001 + frame, e.position, e.scale, e.light, e.angle.z, 0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_SWORD_FORCE (emitter of the BITMAP_JOINT_FORCE sword trail) ----------------------------------
@@ -429,7 +429,7 @@ fn sword_force_step(e: &mut Effect, ctx: &mut Ctx) {
         };
         ctx.create_joint_ex(BITMAP_JOINT_FORCE, position, position, e.head_angle, sub, e.owner, 150.0, e.pk_key, e.skill);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_BLIZZARD (falling ice meteors) ---------------------------------------------------------------
@@ -499,7 +499,7 @@ fn blizzard_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_SHOTGUN --------------------------------------------------------------------------------------
@@ -544,7 +544,7 @@ fn shotgun_step(e: &mut Effect, ctx: &mut Ctx) {
     if lt == 1 {
         common::create_bomb2(ctx, e.position, false, 0, 0.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FLARE_FORCE (emitter of BITMAP_FLARE_FORCE trails) -------------------------------------------
@@ -585,7 +585,7 @@ fn flare_force_create(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzEffect.cpp:13350-13351: nothing but the common tail.
 fn flare_force_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_TWLIGHT (twilight ground ring) ---------------------------------------------------------------
@@ -638,19 +638,13 @@ fn twilight_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_SHOCK_WAVE (shock wave ground ring) ----------------------------------------------------------
 
-/// `user[3]`: 1 when the effect is in Hellas (Kalima), for `RenderEffectShadows`.
-fn store_hellas(e: &mut Effect, ctx: &Ctx) {
-    e.user[3] = if common::in_hellas(ctx.world_active) { 1.0 } else { 0.0 };
-}
-
 /// ZzzEffect.cpp:3765-3847.
 fn shock_wave_create(e: &mut Effect, ctx: &mut Ctx) {
-    store_hellas(e, ctx);
     match e.sub_type {
         0 => {
             e.life_time = 30.0;
@@ -718,7 +712,6 @@ fn shock_wave_create(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzEffect.cpp:13450-13573.
 fn shock_wave_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    store_hellas(e, ctx);
     let lt = e.life_time as i32;
     // Subtypes 6 and 14 `break` out of the case before the scale clamp and the light code.
     let mut done = false;
@@ -785,14 +778,17 @@ fn shock_wave_step(e: &mut Effect, ctx: &mut Ctx) {
             e.light /= 1.3;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderEffectShadows` for `BITMAP_TWLIGHT` and `BITMAP_SHOCK_WAVE` (ZzzEffect.cpp:19575-19587).
-fn shock_wave_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    if e.ty == BITMAP_SHOCK_WAVE && e.user[3] != 0.0 && e.sub_type != 6 {
-        // TODO(original): in Hellas the ring is drawn with RenderWaterTerrain (on the Kalima water
-        // surface, `CSWaterTerrain::RenderWaterAlphaBitmap`, depth mask off); drawn on the ground here.
+fn shock_wave_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    if e.ty == BITMAP_SHOCK_WAVE && common::in_hellas(ctx.world_active) && e.sub_type != 6 {
+        // TODO(original): in Hellas the ring is drawn with RenderWaterTerrain (ZzzEffect.cpp:19577-19580,
+        // depth mask off): `CSWaterTerrain::RenderWaterAlphaBitmap` (CSWaterTerrain.cpp:312) lays
+        // the same tiles on the Kalima water, each vertex at `m_iWaveHeight[0][cell] + 400`.
+        // `water_terrain.rs` does not expose the ripple page 0 to the effects; drawn on the
+        // ground here.
     }
     common::terrain_bitmap(out, e.ty, e.position.x, e.position.y, e.scale, e.scale, e.light, -e.angle.z, 1.0, 5.0, Blend::Glow);
 }
@@ -823,7 +819,7 @@ fn damage_mono_step(e: &mut Effect, ctx: &mut Ctx) {
             e.light *= 0.5;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19589-19598.
@@ -866,7 +862,7 @@ fn flare_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_CRATER (ground crater mark) ------------------------------------------------------------------
@@ -907,7 +903,7 @@ fn crater_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     let range = (e.start_position.x - 1.0) as i32 as f32;
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::splat(-0.5), range);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19600-19603: `EnableAlphaTest` and the mark sized by `StartPosition`.
@@ -932,7 +928,7 @@ fn chrome_energy2_step(e: &mut Effect, ctx: &mut Ctx) {
     if (e.life_time as i32) < 10 {
         e.light *= 0.8;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19620-19623.
@@ -984,12 +980,14 @@ fn joint_force_step(e: &mut Effect, ctx: &mut Ctx) {
         }
     }
     sword_force_fallthrough(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// The `MODEL_SWORD_FORCE` case of `MoveEffect` (ZzzEffect.cpp:14767-14832, with the
 /// `PBG_ADD_NEWCHAR_MONK_SKILL` subtypes 2 and 3), reached by `BITMAP_JOINT_FORCE` through the
-/// missing `break`.
+/// missing `break`. Same code as the case part of `sword_force_step` in `effects_dl_mg1.rs`
+/// (private copy: that one also runs `MODEL_SWORD_FORCE`'s own tail, which a `BITMAP_*` type does
+/// not have; here the common tail is only `MoveParticle(o, true)`).
 fn sword_force_fallthrough(e: &mut Effect, ctx: &mut Ctx) {
     let lt = e.life_time as i32;
     if e.sub_type == 0 || e.sub_type == 2 {
@@ -1047,7 +1045,7 @@ fn target_pos1_step(e: &mut Effect, ctx: &mut Ctx) {
             e.light *= e.alpha;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:4861-4869. `user[0]` = `m_iAnimation` (0 shrinking, 1 growing).
@@ -1077,7 +1075,7 @@ fn target_pos2_step(e: &mut Effect, ctx: &mut Ctx) {
             e.light *= e.alpha;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19624-19639.
@@ -1104,7 +1102,7 @@ fn ring_gradation_step(e: &mut Effect, ctx: &mut Ctx) {
         e.light /= 1.1;
         e.alpha /= 1.1;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19640-19646.
@@ -1155,5 +1153,5 @@ fn waterfall4_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_sprite(BITMAP_WATERFALL_4, v_pos, e.scale, e.light, e.angle.x, 0);
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }

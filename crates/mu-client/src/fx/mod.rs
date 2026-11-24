@@ -14,6 +14,7 @@ pub mod core;
 pub mod draw;
 pub mod kinds;
 pub mod material;
+pub mod model_data;
 pub mod models;
 pub mod sim;
 pub mod textures;
@@ -48,9 +49,10 @@ impl Plugin for FxPlugin {
             .init_resource::<sim::Actors>()
             .init_resource::<draw::FrameDraw>()
             .init_resource::<draw::Batches>()
-            .add_systems(Startup, |mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets<Image>>| {
+            .add_systems(Startup, |mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets<Image>>, mut world: ResMut<sim::FxWorld>| {
                 commands.insert_resource(textures::FxTextures::new(args.data.clone()));
                 commands.insert_resource(models::FxModels::new(args.data.clone()));
+                world.models = model_data::ModelData::new(args.data.clone());
                 let _ = images.add(textures::white_image());
             })
             .add_systems(FixedUpdate, (sim::gather_actors, sim::tick).chain())
@@ -67,7 +69,9 @@ impl Plugin for FxPlugin {
 /// On map change: no effects, map objects or characters from the previous map.
 pub fn reset(mut world: ResMut<FxWorld>, mut actors: ResMut<sim::Actors>) {
     let next_effect_id = world.next_effect_id;
-    *world = FxWorld { next_effect_id, ..default() };
+    let models = std::mem::take(&mut world.models);
+    let hero_skills = std::mem::take(&mut world.hero_skills);
+    *world = FxWorld { next_effect_id, models, hero_skills, ..default() };
     *actors = sim::Actors::default();
 }
 
