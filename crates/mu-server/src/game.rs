@@ -340,6 +340,7 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         | ClientMessage::CloseNpc
         | ClientMessage::CloseVault
         | ClientMessage::CloseCrafting
+        | ClientMessage::GuildMasterAnswer { .. }
         | ClientMessage::RepairItem { .. } => {}
     }
     true

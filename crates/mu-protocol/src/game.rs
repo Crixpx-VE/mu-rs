@@ -449,6 +449,10 @@ pub enum ClientMessage {
     /// `SendRequestRepair(index, addGold)`: repair `slot` (0xFF = all equipped items); `self_repair`
     /// is the inventory "repair" button (`p_AddGold` 1), not an NPC.
     RepairItem { slot: u8, self_repair: bool },
+    /// `SendRequestGuildMaster(value)` (wsclientinline.h:1296-1302, C1 54, not encrypted): the answer
+    /// to the guild master dialog. `false` closes it (`CNewUIGuildMakeWindow::ClosingProcess`,
+    /// NewUIGuildMakeWindow.cpp:247-253). OpenMU's `GuildMasterAnswer`.
+    GuildMasterAnswer { show_creation: bool },
 }
 
 /// Item storages of [`ClientMessage::ItemMove`] and `ItemMoved` (`ItemStorageKind`, OpenMU
@@ -663,6 +667,16 @@ pub enum ServerMessage {
     /// refused with a message, 0xFE = refused and the store closes, anything else = sold; `money` is
     /// the zen after the sale (OpenMU sends 0 or 1).
     SellResult { result: u8, money: u32 },
+    /// `ReceiveNPCDlgUIStart` (C3 F9 01, WSclient.cpp:9881-9890, `PMSG_ANS_NPC_CLICK`): the dialog
+    /// of an NPC with talk lines (the Gens NPCs...) opens. OpenMU's `OpenNpcDialog` (12 bytes: the NPC
+    /// number at 4, little endian, and the gens contribution points at 8).
+    OpenNpcDialog { npc: u16, contribution: u32 },
+    /// `ReceiveQuestState` (C1 A1, WSclient.cpp:9539-9546): the quest NPC window opens with the state
+    /// of quest `quest` (`state` holds four quests). OpenMU's `LegacyQuestStateDialog`.
+    QuestStateDialog { quest: u8, state: u8 },
+    /// `ReceiveCreateGuildInterface` (C1 54, WSclient.cpp:6700-6703): the guild master window opens.
+    /// OpenMU's `ShowGuildMasterDialog`.
+    GuildMasterDialog,
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -924,6 +938,7 @@ impl ClientMessage {
             Self::BuyItem { slot } => encrypted(c1(&[0x32, *slot])),
             Self::SellItem { slot } => encrypted(c1(&[0x33, *slot])),
             Self::RepairItem { slot, self_repair } => encrypted(c1(&[0x34, *slot, *self_repair as u8])),
+            Self::GuildMasterAnswer { show_creation } => c1(&[0x54, *show_creation as u8]),
         }
     }
 
@@ -963,6 +978,7 @@ impl ClientMessage {
             0x32 => return Some(Self::BuyItem { slot: *d.get(3)? }),
             0x33 => return Some(Self::SellItem { slot: *d.get(3)? }),
             0x34 => return Some(Self::RepairItem { slot: *d.get(3)?, self_repair: *d.get(4).unwrap_or(&0) != 0 }),
+            0x54 => return Some(Self::GuildMasterAnswer { show_creation: *d.get(3)? != 0 }),
             _ => {}
         }
         match (p.code(), p.sub_code()?) {
@@ -1300,6 +1316,14 @@ impl ServerMessage {
                 put_u32_le(&mut p, 4, *money);
                 p
             }
+            Self::OpenNpcDialog { npc, contribution } => {
+                let mut p = fixed_c3(12, 0xF9, 0x01);
+                put_u16_le(&mut p, 4, *npc);
+                put_u32_le(&mut p, 8, *contribution);
+                p
+            }
+            Self::QuestStateDialog { quest, state } => c1(&[0xA1, *quest, *state]),
+            Self::GuildMasterDialog => c1(&[0x54]),
         }
     }
 
@@ -1419,6 +1443,12 @@ impl ServerMessage {
                 let d = short_header(&p)?;
                 return Some(Self::SellResult { result: *d.get(3)?, money: get_u32_le(d, 4).unwrap_or(0) });
             }
+            // `PRECEIVE_QUEST_STATE`: `m_byQuestIndex`, `m_byState`.
+            0xA1 => {
+                let d = short_header(&p)?;
+                return Some(Self::QuestStateDialog { quest: *d.get(3)?, state: *d.get(4)? });
+            }
+            0x54 => return Some(Self::GuildMasterDialog),
             _ => {}
         }
         let d = short_header(&p)?;
@@ -1468,6 +1498,7 @@ impl ServerMessage {
             }),
             // `Item[0..4]` in big endian.
             (0x22, 0xFE) => Some(Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }),
+            (0xF9, 0x01) => Some(Self::OpenNpcDialog { npc: get_u16_le(d, 4)?, contribution: get_u32_le(d, 8)? }),
             _ => None,
         }
     }
@@ -2048,5 +2079,22 @@ mod tests {
             ida_y_vuelta_servidor(ServerMessage::SellResult { result: 1, money: 0x0001_E240 }),
             [0xC3, 8, 0x33, 1, 0x40, 0xE2, 0x01, 0x00]
         );
+    }
+
+    /// The other NPC dialogs OpenMU opens instead of `NpcWindowResponse` (C3 30).
+    #[test]
+    fn other_npc_dialogs() {
+        // OpenNpcDialog (OpenMU ServerToClientPackets.xml:11779-11800, OpenNpcWindowPlugIn.cs:33-40):
+        // C3 0C F9 01, the NPC number (543, Gens Duprian) little endian at 4 and the contribution at 8.
+        let wire = [0xC3, 12, 0xF9, 0x01, 0x1F, 0x02, 0, 0, 0x10, 0x27, 0, 0];
+        let msg = ServerMessage::OpenNpcDialog { npc: 543, contribution: 10_000 };
+        assert_eq!(ServerMessage::decode(&wire), Some(msg.clone()));
+        assert_eq!(msg.encode(), wire);
+        // LegacyQuestStateDialog (C1 05 A1 <quest> <state>, ServerToClientPackets.xml:9029-9049).
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::QuestStateDialog { quest: 0, state: 0xFE }), [0xC1, 5, 0xA1, 0, 0xFE]);
+        // ShowGuildMasterDialog: C1 03 54 (ServerToClientPackets.xml:7957-7967).
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::GuildMasterDialog), [0xC1, 3, 0x54]);
+        // GuildMasterAnswer (ClientToServerPackets.xml): C1 04 54 <show creation dialog>.
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::GuildMasterAnswer { show_creation: false }), [0xC1, 4, 0x54, 0]);
     }
 }
