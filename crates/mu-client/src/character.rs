@@ -12,6 +12,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::mesh::PrimitiveTopology;
 use bevy::prelude::*;
 use mu_data::bmd::{self, Bmd};
+use mu_data::objects::render::{ObjectDraw, Saw};
 use mu_data::texture::AlphaKind;
 use mu_data::{fs, path, texture};
 
@@ -577,8 +578,8 @@ pub struct CharacterModel {
     pub materials: Vec<Handle<crate::model_light::ModelMaterial>>,
     /// Bones of the initial pose.
     pub bones: Vec<bmd::Mat34>,
-    /// Equipment glow materials whose color changes over time (hero_dress.rs).
-    pub glow: Vec<(Handle<crate::model_light::ModelMaterial>, mu_data::items::glow::GlowLight)>,
+    /// Equipment materials that change over time (hero_dress.rs).
+    pub glow: Vec<crate::item_draw::PassAnim>,
 }
 
 /// Worn equipment replacing the class pieces (`BodyPart[].Type`, `Weapon[].Type` and `Wing.Type`
@@ -594,6 +595,8 @@ pub struct Dress {
     pub wing: Option<(std::path::PathBuf, mu_data::items::Item)>,
     /// `g_pOption->GetRenderLevel()`.
     pub render_level: u8,
+    /// The character's `c->Light` is (1, 1, 1) (some items check `b->BodyLight`, ZzzObject.cpp:6961).
+    pub white_light: bool,
 }
 
 impl Dress {
@@ -671,10 +674,29 @@ pub fn load_character_dressed(
             let texture = crate::hero_dress::part_texture(&model.meshes[i].texture, item.is_some(), &class_model);
             let Some(texture) = texture else { continue };
             let material = materials.add(part_material(&pdir, &texture, images));
-            body_materials.push(material.clone());
-            children.push((Mesh3d(handle.clone()), MeshMaterial3d(material.clone())));
             if let (Some(item), Some(d)) = (item, dress) {
-                children.extend(glow.passes(&args.data, &handle, &model.meshes[i], &item, d.render_level, &material, materials, images));
+                // The character's own `o` (not an item object): no `BlendMesh` nor `HiddenMesh`.
+                let draw = ObjectDraw { blend_mesh: -1, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh: -1 };
+                let looks = glow.passes(
+                    &args.data,
+                    &handle,
+                    &model.meshes[i],
+                    (i, model.meshes.len()),
+                    (&item, d.render_level, d.white_light),
+                    &draw,
+                    &material,
+                    materials,
+                    images,
+                );
+                for (mesh, mat, follows_light) in looks {
+                    if follows_light {
+                        body_materials.push(mat.0.clone());
+                    }
+                    children.push((mesh, mat));
+                }
+            } else {
+                body_materials.push(material.clone());
+                children.push((Mesh3d(handle.clone()), MeshMaterial3d(material.clone())));
             }
             parts.push((model_index, i, handle));
         }
@@ -728,9 +750,13 @@ pub fn load_character_dressed(
         };
         // `ItemObjectAttribute(Object)` (ZzzCharacter.cpp:6446): the item's `BlendMesh` / `HiddenMesh`.
         let (blend_mesh, hidden_mesh) = mu_data::items::model::item_object_meshes(&item);
+        let draw = ObjectDraw { blend_mesh, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh };
+        let num_meshes = linked.model.meshes.len();
         let mut handles = vec![];
-        for i in 0..linked.model.meshes.len() {
-            if i as i32 == hidden_mesh {
+        for i in 0..num_meshes {
+            // Without the item's drawing (the default short sword) `HiddenMesh` is not drawn as before;
+            // with it, each call decides (`RenderBody` with or without `o->HiddenMesh`).
+            if !glows && i as i32 == hidden_mesh {
                 continue;
             }
             let posed = linked.model.pose_with(i, &lbones);
@@ -744,14 +770,32 @@ pub fn load_character_dressed(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
             let mut mat = part_material(&dir, &linked.model.meshes[i].texture, images);
-            if blend_mesh <= -2 || linked.model.meshes[i].texture_index as i32 == blend_mesh {
-                mat.base.alpha_mode = AlphaMode::Add;
-            }
-            let material = materials.add(mat);
-            body_materials.push(material.clone());
-            children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
             if let (true, Some(d)) = (glows, dress) {
-                children.extend(glow.passes(&args.data, &mesh, &linked.model.meshes[i], &glow_item, d.render_level, &material, materials, images));
+                let material = materials.add(mat);
+                let looks = glow.passes(
+                    &args.data,
+                    &mesh,
+                    &linked.model.meshes[i],
+                    (i, num_meshes),
+                    (&glow_item, d.render_level, d.white_light),
+                    &draw,
+                    &material,
+                    materials,
+                    images,
+                );
+                for (m, mat, follows_light) in looks {
+                    if follows_light {
+                        body_materials.push(mat.0.clone());
+                    }
+                    children.push((m, mat));
+                }
+            } else {
+                if blend_mesh <= -2 || linked.model.meshes[i].texture_index as i32 == blend_mesh {
+                    mat.base.alpha_mode = AlphaMode::Add;
+                }
+                let material = materials.add(mat);
+                body_materials.push(material.clone());
+                children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
             }
             handles.push((i, mesh));
         }

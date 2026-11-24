@@ -13,8 +13,8 @@
 //! - **Model**: the item's, in pose 0 of its animation 0; armors use the
 //!   `player.bmd` skeleton (`ObjectSelect.Type = MODEL_PLAYER`) and its `BodyHeight`. Unlit (`LightEnable = false`:
 //!   flat `BodyLight` color), without the skin meshes (`HideSkin`).
-//! - **Glow**: the passes of [`mu_data::items::glow::item_passes`] resolved mesh by mesh like map
-//!   objects; the pulsing ones (excellent, +3 to +6, ancient) change color every frame.
+//! - **Passes**: the item's own drawing and its glow ([`mu_data::items::glow::item_passes`]), resolved
+//!   mesh by mesh like map objects (item_draw.rs); the pulsing and scrolling ones change every frame.
 //! - **Hover**: the item spins (`ObjectSelect.Angle[1] = WorldTime · 0.45`).
 
 use std::collections::HashMap;
@@ -30,14 +30,15 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureFormat;
 use bevy::ui::UiScale;
 use mu_data::bmd::{self, Bmd};
-use mu_data::items::glow::{GlowLight, item_passes};
+use mu_data::items::glow::{ItemCtx, item_passes};
 use mu_data::items::model::{self, ITEMVIEW_FAR, ITEMVIEW_FOV_DEG, ITEMVIEW_NEAR, ModelFile, ScreenPose};
 use mu_data::items::{Item, ItemTable};
-use mu_data::objects::render::{self, Bitmap, LookColor, MeshInfo, ObjectDraw, Pass, Saw};
+use mu_data::objects::render::{Bitmap, MeshInfo, ObjectDraw, Saw};
 use mu_data::texture::AlphaKind;
 use mu_data::{fs, texture};
 
 use crate::Args;
+use crate::item_draw::{self, PassAnim};
 use crate::model_light::ModelMaterial;
 use crate::terrain::to_bevy_image;
 
@@ -137,7 +138,7 @@ struct ItemEntity {
     render_level: u8,
     pose: ScreenPose,
     /// Materials whose color changes over time.
-    animated: Vec<(Handle<ModelMaterial>, GlowLight)>,
+    animated: Vec<PassAnim>,
 }
 
 /// An already posed model mesh.
@@ -248,11 +249,8 @@ fn sync_views(
         }
         seen.push(ent.key);
         *tf = view_transform(&ent.pose, view, world_time);
-        for (h, light) in &ent.animated {
-            if let Some(mut m) = materials.get_mut(h) {
-                let c = light.at(world_time);
-                m.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
-            }
+        for a in &ent.animated {
+            a.update(&mut materials, world_time);
         }
     }
     for view in views.views.iter().filter(|v| !seen.contains(&v.key)) {
@@ -260,33 +258,22 @@ fn sync_views(
         let pose = model::screen_pose(&view.item, two_hand);
         let Some(path) = data.model_path(&view.item) else { continue };
         let Some(parts) = cache.parts(&args.data, &path, &pose, &mut meshes, &mut images) else { continue };
-        let passes: Vec<(Pass, GlowLight)> = item_passes(&view.item, [1.0; 3], views.render_level)
-            .into_iter()
-            .map(|p| (Pass::body(p.flags), p.light))
-            .collect();
-        let only: Vec<Pass> = passes.iter().map(|p| p.0).collect();
+        // `b->NumMeshs`: the skipped skin and hidden meshes return at once in `RenderMesh` with
+        // `HideSkin` (ZzzBMD.cpp:946-962), so the drawn ones are enough.
+        let num_meshes = parts.iter().map(|p| p.info.index + 1).max().unwrap_or(0);
+        let ctx = ItemCtx { hide_skin: true, num_meshes, white_light: true };
+        let passes = item_passes(&view.item, [1.0; 3], views.render_level, &ctx);
         // `ItemObjectAttribute` (`RenderObjectScreen`, ZzzInventory.cpp:10584).
         let (blend_mesh, hidden_mesh) = model::item_object_meshes(&view.item);
         let draw = ObjectDraw { blend_mesh, stream_mesh: -1, tex_coord: [Saw::ZERO; 2], hidden_mesh };
         let mut animated = Vec::new();
         let mut children = Vec::new();
         for part in parts.iter() {
-            for (k, look) in render::resolve_all(&only, &draw, &part.info) {
-                let light = passes[k].1;
-                // `LightEnable = false`: normal-based light becomes flat `BodyLight` color.
-                let look = if look.color == LookColor::Lit { render::MeshLook { color: LookColor::Flat, ..look } } else { look };
-                let image = match (look.textured, look.texture) {
-                    (false, _) => None,
-                    (true, Some(b)) => cache.bitmap(&args.data, b, &mut images),
-                    (true, None) => part.image.clone(),
-                };
-                let body = light.at(world_time);
-                let mat = crate::objects::object_material(image, &look, body, None, k, false);
-                let h = materials.add(mat);
-                if light.animated() {
-                    animated.push((h.clone(), light));
-                }
-                children.push((Mesh3d(part.mesh.clone()), MeshMaterial3d(h), RenderLayers::layer(ITEM_LAYER)));
+            // `LightEnable = false`: normal-based light becomes flat `BodyLight` color.
+            let bitmap = |b| cache.bitmap(&args.data, b, &mut images);
+            for mp in item_draw::mesh_passes(&passes, &draw, &part.info, part.image.as_ref(), true, bitmap, &mut materials, world_time) {
+                animated.extend(mp.anim);
+                children.push((Mesh3d(part.mesh.clone()), MeshMaterial3d(mp.handle), RenderLayers::layer(ITEM_LAYER)));
             }
         }
         let mut e = commands.spawn((

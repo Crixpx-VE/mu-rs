@@ -1,15 +1,21 @@
 //! Item glow: the `RenderPartObjectEffect` passes (ZzzObject.cpp:9327-10385) depending on
 //! level (+3 to +15), excellent options and ancient sets.
 //!
-//! Each pass is a call to `RenderPartObjectBody` / `RenderPartObjectBodyColor(2)` with its
-//! `RENDER_*` flags ([`crate::objects::render::flags`]) and its `b->BodyLight` ([`GlowLight`]); the drawer
-//! resolves it mesh by mesh with [`crate::objects::render::resolve`] like any other model. This is the
-//! general branch: the items with their own drawing at the start of the function (the Kundun spear, the
-//! event rings...) use it too.
+//! `RenderPartObjectEffect` sets `b->BodyLight` from the level ([`level_light`]), calls
+//! `RenderPartObjectBody` (the item's own drawing, [`super::body`]) and then the glow calls
+//! `RenderPartObjectBodyColor(2)` and the excellent / ancient ones ([`glow_passes`]), each with its
+//! `RENDER_*` flags ([`crate::objects::render::flags`]) and its `b->BodyLight` ([`GlowLight`]).
+//! [`item_passes`] puts them in that order as [`Pass`]es, which the drawer resolves mesh by mesh with
+//! [`crate::objects::render::resolve_all`] like any other model. This is the general branch: the items
+//! with their own drawing at the start of the function (the Kundun spear, the event rings...) do not
+//! have it yet. TODO: neither do the extra `RenderPartObjectBodyColor2` calls of some items below +3
+//! (ZzzObject.cpp:10134-10176).
 
+use super::body::{BodyCtx, LightOp, body_passes};
 use super::group::*;
 use super::{Item, kind};
 use crate::objects::render::flags::*;
+use crate::objects::render::{Pass, Saw};
 
 /// `b->BodyLight` of a pass.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -50,11 +56,71 @@ impl GlowLight {
     }
 }
 
-/// One draw call over all meshes (`RenderBody`) with its `RENDER_*` flags and its light.
+/// Which function draws a glow pass: they pick the meshes differently for some types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlowCall {
+    /// `RenderPartObjectBodyColor` (ZzzObject.cpp:8908-9080): the chrome and metal passes.
+    Color,
+    /// `RenderPartObjectBodyColor2` (ZzzObject.cpp:9082-9171): `RENDER_CHROME2/4` and the ancient pass.
+    Color2,
+    /// The excellent pass, drawn directly (ZzzObject.cpp:10296-10329).
+    Excellent,
+}
+
+/// One glow call with its `RENDER_*` flags and its light (`b->BodyLight`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlowPass {
     pub flags: u32,
     pub light: GlowLight,
+    pub call: GlowCall,
+}
+
+/// The light of an item pass: the level light ([`GlowLight`]) as `RenderPartObjectEffect` leaves it
+/// in `b->BodyLight`, and what the item's own drawing does with it ([`LightOp`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PassLight {
+    pub base: GlowLight,
+    pub op: LightOp,
+}
+
+impl PassLight {
+    /// The color with `WorldTime` in ms.
+    pub fn at(self, world_time: f32) -> [f32; 3] {
+        self.op.apply(self.base.at(world_time), world_time)
+    }
+
+    /// Changes over time.
+    pub fn animated(self) -> bool {
+        self.op.animated() || (self.op.relative() && self.base.animated())
+    }
+
+    /// Relative to the light the caller gave (the character's `c->Light`); otherwise an absolute
+    /// color (`Vector(..., b->BodyLight)`, the glow colors).
+    pub fn relative(self) -> bool {
+        self.op.relative() && matches!(self.base, GlowLight::Fixed(_) | GlowLight::Luminosity(_))
+    }
+}
+
+/// A draw call of the item (`RenderPartObjectBody`, then the glow), resolved mesh by mesh with
+/// [`crate::objects::render::resolve_all`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemPass {
+    pub pass: Pass,
+    pub light: PassLight,
+    /// See [`super::body::BodyPass::gl_color`].
+    pub gl_color: Option<[f32; 3]>,
+}
+
+/// Where an item is drawn (see [`BodyCtx`]).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ItemCtx {
+    /// `b->HideSkin` (windows).
+    pub hide_skin: bool,
+    /// `b->NumMeshs`.
+    pub num_meshes: usize,
+    /// The caller's `Light` is (1, 1, 1): the window's (ZzzInventory.cpp:10600) or the hero's
+    /// `AbilityLight`; not the terrain light other characters get.
+    pub white_light: bool,
 }
 
 /// The level used to choose the glow (the `switch (Type)` at the start and the effects limit:
@@ -265,27 +331,42 @@ pub fn part_object_color3(item: &Item) -> [f32; 3] {
     if gold { [1.0, 0.7, 0.2] } else { [0.1, 0.6, 1.0] }
 }
 
-/// The item's passes with the local `light` (the inventory's is (1, 1, 1)) and the options'
-/// effects limit (`g_pOption->GetRenderLevel()`, 0 to 4).
-pub fn item_passes(item: &Item, light: [f32; 3], render_level: u8) -> Vec<GlowPass> {
+/// `b->BodyLight` when `RenderPartObjectEffect` calls `RenderPartObjectBody` (ZzzObject.cpp:10132-10274),
+/// with the caller's `light` (the inventory's is (1, 1, 1)) and the effects limit
+/// (`g_pOption->GetRenderLevel()`, 0 to 4).
+pub fn level_light(item: &Item, light: [f32; 3], render_level: u8) -> GlowLight {
+    let scaled = |k: f32| GlowLight::Fixed(light.map(|v| v * k));
+    match effect_level(item, render_level) {
+        0..=2 => GlowLight::Fixed(light),
+        3 | 4 => GlowLight::Luminosity([light[0], light[1] * 0.6, light[2] * 0.6]),
+        5 | 6 => GlowLight::Luminosity([light[0] * 0.5, light[1] * 0.7, light[2]]),
+        _ if render_level == 0 => GlowLight::Fixed(light),
+        7 | 8 => scaled(0.8),
+        9 | 10 if render_level >= 2 => scaled(0.9),
+        11 | 12 if render_level >= 3 => scaled(0.9),
+        13..=15 if render_level >= 4 => scaled(0.9),
+        _ => GlowLight::Fixed(light),
+    }
+}
+
+/// The glow calls after `RenderPartObjectBody` (ZzzObject.cpp:10197-10339): level chrome, excellent and
+/// ancient.
+pub fn glow_passes(item: &Item, light: [f32; 3], render_level: u8) -> Vec<GlowPass> {
     let level = effect_level(item, render_level);
     let rl = render_level;
-    let scaled = |k: f32| GlowLight::Fixed(light.map(|v| v * k));
-    let body = |l: GlowLight| GlowPass { flags: TEXTURE, light: l };
     let color = GlowLight::Fixed(part_object_color(item));
-    let chrome = GlowPass { flags: CHROME | BRIGHT, light: color };
-    let metal = GlowPass { flags: METAL | BRIGHT, light: color };
+    let chrome = GlowPass { flags: CHROME | BRIGHT, light: color, call: GlowCall::Color };
+    let metal = GlowPass { flags: METAL | BRIGHT, light: color, call: GlowCall::Color };
     let color2 = GlowLight::Fixed(part_object_color2(item, light.map(|v| v * 0.9)));
+    let color2 = |flags: u32| GlowPass { flags: flags | BRIGHT, light: color2, call: GlowCall::Color2 };
     let mut out = match level {
-        0..=2 => vec![body(GlowLight::Fixed(light))],
-        3 | 4 => vec![body(GlowLight::Luminosity([light[0], light[1] * 0.6, light[2] * 0.6]))],
-        5 | 6 => vec![body(GlowLight::Luminosity([light[0] * 0.5, light[1] * 0.7, light[2]]))],
-        _ if rl == 0 => vec![body(GlowLight::Fixed(light))],
-        7 | 8 if rl >= 1 => vec![body(scaled(0.8)), chrome],
-        9 | 10 if rl >= 2 => vec![body(scaled(0.9)), chrome, metal],
-        11 | 12 if rl >= 3 => vec![body(scaled(0.9)), GlowPass { flags: CHROME2 | BRIGHT, light: color2 }, metal, chrome],
-        13..=15 if rl >= 4 => vec![body(scaled(0.9)), GlowPass { flags: CHROME4 | BRIGHT, light: color2 }, metal, chrome],
-        _ => vec![body(GlowLight::Fixed(light))],
+        0..=6 => vec![],
+        _ if rl == 0 => vec![],
+        7 | 8 => vec![chrome],
+        9 | 10 if rl >= 2 => vec![chrome, metal],
+        11 | 12 if rl >= 3 => vec![color2(CHROME2), metal, chrome],
+        13..=15 if rl >= 4 => vec![color2(CHROME4), metal, chrome],
+        _ => vec![],
     };
     if rl == 0 {
         return out;
@@ -298,9 +379,105 @@ pub fn item_passes(item: &Item, light: [f32; 3], render_level: u8) -> Vec<GlowPa
         && (t < k(WING, 36) || t > k(WING, 43))
         && (t < k(WING, 130) || t > k(WING, 134));
     if excellent_glow {
-        out.push(GlowPass { flags: TEXTURE | BRIGHT, light: GlowLight::Excellent });
+        out.push(GlowPass { flags: TEXTURE | BRIGHT, light: GlowLight::Excellent, call: GlowCall::Excellent });
     } else if item.is_ancient() {
-        out.push(GlowPass { flags: CHROME3 | BRIGHT, light: GlowLight::Ancient(part_object_color3(item)) });
+        let light = GlowLight::Ancient(part_object_color3(item));
+        out.push(GlowPass { flags: CHROME3 | BRIGHT, light, call: GlowCall::Color2 });
+    }
+    out
+}
+
+/// The meshes a glow call draws for this type, as `RenderBody` / `RenderMesh` templates (flags are
+/// set by the caller) with the `b->BodyLight` change they make (ZzzObject.cpp:8960-9079, 9102-9169,
+/// 10299-10329).
+fn glow_calls(item: &Item, call: GlowCall, hide_skin: bool) -> Vec<(Pass, LightOp)> {
+    let (g, i) = (item.group, item.index);
+    let keep = |p: Pass| vec![(p, LightOp::Keep)];
+    let body = |hidden: i32| keep(Pass::body(0).hidden(hidden));
+    let mesh = |m: usize| keep(Pass::mesh(m, 0));
+    match call {
+        GlowCall::Color => match (g, i) {
+            (STAFF, 5) | (SWORD, 20) => body(1),
+            (SWORD, 21) => body(0),
+            // `o->HiddenMesh = 2` around the call (ZzzObject.cpp:8960-8963, 9076-9079).
+            (MACE, 7) => body(2),
+            (SWORD, 31) | (SPEAR, 10) | (SHIELD, 16) | (MACE, 8..=13) => keep(Pass::body(0)),
+            (SWORD, 26) => body(5),
+            (SWORD, 27) => mesh(0),
+            (SWORD, 28) => mesh(2),
+            // `o->BlendMesh = 1` and a white `BodyLight` for the second call (ZzzObject.cpp:8987-8993).
+            (STAFF, 30) => vec![
+                (Pass::body(0).hidden(-1), LightOp::Keep),
+                (Pass::mesh(1, 0).blend_mesh(1), LightOp::Set([1.0; 3])),
+            ],
+            (STAFF, 32) => mesh(1),
+            (SHIELD, 19..=21) | (STAFF, 33 | 34) | (MACE, 18) | (BOW, 24) | (HELM, 49) => mesh(0),
+            (HELM, 50) => mesh(1),
+            (HELM, 53) => mesh(2),
+            (SPEAR, 11) => vec![(Pass::mesh(0, 0), LightOp::Keep), (Pass::mesh(1, 0), LightOp::Keep)],
+            _ => body(-1),
+        },
+        GlowCall::Color2 => match (g, i) {
+            (STAFF, 5) | (SWORD, 20) | (HELPER, 50) => body(1),
+            (SWORD, 21) | (POTION, 64) => body(0),
+            (SWORD, 26) => body(5),
+            (SHIELD, 19) | (HELM, 49) => mesh(0),
+            (HELM, 50) => mesh(1),
+            (HELM, 53) => mesh(2),
+            _ => body(-1),
+        },
+        GlowCall::Excellent => match (g, i) {
+            (HELM, 39..=44) if hide_skin => mesh([2, 1, 0, 2, 1, 2][i as usize - 39]),
+            _ => body(-1),
+        },
+    }
+}
+
+/// Every draw call of the item, in order: its own drawing ([`body_passes`]) with the level light,
+/// then the glow calls ([`glow_passes`]), which see what the drawing left in `o` and `b`.
+pub fn item_passes(item: &Item, light: [f32; 3], render_level: u8, ctx: &ItemCtx) -> Vec<ItemPass> {
+    let base = level_light(item, light, render_level);
+    let white_light = ctx.white_light && base == GlowLight::Fixed(light);
+    let body_ctx = BodyCtx { hide_skin: ctx.hide_skin, num_meshes: ctx.num_meshes, white_light };
+    let body = body_passes(item, &body_ctx);
+    let mut out: Vec<ItemPass> = body
+        .passes
+        .iter()
+        .map(|p| ItemPass { pass: p.pass, light: PassLight { base, op: p.light }, gl_color: p.gl_color })
+        .collect();
+    for glow in glow_passes(item, light, render_level) {
+        // `PartObjectColor2` starts from the `BodyLight` the item's drawing left (ZzzObject.cpp:9100);
+        // `glow_passes` assumed the level light (`Light · 0.9`, a fixed light at those levels).
+        let glow_light = match (glow.call, glow.light, base) {
+            (GlowCall::Color2, GlowLight::Fixed(_), GlowLight::Fixed(l)) if body.light_after != LightOp::Keep => {
+                if body.light_after.animated() {
+                    // Only types whose `PartObjectColor2` keeps the light end with a varying one
+                    // (SWORD+31, MACE+7, SHIELD+15).
+                    PassLight { base, op: body.light_after }
+                } else {
+                    let after = body.light_after.apply(l, 0.0);
+                    PassLight { base: GlowLight::Fixed(part_object_color2(item, after)), op: LightOp::Keep }
+                }
+            }
+            _ => PassLight { base: glow.light, op: LightOp::Keep },
+        };
+        for (template, op) in glow_calls(item, glow.call, ctx.hide_skin) {
+            let mut pass = Pass { flags: glow.flags, ..template };
+            // What the item's drawing left in `o` and `b` (`o->BlendMesh`... are read by these calls).
+            if pass.blend_mesh.is_none() {
+                pass.blend_mesh = body.blend_mesh;
+            }
+            if pass.mesh.is_none() && pass.hidden_mesh.is_none() {
+                pass.hidden_mesh = body.hidden_mesh;
+            }
+            pass.glow = body.glow;
+            pass.stream_mesh = body.stream_mesh;
+            if let Some(u) = body.tex_u {
+                pass.tex_coord = Some([u, Saw::ZERO]);
+            }
+            let light = if op == LightOp::Keep { glow_light } else { PassLight { base: glow_light.base, op } };
+            out.push(ItemPass { pass, light, gl_color: None });
+        }
     }
     out
 }
@@ -313,9 +490,11 @@ mod tests {
         Item { level, ..Item::new(group, index) }
     }
 
+    const CTX: ItemCtx = ItemCtx { hide_skin: true, num_meshes: 2, white_light: true };
+
     #[test]
     fn pasadas_por_nivel() {
-        let flags = |it: &Item| item_passes(it, [1.0; 3], 4).iter().map(|p| p.flags).collect::<Vec<_>>();
+        let flags = |it: &Item| item_passes(it, [1.0; 3], 4, &CTX).iter().map(|p| p.pass.flags).collect::<Vec<_>>();
         assert_eq!(flags(&lv(SWORD, 0, 0)), vec![TEXTURE]);
         assert_eq!(flags(&lv(SWORD, 0, 4)), vec![TEXTURE]);
         assert_eq!(flags(&lv(SWORD, 0, 7)), vec![TEXTURE, CHROME | BRIGHT]);
@@ -323,11 +502,12 @@ mod tests {
         assert_eq!(flags(&lv(SWORD, 0, 11)), vec![TEXTURE, CHROME2 | BRIGHT, METAL | BRIGHT, CHROME | BRIGHT]);
         assert_eq!(flags(&lv(SWORD, 0, 15)), vec![TEXTURE, CHROME4 | BRIGHT, METAL | BRIGHT, CHROME | BRIGHT]);
         // +7 and above: the base at 0.8 or 0.9.
-        assert_eq!(item_passes(&lv(SWORD, 0, 7), [1.0; 3], 4)[0].light, GlowLight::Fixed([0.8; 3]));
-        assert_eq!(item_passes(&lv(SWORD, 0, 13), [1.0; 3], 4)[0].light, GlowLight::Fixed([0.9; 3]));
+        assert_eq!(level_light(&lv(SWORD, 0, 7), [1.0; 3], 4), GlowLight::Fixed([0.8; 3]));
+        assert_eq!(item_passes(&lv(SWORD, 0, 13), [1.0; 3], 4, &CTX)[0].light.at(0.0), [0.9; 3]);
         // Excellent: one more pass adding the item's own texture.
         let exc = Item { excellent: 4, ..lv(SWORD, 0, 9) };
-        assert_eq!(item_passes(&exc, [1.0; 3], 4).last().unwrap(), &GlowPass { flags: TEXTURE | BRIGHT, light: GlowLight::Excellent });
+        let last = *item_passes(&exc, [1.0; 3], 4, &CTX).last().unwrap();
+        assert_eq!((last.pass.flags, last.light.base), (TEXTURE | BRIGHT, GlowLight::Excellent));
         // Wings do not glow from level or excellent.
         assert_eq!(flags(&Item { excellent: 1, ..lv(WING, 4, 13) }), vec![TEXTURE]);
         // Jewels always as +8.
@@ -339,7 +519,31 @@ mod tests {
         // With `RenderLevel` 1 a +13 stays at +7; with 0, at +5 (the pulsing blue) and no excellent.
         assert_eq!(effect_level(&lv(SWORD, 0, 13), 1), 7);
         let exc = Item { excellent: 1, ..lv(SWORD, 0, 13) };
-        assert_eq!(item_passes(&exc, [1.0; 3], 0), vec![GlowPass { flags: TEXTURE, light: GlowLight::Luminosity([0.5, 0.7, 1.0]) }]);
+        let p = item_passes(&exc, [1.0; 3], 0, &CTX);
+        assert_eq!(p.len(), 1);
+        assert_eq!(p[0].light.base, GlowLight::Luminosity([0.5, 0.7, 1.0]));
+        assert!(p[0].light.animated() && p[0].light.relative());
+    }
+
+    /// The glow goes on top of the item's own drawing, in the original order, and picks the meshes
+    /// as `RenderPartObjectBodyColor` does.
+    #[test]
+    fn glow_after_the_body() {
+        // Divine Sword of Archangel +9: three body calls, then chrome and metal over every mesh.
+        let p = item_passes(&lv(SWORD, 19, 9), [1.0; 3], 4, &CTX);
+        let flags: Vec<u32> = p.iter().map(|p| p.pass.flags).collect();
+        assert_eq!(flags, vec![TEXTURE | METAL, LIGHTMAP | TEXTURE, TEXTURE, CHROME | BRIGHT, METAL | BRIGHT]);
+        assert_eq!(p[0].light.at(0.0), [0.9; 3]);
+        assert_eq!((p[3].pass.mesh, p[3].pass.hidden_mesh), (None, Some(-1)));
+        // `MODEL_SWORD+28` +7: the chrome only on mesh 2 (ZzzObject.cpp:8983), with the `o->BlendMesh = 1`
+        // the drawing left.
+        let p = item_passes(&lv(SWORD, 28, 7), [1.0; 3], 4, &CTX);
+        let glow = p.last().unwrap();
+        assert_eq!((glow.pass.flags, glow.pass.mesh, glow.pass.blend_mesh), (CHROME | BRIGHT, Some(2), Some(1)));
+        // SWORD+22 leaves `BodyLight` at 0.7: the +13 `RENDER_CHROME4` pass starts from it.
+        let p = item_passes(&lv(SWORD, 22, 13), [1.0; 3], 4, &CTX);
+        let c4 = p.iter().find(|p| p.pass.flags == CHROME4 | BRIGHT).unwrap();
+        assert_eq!(c4.light.at(0.0), [0.7; 3]);
     }
 
     #[test]

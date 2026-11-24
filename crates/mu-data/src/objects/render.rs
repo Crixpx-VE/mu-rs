@@ -53,9 +53,10 @@ pub enum Bitmap {
     /// `GL_REPEAT`; `MapManager.cpp:1041-1053`), one per tick (`WaterTextureNumber++`, ZzzScene.cpp:2315).
     /// [`Bitmap::path`] is the first one; the rest, [`Bitmap::frame_path`].
     Water,
-    /// Another texture loaded by the map (e.g. `BITMAP_CHROME+2` = `Object9\sand01.jpg` in Tarkan,
-    /// `MapManager.cpp:150`): path relative to `Data` and whether it is `GL_NEAREST` + `GL_CLAMP_TO_EDGE`.
-    File { path: &'static str, nearest_clamp: bool },
+    /// Another texture (e.g. `BITMAP_CHROME+2` = `Object9\sand01.jpg` in Tarkan, `MapManager.cpp:150`):
+    /// path relative to `Data`, `GL_NEAREST` (otherwise `GL_LINEAR`) and `GL_CLAMP_TO_EDGE` (otherwise
+    /// `GL_REPEAT`), as its `LoadBitmap` asks (defaults `GL_NEAREST`, `GL_CLAMP_TO_EDGE`, ZzzTexture.h:12).
+    File { path: &'static str, nearest: bool, clamp: bool },
 }
 
 impl Bitmap {
@@ -91,13 +92,16 @@ impl Bitmap {
     pub fn nearest(self) -> bool {
         match self {
             Bitmap::Chrome2 | Bitmap::Chrome3 | Bitmap::Chrome6 | Bitmap::Chrome7 => true,
-            Bitmap::File { nearest_clamp, .. } => nearest_clamp,
+            Bitmap::File { nearest, .. } => nearest,
             Bitmap::Chrome | Bitmap::Chrome8 | Bitmap::Shiny | Bitmap::Water => false,
         }
     }
 
     pub fn clamp(self) -> bool {
-        self.nearest() || matches!(self, Bitmap::Shiny | Bitmap::Chrome8)
+        match self {
+            Bitmap::File { clamp, .. } => clamp,
+            _ => self.nearest() || matches!(self, Bitmap::Shiny | Bitmap::Chrome8),
+        }
     }
 }
 
@@ -208,22 +212,52 @@ pub fn chrome_uv(mode: ChromeMode, n: [f32; 3], world_time: f32) -> [f32; 2] {
     }
 }
 
-/// `k · ((int)WorldTime % period)`, with `WorldTime` in ms: the `BlendMeshTexCoordU/V` of `MoveObject`
-/// (e.g. `-(int)WorldTime%1000 * 0.001f` = `Saw { period: 1000, k: -0.001 }`). `k = 0`: none.
+/// `k · ((int)WorldTime % period) + offset`, with `WorldTime` in ms: the `BlendMeshTexCoordU/V` of
+/// `MoveObject` (e.g. `-(int)WorldTime%1000 * 0.001f` = `Saw::new(1000, -0.001)`).
+///
+/// `period = 0` is the linear form `k · WorldTime + offset` (float, no `(int)` nor `%`), which the item
+/// drawing code passes directly (`WorldTime*0.0001f`, ZzzObject.cpp:6991): it grows without bound like
+/// the original's, and only `GL_REPEAT` textures make it look periodic, so it cannot be a [`Saw`] with a
+/// period. `k = 0` and `offset = 0`: none.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Saw {
     pub period: f32,
     pub k: f32,
+    pub offset: f32,
 }
 
 impl Saw {
-    pub const ZERO: Saw = Saw { period: 1.0, k: 0.0 };
+    pub const ZERO: Saw = Saw::new(1.0, 0.0);
+
+    /// `k · ((int)WorldTime % period)`.
+    pub const fn new(period: f32, k: f32) -> Self {
+        Self { period, k, offset: 0.0 }
+    }
+
+    /// `k · WorldTime` (see the type's docs).
+    pub const fn linear(k: f32) -> Self {
+        Self { period: 0.0, k, offset: 0.0 }
+    }
+
+    /// `... + offset` (e.g. `(int)WorldTime%4000*0.0004f - 0.7f`, ZzzObject.cpp:7603).
+    pub const fn plus(mut self, offset: f32) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Always 0 (`BlendMeshTexCoordU/V` = 0: no `EnableWave`).
+    pub fn is_zero(self) -> bool {
+        self.k == 0.0 && self.offset == 0.0
+    }
 
     pub fn at(self, world_time: f32) -> f32 {
         if self.k == 0.0 {
-            return 0.0;
+            return self.offset;
         }
-        self.k * world_time.floor().rem_euclid(self.period)
+        if self.period == 0.0 {
+            return self.k * world_time + self.offset;
+        }
+        self.k * world_time.floor().rem_euclid(self.period) + self.offset
     }
 }
 
@@ -254,6 +288,9 @@ pub struct Pass {
     pub alpha: Option<f32>,
     /// Time-varying `b->BodyLight` (instead of [`Pass::light`]).
     pub body_wave: Option<BodyWave>,
+    /// The `HiddenMesh` parameter of a `RenderBody` (`None` = `o->HiddenMesh`, [`ObjectDraw::hidden_mesh`];
+    /// `Some(-1)` = the default, none hidden). `RenderMesh` has no such parameter.
+    pub hidden_mesh: Option<i32>,
 }
 
 impl Pass {
@@ -270,7 +307,13 @@ impl Pass {
             glow: None,
             alpha: None,
             body_wave: None,
+            hidden_mesh: None,
         }
+    }
+    /// The call's `HiddenMesh` (`-1` = none).
+    pub const fn hidden(mut self, mesh: i32) -> Self {
+        self.hidden_mesh = Some(mesh);
+        self
     }
     /// The call's `Alpha`.
     pub const fn alpha(mut self, a: f32) -> Self {
@@ -368,6 +411,9 @@ pub struct MeshLook {
     pub alpha: f32,
     /// Time-varying `BodyLight` (overrides [`MeshLook::light`]).
     pub body_wave: Option<BodyWave>,
+    /// Factor on `BodyLight`: the chrome branch with `Alpha` < 0.99 and `RENDER_CHROME3/4/5/7` or
+    /// `RENDER_BRIGHT` multiplies `BodyLight` by `Alpha` (ZzzBMD.cpp:1110-1129); 1 otherwise.
+    pub body_scale: f32,
 }
 
 /// What is needed about a mesh to decide how it is drawn.
@@ -402,7 +448,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
     match p.mesh {
         // `RenderBody`: `_H` and `HiddenMesh` are not drawn; `_R` makes the mesh its own `BlendMesh`.
         None => {
-            if i == o.hidden_mesh || m.script.is_some_and(|s| s.hidden) {
+            if i == p.hidden_mesh.unwrap_or(o.hidden_mesh) || m.script.is_some_and(|s| s.hidden) {
                 return None;
             }
             if m.script.is_some_and(|s| s.bright) {
@@ -413,7 +459,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         Some(_) => {}
     }
     let tex_coord = p.tex_coord.unwrap_or(o.tex_coord);
-    let has_offset = tex_coord.iter().any(|s| s.k != 0.0);
+    let has_offset = tex_coord.iter().any(|s| !s.is_zero());
     let model_stream = p.stream_mesh.unwrap_or(o.stream_mesh);
     // The `_S` script only enables scrolling; flat light comes from the model's `StreamMesh`.
     let stream = if m.script.is_some_and(|s| s.stream) { i } else { model_stream };
@@ -432,6 +478,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         blend,
         alpha: p.alpha.unwrap_or(1.0),
         body_wave: p.body_wave,
+        body_scale: 1.0,
     };
     let translucent = p.alpha.is_some_and(|a| a < 0.99);
 
@@ -449,13 +496,20 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         if m.script.is_some_and(|s| s.none_blend) {
             return None;
         }
-        let blend = if f & (CHROME3 | CHROME4 | CHROME5 | CHROME7) != 0 || f & BRIGHT != 0 {
+        let additive = f & (CHROME3 | CHROME4 | CHROME5 | CHROME7) != 0 || f & BRIGHT != 0;
+        let blend = if additive {
             LookBlend::Add
         } else if f & DARK != 0 {
             LookBlend::Subtract
+        } else if translucent {
+            // TODO: `RENDER_LIGHTMAP` here takes `EnableLightMap` (ZzzBMD.cpp:1132), a multiplying
+            // blend there is no `LookBlend` for; no caller combines it with a chrome flag.
+            LookBlend::AlphaTest
         } else {
             LookBlend::Opaque
         };
+        // `BodyLight *= Alpha` (ZzzBMD.cpp:1116-1127).
+        let body_scale = if additive && translucent { p.alpha.unwrap_or(1.0) } else { 1.0 };
         // `BindTexture`: with `MeshTexture == -1` each formula's own; otherwise the requested one.
         let texture = match p.texture {
             Some(t) => Some(t),
@@ -467,7 +521,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         };
         // Only `RENDER_CHROME4` adds `BlendMeshTexCoordU/V` (`ZzzBMD.cpp:1301`).
         let wave = (mode == ChromeMode::Chrome4 && has_offset).then_some(tex_coord);
-        return Some(MeshLook { chrome: Some(mode), ..look(texture, blend, LookColor::Flat, wave) });
+        return Some(MeshLook { chrome: Some(mode), body_scale, ..look(texture, blend, LookColor::Flat, wave) });
     }
     if blend_mesh <= -2 || m.texture_index == blend_mesh {
         let blend = if f & DARK != 0 { LookBlend::Subtract } else { LookBlend::Add };
@@ -539,10 +593,10 @@ mod tests {
 
     #[test]
     fn dientes_de_sierra() {
-        let s = Saw { period: 1000.0, k: -0.001 };
+        let s = Saw::new(1000.0, -0.001);
         assert!((s.at(1250.0) + 0.25).abs() < 1e-6);
         assert_eq!(s.at(2000.0), 0.0);
-        let s = Saw { period: 50000.0, k: -0.00005 };
+        let s = Saw::new(50000.0, -0.00005);
         assert!((s.at(49_999.0) + 2.49995).abs() < 1e-4);
     }
 
@@ -578,7 +632,7 @@ mod tests {
 
     #[test]
     fn stream_mesh() {
-        let saw = [Saw { period: 1000.0, k: -0.001 }, Saw::ZERO];
+        let saw = [Saw::new(1000.0, -0.001), Saw::ZERO];
         let o = ObjectDraw { tex_coord: saw, ..obj() };
         // Model StreamMesh: flat light and scrolling.
         let p = Pass::body(TEXTURE).stream(2);
