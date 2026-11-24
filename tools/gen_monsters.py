@@ -1,21 +1,21 @@
-"""Genera la tabla de monstruos y NPC a partir del código del Main 5.2 (solo lectura).
+"""Generates the monster and NPC table from the Main 5.2 code (read only).
 
-    python tools/gen_monsters.py [ruta a "Source Main 5.2/source"] [ruta a MuMain/src/bin/Data]
+    python tools/gen_monsters.py [path to "Source Main 5.2/source"] [path to MuMain/src/bin/Data]
 
-Recorre (con un intérprete mínimo de C, `cparse.py`/`cexpr.py`):
-- `CreateMonster` (ZzzCharacter.cpp:12577): primero los creadores de cada mapa en su orden y luego el
-  `switch(Type)` grande. Para cada número de monstruo del servidor sale el modelo, la escala, las armas,
-  `Level`, `BlendMesh`... y, si cambia según el mapa o con `rand()`, una entrada por caso.
-- `OpenMonsterModel` (ZzzOpenData.cpp:2367): `PlaySpeed` y `Loop` de cada acción, `BoneHead`, `StreamMesh`
-  y los sonidos de cada modelo `MonsterNN.bmd`.
-- `OpenNpc` (ZzzOpenData.cpp:1865): archivo, carpeta de texturas y `PlaySpeed` de cada modelo `MODEL_*`.
-- `CreateCharacterPointer` (ZzzCharacter.cpp:11540): huesos de las armas (`LinkBone`).
+Walks (with a minimal C interpreter, `cparse.py`/`cexpr.py`):
+- `CreateMonster` (ZzzCharacter.cpp:12577): first each map's creators in order, then the big
+  `switch(Type)`. For each server monster number it gets the model, scale, weapons, `Level`,
+  `BlendMesh`... and, if it changes per map or with `rand()`, one entry per case.
+- `OpenMonsterModel` (ZzzOpenData.cpp:2367): `PlaySpeed` and `Loop` of each action, `BoneHead`,
+  `StreamMesh` and the sounds of each `MonsterNN.bmd` model.
+- `OpenNpc` (ZzzOpenData.cpp:1865): file, texture folder and `PlaySpeed` of each `MODEL_*` model.
+- `CreateCharacterPointer` (ZzzCharacter.cpp:11540): weapon bones (`LinkBone`).
 
-Los nombres (que el original lee de `NpcName_<idioma>.txt`, que no está en nuestra Data) salen de
-`Monsters/Monsters.json` de MuMain (español si lo hay, si no inglés). Con ese archivo además compara modelo,
-escala y armas con la conversión de MuMain y avisa de las diferencias (manda el Main 5.2).
+Names (the original reads them from `NpcName_<language>.txt`, which is not in our Data) come from MuMain's
+`Monsters/Monsters.json` (Spanish if present, else English). That file is also used to compare model,
+scale and weapons against MuMain's conversion and report differences (Main 5.2 wins).
 
-Escribe crates/mu-data/src/monsters/table.rs.
+Writes crates/mu-data/src/monsters/table.rs.
 """
 
 import json
@@ -40,7 +40,7 @@ def src(name):
     return read_source(os.path.join(SRC, name))
 
 
-# --- Intérprete -----------------------------------------------------------------------------------
+# --- Interpreter ----------------------------------------------------------------------------------
 
 class Break(Exception):
     pass
@@ -52,7 +52,7 @@ class Return(Exception):
 
 
 class State:
-    """Lo que va quedando en `c` / `c->Object` (solo lo que el código pone a mano)."""
+    """What ends up in `c` / `c->Object` (only what the code sets explicitly)."""
 
     def __init__(self, file):
         self.file = file
@@ -77,7 +77,7 @@ def compact(toks):
 
 
 def split_args(toks):
-    """Argumentos de la llamada `f(...)` cuyos tokens son `toks` (desde el nombre)."""
+    """Arguments of the call `f(...)` whose tokens are `toks` (starting at the name)."""
     i = [t for t, _ in toks].index("(")
     depth, args, cur = 0, [], []
     for t in toks[i:]:
@@ -188,12 +188,12 @@ class Interp:
         line = node.line
         names = [t for t, _ in toks]
         st = self.st
-        # Declaraciones de punteros que no cuentan.
+        # Pointer declarations that do not matter.
         if re.match(r"^(OBJECT|BMD|CHARACTER)\*\w+=&?(C\.Object|&?\w+)$", s) or re.match(r"^O=&C\.Object$", s):
             return
         if re.match(r"^[oO]=&", s) or s.startswith("OBJECT*") and "CreateCharacter" not in s:
             return
-        # `o->Position[2] = RequestTerrainHeight(o->Position[0],o->Position[1]) + k`: k sobre el suelo.
+        # `o->Position[2] = RequestTerrainHeight(o->Position[0],o->Position[1]) + k`: k above the ground.
         m = re.match(r"^O\.Position\[2\]=RequestTerrainHeight\(O\.Position\[0\],O\.Position\[1\]\)\+(.+)$", s)
         if m:
             self.set("height", evaluate([m.group(1)], self.env), line)
@@ -205,7 +205,7 @@ class Interp:
             st.created = True
             if len(args) > 4:
                 st.fields["rotation"] = (self.ev(args[4]), line)
-            # Casilla desplazada (`PositionX+1`...).
+            # Offset tile (`PositionX+1`...).
             for k, name in ((2, "tile_dx"), (3, "tile_dy")):
                 a = [t for t, _ in args[k]]
                 if len(a) == 3 and a[1] in "+-":
@@ -228,8 +228,8 @@ class Interp:
             st.fields["open"] = (self.ev(split_args(toks)[0]), line)
             return
         if names[0] == "SetCharacterScale":
-            # `SetCharacterScale` (ZzzCharacter.cpp:11772-11801) en el juego, según la clase (0 = Dark Wizard,
-            # la de `CreateCharacterPointer`) y `Skin`.
+            # In-game `SetCharacterScale` (ZzzCharacter.cpp:11772-11801), by class (0 = Dark Wizard, the one
+            # from `CreateCharacterPointer`) and `Skin`.
             cls = repr(st.fields.get("class", (Sym("CLASS_WIZARD"),))[0])
             skin = st.fields.get("skin", (0,))[0]
             table0 = {"CLASS_WIZARD": 0.9, "CLASS_KNIGHT": 0.9, "CLASS_ELF": 0.88, "CLASS_DARK": 0.95,
@@ -239,7 +239,7 @@ class Interp:
             self.set("scale", (table0 if skin == 0 else table1)[cls], line)
             return
         if names[0] in self.functions and len(names) > 1 and names[1] == "(":
-            # `MakeElfHelper(c)` y parecidas: su código sobre el mismo personaje.
+            # `MakeElfHelper(c)` and similar: run their code on the same character.
             self.run(self.functions[names[0]])
             return
         if names[0] == "SetAction":
@@ -249,7 +249,7 @@ class Interp:
             args = split_args(toks)
             self.set("bbox_max", [self.ev(a) for a in args[:3]], line)
             return
-        # Variables locales: `int Level = 9;`, `randType = rand()%2;`.
+        # Local variables: `int Level = 9;`, `randType = rand()%2;`.
         m = re.match(r"^(?:int|float|BYTE|bool)?([A-Za-z_]\w*)=(.+)$", s)
         if m and m.group(1) not in ("C", "O") and "." not in m.group(1):
             j = names.index("=")
@@ -261,7 +261,7 @@ class Interp:
         m = re.match(r"^(?:int|float)([A-Za-z_]\w*)$", s)
         if m:
             return
-        # `Models[X].Actions[i].PlaySpeed = v` y parecidos: cambian el modelo para todos.
+        # `Models[X].Actions[i].PlaySpeed = v` and similar: they change the model for everyone.
         m = re.match(r"^Models\[(.+?)\]\.Actions\[(\w+)\]\.PlaySpeed=(.+)$", s)
         if m:
             j = names.index("=")
@@ -283,7 +283,7 @@ class Interp:
         if m:
             self.set("stream_mesh", int(m.group(2)), line)
             return
-        # Campos de `c` y `c->Object`.
+        # Fields of `c` and `c->Object`.
         m = re.match(r"^([CO])\.([\w\[\]\.]+?)(=|\+=|-=|\*=)(.+)$", s)
         if m:
             who, field, op = m.group(1), m.group(2), m.group(3)
@@ -341,10 +341,10 @@ class Interp:
         st.notes.append(f"{st.file}:{line} `{key} {op} {text}`")
 
 
-# --- Creadores ------------------------------------------------------------------------------------
+# --- Creators -------------------------------------------------------------------------------------
 
-# (archivo, línea de la firma, nombre para `g_<nombre>.CreateMonster`) en el orden de `CreateMonster`
-# (ZzzCharacter.cpp:12584-12692; los de `TheMapProcess()` en el orden de `MapProcess::Make`, w_MapProcess.cpp:35-86).
+# (file, signature line, name for `g_<name>.CreateMonster`) in `CreateMonster` order
+# (ZzzCharacter.cpp:12584-12692; the `TheMapProcess()` ones in `MapProcess::Make` order, w_MapProcess.cpp:35-86).
 CREATORS = [
     ("w_CursedTemple.cpp", 163, None),
     ("GMHellas.cpp", 779, None),
@@ -375,23 +375,23 @@ CREATORS = [
     ("GMEmpireGuardian4.cpp", 78, None),
     ("GMUnitedMarketPlace.cpp", 64, None),
     ("GMKarutan1.cpp", 365, None),
-    # El `switch(Type)` de `CreateMonster` (lo último).
+    # The `switch(Type)` of `CreateMonster` (last).
     ("ZzzCharacter.cpp", 12577, None),
 ]
 
 bodies = []
 functions = {}
-# Números de cada creador (sus `case`); `None` = todos (el `switch` final, con `default:`).
+# Numbers of each creator (its `case`s); `None` = all (the final `switch`, with `default:`).
 handled = []
 for file, line, alias in CREATORS:
     body = function_body(src(file), line)
     if file == "ZzzCharacter.cpp":
-        # Solo el `switch(Type)` final (los creadores de antes ya están en la lista).
+        # Only the final `switch(Type)` (the earlier creators are already in the list).
         body = next(x for x in body.items if x.kind == "switch")
     bodies.append((file, body))
     if alias:
         functions[alias] = body
-# `MakeElfHelper` (ZzzCharacter.cpp:12065), que llama el `case 257`.
+# `MakeElfHelper` (ZzzCharacter.cpp:12065), called by `case 257`.
 functions["MakeElfHelper"] = function_body(src("ZzzCharacter.cpp"), 12065)
 
 case_numbers = set()
@@ -416,10 +416,10 @@ for file, b in bodies:
     collect_cases(b, mine)
     case_numbers.update(mine)
     handled.append(None if file == "ZzzCharacter.cpp" else mine)
-# `C09SummerEvent::CreateMonster` no usa `switch`: `if(iType == 463)` (Event.cpp:445).
+# `C09SummerEvent::CreateMonster` has no `switch`: `if(iType == 463)` (Event.cpp:445).
 case_numbers.add(463)
 handled[[i for i, c in enumerate(CREATORS) if c[:2] == ("Event.cpp", 441)][0]] = {463}
-# `GMEmpireGuardian2..4::CreateMonster` llaman antes a `g_EmpireGuardian1.CreateMonster`.
+# `GMEmpireGuardian2..4::CreateMonster` call `g_EmpireGuardian1.CreateMonster` first.
 eg1 = handled[[i for i, c in enumerate(CREATORS) if c[0] == "GMEmpireGuardian1.cpp"][0]]
 for i, c in enumerate(CREATORS):
     if c[0] in ("GMEmpireGuardian2.cpp", "GMEmpireGuardian3.cpp", "GMEmpireGuardian4.cpp"):
@@ -454,7 +454,7 @@ def signature(st):
 
 
 def resolve(number):
-    """[(mapas o None = cualquiera, variantes de rand: [State])]"""
+    """[(maps or None = any, rand variants: [State])]"""
     def variants(world):
         try:
             return [create(number, world, None)]
@@ -478,13 +478,13 @@ def resolve(number):
         sig = tuple(signature(s) for s in vs)
         groups.setdefault(sig, (vs, []))[1].append(w)
     out = sorted(groups.values(), key=lambda g: -len(g[1]))
-    # Fuera de los mapas de su creador, un número que el `switch` no tiene cae en el `default:` (el toro):
-    # el servidor no lo manda ahí, así que esa entrada no sirve y vale la del creador en todos.
+    # Outside its creator's maps, a number the `switch` lacks falls into `default:` (the bull): the server
+    # never sends it there, so that entry is useless and the creator's one applies everywhere.
     def from_default(vs):
         return all(s is not None and s.file == "ZzzCharacter.cpp" and s.case_line == DEFAULT_LINE for s in vs)
     if len(out) > 1:
         out = [g for g in out if not from_default(g[0])] or out
-    # La de más mapas, sin lista (vale en el resto).
+    # The one with most maps, without a list (applies to the rest).
     return [(None if i == 0 else maps, vs) for i, (vs, maps) in enumerate(out)]
 
 
@@ -494,7 +494,7 @@ DEFAULT_LINE = next(x.line for x in bodies[-1][1].items if x.kind == "default")
 monsters = {}
 for n in sorted(case_numbers):
     monsters[n] = resolve(n)
-# El `default:` del switch: cualquier número que no esté en ningún `case` (ZzzCharacter.cpp:13467).
+# The switch's `default:`: any number not in any `case` (ZzzCharacter.cpp:13467).
 default_def = resolve(100000)
 
 if __name__ == "__main__" and "--debug" in sys.argv:
@@ -515,17 +515,17 @@ if __name__ == "__main__" and "--debug" in sys.argv:
 class ModelState(State):
     def __init__(self, file):
         super().__init__(file)
-        self.speeds = {}  # acción -> PlaySpeed
+        self.speeds = {}  # action -> PlaySpeed
         self.speed_lines = {}
-        self.hold = set()  # acciones con `Loop = true` (se quedan en el último fotograma)
-        self.bone_head = {}  # índice de modelo -> hueso
+        self.hold = set()  # actions with `Loop = true` (they hold the last frame)
+        self.bone_head = {}  # model index -> bone
         self.stream_mesh = {}
-        self.sounds = {}  # índice de modelo -> [ranuras]
-        self.waves = {}  # ranura SOUND_MONSTER+n -> archivo
+        self.sounds = {}  # model index -> [slots]
+        self.waves = {}  # slot SOUND_MONSTER+n -> file
 
 
 class ModelInterp(Interp):
-    """`OpenMonsterModel(Type)`: `b` es `Models[MODEL_MONSTER01+Type]`."""
+    """`OpenMonsterModel(Type)`: `b` is `Models[MODEL_MONSTER01+Type]`."""
 
     def stmt(self, node):
         toks = node.toks
@@ -613,8 +613,8 @@ for t in range(0, max(used_models) + 1):
 class NpcState(State):
     def __init__(self, file):
         super().__init__(file)
-        self.access = []  # (slot, carpeta, archivo, línea)
-        self.textures = {}  # slot -> carpeta
+        self.access = []  # (slot, folder, file, line)
+        self.textures = {}  # slot -> folder
         self.speeds = {}
         self.texture_patch = None
 
@@ -670,9 +670,9 @@ for slot, case_line in npc_slots:
     st.case_line = case_line
     npc_models[slot] = st
 
-# Los NPC de las misiones con tiempo (566-568): el Main 5.2 los crea (ZzzCharacter.cpp:14390-14414) y a Tercia le
-# pone `PlaySpeed` (ZzzOpenData.cpp:2324), pero no tiene su `AccessModel` (lo dejaron a medias). El archivo, como
-# MuMain (Data/Monsters/Models.json): `tersia.bmd`, `bena.bmd` y, para Zyro, el modelo de Moss.
+# The timed quest NPCs (566-568): Main 5.2 creates them (ZzzCharacter.cpp:14390-14414) and sets Tercia's
+# `PlaySpeed` (ZzzOpenData.cpp:2324), but has no `AccessModel` for them (left unfinished). Files as in
+# MuMain (Data/Monsters/Models.json): `tersia.bmd`, `bena.bmd` and, for Zyro, Moss's model.
 MISSING_ACCESS = {
     "MODEL_TIME_LIMIT_QUEST_NPC_TERSIA": ("Npc", "tersia.bmd"),
     "MODEL_TIME_LIMIT_QUEST_NPC_BENA": ("Npc", "bena.bmd"),
@@ -680,7 +680,7 @@ MISSING_ACCESS = {
 }
 for name, where in MISSING_ACCESS.items():
     slot = Sym(name)
-    assert slot not in npc_models, f"{name} ya tiene AccessModel en el Main 5.2: quitarlo de MISSING_ACCESS"
+    assert slot not in npc_models, f"{name} already has AccessModel in Main 5.2: remove it from MISSING_ACCESS"
     st = NpcState("ZzzOpenData.cpp")
     it = NpcInterp(Env(type_value=slot, world=0), st, {})
     for sw in npc_switches:
@@ -722,11 +722,11 @@ for x in link_switch.items:
         labels = []
 
 
-# --- Nombres y comparación con MuMain -------------------------------------------------------------
+# --- Names and comparison with MuMain -------------------------------------------------------------
 
 names = {}
 mumain = {}
-# Mapas donde sale cada número (`numbers[].maps` de MuMain): solo para elegir los de prueba.
+# Maps where each number appears (MuMain's `numbers[].maps`): only for picking test maps.
 seen_in = {}
 try:
     with open(os.path.join(MUMAIN_DATA, "Monsters", "Monsters.json"), encoding="utf-8") as f:
@@ -738,7 +738,7 @@ try:
             mumain.setdefault(n, (mdef, num))
             seen_in.setdefault(n, []).extend(m for m in num.get("maps", []) if 0 <= m < 256)
 except FileNotFoundError:
-    print("aviso: sin Monsters.json de MuMain: sin nombres")
+    print("warning: no MuMain Monsters.json: no names")
 
 GROUPS = ["MODEL_SWORD", "MODEL_AXE", "MODEL_MACE", "MODEL_SPEAR", "MODEL_BOW", "MODEL_STAFF", "MODEL_SHIELD",
           "MODEL_HELM", "MODEL_ARMOR", "MODEL_PANTS", "MODEL_GLOVES", "MODEL_BOOTS", "MODEL_WING", "MODEL_HELPER",
@@ -761,7 +761,7 @@ def compare(n, st):
     scale = num.get("scale", mdef.get("scale"))
     ours = st.fields.get("scale", (0.9,))[0]
     if isinstance(scale, (int, float)) and abs(scale - ours) > 1e-4:
-        warnings.append(f"{n}: escala Main 5.2 {ours} / MuMain {scale}")
+        warnings.append(f"{n}: scale Main 5.2 {ours} / MuMain {scale}")
     weapons = (num.get("equipment") or mdef.get("equipment") or {}).get("weapons") or []
     for i in range(2):
         w = st.fields.get(f"weapon{i}", ({},))[0].get("Type", -1)
@@ -769,7 +769,7 @@ def compare(n, st):
         theirs = weapons[i] if i < len(weapons) else None
         theirs = (theirs["group"], theirs["number"]) if theirs else None
         if ours != theirs:
-            warnings.append(f"{n}: arma {i} Main 5.2 {ours} / MuMain {theirs}")
+            warnings.append(f"{n}: weapon {i} Main 5.2 {ours} / MuMain {theirs}")
 
 
 for n, groups in monsters.items():
@@ -779,7 +779,7 @@ for n, groups in monsters.items():
 # --- Rust -----------------------------------------------------------------------------------------
 
 def rs_f32(v):
-    # Los productos (`PlaySpeed *= 1.2f`) se hacen en `float` en el original: 7 cifras bastan.
+    # Products (`PlaySpeed *= 1.2f`) are computed in `float` in the original: 7 digits are enough.
     s = format(float(v), ".7g")
     return s if "." in s or "e" in s else s + ".0"
 
@@ -796,7 +796,7 @@ def rs_model(v):
             return "Model::Player"
         return f"Model::Npc({rs_str(repr(v))})" if v in npc_models else f"Model::Other({rs_str(repr(v))})"
     if isinstance(v, int):
-        # `CreateCharacter(Key, 39, ...)`: el modelo del objeto 39 del mapa (trampas).
+        # `CreateCharacter(Key, 39, ...)`: the model of the map's object 39 (traps).
         return f"Model::Object({v})"
     raise ValueError(v)
 
@@ -913,17 +913,17 @@ def rs_def(n, maps, st):
 
 
 out = []
-out.append("// Generado por tools/gen_monsters.py a partir del Main 5.2 (nombres: Monsters.json de MuMain). No editar a mano.")
+out.append("// Generated by tools/gen_monsters.py from Main 5.2 (names: MuMain's Monsters.json). Do not edit by hand.")
 out.append("")
 out.append("use super::*;")
 out.append("")
-out.append("/// Cada número de monstruo del servidor con su aspecto (`CreateMonster`, ZzzCharacter.cpp:12577). Un número")
-out.append("/// puede salir varias veces: primero las entradas de unos mapas concretos (`maps`) y al final la de los demás;")
-out.append("/// varias con los mismos `maps` son las variantes de `rand()` (se elige una al azar).")
+out.append("/// Each server monster number with its look (`CreateMonster`, ZzzCharacter.cpp:12577). A number may")
+out.append("/// appear several times: first the entries for specific maps (`maps`), last the one for all other maps;")
+out.append("/// several with the same `maps` are `rand()` variants (one is picked at random).")
 out.append("pub static DEFS: &[Def] = &[")
 count = 0
 for n, groups in monsters.items():
-    # Las de mapas concretos antes que la general.
+    # Map-specific entries before the general one.
     for maps, vs in sorted(groups, key=lambda g: g[0] is None):
         for st in vs:
             if st is None:
@@ -932,15 +932,15 @@ for n, groups in monsters.items():
             count += 1
 out.append("];")
 out.append("")
-out.append("/// El `default:` del `switch` (ZzzCharacter.cpp:13467): cualquier número que no sale en ningún `case`.")
+out.append("/// The `switch`'s `default:` (ZzzCharacter.cpp:13467): any number that is not in any `case`.")
 st = default_def[0][1][0]
 out.append("pub static DEFAULT_DEF: Def = " + rs_def(0, None, st).strip().rstrip(",").replace("number: 0", "number: u16::MAX") + ";")
 out.append("")
 
-# Modelos de monstruo.
-out.append("/// `OpenMonsterModel(Type)` (ZzzOpenData.cpp:2367) de cada `Monster{Type+1:02}.bmd`: `PlaySpeed` de cada")
-out.append("/// acción (`None` = el original no la pone), acciones con `Loop` (se quedan en su último fotograma),")
-out.append("/// `BoneHead`, `StreamMesh`, sonidos (`Sounds[0..10]`, ranuras de `SOUND_MONSTER`) y `LinkBone` de las armas")
+# Monster models.
+out.append("/// `OpenMonsterModel(Type)` (ZzzOpenData.cpp:2367) of each `Monster{Type+1:02}.bmd`: `PlaySpeed` of each")
+out.append("/// action (`None` = the original does not set it), actions with `Loop` (they hold their last frame),")
+out.append("/// `BoneHead`, `StreamMesh`, sounds (`Sounds[0..10]`, `SOUND_MONSTER` slots) and weapon `LinkBone`")
 out.append("/// (`CreateCharacterPointer`, ZzzCharacter.cpp:11540-11676).")
 out.append("pub static MONSTER_MODELS: &[MonsterModel] = &[")
 for t, st in monster_models.items():
@@ -956,7 +956,7 @@ for t, st in monster_models.items():
     )
 out.append("];")
 out.append("")
-out.append("/// `LoadWaveFile(SOUND_MONSTER + n, ...)` de `OpenMonsterModel`: (n, archivo bajo la carpeta del cliente).")
+out.append("/// `LoadWaveFile(SOUND_MONSTER + n, ...)` of `OpenMonsterModel`: (n, file under the client folder).")
 out.append("pub static MONSTER_WAVES: &[(u16, &str)] = &[")
 for k in sorted(waves):
     out.append(f"    ({k}, {rs_str(waves[k])}),")
@@ -964,13 +964,13 @@ out.append("];")
 out.append("")
 
 # NPC.
-out.append("/// Modelos de `OpenNpc` (ZzzOpenData.cpp:1865): archivo, carpeta de sus texturas, piezas y `PlaySpeed` que")
-out.append("/// cambian (todas las acciones empiezan en 0.25, ZzzOpenData.cpp:2268).")
+out.append("/// `OpenNpc` models (ZzzOpenData.cpp:1865): file, texture folder, parts and the `PlaySpeed`s that")
+out.append("/// change (every action starts at 0.25, ZzzOpenData.cpp:2268).")
 out.append("pub static NPC_MODELS: &[NpcModel] = &[")
 for slot, st in npc_models.items():
     main = [a for a in st.access if a[0] == slot]
     if not main:
-        out.append(f"    // {slot!r}: sin AccessModel activo (ZzzOpenData.cpp:{st.case_line})")
+        out.append(f"    // {slot!r}: no active AccessModel (ZzzOpenData.cpp:{st.case_line})")
         continue
     _, folder, file, line = main[0]
     tex = st.textures.get(slot, "Npc")
@@ -985,7 +985,7 @@ for slot, st in npc_models.items():
     )
 out.append("];")
 out.append("")
-out.append("/// `LinkBone` de las armas de los modelos que no son `MonsterNN` (`CreateCharacterPointer`).")
+out.append("/// Weapon `LinkBone` of the models that are not `MonsterNN` (`CreateCharacterPointer`).")
 out.append("pub static OTHER_LINK_BONES: &[(&str, [u8; 2])] = &[")
 for k, v in link_bones.items():
     if not (isinstance(k, Sym) and k.name == "MODEL_MONSTER01"):
@@ -995,6 +995,6 @@ out.append("];")
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 with open(OUT, "w", encoding="utf-8", newline="\n") as f:
     f.write("\n".join(out) + "\n")
-print(f"{OUT}: {count} entradas de {len(monsters)} números, {len(monster_models)} modelos MonsterNN, {len(npc_models)} NPC")
+print(f"{OUT}: {count} entries for {len(monsters)} numbers, {len(monster_models)} MonsterNN models, {len(npc_models)} NPCs")
 for w in warnings:
-    print("diferencia con MuMain:", w)
+    print("difference with MuMain:", w)

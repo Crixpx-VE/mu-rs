@@ -1,104 +1,104 @@
-Diferencias entre OpenMU, ProjectRebirthMu y Louis (tools/gen_spawns.py).
+Differences between OpenMU, ProjectRebirthMu and Louis (tools/gen_spawns.py).
 
-openmu: 2894 filas en estos mapas
-rebirth: 3323 filas en estos mapas
-louis: 3312 filas en estos mapas
+openmu: 2894 rows in these maps
+rebirth: 3323 rows in these maps
+louis: 3312 rows in these maps
 
-Mapa 0 Lorencia: 29 entradas
-  solo louis: Bull Fighter (0) zona (138,79)-(138,79) x15 — fuera
-  solo louis: Hound (1) zona (90,126)-(90,126) x20 — fuera
-  cantidad distinta: Budge Dragon (2) zona (180,90)-(226,244) {'openmu': 40, 'rebirth': 40, 'louis': 30} — se queda 40
-  solo louis: Budge Dragon (2) zona (181,128)-(181,128) x2 — fuera
-  solo louis: Budge Dragon (2) zona (184,119)-(184,119) x5 — fuera
-  solo louis: Budge Dragon (2) zona (198,126)-(198,126) x2 — fuera
-  solo louis: Budge Dragon (2) zona (206,151)-(206,151) x2 — fuera
-  solo louis: Budge Dragon (2) zona (224,168)-(224,168) x2 — fuera
-  cantidad distinta: Spider (3) zona (180,90)-(226,244) {'openmu': 45, 'rebirth': 45, 'louis': 30} — se queda 45
-  solo louis: Spider (3) zona (181,128)-(181,128) x15 — fuera
-  solo louis: Spider (3) zona (206,151)-(206,151) x2 — fuera
-  solo louis: Spider (3) zona (224,168)-(224,168) x2 — fuera
-  solo louis: Elite Bull Fighter (4) zona (90,126)-(90,126) x20 — fuera
-  solo louis: LIch (6) zona (133,177)-(133,177) x15 — fuera
-  solo louis: Giant (7) zona (138,79)-(138,79) x15 — fuera
-  solo louis: Skeleton (14) zona (133,177)-(133,177) x15 — fuera
-  solo louis: Crown Switch 2 (217) en (154,180) x1 — fuera
-  solo louis: Crown Switch 1 (218) en (154,183) x1 — fuera
-  solo openmu: Marlon (229) en (136,88) x1 — fuera
-  solo louis: Weapons Merchant Zienna (246) en (126,135) x1 — fuera
-  solo openmu: Wandering Merchant Martin (248) en (6,145) x1 — fuera
-  solo louis: Wandering Merchant Martin (248) en (125,125) x1 — fuera
-  solo rebirth: Lumen the Barmaid (255) en (125,135) x1 — fuera
-  solo openmu: Leo the Helper (371) en (130,126) x1 — fuera
-  solo louis: Stone Statue (380) en (130,134) x1 — fuera
-  solo louis: Jerint the Assistant (522) en (130,126) x1 — fuera
-  solo louis: Lugard (540) en (130,128) x1 — fuera
-  solo rebirth: Gens Duprian Steward (543) en (137,121) x1 — fuera
-  solo openmu: Gens Duprian Steward (543) en (144,127) x1 — fuera
-  solo rebirth: Gens Vanert Steward (544) en (137,133) x1 — fuera
-  solo openmu: Wandering Merchant Zyro (568) en (131,139) x1 — fuera
+Map 0 Lorencia: 29 entries
+  only louis: Bull Fighter (0) area (138,79)-(138,79) x15 — dropped
+  only louis: Hound (1) area (90,126)-(90,126) x20 — dropped
+  count differs: Budge Dragon (2) area (180,90)-(226,244) {'openmu': 40, 'rebirth': 40, 'louis': 30} — kept 40
+  only louis: Budge Dragon (2) area (181,128)-(181,128) x2 — dropped
+  only louis: Budge Dragon (2) area (184,119)-(184,119) x5 — dropped
+  only louis: Budge Dragon (2) area (198,126)-(198,126) x2 — dropped
+  only louis: Budge Dragon (2) area (206,151)-(206,151) x2 — dropped
+  only louis: Budge Dragon (2) area (224,168)-(224,168) x2 — dropped
+  count differs: Spider (3) area (180,90)-(226,244) {'openmu': 45, 'rebirth': 45, 'louis': 30} — kept 45
+  only louis: Spider (3) area (181,128)-(181,128) x15 — dropped
+  only louis: Spider (3) area (206,151)-(206,151) x2 — dropped
+  only louis: Spider (3) area (224,168)-(224,168) x2 — dropped
+  only louis: Elite Bull Fighter (4) area (90,126)-(90,126) x20 — dropped
+  only louis: LIch (6) area (133,177)-(133,177) x15 — dropped
+  only louis: Giant (7) area (138,79)-(138,79) x15 — dropped
+  only louis: Skeleton (14) area (133,177)-(133,177) x15 — dropped
+  only louis: Crown Switch 2 (217) at (154,180) x1 — dropped
+  only louis: Crown Switch 1 (218) at (154,183) x1 — dropped
+  only openmu: Marlon (229) at (136,88) x1 — dropped
+  only louis: Weapons Merchant Zienna (246) at (126,135) x1 — dropped
+  only openmu: Wandering Merchant Martin (248) at (6,145) x1 — dropped
+  only louis: Wandering Merchant Martin (248) at (125,125) x1 — dropped
+  only rebirth: Lumen the Barmaid (255) at (125,135) x1 — dropped
+  only openmu: Leo the Helper (371) at (130,126) x1 — dropped
+  only louis: Stone Statue (380) at (130,134) x1 — dropped
+  only louis: Jerint the Assistant (522) at (130,126) x1 — dropped
+  only louis: Lugard (540) at (130,128) x1 — dropped
+  only rebirth: Gens Duprian Steward (543) at (137,121) x1 — dropped
+  only openmu: Gens Duprian Steward (543) at (144,127) x1 — dropped
+  only rebirth: Gens Vanert Steward (544) at (137,133) x1 — dropped
+  only openmu: Wandering Merchant Zyro (568) at (131,139) x1 — dropped
 
-Mapa 1 Dungeon: 311 entradas
-  solo openmu: Poison Bull Fighter (8) en (30,122) x1 — fuera
-  solo openmu: Poison Bull Fighter (8) en (40,98) x1 — fuera
-  solo rebirth: Poison Bull Fighter (8) en (42,122) x1 — fuera
-  solo rebirth: Poison Bull Fighter (8) en (50,123) x1 — fuera
-  solo openmu: Ghost (11) en (240,9) x1 — fuera
-  solo openmu: Skeleton Archer (15) en (188,146) x1 — fuera
-  solo openmu: Chief Skeleton Warrior (16) en (115,7) x1 — fuera
+Map 1 Dungeon: 311 entries
+  only openmu: Poison Bull Fighter (8) at (30,122) x1 — dropped
+  only openmu: Poison Bull Fighter (8) at (40,98) x1 — dropped
+  only rebirth: Poison Bull Fighter (8) at (42,122) x1 — dropped
+  only rebirth: Poison Bull Fighter (8) at (50,123) x1 — dropped
+  only openmu: Ghost (11) at (240,9) x1 — dropped
+  only openmu: Skeleton Archer (15) at (188,146) x1 — dropped
+  only openmu: Chief Skeleton Warrior (16) at (115,7) x1 — dropped
 
-Mapa 2 Devias: 76 entradas
-  solo rebirth: Elite Yeti (20) en (240,207) x1 — fuera
-  solo openmu: Marlon (229) en (197,48) x1 — fuera
-  solo openmu: Lahap (256) en (193,13) x1 — fuera
-  solo openmu: Wandering Merchant Zyro (568) en (225,52) x1 — fuera
+Map 2 Devias: 76 entries
+  only rebirth: Elite Yeti (20) at (240,207) x1 — dropped
+  only openmu: Marlon (229) at (197,48) x1 — dropped
+  only openmu: Lahap (256) at (193,13) x1 — dropped
+  only openmu: Wandering Merchant Zyro (568) at (225,52) x1 — dropped
 
-Mapa 3 Noria: 31 entradas
-  solo openmu: Marlon (229) en (169,88) x1 — fuera
+Map 3 Noria: 31 entries
+  only openmu: Marlon (229) at (169,88) x1 — dropped
 
-Mapa 4 Lost Tower: 588 entradas
-  solo openmu: Poison Shadow (39) en (198,245) x1 — fuera
+Map 4 Lost Tower: 588 entries
+  only openmu: Poison Shadow (39) at (198,245) x1 — dropped
 
-Mapa 6 Arena: 0 entradas
-  solo openmu: Soccer Ball (200) en (63,160) x1 — fuera
-  solo openmu: Arena Guard (239) en (72,164) x1 — fuera
+Map 6 Arena: 0 entries
+  only openmu: Soccer Ball (200) at (63,160) x1 — dropped
+  only openmu: Arena Guard (239) at (72,164) x1 — dropped
 
-Mapa 7 Atlans: 334 entradas
-  solo rebirth: Valkyrie (47) en (218,47) x1 — fuera
-  solo openmu: Valkyrie (47) en (222,48) x1 — fuera
-  solo rebirth: Great Bahamut (51) en (7,52) x1 — fuera
-  solo openmu: Great Bahamut (51) en (240,51) x1 — fuera
-  solo rebirth: Great Bahamut (51) en (251,51) x1 — fuera
-  solo openmu: Silver Valkyrie (52) en (167,140) x1 — fuera
-  solo openmu: Marlon (229) en (17,25) x1 — fuera
+Map 7 Atlans: 334 entries
+  only rebirth: Valkyrie (47) at (218,47) x1 — dropped
+  only openmu: Valkyrie (47) at (222,48) x1 — dropped
+  only rebirth: Great Bahamut (51) at (7,52) x1 — dropped
+  only openmu: Great Bahamut (51) at (240,51) x1 — dropped
+  only rebirth: Great Bahamut (51) at (251,51) x1 — dropped
+  only openmu: Silver Valkyrie (52) at (167,140) x1 — dropped
+  only openmu: Marlon (229) at (17,25) x1 — dropped
 
-Mapa 8 Tarkan: 217 entradas
+Map 8 Tarkan: 217 entries
 
-Mapa 10 Icarus: 80 entradas
+Map 10 Icarus: 80 entries
 
-Mapa 33 Aida: 251 entradas
+Map 33 Aida: 251 entries
 
-Mapa 37 Kanturu 1: 210 entradas
+Map 37 Kanturu 1: 210 entries
 
-Mapa 38 Kanturu 2: 91 entradas
+Map 38 Kanturu 2: 91 entries
 
-Mapa 41 Barracks of Balgass: 28 entradas
+Map 41 Barracks of Balgass: 28 entries
 
-Mapa 51 Elbeland: 158 entradas
+Map 51 Elbeland: 158 entries
 
-Mapa 56 Swamp of Calmness: 282 entradas
+Map 56 Swamp of Calmness: 282 entries
 
-Mapa 57 Raklion: 120 entradas
+Map 57 Raklion: 120 entries
 
-Mapa 62 Santa Town: 9 entradas
+Map 62 Santa Town: 9 entries
 
-Mapa 63 Vulcanus: 246 entradas
+Map 63 Vulcanus: 246 entries
 
-Mapa 79 Loren Market: 3 entradas
+Map 79 Loren Market: 3 entries
 
-Mapa 80 Karutan 1: 128 entradas
+Map 80 Karutan 1: 128 entries
 
-Mapa 81 Karutan 2: 133 entradas
+Map 81 Karutan 2: 133 entries
 
-Monster.txt: filas de ProjectRebirthMu distintas en Louis
+Monster.txt: ProjectRebirthMu rows that differ in Louis
   77: rebirth 108 95000 0 950 1000 600 0 900 350 1 150 6 7 400 1500 150 2 0 46 4 0 30 30 35 30
        louis   108 95000 0 950 1000 600 0 900 350 1 150 6 7 400 1500 150 2 120 46 4 0 30 30 35 30

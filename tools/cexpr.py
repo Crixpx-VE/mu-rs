@@ -1,9 +1,9 @@
-"""Evalúa expresiones sencillas de C (las de los `switch` de tablas del Main 5.2).
+"""Evaluates simple C expressions (those in the Main 5.2 table `switch`es).
 
-Los nombres `MODEL_*`, `BITMAP_*`... quedan como símbolos con desplazamiento (`Sym`). Lo que depende del
-mapa (`gMapManager.WorldActive`, `InDevilSquare()`...) usa `Env.world`; si vale `None` se lanza
-`WorldDependent` para que quien llama lo vuelva a evaluar mapa por mapa. `rand()` usa `Env.rand` (o lanza
-`RandomDependent`). Lo que no se sabe evaluar lanza `Unknown`.
+`MODEL_*`, `BITMAP_*`... names stay as symbols with an offset (`Sym`). Map-dependent terms
+(`gMapManager.WorldActive`, `InDevilSquare()`...) use `Env.world`; if it is `None`, `WorldDependent` is
+raised so the caller re-evaluates map by map. `rand()` uses `Env.rand` (or raises `RandomDependent`).
+Anything it cannot evaluate raises `Unknown`.
 """
 
 import re
@@ -45,7 +45,7 @@ class Sym:
         return self.name if self.offset == 0 else f"{self.name}+{self.offset}"
 
 
-# Mapas (`ENUM_WORLD`, MapManager.h:6).
+# Maps (`ENUM_WORLD`, MapManager.h:6).
 WD = {
     "WD_0LORENCIA": 0, "WD_1DUNGEON": 1, "WD_2DEVIAS": 2, "WD_3NORIA": 3, "WD_4LOSTTOWER": 4, "WD_6STADIUM": 6,
     "WD_7ATLANSE": 7, "WD_8TARKAN": 8, "WD_9DEVILSQUARE": 9, "WD_10HEAVEN": 10, "WD_11BLOODCASTLE1": 11,
@@ -60,9 +60,9 @@ WD = {
     "WD_72EMPIREGUARDIAN4": 72, "WD_79UNITEDMARKETPLACE": 79,
 }
 
-# Comprobaciones de mapa (MapManager.cpp, GM*.cpp). `InBattleCastle()` y `InChaosCastle()` sin argumento
-# devuelven siempre `false` en el Main 5.2 (`iMap = -1`, MapManager.cpp): error de la refactorización del
-# código filtrado; aquí cuentan como el mapa en el que se está (lo que hacía el cliente S6).
+# Map checks (MapManager.cpp, GM*.cpp). `InBattleCastle()` and `InChaosCastle()` without an argument always
+# return `false` in Main 5.2 (`iMap = -1`, MapManager.cpp): a bug from the refactor of the leaked code; here
+# they test the current map (what the S6 client did).
 WORLD_PREDICATES = {
     "InDevilSquare": lambda w: w == 9,
     "InBattleCastle": lambda w: w == 30,
@@ -82,7 +82,7 @@ class Env:
     def __init__(self, type_value=None, world=None, rand=None):
         self.type = type_value
         self.world = world
-        self.rand = rand  # lista de valores para cada rand() que salga
+        self.rand = rand  # list of values, one per rand() call encountered
         self.rand_used = 0
         self.vars = {}
         self.world_used = False
@@ -143,7 +143,7 @@ class _P:
                 raise Unknown("-símbolo")
             return -v
         if tok == "(":
-            # Conversión `(float)x` o paréntesis.
+            # `(float)x` cast or parentheses.
             if self.peek(1) in ("float", "int", "BYTE", "short") and self.peek(2) == ")":
                 cast = self.peek(1)
                 self.i += 3
@@ -232,7 +232,7 @@ class _P:
         return self.env.world
 
 
-# Acciones de los monstruos (`MONSTER01_*`, _define.h:483-494).
+# Monster actions (`MONSTER01_*`, _define.h:483-494).
 MONSTER_ACTIONS = {
     "MONSTER01_STOP1": 0, "MONSTER01_STOP2": 1, "MONSTER01_WALK": 2, "MONSTER01_ATTACK1": 3,
     "MONSTER01_ATTACK2": 4, "MONSTER01_SHOCK": 5, "MONSTER01_DIE": 6, "MONSTER01_APEAR": 7,

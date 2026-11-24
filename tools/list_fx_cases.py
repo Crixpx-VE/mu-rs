@@ -1,7 +1,7 @@
-"""Lista los tipos (case BITMAP_/MODEL_ ...) del switch de creación de partículas y estelas de
-MuMain y los reparte en bloques de tamaño parecido (por líneas de código). Para planificar el port.
+"""Lists the types (case BITMAP_/MODEL_ ...) of the MuMain particle and joint creation switches and
+splits them into chunks of similar size (by lines of code). For planning the port.
 
-    python tools/list_fx_cases.py <MuMain/src/source> <bloques_particulas> <bloques_estelas>
+    python tools/list_fx_cases.py <MuMain/src/source> <particle_chunks> <joint_chunks>
 """
 import json
 import re
@@ -14,7 +14,7 @@ NJ = int(sys.argv[3]) if len(sys.argv) > 3 else 3
 
 def cases(path, start, end):
     lines = open(f"{SRC}/{path}", encoding="utf-8", errors="replace").read().split("\n")
-    out = []  # (tipo, línea)
+    out = []  # (type, line)
     depth_line = None
     for i in range(start - 1, min(end, len(lines))):
         for m in re.finditer(r"^\s{8,16}case\s+((?:BITMAP|MODEL)_\w+(?:\s*\+\s*\d+)?)\s*:", lines[i]):
@@ -25,7 +25,7 @@ def cases(path, start, end):
 
 
 def chunk(items, end, n):
-    # tamaño de cada tipo ≈ líneas hasta el siguiente
+    # size of each type ≈ lines up to the next one
     sizes = []
     for k, (t, ln) in enumerate(items):
         nxt = items[k + 1][1] if k + 1 < len(items) else end

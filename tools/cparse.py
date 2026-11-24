@@ -1,13 +1,13 @@
-"""Mini lector de C++ para los generadores de tablas (solo lo que usa el código del Main 5.2).
+"""Mini C++ reader for the table generators (only what the Main 5.2 code uses).
 
-Quita comentarios y lo que queda fuera de los #ifdef (con las macros activas), parte en tokens con
-su número de línea y arma un árbol de sentencias: bloques, if/else, switch/case, for y sentencias
-sueltas (hasta el `;`). No entiende C++: lo justo para recorrer los `switch` de tablas.
+Strips comments and whatever is outside active #ifdefs, tokenizes with line numbers and builds a
+statement tree: blocks, if/else, switch/case, for and plain statements (up to the `;`). It does not
+understand C++: just enough to walk the table `switch`es.
 """
 
 import re
 
-# Macros activas del Main 5.2: Defined_Global.h, Winmain.h y las del proyecto (Main.vcxproj).
+# Active Main 5.2 macros: Defined_Global.h, Winmain.h and the project ones (Main.vcxproj).
 DEFINED = {
     "PJH_NEW_SERVER_SELECT_MAP", "ASG_ADD_GENS_SYSTEM", "ASG_ADD_INFLUENCE_GROUND_EFFECT", "ASG_ADD_GENS_MARK",
     "PBG_MOD_STRIFE_GENSMARKRENDER", "PBG_ADD_GENSRANKING", "KJH_PBG_ADD_INGAMESHOP_SYSTEM",
@@ -17,9 +17,9 @@ DEFINED = {
     "NEW_PROTOCOL_SYSTEM", "FOR_WORK", "ENABLE_EDIT", "CSK_LH_DEBUG_CONSOLE", "CSK_DEBUG_MAP_ATTRIBUTE",
     "CSK_DEBUG_RENDER_BOUNDINGBOX", "CSK_DEBUG_MAP_PATHFINDING", "WIN32", "_WINDOWS", "_LANGUAGE_FOREIGN",
     "_LANGUAGE_ENG", "NDEBUG",
-    # Apagadas en el Main 5.2, pero su código está y los servidores S6 (OpenMU, Louis, Rebirth) ponen esos
-    # monstruos y NPC: Karutan (MuMain también las activa, Defined_Global.h:33-34), los NPC de las misiones
-    # con tiempo (566-568) y David (579).
+    # Off in Main 5.2, but the code is there and the S6 servers (OpenMU, Louis, Rebirth) spawn these
+    # monsters and NPCs: Karutan (MuMain enables them too, Defined_Global.h:33-34), the timed quest NPCs
+    # (566-568) and David (579).
     "ASG_ADD_MAP_KARUTAN", "ASG_ADD_KARUTAN_MONSTERS", "ASG_ADD_KARUTAN_NPC", "ASG_ADD_TIME_LIMIT_QUEST_NPC",
     "LEM_ADD_LUCKYITEM",
 }
@@ -31,13 +31,13 @@ def read_source(path):
 
 
 def active_text(lines):
-    """[(número de línea, texto)] sin comentarios y sin lo que queda fuera de los #ifdef."""
+    """[(line number, text)] without comments and without what is outside active #ifdefs."""
     out = []
     stack = []
     in_block = False
     for n, raw in enumerate(lines, 1):
         line = raw
-        # Comentarios /* */ (pueden ocupar varias líneas) y //.
+        # /* */ comments (may span lines) and //.
         res = ""
         i = 0
         while i < len(line):
@@ -137,12 +137,12 @@ class Parser:
     def take(self, want=None):
         tok = self.t[self.i]
         if want is not None and tok[0] != want:
-            raise SyntaxError(f"se esperaba {want!r} y hay {tok[0]!r} en la línea {tok[1]}")
+            raise SyntaxError(f"expected {want!r}, got {tok[0]!r} at line {tok[1]}")
         self.i += 1
         return tok[0]
 
     def group(self, open_, close):
-        """Tokens entre paréntesis (o corchetes) equilibrados, sin los extremos."""
+        """Tokens between balanced parentheses (or brackets), without the delimiters."""
         self.take(open_)
         depth, out = 1, []
         while True:
@@ -223,7 +223,7 @@ class Parser:
                 self.i += 1
             self.take(";")
             return Node("return", line, expr=expr)
-        # Sentencia suelta hasta el `;` (con paréntesis y llaves equilibrados).
+        # Plain statement up to the `;` (with balanced parentheses and braces).
         toks = []
         depth = 0
         while True:
@@ -241,7 +241,7 @@ class Parser:
 
 
 def function_body(lines, start_line):
-    """Árbol del cuerpo de la función que empieza en `start_line` (1-based, la de su firma)."""
+    """Tree of the body of the function starting at `start_line` (1-based, its signature line)."""
     text = active_text(lines)
     toks = tokenize([(n, s) for n, s in text if n >= start_line])
     p = Parser(toks)

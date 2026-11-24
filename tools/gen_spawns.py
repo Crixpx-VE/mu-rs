@@ -1,21 +1,21 @@
-"""Junta los monstruos y NPC de cada mapa de tres servidores S6 y escribe los que salen en al menos dos.
+"""Merges the monsters and NPCs of each map from three S6 servers and writes those found in at least two.
 
     python tools/gen_spawns.py [--refs ../referencias]
 
-Fuentes (en `referencias`):
-- OpenMU: `OpenMU/src/Persistence/Initialization/Version*/Maps/*.cs` (las llamadas a `CreateMonsterSpawn`
-  de `CreateNpcSpawns` y `CreateMonsterSpawns`, siguiendo la herencia entre versiones). Solo las de
-  `SpawnTrigger.Automatic` o `Wandering` (las de eventos no).
+Sources (in `referencias`):
+- OpenMU: `OpenMU/src/Persistence/Initialization/Version*/Maps/*.cs` (the `CreateMonsterSpawn` calls
+  of `CreateNpcSpawns` and `CreateMonsterSpawns`, following inheritance across versions). Only
+  `SpawnTrigger.Automatic` or `Wandering` ones (not event ones).
 - ProjectRebirthMu (S6.3): `datos-servidor-s6/rebirth/MonsterSetBase.txt`.
 - Louis S6 Ep3: `datos-servidor-s6/louis/NNN - Mapa.txt`.
 
-Una entrada es (mapa, monstruo, zona) con su cantidad; las de una casilla sola (NPC y monstruos sueltos)
-cuentan cuántas hay en esa casilla. Se queda si está en dos fuentes o en las tres; la cantidad, la que
-digan dos (si las tres dicen una distinta, la de OpenMU). Lo que solo dice una fuente va al informe.
+An entry is (map, monster, area) with its count; single-tile ones (NPCs and lone monsters) count how many
+are on that tile. It is kept if it is in two or three sources; the count is the one two agree on (if all
+three differ, OpenMU's). Whatever only one source has goes to the report.
 
-Escribe `crates/mu-server/datos/MonsterSetBase.txt` (formato clásico, secciones 0, 1 y 2),
-`crates/mu-server/datos/Monster.txt` (el de ProjectRebirthMu; el informe dice en qué cambia el de Louis)
-y `crates/mu-server/datos/diferencias.txt`.
+Writes `crates/mu-server/datos/MonsterSetBase.txt` (classic format, sections 0, 1 and 2),
+`crates/mu-server/datos/Monster.txt` (ProjectRebirthMu's; the report lists how Louis's differs)
+and `crates/mu-server/datos/diferencias.txt`.
 """
 import argparse
 import pathlib
@@ -25,9 +25,9 @@ from collections import Counter, defaultdict
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 OUT = ROOT / "crates" / "mu-server" / "datos"
 
-# Mapas normales del S6 que tiene el cliente (sin los de eventos: Blood Castle, Chaos Castle, Devil
-# Square, Kalima, Illusion Temple, Doppelganger, Imperial Guardian, Kanturu 3, Raklion jefe, Castle
-# Siege, Land of Trials, Crywolf y Refugio de Balgass).
+# Regular S6 maps the client has (no event maps: Blood Castle, Chaos Castle, Devil Square, Kalima,
+# Illusion Temple, Doppelganger, Imperial Guardian, Kanturu 3, Raklion boss, Castle Siege, Land of Trials,
+# Crywolf and Balgass's Refuge).
 MAPS = {
     0: "Lorencia", 1: "Dungeon", 2: "Devias", 3: "Noria", 4: "Lost Tower", 6: "Arena", 7: "Atlans",
     8: "Tarkan", 10: "Icarus", 33: "Aida", 37: "Kanturu 1", 38: "Kanturu 2", 41: "Barracks of Balgass",
@@ -39,11 +39,11 @@ SOURCES = ("openmu", "rebirth", "louis")
 
 
 # ---------------------------------------------------------------------------------------------
-# MonsterSetBase.txt (Rebirth y Louis)
+# MonsterSetBase.txt (Rebirth and Louis)
 # ---------------------------------------------------------------------------------------------
 
 def parse_setbase(text, only_map=None):
-    """[(seccion, mapa, monstruo, rango, x1, y1, x2, y2, dir, cantidad)] de las secciones 0, 1 y 2."""
+    """[(section, map, monster, range, x1, y1, x2, y2, dir, count)] of sections 0, 1 and 2."""
     rows = []
     section = None
     for raw in text.splitlines():
@@ -94,14 +94,14 @@ def load_louis(refs):
 # OpenMU (C#)
 # ---------------------------------------------------------------------------------------------
 
-# Direction de OpenMU: Undefined 0, West 1 ... NorthWest 8; en MonsterSetBase es una menos (-1 = al azar).
+# OpenMU Direction: Undefined 0, West 1 ... NorthWest 8; MonsterSetBase uses one less (-1 = random).
 DIRECTIONS = {"Undefined": 0, "West": 1, "SouthWest": 2, "South": 3, "SouthEast": 4, "East": 5,
               "NorthEast": 6, "North": 7, "NorthWest": 8}
 KEEP_TRIGGERS = {"Automatic", "Wandering"}
 
 
 def body_of(text, start):
-    """Lo que hay entre la llave que abre después de `start` y la que la cierra."""
+    """The text between the first `{` after `start` and its matching `}`."""
     i = text.index("{", start)
     depth = 0
     for j in range(i, len(text)):
@@ -111,11 +111,11 @@ def body_of(text, start):
             depth -= 1
             if depth == 0:
                 return text[i + 1:j]
-    raise ValueError("llaves sin cerrar")
+    raise ValueError("unclosed braces")
 
 
 def calls_in(body):
-    """Los argumentos de cada `this.CreateMonsterSpawn(...)`."""
+    """The arguments of each `this.CreateMonsterSpawn(...)`."""
     out = []
     for m in re.finditer(r"this\.CreateMonsterSpawn\(", body):
         i, depth = m.end(), 1
@@ -184,7 +184,7 @@ def method_calls(classes, key, meth):
 
 
 def parse_call(args):
-    """(monstruo, x1, y1, x2, y2, dir, cantidad) o None si es de un evento o no se entiende."""
+    """(monster, x1, y1, x2, y2, dir, count), or None if it is an event spawn or not understood."""
     parts = [a.strip() for a in args.split(",")]
     m = re.fullmatch(r"this\.NpcDictionary\[(\d+)\]", parts[1]) if len(parts) > 1 else None
     if not m:
@@ -235,11 +235,11 @@ def load_openmu(refs):
 
 
 # ---------------------------------------------------------------------------------------------
-# Votación
+# Voting
 # ---------------------------------------------------------------------------------------------
 
 def entries(rows):
-    """{(mapa, monstruo, x1, y1, x2, y2, es_zona): (cantidad, filas)}; las casillas solas suman una por fila."""
+    """{(map, monster, x1, y1, x2, y2, is_area): (count, rows)}; single tiles add one per row."""
     out = {}
     for row in rows:
         section, map_, monster, rng, x1, y1, x2, y2, d, qty = row
@@ -266,11 +266,11 @@ def main():
     for key in sorted(set().union(*by_source.values())):
         have = {s: by_source[s][key] for s in SOURCES if key in by_source[s]}
         map_, monster, x1, y1, x2, y2, area = key
-        what = f"{names.get(monster, '?')} ({monster}) " + (f"zona ({x1},{y1})-({x2},{y2})" if area else f"en ({x1},{y1})")
+        what = f"{names.get(monster, '?')} ({monster}) " + (f"area ({x1},{y1})-({x2},{y2})" if area else f"at ({x1},{y1})")
         counts = {s: c for s, (c, _) in have.items()}
         if len(have) < 2:
             only = next(iter(have))
-            report[map_].append(f"  solo {only}: {what} x{counts[only]} — fuera")
+            report[map_].append(f"  only {only}: {what} x{counts[only]} — dropped")
             continue
         votes = Counter(counts.values()).most_common()
         if votes[0][1] >= 2:
@@ -278,8 +278,8 @@ def main():
         else:
             count = counts.get("openmu", counts.get("rebirth"))
         if len(set(counts.values())) > 1:
-            report[map_].append(f"  cantidad distinta: {what} {counts} — se queda {count}")
-        # La fila de referencia (rango y dirección): la de Rebirth, la de Louis o la de OpenMU.
+            report[map_].append(f"  count differs: {what} {counts} — kept {count}")
+        # The reference row (range and direction): Rebirth's, else Louis's, else OpenMU's.
         ref_rows = next(have[s][1] for s in ("rebirth", "louis", "openmu") if s in have)
         section = 1 if area else (0 if any(r[0] == 0 for s in have for r in have[s][1]) else 2)
         kept.append((map_, section, monster, ref_rows[0], count))
@@ -287,7 +287,7 @@ def main():
     write_setbase(kept, names)
     write_report(report, loaded, kept, refs)
     (OUT / "Monster.txt").write_bytes((refs / "datos-servidor-s6" / "rebirth" / "Monster.txt").read_bytes())
-    print(f"{OUT / 'MonsterSetBase.txt'}: {len(kept)} entradas")
+    print(f"{OUT / 'MonsterSetBase.txt'}: {len(kept)} entries")
 
 
 def monster_names(text):
@@ -302,14 +302,14 @@ def monster_names(text):
 def write_setbase(kept, names):
     OUT.mkdir(parents=True, exist_ok=True)
     lines = [
-        "// Monstruos y NPC de los mapas normales del S6: lo que dicen al menos dos de OpenMU, ProjectRebirthMu",
-        "// y Louis S6 Ep3 (tools/gen_spawns.py; las diferencias en diferencias.txt). Formato de MonsterSetBase.txt.",
-        "// Direccion: 0..7 (la que va en el paquete 0x13), -1 al azar.",
+        "// Monsters and NPCs of the regular S6 maps: what at least two of OpenMU, ProjectRebirthMu and",
+        "// Louis S6 Ep3 agree on (tools/gen_spawns.py; differences in diferencias.txt). MonsterSetBase.txt format.",
+        "// Direction: 0..7 (the one sent in packet 0x13), -1 random.",
     ]
     for section, title, header in (
         (0, "NPC", "//Monster  Map  Range  X    Y    Dir"),
-        (1, "ZONAS", "//Monster  Map  Range  X1   Y1   X2   Y2   Dir  Count"),
-        (2, "MONSTRUOS SUELTOS", "//Monster  Map  Range  X    Y    Dir"),
+        (1, "AREAS", "//Monster  Map  Range  X1   Y1   X2   Y2   Dir  Count"),
+        (2, "LONE MONSTERS", "//Monster  Map  Range  X    Y    Dir"),
     ):
         lines += ["", f"// {title}", str(section), header]
         for map_, sec, monster, row, count in kept:
@@ -327,18 +327,18 @@ def write_setbase(kept, names):
 
 
 def write_report(report, loaded, kept, refs):
-    lines = ["Diferencias entre OpenMU, ProjectRebirthMu y Louis (tools/gen_spawns.py).", ""]
+    lines = ["Differences between OpenMU, ProjectRebirthMu and Louis (tools/gen_spawns.py).", ""]
     for s, rows in loaded.items():
-        lines.append(f"{s}: {sum(1 for r in rows if r[1] in MAPS)} filas en estos mapas")
+        lines.append(f"{s}: {sum(1 for r in rows if r[1] in MAPS)} rows in these maps")
     lines.append("")
     for map_ in sorted(MAPS):
         n = sum(1 for k in kept if k[0] == map_)
-        lines.append(f"Mapa {map_} {MAPS[map_]}: {n} entradas")
+        lines.append(f"Map {map_} {MAPS[map_]}: {n} entries")
         lines += report.get(map_, [])
         lines.append("")
     a = monster_rows((refs / "datos-servidor-s6" / "rebirth" / "Monster.txt").read_text("latin-1"))
     b = monster_rows((refs / "datos-servidor-s6" / "louis" / "Monster.txt").read_text("latin-1"))
-    lines.append("Monster.txt: filas de ProjectRebirthMu distintas en Louis")
+    lines.append("Monster.txt: ProjectRebirthMu rows that differ in Louis")
     for k in sorted(set(a) | set(b)):
         if a.get(k) != b.get(k):
             lines.append(f"  {k}: rebirth {a.get(k)}\n       louis   {b.get(k)}")

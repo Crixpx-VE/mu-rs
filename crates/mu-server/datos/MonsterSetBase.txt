@@ -1,6 +1,6 @@
-// Monstruos y NPC de los mapas normales del S6: lo que dicen al menos dos de OpenMU, ProjectRebirthMu
-// y Louis S6 Ep3 (tools/gen_spawns.py; las diferencias en diferencias.txt). Formato de MonsterSetBase.txt.
-// Direccion: 0..7 (la que va en el paquete 0x13), -1 al azar.
+// Monsters and NPCs of the regular S6 maps: what at least two of OpenMU, ProjectRebirthMu and
+// Louis S6 Ep3 agree on (tools/gen_spawns.py; differences in diferencias.txt). MonsterSetBase.txt format.
+// Direction: 0..7 (the one sent in packet 0x13), -1 random.
 
 // NPC
 0
@@ -300,7 +300,7 @@
 578        80   0      117  126  3    // Weapons Merchant Bolo
 end
 
-// ZONAS
+// AREAS
 1
 //Monster  Map  Range  X1   Y1   X2   Y2   Dir  Count
 0          0    30     135  20   240  88   -1   45    // Bull Fighter
@@ -366,7 +366,7 @@ end
 491        63   30     211  39   244  72   -1   1     // Ruthless Lava Giant
 end
 
-// MONSTRUOS SUELTOS
+// LONE MONSTERS
 2
 //Monster  Map  Range  X    Y    Dir
 5          1    30     65   127  -1   // Hell Hound
