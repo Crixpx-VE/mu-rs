@@ -435,6 +435,13 @@ pub enum ClientMessage {
     TalkToNpc { id: u16 },
     /// `SendExitInventory`: close the NPC dialog (shop, vault...). Not encrypted.
     CloseNpc,
+    /// `SendRequestStorageExit` (wsclientinline.h:1238-1246, C1 82, not encrypted): close the vault
+    /// (`CNewUIStorageInventory::ProcessClosing`). OpenMU's `VaultClosed`.
+    CloseVault,
+    /// `SendRequestMixExit` (wsclientinline.h:1477-1485, C1 87, not encrypted): close the Chaos
+    /// Machine (`CNewUIMixInventory::ClosingProcess`, NewUIMixInventory.cpp:136-168). OpenMU's
+    /// `CraftingDialogCloseRequest`.
+    CloseCrafting,
     /// `SendRequestBuy(index)`: buy the item in `slot` of the NPC store.
     BuyItem { slot: u8 },
     /// `SendRequestSell(index)`: sell the inventory item in `slot` (12-75) to the open NPC.
@@ -909,6 +916,8 @@ impl ClientMessage {
                 encrypted(c1(&[0x30, h, l]))
             }
             Self::CloseNpc => c1(&[0x31]),
+            Self::CloseVault => c1(&[0x82]),
+            Self::CloseCrafting => c1(&[0x87]),
             Self::BuyItem { slot } => encrypted(c1(&[0x32, *slot])),
             Self::SellItem { slot } => encrypted(c1(&[0x33, *slot])),
             Self::RepairItem { slot, self_repair } => encrypted(c1(&[0x34, *slot, *self_repair as u8])),
@@ -946,6 +955,8 @@ impl ClientMessage {
             }
             0x30 => return Some(Self::TalkToNpc { id: get_u16_be(d, 3)? }),
             0x31 => return Some(Self::CloseNpc),
+            0x82 => return Some(Self::CloseVault),
+            0x87 => return Some(Self::CloseCrafting),
             0x32 => return Some(Self::BuyItem { slot: *d.get(3)? }),
             0x33 => return Some(Self::SellItem { slot: *d.get(3)? }),
             0x34 => return Some(Self::RepairItem { slot: *d.get(3)?, self_repair: *d.get(4).unwrap_or(&0) != 0 }),
@@ -1969,6 +1980,9 @@ mod tests {
 
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::TalkToNpc { id: 0x1234 }), [0xC3, 5, 0x30, 0x12, 0x34]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::CloseNpc), [0xC1, 3, 0x31]);
+        // `spe.Init(0xC1, 0x82); spe.Send()` and `spe.Init(0xC1, 0x87); spe.Send()`: header only.
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::CloseVault), [0xC1, 3, 0x82]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::CloseCrafting), [0xC1, 3, 0x87]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::BuyItem { slot: 16 }), [0xC3, 4, 0x32, 16]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::SellItem { slot: 20 }), [0xC3, 4, 0x33, 20]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::RepairItem { slot: 0xFF, self_repair: true }), [0xC3, 5, 0x34, 0xFF, 1]);
