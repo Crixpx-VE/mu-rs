@@ -1,33 +1,33 @@
-//! Chat del juego: la caja para escribir (`SEASON3B::CNewUIChatInputBox`), la ventana de mensajes
-//! (`SEASON3B::CNewUIChatLogWindow`), la de mensajes del sistema del S6 (`CSystemLogWindow` de
-//! MuMain) y lo que llega del servidor (`ReceiveChat`, `ReceiveChatWhisper`,
-//! `ReceiveChatWhisperResult`, `ReceiveNotice` y "Welcome to ..." al entrar y al cambiar de mapa).
-//! La lógica está en chat_log.rs; aquí, el teclado, el ratón, la red y el dibujo.
+//! In-game chat: the input box (`SEASON3B::CNewUIChatInputBox`), the message window
+//! (`SEASON3B::CNewUIChatLogWindow`), the S6 system message window (MuMain's `CSystemLogWindow`)
+//! and what comes from the server (`ReceiveChat`, `ReceiveChatWhisper`,
+//! `ReceiveChatWhisperResult`, `ReceiveNotice` and "Welcome to ..." on entering and changing maps).
+//! The logic is in chat_log.rs; here, keyboard, mouse, network and drawing.
 //!
-//! - **Teclas** (`CNewUIChatInputBox::UpdateKeyEvent`, NewUIChatInputBox.cpp:366-614): Enter abre
-//!   la caja y, abierta, manda; Esc la cierra; F2 solo susurros / todo; F3 quita o pone la caja del
-//!   nombre para susurrar; F4 (con el fondo) cambia el tamaño; F5 (abierta) pone o quita el fondo;
-//!   RePág/AvPág (con el fondo) pasan una pantalla; arriba/abajo, el historial de la caja con el
-//!   foco; Tab cambia de caja. Mientras se escribe, el foco es de la caja (`GetFocus()` es su
-//!   `edit`): ninguna otra ventana ni tecla rápida recibe teclas (se borran en `PreUpdate`).
-//! - **Ratón**: los botones de la barra al soltar (con `SOUND_CLICK01`) y su ayuda encima; la rueda
-//!   sobre los mensajes los mueve (y no acerca la cámara); con el fondo, arrastrar la barra de
-//!   desplazamiento o la de tamaño; clic derecho en una línea con nombre lo pone para susurrar.
-//! - **Dibujo**: en la pantalla de 640×480 (`UiScale`), pegada abajo y centrada como la barra.
-//!   Barra del S6 de 281×47 en (0, 382) con sus 10 botones (normal, grupo, gremio, Gens | no
-//!   susurros, sistema, chat | fondo, tamaño, transparencia); mensajes desde y = 383 hacia arriba,
-//!   cada uno con su fondo del ancho del texto; mensajes del sistema en (4, 84) hacia abajo.
-//! - **Sobre la cabeza**: lo que dice alguien (el héroe también) va a su caja `CHAT` de names.rs,
-//!   debajo del nombre (`AssignChat` → `CreateChat`, ZzzInterface.cpp:1106-1237).
-//! - **Letra**: `g_hFont` a 1024×768 (13 px, 8.125 de la pantalla de 640) con la Noto Sans de
-//!   fonts.rs; los anchos se miden con la misma letra ([`TextMetrics`]) para partir las líneas.
+//! - **Keys** (`CNewUIChatInputBox::UpdateKeyEvent`, NewUIChatInputBox.cpp:366-614): Enter opens
+//!   the box and, when open, sends; Esc closes it; F2 whispers only / all; F3 hides or shows the
+//!   whisper name box; F4 (with the background) resizes; F5 (open) toggles the background;
+//!   PgUp/PgDn (with the background) scroll one screen; up/down, the history of the focused
+//!   box; Tab switches box. While typing, the box has the focus (`GetFocus()` is its
+//!   `edit`): no other window or hotkey gets keys (they are cleared in `PreUpdate`).
+//! - **Mouse**: the bar buttons on release (with `SOUND_CLICK01`) and their tooltip on hover; the wheel
+//!   over the messages scrolls them (and does not zoom the camera); with the background, drag the
+//!   scroll bar or the resize bar; right click on a line with a name sets it for whispering.
+//! - **Drawing**: on the 640×480 screen (`UiScale`), stuck to the bottom and centered like the bar.
+//!   S6 bar of 281×47 at (0, 382) with its 10 buttons (normal, party, guild, Gens | no
+//!   whispers, system, chat | background, size, transparency); messages from y = 383 upwards,
+//!   each with a background as wide as its text; system messages at (4, 84) downwards.
+//! - **Overhead**: what someone says (the hero too) goes to their `CHAT` box in names.rs,
+//!   below the name (`AssignChat` → `CreateChat`, ZzzInterface.cpp:1106-1237).
+//! - **Font**: `g_hFont` at 1024×768 (13 px, 8.125 on the 640 screen) with the Noto Sans from
+//!   fonts.rs; widths are measured with the same font ([`TextMetrics`]) to wrap lines.
 //!
-//! Lo que no hay todavía (ver el informe): grupo, gremio y Gens (sus mensajes no llegan a nadie),
-//! comandos del chat del cliente salvo `/filter`, `/warp`, `/whisper on|off` y el aviso de Icarus
-//! de `/move`, los gestos de los anillos de transformación (los demás gestos al hablar, de
-//! `CheckChatText`, sí: chat_log.rs y character.rs), filtro de palabrotas (`CheckAbuseFilter`),
-//! clic derecho en un jugador para susurrarle y el
-//! texto de ayuda del botón de Gens (no está en Text_eng.bmd).
+//! Not implemented yet: party, guild and Gens (their messages reach nobody),
+//! client chat commands except `/filter`, `/warp`, `/whisper on|off` and the Icarus warning
+//! of `/move`, transformation ring gestures (the other gestures when talking, from
+//! `CheckChatText`, are: chat_log.rs and character.rs), swear filter (`CheckAbuseFilter`),
+//! right click on a player to whisper them and the
+//! Gens button tooltip (not in Text_eng.bmd).
 
 use std::collections::HashMap;
 
@@ -46,7 +46,7 @@ use crate::sound::SoundQueue;
 
 pub struct ChatPlugin;
 
-/// Las teclas del chat (antes que las del minimapa y el resto).
+/// Chat keys (before the minimap's and the rest).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChatKeys;
 
@@ -67,12 +67,12 @@ impl Plugin for ChatPlugin {
     }
 }
 
-/// Lo que alguien ha dicho y aún no está en su caja sobre la cabeza: (nombre, texto, `Flag`).
+/// What someone said that is not yet in their overhead box: (name, text, `Flag`).
 #[derive(Resource, Default)]
 pub struct PendingSay(Vec<(String, String, u8)>);
 
-/// `AssignChat` (ZzzInterface.cpp:1204-1237): la caja del jugador con ese nombre (el héroe también)
-/// en names.rs. Con `Flag` 1 (`#`), si lo encuentra, `AddChat` lo escribe además en el chat.
+/// `AssignChat` (ZzzInterface.cpp:1204-1237): the box of the player with that name (the hero too)
+/// in names.rs. With `Flag` 1 (`#`), if found, `AddChat` also writes it to the chat.
 fn assign_chat(
     mut pending: ResMut<PendingSay>,
     mut boxes: ResMut<crate::names::NameBoxes>,
@@ -98,20 +98,20 @@ fn assign_chat(
     }
 }
 
-// --- Medidas (pantalla de 640×480) -------------------------------------------------------------
+// --- Sizes (640×480 screen) -------------------------------------------------------------------
 
-/// `g_hFont` a 1024×768: 13 px, en unidades de la pantalla de 480 de alto (como options.rs).
+/// `g_hFont` at 1024×768: 13 px, in units of the 480-high screen (like options.rs).
 pub const FONT: f32 = 13.0 * 480.0 / 768.0;
 const SMOOTHING: FontSmoothing = FontSmoothing::AntiAliased;
 /// `Create(m_pNewUIMng, m_pNewChatLogWindow, 0, 480-51-47)` (NewUISystem.cpp:149).
 const INPUT_X: i32 = 0;
 const INPUT_Y: i32 = 480 - 51 - 47;
-/// `CHATBOX_WIDTH` × `WND_HEIGHT` (la barra del S6).
+/// `CHATBOX_WIDTH` × `WND_HEIGHT` (the S6 bar).
 const INPUT_W: i32 = crate::chat_log::WND_WIDTH;
 const INPUT_H: i32 = 47;
 const BTN_W: i32 = 27;
 const BTN_H: i32 = 26;
-/// Los 10 botones: de 27 en 27 con 6 entre grupos (4 | 3 | 3), como chat_input.rcss de MuMain.
+/// The 10 buttons: every 27 with 6 between groups (4 | 3 | 3), like MuMain's chat_input.rcss.
 const BUTTON_X: [i32; 10] = [0, 27, 54, 81, 114, 141, 168, 201, 228, 255];
 const BTN_WHISPER: usize = 4;
 const BTN_SYSTEM: usize = 5;
@@ -120,7 +120,7 @@ const BTN_FRAME: usize = 7;
 const BTN_SIZE: usize = 8;
 const BTN_ALPHA: usize = 9;
 /// `GlobalText[1681, 1682, 1683, —, 1684, 1685, 750, 1686, 751, 752]` (`RenderTooltip`,
-/// NewUIChatInputBox.cpp:730). El de Gens no está en Text_eng.bmd.
+/// NewUIChatInputBox.cpp:730). The Gens one is not in Text_eng.bmd.
 const TOOLTIP: [Option<&str>; 10] = [
     Some("Regular chat"),
     Some("Party chat"),
@@ -133,20 +133,20 @@ const TOOLTIP: [Option<&str>; 10] = [
     Some("Size Adjustment (F4)"),
     Some("Transparency Adjustment"),
 ];
-/// Las cajas de texto (`SetPosition(m_WndPos.x+72, m_WndPos.y+32)` 176×14 y `+5` 50×14).
+/// The text boxes (`SetPosition(m_WndPos.x+72, m_WndPos.y+32)` 176×14 and `+5` 50×14).
 const CHAT_FIELD: (i32, i32, i32, i32) = (INPUT_X + 72, INPUT_Y + 32, 176, 14);
 const WHISPER_FIELD: (i32, i32, i32, i32) = (INPUT_X + 5, INPUT_Y + 32, 50, 14);
-/// `SetTextColor(255, 255, 230, 210)` y `(255, 200, 200, 200)` (ARGB).
+/// `SetTextColor(255, 255, 230, 210)` and `(255, 200, 200, 200)` (ARGB).
 const CHAT_COLOR: [u8; 4] = [255, 230, 210, 255];
 const WHISPER_COLOR: [u8; 4] = [200, 200, 200, 255];
-/// `m_iCaretBlinkTemp % 24 < 12`, un paso por fotograma del original.
+/// `m_iCaretBlinkTemp % 24 < 12`, one step per original frame.
 const CARET_PERIOD: f32 = 24.0 / 25.0;
-/// La ventana de mensajes del sistema de MuMain: (0, 80), la primera línea en (4, 84) y una cada
-/// 1.2 del alto de la letra, con el fondo negro a la transparencia de siempre (0.6).
+/// MuMain's system message window: (0, 80), the first line at (4, 84) and one every
+/// 1.2 font heights, with the black background at the usual transparency (0.6).
 const SYSTEM_X: f32 = 4.0;
 const SYSTEM_Y: f32 = 84.0;
 const SYSTEM_ROW: f32 = FONT * 1.2;
-/// `TICKS_PER_SECOND` del original (`ChatTime--` una vez por tick).
+/// The original's `TICKS_PER_SECOND` (`ChatTime--` once per tick).
 const TICKS: f32 = 25.0;
 
 /// `CheckMouseIn`.
@@ -154,22 +154,22 @@ fn inside(m: (i32, i32), x: i32, y: i32, w: i32, h: i32) -> bool {
     m.0 >= x && m.0 < x + w && m.1 >= y && m.1 < y + h
 }
 
-// --- Medir texto -------------------------------------------------------------------------------
+// --- Text measuring ---------------------------------------------------------------------------
 
-/// Anchos del texto con la letra de la interfaz (`_GetTextExtentPoint32` del original), en
-/// unidades de la pantalla de 640. Sin el archivo, una aproximación de media letra por letra.
+/// Text widths with the interface font (the original's `_GetTextExtentPoint32`), in
+/// units of the 640 screen. Without the file, an approximation of half a font size per character.
 #[derive(Resource, Default)]
 pub struct TextMetrics {
     font: Option<ab_glyph::FontArc>,
 }
 
 impl TextMetrics {
-    /// Ancho con `g_hFont`.
+    /// Width with `g_hFont`.
     pub fn width(&self, s: &str) -> f32 {
         self.width_at(s, FONT)
     }
 
-    /// Ancho con la letra a `size` unidades (sin el interletraje de GPOS que pone el dibujo).
+    /// Width with the font at `size` units (without the GPOS kerning that drawing applies).
     pub fn width_at(&self, s: &str, size: f32) -> f32 {
         let Some(f) = &self.font else { return s.chars().count() as f32 * size * 0.5 };
         let upem = f.units_per_em().unwrap_or(1000.0);
@@ -195,9 +195,9 @@ fn load_metrics(args: Res<Args>, mut metrics: ResMut<TextMetrics>) {
     }
 }
 
-// --- Estado ------------------------------------------------------------------------------------
+// --- State -------------------------------------------------------------------------------------
 
-/// El chat entero: la ventana de mensajes, la del sistema y la caja de escribir.
+/// The whole chat: the message window, the system one and the input box.
 #[derive(Resource, Default)]
 pub struct Chat {
     pub log: ChatLog,
@@ -205,32 +205,32 @@ pub struct Chat {
     pub input: ChatInput,
     /// `m_iTooltipType`.
     tooltip: Option<usize>,
-    /// Los botones de tamaño y transparencia, apretados encima (`BUTTON_STATE_DOWN`).
+    /// The size and transparency buttons, pressed over them (`BUTTON_STATE_DOWN`).
     size_down: bool,
     alpha_down: bool,
     caret_clock: f32,
     tick_clock: f32,
-    /// `WorldActive` de lo último que se ha dicho con "Welcome to".
+    /// `WorldActive` of the last "Welcome to" message.
     map: Option<u16>,
-    /// Avisos del centro (notices.rs).
+    /// Center notices (notices.rs).
     pub notices: crate::notices::Notices,
 }
 
 impl Chat {
-    /// El ratón (pantalla de 640×480) cae en la caja abierta o en lo que agarra la ventana de
-    /// mensajes: un clic ahí no hace caminar.
+    /// The mouse (640×480 screen) is over the open box or something the message window
+    /// grabs: a click there does not walk.
     pub fn blocks(&self, c: Vec2) -> bool {
         let m = (c.x.floor() as i32, c.y.floor() as i32);
         (self.input.open && inside(m, INPUT_X, INPUT_Y, INPUT_W, INPUT_H)) || self.log.blocks(m)
     }
 
-    /// `g_pChatListBox->AddText`; devuelve si suena el aviso del filtro.
+    /// `g_pChatListBox->AddText`; returns whether the filter alert sounds.
     pub fn add(&mut self, id: &str, text: &str, kind: MsgType, err: MsgType, metrics: &TextMetrics) -> bool {
         self.log.add_text(id, text, kind, err, &|s| metrics.width(s))
     }
 }
 
-/// Al salir del juego (o cambiar de mapa, `HideAll`): la caja se cierra (y el fondo con ella).
+/// On leaving the game (or changing maps, `HideAll`): the box closes (and its background with it).
 fn leave_game(mut chat: ResMut<Chat>) {
     chat.input.close();
     chat.log.set_frame(false);
@@ -238,7 +238,7 @@ fn leave_game(mut chat: ResMut<Chat>) {
     chat.tooltip = None;
 }
 
-/// `ChatTime--`, `MoveNotices` y el parpadeo del cursor.
+/// `ChatTime--`, `MoveNotices` and the caret blink.
 fn tick(time: Res<Time>, mut chat: ResMut<Chat>, metrics: Res<TextMetrics>) {
     let chat = &mut *chat;
     chat.caret_clock += time.delta_secs();
@@ -250,10 +250,10 @@ fn tick(time: Res<Time>, mut chat: ResMut<Chat>, metrics: Res<TextMetrics>) {
     }
 }
 
-// --- Red ---------------------------------------------------------------------------------------
+// --- Network -----------------------------------------------------------------------------------
 
-/// `ReceiveChat`, `ReceiveChatWhisper`, `ReceiveChatWhisperResult`, `ReceiveNotice` y el "Welcome
-/// to" de `ReceiveJoinMapServer` / `ReceiveTeleport`.
+/// `ReceiveChat`, `ReceiveChatWhisper`, `ReceiveChatWhisperResult`, `ReceiveNotice` and the "Welcome
+/// to" of `ReceiveJoinMapServer` / `ReceiveTeleport`.
 #[allow(clippy::too_many_arguments)]
 fn net_messages(
     mut from: MessageReader<crate::net::FromServer>,
@@ -268,7 +268,7 @@ fn net_messages(
     for m in from.read() {
         match &m.0 {
             ServerMessage::ChatMessage { sender, message } => {
-                // El prefijo dice el canal (WSclient.cpp:1435-1510).
+                // The prefix gives the channel (WSclient.cpp:1435-1510).
                 let (kind, text) = if let Some(t) = message.strip_prefix('~') {
                     (Some(MsgType::Party), t)
                 } else if let Some(t) = message.strip_prefix("@@") {
@@ -278,12 +278,12 @@ fn net_messages(
                 } else if let Some(t) = message.strip_prefix('$') {
                     (Some(MsgType::Gens), t)
                 } else if let Some(t) = message.strip_prefix('#') {
-                    // Sin GMs: solo la caja sobre la cabeza, larga, que además lo escribe en el chat
-                    // (`AssignChat(ID, Text, 1)` → `AddChat` con `Flag` 1, [`assign_chat`]).
+                    // No GMs: only the long overhead box, which also writes it to the chat
+                    // (`AssignChat(ID, Text, 1)` → `AddChat` with `Flag` 1, [`assign_chat`]).
                     bubbles.0.push((sender.clone(), t.to_string(), 1));
                     (None, t)
                 } else {
-                    // `AssignChat` + `TYPE_CHAT_MESSAGE` (sin GMs no hay `TYPE_GM_MESSAGE`).
+                    // `AssignChat` + `TYPE_CHAT_MESSAGE` (without GMs there is no `TYPE_GM_MESSAGE`).
                     bubbles.0.push((sender.clone(), message.clone(), 0));
                     (Some(MsgType::Chat), message.as_str())
                 };
@@ -309,13 +309,13 @@ fn net_messages(
             }
             ServerMessage::Notice { kind, text } => match *kind {
                 notice_kind::GOLDEN_CENTER => chat.notices.create(text, NoticeColor::Golden, &|s| metrics.width(s)),
-                // `sprintf(Text, GlobalText[483], Notice)` (y la ventana del gremio, que no hay).
+                // `sprintf(Text, GlobalText[483], Notice)` (plus the guild window, which does not exist).
                 notice_kind::GUILD => {
                     let t = crate::notices::TEXT_GUILD_NOTICE.replace("%s", text);
                     chat.notices.create(&t, NoticeColor::Guild, &|s| metrics.width(s));
                 }
-                // En la selección de personaje el original lo pone en su caja de mensajes del
-                // servidor (`CUIMng::AddServerMsg`), que aquí no hay.
+                // In character selection the original puts it in its server message box
+                // (`CUIMng::AddServerMsg`), which does not exist here.
                 notice_kind::BLUE if *scene.get() != GameScene::CharacterSelect => chat.system.add(text, MsgType::System),
                 k => info!("aviso del servidor de tipo {k} sin mostrar: {text}"),
             },
@@ -330,7 +330,7 @@ fn net_messages(
     }
 }
 
-/// "Welcome to <mapa>" en los mensajes del sistema.
+/// "Welcome to <map>" in the system messages.
 fn welcome(chat: &mut Chat, map: u16) {
     chat.map = Some(map);
     if let Some(text) = crate::chat_log::welcome_text(map) {
@@ -338,7 +338,7 @@ fn welcome(chat: &mut Chat, map: u16) {
     }
 }
 
-// --- Teclado -----------------------------------------------------------------------------------
+// --- Keyboard ----------------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 fn chat_keys(
@@ -357,8 +357,8 @@ fn chat_keys(
     let typed: Vec<Key> = crate::clipboard::typed_keys(typed.read().cloned(), &keys);
     let chat = &mut *chat;
     let was_open = chat.input.open;
-    // Con la caja de mensajes del sistema (orden 10) las teclas son suyas; con el chat abierto, el
-    // foco es de su `edit` y solo él las recibe.
+    // With the system message box (order 10) the keys are its own; with the chat open, the
+    // focus is on its `edit` and only it gets them.
     if !was_open && game_ui.modal() {
         return;
     }
@@ -370,10 +370,10 @@ fn chat_keys(
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let measure = |s: &str| metrics.width(s);
     let frame = chat.log.show_frame();
-    // Lo que se ha usado con la caja cerrada (para que no llegue a nadie más).
+    // What was used with the box closed (so it reaches nobody else).
     let mut used: Vec<KeyCode> = Vec::new();
 
-    // `UpdateKeyEvent`: la primera que vale y se acaba.
+    // `UpdateKeyEvent`: the first one that applies, and done.
     if f2 {
         chat.input.whisper_only = !chat.input.whisper_only;
         chat.log.change_message(if chat.input.whisper_only { MsgType::Whisper } else { MsgType::All });
@@ -400,7 +400,7 @@ fn chat_keys(
     } else if frame && page_down {
         chat.log.scrolling(chat.log.end_line() + chat.log.showing());
     } else if !was_open && enter {
-        // Sin el Chaos Castle (ni su ventana del tiempo), siempre se abre.
+        // Without Chaos Castle (nor its timer window), it always opens.
         chat.input.open();
         chat.caret_clock = 0.0;
         used.extend([KeyCode::Enter, KeyCode::NumpadEnter]);
@@ -410,13 +410,13 @@ fn chat_keys(
             .map(|w| w.0.iter().map(|m| WarpName { index: m.index, name: m.name.clone(), sub_name: m.sub_name.clone() }).collect())
             .unwrap_or_default();
         let out = chat.input.submit(&hero_name, &warps, &mut chat.log, &mut chat.system, &measure);
-        // `ClosingProcess`: el fondo se va con la caja.
+        // `ClosingProcess`: the background goes away with the box.
         chat.log.set_frame(false);
         for o in out {
             match o {
                 Outgoing::Chat(message) => net.send(ClientMessage::PublicChat { name: hero_name.clone(), message }),
                 Outgoing::Whisper(target, message) => net.send(ClientMessage::Whisper { target, message }),
-                // Un nombre que no está manda −1 como `WORD` (0xFFFF), como el original.
+                // An unknown name sends −1 as a `WORD` (0xFFFF), like the original.
                 Outgoing::Warp(index) => move_window.request_warp(&mut net, index as u16),
                 Outgoing::Emote(action) => {
                     if let Ok(mut p) = players.single_mut() {
@@ -442,7 +442,7 @@ fn chat_keys(
         sound.play("SOUND_CLICK01");
     }
 
-    // Lo que se escribe en la caja con el foco (el `edit` de Windows).
+    // What is typed into the focused box (the Windows `edit`).
     if was_open && chat.input.open {
         let mut changed = false;
         for key in &typed {
@@ -480,7 +480,7 @@ fn chat_keys(
     chat.input.whisper.follow_caret(WHISPER_FIELD.2 as f32, &measure);
 
     if was_open {
-        // Nada de lo pulsado mientras se escribe llega al juego (teclas rápidas, habilidades...).
+        // Nothing pressed while typing reaches the game (hotkeys, skills...).
         keys.clear();
     } else {
         for k in used {
@@ -489,10 +489,10 @@ fn chat_keys(
     }
 }
 
-// --- Ratón -------------------------------------------------------------------------------------
+// --- Mouse -------------------------------------------------------------------------------------
 
-/// `UpdateMouseEvent` de la caja (capa 6.2) y, si no se ha quedado el ratón, el de la ventana de
-/// mensajes (6.1); luego `UpdateScrollPos`.
+/// `UpdateMouseEvent` of the box (layer 6.2) and, if it did not take the mouse, that of the message
+/// window (6.1); then `UpdateScrollPos`.
 fn chat_mouse(
     mut chat: ResMut<Chat>,
     windows: Query<&Window>,
@@ -503,7 +503,7 @@ fn chat_mouse(
 ) {
     let chat = &mut *chat;
     let cursor = windows.single().ok().and_then(crate::mainframe::cursor_virtual).map(|c| (c.x.floor() as i32, c.y.floor() as i32));
-    // Con la caja de mensajes del sistema, el ratón es suyo.
+    // With the system message box open, the mouse is its own.
     if game_ui.modal() {
         chat.tooltip = None;
         return;
@@ -526,7 +526,7 @@ fn chat_mouse(
             wheel: scroll.delta.y,
         });
         if out.wheel_used {
-            // `MouseWheel = 0`: la cámara no se acerca.
+            // `MouseWheel = 0`: the camera does not zoom.
             scroll.delta = Vec2::ZERO;
         }
         if let Some(id) = out.whisper_to {
@@ -536,12 +536,12 @@ fn chat_mouse(
     chat.log.update_scroll_pos();
 }
 
-/// `CNewUIChatInputBox::UpdateMouseEvent` (NewUIChatInputBox.cpp:231-364). `true` = se lo queda.
+/// `CNewUIChatInputBox::UpdateMouseEvent` (NewUIChatInputBox.cpp:231-364). `true` = it takes the mouse.
 fn input_mouse(chat: &mut Chat, cursor: Option<(i32, i32)>, press: bool, held: bool, release: bool, sound: &mut SoundQueue) -> bool {
     let at = |x: i32, y: i32, w: i32, h: i32| cursor.is_some_and(|m| inside(m, x, y, w, h));
     let button = |i: usize| at(BUTTON_X[i], INPUT_Y, BTN_W, BTN_H);
     chat.tooltip = (0..BUTTON_X.len()).find(|&i| button(i));
-    // Un clic en una caja de texto le da el foco (es un `edit` de Windows).
+    // A click on a text box gives it the focus (it is a Windows `edit`).
     if press {
         let (x, y, w, h) = WHISPER_FIELD;
         if chat.input.whisper_send && at(x, y, w, h) {
@@ -565,7 +565,7 @@ fn input_mouse(chat: &mut Chat, cursor: Option<(i32, i32)>, press: bool, held: b
             return true;
         }
         if button(BTN_SYSTEM) {
-            // S6: enseña o esconde la ventana de mensajes del sistema.
+            // S6: shows or hides the system message window.
             chat.input.show_system = !chat.input.show_system;
             click(sound);
             return true;
@@ -588,7 +588,7 @@ fn input_mouse(chat: &mut Chat, cursor: Option<(i32, i32)>, press: bool, held: b
         }
     }
     if chat.log.show_frame() {
-        // `CNewUIButton::Process`: apretado encima = fotograma 1; al soltar encima, vale.
+        // `CNewUIButton::Process`: pressed over it = frame 1; released over it, it fires.
         chat.size_down = held && button(BTN_SIZE);
         chat.alpha_down = held && button(BTN_ALPHA);
         if release && button(BTN_SIZE) {
@@ -608,7 +608,7 @@ fn input_mouse(chat: &mut Chat, cursor: Option<(i32, i32)>, press: bool, held: b
     at(INPUT_X, INPUT_Y, INPUT_W, INPUT_H)
 }
 
-// --- Dibujo ------------------------------------------------------------------------------------
+// --- Drawing -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Tex {
@@ -650,7 +650,7 @@ impl Tex {
         Tex::Stretch,
     ];
 
-    /// `LoadImages` de la caja (NewUIChatInputBox.cpp:44-56, con el de Gens) y de la ventana
+    /// `LoadImages` of the box (NewUIChatInputBox.cpp:44-56, with the Gens one) and of the window
     /// (NewUIChatLogWindow.cpp:45-53).
     fn file(self) -> &'static str {
         match self {
@@ -673,7 +673,7 @@ impl Tex {
         }
     }
 
-    /// El botón encendido de cada tipo de mensaje (`IMAGE_INPUTBOX_NORMAL_ON + m_iInputMsgType`).
+    /// The lit button of each message type (`IMAGE_INPUTBOX_NORMAL_ON + m_iInputMsgType`).
     fn type_on(t: InputType) -> Tex {
         match t {
             InputType::Normal => Tex::NormalOn,
@@ -687,19 +687,19 @@ impl Tex {
 #[derive(Resource)]
 struct ChatTextures(HashMap<Tex, Handle<Image>>);
 
-/// Una pieza en la pantalla de 640×480.
+/// A piece on the 640×480 screen.
 #[derive(Clone, PartialEq, Debug)]
 enum Piece {
-    /// `RenderColor` con el color de `glColor4f`.
+    /// `RenderColor` with the `glColor4f` color.
     Fill { x: f32, y: f32, w: f32, h: f32, rgba: [u8; 4] },
-    /// `RenderImage(tex, x, y, ancho, alto, 0, sv)`: el trozo desde (0, sv), sin estirar;
+    /// `RenderImage(tex, x, y, width, height, 0, sv)`: the part from (0, sv), without stretching;
     /// `dark` = `glColor4f(0.7, 0.7, 0.7)`.
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32, dark: bool },
-    /// `RenderText` en (x, y) con su fondo del ancho del texto (más `pad` a cada lado).
+    /// `RenderText` at (x, y) with a background as wide as the text (plus `pad` on each side).
     Text { x: f32, y: f32, text: String, color: [u8; 4], bg: Option<[u8; 4]>, bold: bool, pad: f32 },
-    /// `RenderText(320, y, ..., RT3_WRITE_CENTER)` en negrita con su fondo (los avisos del centro).
+    /// `RenderText(320, y, ..., RT3_WRITE_CENTER)` in bold with its background (center notices).
     Centered { y: f32, text: String, color: [u8; 4], bg: [u8; 4] },
-    /// Una caja de texto: lo de antes y después del cursor, desplazado `scroll`.
+    /// A text box: what is before and after the caret, shifted by `scroll`.
     Field { x: f32, y: f32, w: f32, h: f32, before: String, after: String, color: [u8; 4], caret: bool, selected: bool, scroll: f32 },
 }
 
@@ -708,11 +708,11 @@ fn img(tex: Tex, x: i32, y: i32, w: i32, h: i32) -> Piece {
 }
 
 impl Chat {
-    /// Lo que se dibuja, de atrás a delante: mensajes del sistema (capa 6.05), ventana de
-    /// mensajes (6.1) y caja (6.2).
+    /// What is drawn, back to front: system messages (layer 6.05), message
+    /// window (6.1) and box (6.2).
     fn pieces(&self, metrics: &TextMetrics) -> Vec<Piece> {
         let mut out = Vec::new();
-        // `RenderNotices` (antes que la interfaz, ZzzScene.cpp:585).
+        // `RenderNotices` (before the interface, ZzzScene.cpp:585).
         for (i, n) in self.notices.lines().iter().enumerate() {
             if n.text.is_empty() {
                 continue;
@@ -745,7 +745,7 @@ impl Chat {
         out
     }
 
-    /// `CNewUIChatLogWindow::Render`: fondo, mensajes y marco (NewUIChatLogWindow.cpp:65-237).
+    /// `CNewUIChatLogWindow::Render`: background, messages and frame (NewUIChatLogWindow.cpp:65-237).
     fn push_log(&self, out: &mut Vec<Piece>) {
         use crate::chat_log::*;
         let log = &self.log;
@@ -803,7 +803,7 @@ impl Chat {
     /// `CNewUIChatInputBox::Render` (NewUIChatInputBox.cpp:653-748).
     fn push_input(&self, out: &mut Vec<Piece>, metrics: &TextMetrics) {
         let input = &self.input;
-        // `RenderFrame` y `RenderButtons`.
+        // `RenderFrame` and `RenderButtons`.
         out.push(img(Tex::Back, INPUT_X, INPUT_Y, INPUT_W, INPUT_H));
         let t = input.msg_type as usize;
         out.push(img(Tex::type_on(input.msg_type), INPUT_X + BUTTON_X[t], INPUT_Y, BTN_W, BTN_H));
@@ -830,7 +830,7 @@ impl Chat {
                 });
             }
         }
-        // `RenderTooltip`: centrado sobre el botón, encima de la barra, con fondo negro a 180.
+        // `RenderTooltip`: centered over the button, above the bar, with a black background at 180.
         if let Some(text) = self.tooltip.and_then(|i| TOOLTIP[i].map(|t| (i, t))) {
             let (i, text) = text;
             let w = metrics.width(text).floor();
@@ -838,7 +838,7 @@ impl Chat {
             let h = FONT.floor();
             out.push(Piece::Text { x, y: INPUT_Y as f32 - (h + 1.0), text: text.into(), color: [255, 255, 255, 255], bg: Some([0, 0, 0, 180]), bold: false, pad: 3.0 });
         }
-        // Las cajas de texto.
+        // The text boxes.
         let caret_on = (self.caret_clock % CARET_PERIOD) < CARET_PERIOD / 2.0;
         let field = |(x, y, w, h): (i32, i32, i32, i32), b: &crate::chat_log::TextBox, color: [u8; 4], focused: bool| {
             let (before, after) = b.split();
@@ -859,7 +859,7 @@ impl Chat {
         if input.whisper_send {
             out.push(field(WHISPER_FIELD, &input.whisper, WHISPER_COLOR, input.whisper_focus));
         } else {
-            // Sin la caja del nombre (F3): su texto apagado y un velo rojizo encima.
+            // Without the name box (F3): its text dimmed and a reddish veil on top.
             out.push(Piece::Text {
                 x: WHISPER_FIELD.0 as f32,
                 y: WHISPER_FIELD.1 as f32,
@@ -883,7 +883,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         .filter_map(|&t| crate::scene::interface_image(&args, &mut images, t.file()).map(|(h, _)| (t, h)))
         .collect();
     commands.insert_resource(ChatTextures(textures));
-    // La pantalla de 640×480 centrada y pegada abajo, como la barra; debajo de las ventanas.
+    // The 640×480 screen centered and stuck to the bottom, like the bar; below the windows.
     commands.spawn((
         Name::new("Chat"),
         ChatRoot,
@@ -915,7 +915,7 @@ fn rgba(c: [u8; 4]) -> Color {
     Color::srgba_u8(c[0], c[1], c[2], c[3])
 }
 
-/// `g_hFont` (o `g_hFontBold`).
+/// `g_hFont` (or `g_hFontBold`).
 pub fn text_font(bold: bool) -> TextFont {
     let mut f = TextFont { font_size: FontSize::Px(FONT), font_smoothing: SMOOTHING, ..default() };
     if bold {
@@ -924,7 +924,7 @@ pub fn text_font(bold: bool) -> TextFont {
     f
 }
 
-/// Rehace el chat cuando cambia algo de lo que se dibuja.
+/// Rebuilds the chat when something drawn changes.
 fn draw(
     mut commands: Commands,
     chat: Res<Chat>,
@@ -976,7 +976,7 @@ fn draw(
                     }
                 }
                 Piece::Centered { y, text, color, bg } => {
-                    // Una fila de todo el ancho que centra el texto (con su fondo del ancho del texto).
+                    // A full-width row that centers the text (with a background as wide as the text).
                     let row = Node {
                         position_type: PositionType::Absolute,
                         left: Val::Px(0.0),
@@ -1017,7 +1017,7 @@ fn draw(
                                 // `m_dwSelectBackColor`.
                                 first.insert(BackgroundColor(Color::srgb_u8(150, 150, 150)));
                             }
-                            // El cursor no ocupa sitio: 2 de ancho y el alto de la letra, en gris (200, 200, 200).
+                            // The caret takes no space: 2 wide and the font height, in gray (200, 200, 200).
                             row.spawn(Node { width: Val::Px(0.0), height: Val::Percent(100.0), ..default() }).with_children(|c| {
                                 if caret {
                                     c.spawn((absolute(0.0, 0.0, 2.0, FONT), BackgroundColor(Color::srgb_u8(200, 200, 200))));

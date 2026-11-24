@@ -1,20 +1,20 @@
-//! Barra principal de abajo (main frame) de la interfaz Season 6, con las texturas originales
-//! de `Data/Interface`.
+//! Main bottom bar (main frame) of the Season 6 interface, with the original textures
+//! from `Data/Interface`.
 //!
-//! Coordenadas: las del original, en su pantalla virtual de 640×480. Toda la interfaz usa
-//! `UiScale = alto de la ventana / 480`, así que 1 px de Bevy UI = 1 unidad del original. La
-//! barra (640×51) va abajo y centrada: en pantallas panorámicas no se estira (el original sí).
+//! Coordinates: the original's, in its 640×480 virtual screen. The whole interface uses
+//! `UiScale = window height / 480`, so 1 Bevy UI px = 1 original unit. The
+//! bar (640×51) sits at the bottom, centered: on widescreens it is not stretched (the original does stretch it).
 //!
-//! Piezas (posiciones del tema "legacy" de MuMain, que reproduce las del original):
-//! - marco: `newui_menu01` (0,429) 256×51, `newui_menu02` (256,429) 128×51,
+//! Pieces (positions from MuMain's "legacy" theme, which reproduces the original's):
+//! - frame: `newui_menu01` (0,429) 256×51, `newui_menu02` (256,429) 128×51,
 //!   `partCharge1/newui_menu03` (384,429) 256×51;
-//! - esferas: vida (158,432) 45×39, SD (204,431) 16×39, AG (420,431) 16×39, maná (437,432) 45×39.
-//!   Se llenan desde abajo recortando la imagen, sin estirarla;
-//! - experiencia: `newui_exbar` estirada en (2,473), 629×4 × progreso;
-//! - botones 30×41 en y=429: tienda 489, personaje 519, inventario 549, amigos 579, menú 609
-//!   (`partCharge1/newui_menu_Bt05/01/02/03/04`, fotogramas normal/encima/abierto cada 41 px);
-//!   el de menú abre el menú de ventanas (options.rs) y el de inventario, el inventario (inventory.rs);
-//! - números: `newui_number1.tga`, dígitos de 12×14 (`RenderNumber`).
+//! - orbs: life (158,432) 45×39, SD (204,431) 16×39, AG (420,431) 16×39, mana (437,432) 45×39.
+//!   They fill from the bottom by cropping the image, without stretching it;
+//! - experience: `newui_exbar` stretched at (2,473), 629×4 × progress;
+//! - 30×41 buttons at y=429: shop 489, character 519, inventory 549, friends 579, menu 609
+//!   (`partCharge1/newui_menu_Bt05/01/02/03/04`, normal/hover/open frames every 41 px);
+//!   menu opens the window menu (options.rs) and inventory opens the inventory (inventory.rs);
+//! - numbers: `newui_number1.tga`, 12×14 digits (`RenderNumber`).
 
 use bevy::prelude::*;
 use bevy::ui::UiScale;
@@ -35,18 +35,18 @@ impl Plugin for MainFramePlugin {
     }
 }
 
-/// La barra entera (solo existe en el juego).
+/// The whole bar (only exists in game).
 #[derive(Component)]
 pub struct MainFrameRoot;
 
-/// Alto de la pantalla virtual del original.
+/// Height of the original's virtual screen.
 const VIRTUAL_HEIGHT: f32 = 480.0;
-/// Alto de la barra.
+/// Bar height.
 const FRAME_HEIGHT: f32 = 51.0;
-/// La barra empieza en y = 429 de la pantalla virtual.
+/// The bar starts at y = 429 of the virtual screen.
 const FRAME_TOP: f32 = 480.0 - FRAME_HEIGHT;
 
-/// Lo que muestra la barra. Sin red todavía: valores de un Dark Knight recién creado.
+/// What the bar shows. No network yet: values of a freshly created Dark Knight.
 #[derive(Resource, Clone, PartialEq)]
 pub struct CharacterStats {
     pub hp: u32,
@@ -57,7 +57,7 @@ pub struct CharacterStats {
     pub ag_max: u32,
     pub sd: u32,
     pub sd_max: u32,
-    /// Progreso dentro de la décima de nivel actual (0..1) y qué décima (0..9).
+    /// Progress within the current tenth of the level (0..1) and which tenth (0..9).
     pub exp_progress: f32,
     pub exp_tenth: u8,
     pub poisoned: bool,
@@ -81,7 +81,7 @@ impl Default for CharacterStats {
     }
 }
 
-/// Si el ratón está sobre la interfaz (para que un clic ahí no haga caminar al personaje).
+/// Whether the mouse is over the interface (so a click there does not make the character walk).
 #[derive(Resource, Default)]
 pub struct PointerOverUi(pub bool);
 
@@ -94,7 +94,7 @@ enum Gauge {
 }
 
 impl Gauge {
-    /// (x, y, ancho, alto) en la pantalla virtual.
+    /// (x, y, width, height) in the virtual screen.
     fn rect(self) -> (f32, f32, f32, f32) {
         match self {
             Gauge::Hp => (158.0, 432.0, 45.0, 39.0),
@@ -112,7 +112,7 @@ impl Gauge {
         };
         if max == 0 { 0.0 } else { (v.min(max) as f32 / max as f32).clamp(0.0, 1.0) }
     }
-    /// Centro del número (x) y su parte de arriba (y).
+    /// Number center (x) and its top (y).
     fn number_at(self) -> (f32, f32) {
         match self {
             Gauge::Hp => (180.75, 462.0),
@@ -142,12 +142,12 @@ struct ExpFill;
 
 #[derive(Component)]
 struct HudButton {
-    /// Posición en la fila (0 = tienda ... 4 = menú).
+    /// Position in the row (0 = shop ... 4 = menu).
     index: usize,
     open: bool,
 }
 
-/// Imágenes de la interfaz cargadas (para los números, que se crean y destruyen).
+/// Loaded interface images (for the numbers, which are created and destroyed).
 #[derive(Resource)]
 struct UiImages {
     hp: Handle<Image>,
@@ -166,7 +166,7 @@ fn load_image(args: &Args, images: &mut Assets<Image>, sub: &str, name: &str) ->
     }
 }
 
-/// Nodo con una imagen (o parte de ella) en (x, y) de la pantalla virtual, relativo a la barra.
+/// Node with an image (or part of one) at (x, y) of the virtual screen, relative to the bar.
 fn piece(image: Handle<Image>, x: f32, y: f32, w: f32, h: f32, src: Option<Rect>) -> (Node, ImageNode) {
     let mut img = ImageNode::new(image);
     img.rect = src;
@@ -195,13 +195,13 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
     let sd = load("", "newui_menu_SD.OZJ");
     let exbar = load("", "newui_Exbar.OZJ");
     let digits = load("", "newui_number1.OZT");
-    // Botones en el orden de izquierda a derecha: tienda, personaje, inventario, amigos, menú.
+    // Buttons from left to right: shop, character, inventory, friends, menu.
     let buttons: Vec<_> = ["newui_menu_Bt05.OZJ", "newui_menu_Bt01.OZJ", "newui_menu_Bt02.OZJ", "newui_menu_Bt03.OZJ", "newui_menu_Bt04.OZJ"]
         .iter()
         .map(|n| load("partCharge1", n))
         .collect();
 
-    // Barra de 640×51 abajo y centrada.
+    // 640×51 bar at the bottom, centered.
     let mut bar = commands.spawn((
         Name::new("Barra principal"),
         MainFrameRoot,
@@ -216,7 +216,7 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
         },
     ));
     bar.with_children(|b| {
-        // Primero el marco (JPG opaco, con las esferas vacías dibujadas) y encima el líquido.
+        // First the frame (opaque JPG, with the empty orbs drawn) and the liquid on top.
         for (img, x) in [(&menu1, 0.0), (&menu2, 256.0), (&menu3, 384.0)] {
             if let Some((h, size)) = img {
                 b.spawn(piece(h.clone(), x, FRAME_TOP, size.x, size.y, None));
@@ -255,16 +255,16 @@ fn spawn_main_frame(mut commands: Commands, args: Res<Args>, mut images: ResMut<
     });
 }
 
-/// Escala de la interfaz: la pantalla virtual de 640×480 tiene que caber entera, así que manda
-/// lo que limite más (el alto en panorámico, el ancho en una ventana estrecha).
+/// Interface scale: the whole 640×480 virtual screen must fit, so the tighter
+/// limit wins (height on widescreen, width in a narrow window).
 fn ui_scale(window: &Window) -> f32 {
     (window.height() / VIRTUAL_HEIGHT).min(window.width() / 640.0).max(0.25)
 }
 
-/// 1 px de interfaz = 1 unidad de la pantalla virtual.
+/// 1 interface px = 1 virtual screen unit.
 fn update_scale(windows: Query<&Window>, mut scale: ResMut<UiScale>) {
     let Ok(w) = windows.single() else { return };
-    // Minimizada mide 0: se deja como estaba.
+    // Minimized it measures 0: leave it as it was.
     if w.width() < 1.0 || w.height() < 1.0 {
         return;
     }
@@ -274,7 +274,7 @@ fn update_scale(windows: Query<&Window>, mut scale: ResMut<UiScale>) {
     }
 }
 
-/// Esferas: se llenan desde abajo recortando la imagen (el original mueve el borde de arriba).
+/// Orbs: fill from the bottom by cropping the image (the original moves the top edge).
 fn update_gauges(
     stats: Res<CharacterStats>,
     imgs: Option<Res<UiImages>>,
@@ -302,8 +302,8 @@ fn update_gauges(
     }
 }
 
-/// Números bajo las esferas con los dígitos de `newui_number1` (`RenderNumber`: centrados,
-/// cada dígito avanza 0.8 de su ancho).
+/// Numbers under the orbs with the `newui_number1` digits (`RenderNumber`: centered,
+/// each digit advances 0.8 of its width).
 fn update_numbers(
     mut commands: Commands,
     stats: Res<CharacterStats>,
@@ -337,34 +337,34 @@ fn update_numbers(
     }
 }
 
-/// Cursor en coordenadas de la pantalla virtual 640×480 del original (con la barra centrada).
+/// Cursor in the original's 640×480 virtual screen coordinates (with the bar centered).
 pub(crate) fn cursor_virtual(window: &Window) -> Option<Vec2> {
     Some(to_virtual(window, window.cursor_position()?))
 }
 
-/// Un punto de la ventana (píxeles lógicos) en la pantalla virtual 640×480 (con la barra centrada).
+/// A window point (logical pixels) in the 640×480 virtual screen (with the bar centered).
 pub(crate) fn to_virtual(window: &Window, c: Vec2) -> Vec2 {
     let s = ui_scale(window);
     let x0 = (window.width() - 640.0 * s) / 2.0;
-    // La barra va pegada abajo: y virtual = 480 en el borde inferior de la ventana.
+    // The bar sticks to the bottom: virtual y = 480 at the window's bottom edge.
     Vec2::new((c.x - x0) / s, VIRTUAL_HEIGHT - (window.height() - c.y) / s)
 }
 
-/// Rectángulo (x, y, ancho, alto) del botón `i` en la pantalla virtual.
+/// Rectangle (x, y, width, height) of button `i` in the virtual screen.
 fn button_rect(i: usize) -> Rect {
     let x = 489.0 + i as f32 * 30.0;
     Rect::new(x, FRAME_TOP, x + 30.0, FRAME_TOP + 41.0)
 }
 
-/// Botón de menú (`m_BtnWindow`): el último de la fila.
+/// Menu button (`m_BtnWindow`): the last one in the row.
 const MENU_BUTTON: usize = 4;
-/// Botón del personaje (`m_BtnChaInfo`): el segundo.
+/// Character button (`m_BtnChaInfo`): the second.
 const CHAR_BUTTON: usize = 1;
-/// Botón del inventario (`m_BtnMyInven`): el tercero.
+/// Inventory button (`m_BtnMyInven`): the third.
 const INVENTORY_BUTTON: usize = 2;
 
-/// Fotograma del botón: normal, ratón encima o abierto (como en el original, se comprueba
-/// a mano si el cursor está dentro).
+/// Button frame: normal, hovered or open (as in the original, whether the cursor is
+/// inside is checked by hand).
 fn update_buttons(
     windows: Query<&Window>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -374,14 +374,14 @@ fn update_buttons(
     mut inventory: ResMut<crate::inventory::Inventory>,
     mut q: Query<(&mut HudButton, &mut ImageNode)>,
 ) {
-    // Con una caja de mensajes abierta, la barra no recibe el ratón.
+    // With a message box open, the bar ignores the mouse.
     let cursor = windows.single().ok().and_then(cursor_virtual).filter(|_| !game_ui.modal());
     for (mut b, mut img) in &mut q {
         let inside = cursor.is_some_and(|c| button_rect(b.index).contains(c));
         if b.index == MENU_BUTTON || b.index == CHAR_BUTTON {
-            // `m_BtnWindow` (NewUIMainFrameWindow.cpp:817-821) y `m_BtnChaInfo` (782-792): al soltar
-            // encima abren o cierran el menú de ventanas o la ventana del personaje. Abierto: 2
-            // normal, 3 encima y 2 apretado; cerrado: 0, 1 y 2 (`SetBtnState`, 2636-2717).
+            // `m_BtnWindow` (NewUIMainFrameWindow.cpp:817-821) and `m_BtnChaInfo` (782-792): releasing
+            // over them opens or closes the window menu or the character window. Open: 2
+            // normal, 3 hover and 2 pressed; closed: 0, 1 and 2 (`SetBtnState`, 2636-2717).
             if inside && mouse.just_released(MouseButton::Left) {
                 if b.index == MENU_BUTTON {
                     game_ui.toggle_window_menu();
@@ -405,15 +405,15 @@ fn update_buttons(
             continue;
         }
         if b.index == INVENTORY_BUTTON {
-            // `m_BtnMyInven` (NewUIMainFrameWindow.cpp:769-775): al soltar encima abre o cierra el
-            // inventario (inventory.rs), con `SOUND_CLICK01`; apretado mientras está abierto.
+            // `m_BtnMyInven` (NewUIMainFrameWindow.cpp:769-775): releasing over it opens or closes the
+            // inventory (inventory.rs), with `SOUND_CLICK01`; pressed while open.
             if inside && mouse.just_released(MouseButton::Left) {
                 inventory.toggle();
                 sound.play("SOUND_CLICK01");
             }
             b.open = inventory.open;
         } else if inside && mouse.just_pressed(MouseButton::Left) {
-            // Sin ventanas todavía: solo se marca como abierto o cerrado.
+            // No windows yet: only marked as open or closed.
             b.open = !b.open;
         }
         let frame = if b.open || (inside && mouse.pressed(MouseButton::Left)) {
@@ -430,7 +430,7 @@ fn update_buttons(
     }
 }
 
-/// El ratón está sobre la barra o sobre una ventana del juego (un clic ahí no hace caminar).
+/// The mouse is over the bar or over a game window (a click there does not walk).
 fn pointer_over_ui(
     windows: Query<&Window>,
     game_ui: Res<crate::options::GameUi>,

@@ -1,18 +1,18 @@
-//! Objetos del mapa con efectos (2): Exile, Arena, Atlans, Tarkan, Devil Square, Heaven y Blood
-//! Castle 1-8. Traducido de `ZzzObject.cpp`: `MoveObject`, `MoveObjectSetting` /
-//! `MoveHeavenThunder` / `MoveObjectOnEffect` (de `MoveObjects`) y `UpdateObjectVisual`.
-//! `CreateObject` no crea efectos en estos mapas.
+//! Map objects with effects (2): Exile, Arena, Atlans, Tarkan, Devil Square, Heaven and Blood
+//! Castle 1-8. Translated from `ZzzObject.cpp`: `MoveObject`, `MoveObjectSetting` /
+//! `MoveHeavenThunder` / `MoveObjectOnEffect` (from `MoveObjects`) and `UpdateObjectVisual`.
+//! `CreateObject` creates no effects on these maps.
 //!
-//! Lo que el original hace una vez por tick para todo el mapa (`MoveObjectSetting`: truenos y
-//! nubes de Heaven, destellos de Blood Castle) se hace aquí desde el primer objeto registrado de
-//! ese mapa que se mueve en el tick (se detecta el tick nuevo por `world_time`). Por eso en
-//! Heaven y Blood Castle se registran todos los tipos de objeto del mapa, aunque no tengan código
-//! propio. El trueno de Devil Square va al principio de `MoveObject` y el original lo tira una vez
-//! por objeto visible: aquí igual, con todos los tipos de Devil Square registrados.
+//! What the original does once per tick for the whole map (`MoveObjectSetting`: Heaven thunder and
+//! clouds, Blood Castle flashes) is done here from the first registered object of
+//! that map that moves in the tick (the new tick is detected via `world_time`). That is why in
+//! Heaven and Blood Castle every object type of the map is registered, even without code
+//! of its own. The Devil Square thunder is at the start of `MoveObject` and the original rolls it once
+//! per visible object: same here, with every Devil Square type registered.
 //!
-//! También van aquí dos efectos que solo crean estos mapas: `MODEL_CLOUD` (el relámpago de nube
-//! de Heaven) y `BITMAP_LIGHT` (subtipo 0: las chispas que suben en Heaven), y un efecto propio
-//! invisible ([`FX_MAP_ANCHOR`]) que hace de `o->Target` para las nubes de Heaven.
+//! Also here are two effects only these maps create: `MODEL_CLOUD` (Heaven's cloud
+//! lightning) and `BITMAP_LIGHT` (subtype 0: the sparks rising in Heaven), plus an invisible
+//! custom effect ([`FX_MAP_ANCHOR`]) that acts as `o->Target` for the Heaven clouds.
 
 use std::sync::Mutex;
 
@@ -21,7 +21,7 @@ use bevy::math::Vec3;
 use crate::fx::core::*;
 use crate::fx::sim::OBJECT_FX_DISTANCE;
 
-// `gMapManager.WorldActive` de estos mapas.
+// `gMapManager.WorldActive` of these maps.
 const WD_4LOSTTOWER: i32 = 4;
 const WD_6STADIUM: i32 = 6;
 const WD_7ATLANSE: i32 = 7;
@@ -32,12 +32,12 @@ const WD_11BLOODCASTLE1: i32 = 11;
 const WD_11BLOODCASTLE_END: i32 = 17;
 const WD_52BLOODCASTLE_MASTER_LEVEL: i32 = 52;
 
-/// Efecto propio (no existe en el original): marca invisible que sigue viva mientras su objeto
-/// del mapa se mueve (el héroe a menos de [`OBJECT_FX_DISTANCE`]). Las nubes de Heaven la usan
-/// como `o->Target`, que en el original es el objeto del mapa.
+/// Custom effect (not in the original): an invisible marker that stays alive while its map
+/// object moves (the hero within [`OBJECT_FX_DISTANCE`]). The Heaven clouds use it
+/// as `o->Target`, which in the original is the map object.
 pub const FX_MAP_ANCHOR: i32 = -2_000_001;
 
-/// `Random::Rand() % n` en coma flotante.
+/// `Random::Rand() % n` as a float.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
@@ -49,13 +49,13 @@ fn in_blood_castle(world: i32) -> bool {
 pub fn register(r: &mut Registry) {
     // Arena (WD_6STADIUM).
     r.object(WD_6STADIUM, 9, stadium_9);
-    // En `UpdateObjectVisual` el caso de Lost Tower no tiene `break` y cae en el de la Arena:
-    // los objetos 9 de Lost Tower también encienden esta luz (si nadie lo ha registrado ya).
+    // In `UpdateObjectVisual` the Lost Tower case has no `break` and falls through to the Arena one:
+    // Lost Tower objects 9 also light this lamp (unless someone already registered it).
     if !r.objects.contains_key(&(WD_4LOSTTOWER, 9)) {
         r.object(WD_4LOSTTOWER, 9, stadium_9);
     }
 
-    // Atlans (WD_7ATLANSE): burbujas.
+    // Atlans (WD_7ATLANSE): bubbles.
     r.object(WD_7ATLANSE, 22, atlans_22);
 
     // Tarkan (WD_8TARKAN).
@@ -63,17 +63,17 @@ pub fn register(r: &mut Registry) {
         r.object(WD_8TARKAN, ty, tarkan);
     }
 
-    // Devil Square (WD_9DEVILSQUARE): el trueno va en todos los objetos.
+    // Devil Square (WD_9DEVILSQUARE): the thunder goes in every object.
     for ty in 0..=10 {
         r.object(WD_9DEVILSQUARE, ty, devil_square);
     }
 
-    // Heaven (WD_10HEAVEN): todos los tipos (para `MoveObjectSetting` y `MoveObjectOnEffect`).
+    // Heaven (WD_10HEAVEN): every type (for `MoveObjectSetting` and `MoveObjectOnEffect`).
     for ty in 0..=15 {
         r.object(WD_10HEAVEN, ty, heaven);
     }
 
-    // Blood Castle 1-7 y 8 (WD_52): todos los tipos (para `MoveObjectSetting`).
+    // Blood Castle 1-7 and 8 (WD_52): every type (for `MoveObjectSetting`).
     for world in (WD_11BLOODCASTLE1..=WD_11BLOODCASTLE_END).chain([WD_52BLOODCASTLE_MASTER_LEVEL]) {
         for ty in 0..=40 {
             r.object(world, ty, blood_castle);
@@ -85,20 +85,20 @@ pub fn register(r: &mut Registry) {
     r.effect(FX_MAP_ANCHOR, EffectKind { create: Some(anchor_create), step: Some(anchor_step), draw: Some(draw_nothing) });
 }
 
-// --- Estado por tick de todo el mapa (`MoveObjects`) ---------------------------------------------
+// --- Per-tick state of the whole map (`MoveObjects`) --------------------------------------------
 
 struct TickState {
-    /// `world_time` del último tick en que se hizo `MoveObjectSetting`.
+    /// `world_time` of the last tick in which `MoveObjectSetting` ran.
     time: f32,
-    /// `objectCount` de este tick (lo que devuelve `MoveHeavenThunder`).
+    /// `objectCount` of this tick (what `MoveHeavenThunder` returns).
     obj_count: i32,
-    /// `visibleObject`: se cuenta en este tick; `MoveHeavenThunder` usa el del anterior.
+    /// `visibleObject`: counted in this tick; `MoveHeavenThunder` uses the previous one.
     visible: i32,
 }
 
 static TICK: Mutex<TickState> = Mutex::new(TickState { time: f32::NAN, obj_count: 0, visible: 0 });
 
-/// `MoveObjectSetting` la primera vez que se llama en cada tick.
+/// `MoveObjectSetting` the first time it is called in each tick.
 fn object_setting(ctx: &mut Ctx) {
     let prev_visible = {
         let mut s = TICK.lock().unwrap_or_else(|e| e.into_inner());
@@ -107,10 +107,10 @@ fn object_setting(ctx: &mut Ctx) {
         }
         s.time = ctx.world_time;
         s.obj_count = 0;
-        // `visibleObject = 0` va después de `MoveObjectSetting`: este usa el del tick anterior.
+        // `visibleObject = 0` comes after `MoveObjectSetting`, which uses the previous tick's value.
         std::mem::take(&mut s.visible)
     };
-    // TODO(original): MoveChaosCastleObjectSetting / Hellas / BattleCastle (otros mapas).
+    // TODO(original): MoveChaosCastleObjectSetting / Hellas / BattleCastle (other maps).
     if ctx.world_active == WD_10HEAVEN {
         let count = move_heaven_thunder(ctx, prev_visible);
         TICK.lock().unwrap_or_else(|e| e.into_inner()).obj_count = count;
@@ -133,7 +133,7 @@ fn object_setting(ctx: &mut Ctx) {
     }
 }
 
-/// `MoveHeavenThunder`: relámpago entre las nubes alrededor del héroe.
+/// `MoveHeavenThunder`: lightning between the clouds around the hero.
 fn move_heaven_thunder(ctx: &mut Ctx, visible_object: i32) -> i32 {
     let mut object_count = 0;
     if !ctx.rand_fps_check(50) {
@@ -167,7 +167,7 @@ fn move_heaven_thunder(ctx: &mut Ctx, visible_object: i32) -> i32 {
         let mut position = pos + offset;
         position.z -= 300.0;
         position2.z -= 300.0;
-        // `angle[2] = 0`: el ángulo queda (0, 0, 0).
+        // `angle[2] = 0`: the angle stays (0, 0, 0).
         let angle = Vec3::ZERO;
         for _ in 0..2 {
             let scale = 40.0 + rf(ctx, 10);
@@ -180,11 +180,11 @@ fn move_heaven_thunder(ctx: &mut Ctx, visible_object: i32) -> i32 {
 // --- Arena (WD_6STADIUM) ------------------------------------------------------------------------
 
 fn stadium_9(o: &mut MapObject, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `UpdateObjectVisual`.
+    // `Luminosity` from the start of `UpdateObjectVisual`.
     let luminosity = (ctx.rand() % 30 + 70) as f32 * 0.01;
     let scale = luminosity * 5.0;
     let light = Vec3::new(luminosity * 0.6, luminosity * 0.3, luminosity * 0.1);
-    // El original pasa `Position` sin inicializar como desplazamiento: se toma (0, 0, 0).
+    // The original passes an uninitialized `Position` as offset: (0, 0, 0) is used.
     let p = o.bone_world(1, Vec3::ZERO);
     ctx.create_sprite(BITMAP_LIGHT, p, scale, light, 0.0, 0);
 }
@@ -206,7 +206,7 @@ fn atlans_22(o: &mut MapObject, ctx: &mut Ctx) {
 
 fn tarkan(o: &mut MapObject, ctx: &mut Ctx) {
     let wt = ctx.world_time;
-    // MoveObject: luces del suelo (el brillo de las mallas lo hace objects.rs).
+    // MoveObject: ground lights (the mesh glow is done by objects.rs).
     match o.ty {
         4 => {
             let sine = (wt * 0.002).sin() * 0.35 + 0.65;
@@ -226,8 +226,8 @@ fn tarkan(o: &mut MapObject, ctx: &mut Ctx) {
     // UpdateObjectVisual.
     match o.ty {
         60 => {
-            // `if (HiddenMesh != -2)`: solo la primera vez (objects.rs ya lo crea oculto).
-            // El humo 6 no muere nunca.
+            // `if (HiddenMesh != -2)`: only the first time (objects.rs already creates it hidden).
+            // Smoke 6 never dies.
             if !o.created {
                 for _ in 0..20 {
                     ctx.create_particle(BITMAP_SMOKE, o.position, o.angle, o.light, 6, o.scale, None);
@@ -243,7 +243,7 @@ fn tarkan(o: &mut MapObject, ctx: &mut Ctx) {
             } else {
                 Vec3::new(luminosity, luminosity * 0.32, luminosity * 0.32)
             };
-            // Hueso 2 del modelo: objects.rs no carga el modelo de los objetos ocultos (ver notas).
+            // Model bone 2: objects.rs does not load the model of hidden objects (see notes).
             let position = o.bone_world(2, Vec3::ZERO);
             ctx.create_sprite(BITMAP_IMPACT, position, scale, light, 0.0, 0);
         }
@@ -284,7 +284,7 @@ fn tarkan(o: &mut MapObject, ctx: &mut Ctx) {
 // --- Devil Square (WD_9DEVILSQUARE) -------------------------------------------------------------
 
 fn devil_square(o: &mut MapObject, ctx: &mut Ctx) {
-    // Principio de MoveObject: relámpagos de la tormenta, una tirada por objeto.
+    // Start of MoveObject: storm lightning, one roll per object.
     if (ctx.world_time as i32) % 4000 < 1000 && ctx.rand_fps_check(100) {
         let luminosity = (ctx.rand() % 12 + 4) as f32 * 0.1;
         let light = Vec3::new(luminosity * 0.2, luminosity * 0.3, luminosity * 0.5);
@@ -293,11 +293,11 @@ fn devil_square(o: &mut MapObject, ctx: &mut Ctx) {
             let y = hero.y + (ctx.rand() % 1200) as f32 - 600.0;
             ctx.add_terrain_light(x, y, light, 12.0);
         }
-        // TODO(original): PlayBuffer(SOUND_THUNDER01) (comentado en el original).
+        // TODO(original): PlayBuffer(SOUND_THUNDER01) (commented out in the original).
     }
     // TODO(original): PlayBuffer(SOUND_RAIN01, NULL, true).
 
-    // UpdateObjectVisual: gotas que caen de la estatua.
+    // UpdateObjectVisual: drops falling from the statue.
     if o.ty == 2 {
         let light = Vec3::ONE;
         let p = Vec3::new(-15.0, 0.0, 0.0);
@@ -319,7 +319,7 @@ fn devil_square(o: &mut MapObject, ctx: &mut Ctx) {
 fn heaven(o: &mut MapObject, ctx: &mut Ctx) {
     object_setting(ctx);
 
-    // MoveObjectOnEffect: con trueno en este tick, rayos sobre algunas nubes.
+    // MoveObjectOnEffect: with thunder this tick, bolts over some clouds.
     let obj_count = {
         let mut s = TICK.lock().unwrap_or_else(|e| e.into_inner());
         s.visible += 1;
@@ -349,12 +349,12 @@ fn heaven(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Nubes 0-5: el original las crea cuando `HiddenMesh != -2` y las deja seguir al objeto
-/// (`o->Target`) mientras se ve; al morir ponen `HiddenMesh = 0` y se vuelven a crear la próxima
-/// vez que se dibuja. Aquí las sigue una marca ([`FX_MAP_ANCHOR`]) que muere cuando el objeto deja
-/// de moverse, y se vuelven a crear cuando el objeto vuelve a moverse tras un hueco.
+/// Clouds 0-5: the original creates them when `HiddenMesh != -2` and lets them follow the object
+/// (`o->Target`) while it is visible; when they die they set `HiddenMesh = 0` and are recreated the next
+/// time it is drawn. Here they follow a marker ([`FX_MAP_ANCHOR`]) that dies when the object stops
+/// moving, and they are recreated when the object moves again after a gap.
 fn heaven_clouds(o: &mut MapObject, ctx: &mut Ctx) {
-    // `user[0]`: `world_time` de la última vez que se movió este objeto.
+    // `user[0]`: `world_time` of the last time this object moved.
     let gap = ctx.world_time - o.user[0];
     o.user[0] = ctx.world_time;
     if !o.created || gap > 100.0 {
@@ -392,7 +392,7 @@ fn blood_castle(o: &mut MapObject, ctx: &mut Ctx) {
         37 => {
             let light = Vec3::ONE;
             if ctx.rand_fps_check(2) {
-                // `(int)((o->Timer++) + 2) % 4`: con el valor de antes de sumar.
+                // `(int)((o->Timer++) + 2) % 4`: with the value before the increment.
                 let t = o.timer;
                 o.timer += 1.0;
                 if ((t + 2.0) as i32) % 4 == 0 {
@@ -415,12 +415,12 @@ fn blood_castle(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-// --- Efectos ------------------------------------------------------------------------------------
+// --- Effects -----------------------------------------------------------------------------------
 
 fn draw_nothing(_: &Effect, _: &DrawCtx, _: &mut DrawList) {}
 
-/// `MODEL_CLOUD` (EffectTypes.json): dura 2 ticks, escala 10, malla 0 sumando, sin luz del
-/// terreno y desplazado (0, 200, -190). Se mueve con el paso por defecto (anima y no avanza).
+/// `MODEL_CLOUD` (EffectTypes.json): lasts 2 ticks, scale 10, mesh 0 additive, no terrain
+/// light and offset (0, 200, -190). Moves with the default step (animates, does not advance).
 fn cloud_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 2.0;
     e.scale = 10.0;
@@ -429,7 +429,7 @@ fn cloud_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.position += Vec3::new(0.0, 200.0, -190.0);
 }
 
-/// `CreateEffect(BITMAP_LIGHT)` (ZzzEffect.cpp ≈787). Solo el subtipo 0 (Heaven).
+/// `CreateEffect(BITMAP_LIGHT)` (ZzzEffect.cpp ≈787). Subtype 0 only (Heaven).
 fn light_create(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.light = Vec3::splat(0.3);
@@ -442,16 +442,16 @@ fn light_create(e: &mut Effect, ctx: &mut Ctx) {
         e.scale = 3.0;
         e.life_time = 400.0;
     }
-    // TODO(original): subtipos 1 y 2 (buff de vida, con dueño personaje) y el resto.
+    // TODO(original): subtypes 1 and 2 (life buff, owned by a character) and the rest.
 }
 
-/// `MoveEffect` de `BITMAP_LIGHT` subtipo 0 (≈6145) + la cola común (`MoveParticle(o, true)`).
-/// El original, si sigue vivo, se vuelve a mover en el mismo tick 1 de cada 2 veces (≈7720),
-/// y cada movimiento resta 1 de vida.
+/// `MoveEffect` of `BITMAP_LIGHT` subtype 0 (≈6145) + the common tail (`MoveParticle(o, true)`).
+/// The original, if still alive, moves again in the same tick 1 out of 2 times (≈7720),
+/// and each move subtracts 1 from the lifetime.
 fn light_step(e: &mut Effect, ctx: &mut Ctx) {
     loop {
         light_move(e, ctx);
-        // La última resta de vida la hace el núcleo después de esta función.
+        // The last lifetime decrement is done by the core after this function.
         if e.sub_type != 0 || e.life_time - 1.0 <= 0.0 || !ctx.rand_fps_check(2) {
             break;
         }
@@ -460,7 +460,7 @@ fn light_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 fn light_move(e: &mut Effect, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `MoveEffect` (gasta un rand()).
+    // `Luminosity` from the start of `MoveEffect` (consumes one rand()).
     let _ = ctx.rand();
     if e.sub_type == 0 {
         e.position += e.direction;
@@ -470,12 +470,12 @@ fn light_move(e: &mut Effect, ctx: &mut Ctx) {
             e.life_time = 0.0;
         }
     }
-    // Cola común: `MoveParticle(o, true)`.
+    // Common tail: `MoveParticle(o, true)`.
     e.position += rotate(e.angle, e.direction);
 }
 
-/// Marca de un objeto del mapa: vive mientras el héroe está a menos de [`OBJECT_FX_DISTANCE`]
-/// (lo mismo que decide si el objeto se mueve).
+/// A map object's marker: lives while the hero is within [`OBJECT_FX_DISTANCE`]
+/// (the same check that decides whether the object moves).
 fn anchor_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 2.0;
     e.visible = false;

@@ -1,12 +1,12 @@
-//! Las líneas del cuadro de información de un objeto (`RenderItemInfo`, ZzzInventory.cpp:2053-5640),
-//! con los textos de `Text_eng.bmd` (`GlobalText[n]`, el número al lado) y los colores de
+//! The lines of an item's info box (`RenderItemInfo`, ZzzInventory.cpp:2053-5640),
+//! with the texts from `Text_eng.bmd` (`GlobalText[n]`, the number beside each) and the colors of
 //! `RenderTipTextList` (ZzzInventory.cpp:285-453).
 //!
-//! Están el nombre (con su color: excelente, +7, set...), daño, defensa, velocidad, durabilidad, los
-//! requisitos (en rojo con lo que falta), las clases que lo pueden llevar y las opciones (habilidad,
-//! suerte, opción adicional y excelentes). Faltan las líneas de los objetos especiales (mascotas,
-//! pociones con su efecto, cofres...), los sets antiguos (`RenderSetOptionListInItem`), la armonía y
-//! los zócalos.
+//! Included: the name (with its color: excellent, +7, set...), damage, defense, speed, durability, the
+//! requirements (in red with what is lacking), the classes that can wear it and the options (skill,
+//! luck, additional option and excellent ones). Missing: the lines of special items (pets,
+//! potions with their effect, chests...), ancient sets (`RenderSetOptionListInItem`), harmony and
+//! sockets.
 
 use super::group::*;
 use super::{Item, ItemAttribute, ItemStats, Special, kind};
@@ -31,7 +31,7 @@ pub enum TextColor {
 }
 
 impl TextColor {
-    /// Color de la letra (el `glColor3f` de cada color; el verde-azul pone `SetTextColor(0, 255, 0)`).
+    /// Text color (each color's `glColor3f`; the blue-green one uses `SetTextColor(0, 255, 0)`).
     pub fn rgb(self) -> [f32; 3] {
         match self {
             TextColor::White | TextColor::DarkRed | TextColor::DarkBlue | TextColor::DarkYellow => [1.0, 1.0, 1.0],
@@ -48,7 +48,7 @@ impl TextColor {
         }
     }
 
-    /// Fondo de la línea (`SetBgColor`), si tiene.
+    /// Line background (`SetBgColor`), if any.
     pub fn background(self) -> Option<[u8; 3]> {
         match self {
             TextColor::DarkRed => Some([160, 0, 0]),
@@ -60,7 +60,7 @@ impl TextColor {
     }
 }
 
-/// Una línea; `"\n"` es una línea vacía de medio alto.
+/// One line; `"\n"` is an empty half-height line.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TipLine {
     pub text: String,
@@ -82,20 +82,20 @@ impl TipLine {
     }
 }
 
-/// Lo del personaje que mira el cuadro (`Hero->Class`, `CharacterAttribute`).
+/// What the character looking at the box has (`Hero->Class`, `CharacterAttribute`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct HeroView {
     /// `GetBaseClass` (`CLASS_*`, 0 a 6).
     pub class: u8,
-    /// `GetStepClass`: 1, 2 o 3.
+    /// `GetStepClass`: 1, 2 or 3.
     pub step: u8,
     pub level: u32,
-    /// Fuerza, agilidad, vitalidad, energía y mando (`None` sin el servidor: no se comprueban).
+    /// Strength, agility, vitality, energy and command (`None` without the server: not checked).
     pub stats: Option<[u32; 5]>,
 }
 
-/// Nombres de las clases por clase y grado (`RequireClass`, ZzzInventory.cpp:549-700):
-/// `GlobalText[20-27, 1668-1672, 1687-1689]` y el Rage Fighter (de MuMain).
+/// Class names by class and tier (`RequireClass`, ZzzInventory.cpp:549-700):
+/// `GlobalText[20-27, 1668-1672, 1687-1689]` and the Rage Fighter (from MuMain).
 fn class_name(class: usize, step: u8) -> Option<&'static str> {
     Some(match (class, step) {
         (0, 1) => "Dark Wizard",
@@ -119,7 +119,7 @@ fn class_name(class: usize, step: u8) -> Option<&'static str> {
     })
 }
 
-/// `GetSpecialOptionText` (ZzzInventory.cpp:1823-2051). `mana` = el de la habilidad.
+/// `GetSpecialOptionText` (ZzzInventory.cpp:1823-2051). `mana` = the skill's mana.
 fn special_text(o: Special, value: u32, mana: u32) -> Option<String> {
     Some(match o {
         // `AT_SKILL_*` (SkillManager.h:28-60).
@@ -165,7 +165,7 @@ fn special_text(o: Special, value: u32, mana: u32) -> Option<String> {
     })
 }
 
-/// Color del nombre (ZzzInventory.cpp ≈2100-2187).
+/// Name color (ZzzInventory.cpp ≈2100-2187).
 pub fn name_color(item: &Item, stats: &ItemStats) -> TextColor {
     let t = item.kind();
     let k = |g: u8, i: u16| kind(g, i);
@@ -205,8 +205,8 @@ pub fn name_color(item: &Item, stats: &ItemStats) -> TextColor {
     c
 }
 
-/// Las líneas del cuadro (`RenderItemInfo` con `Sell = false`). `skill_mana(i)` = `SkillAttribute[i].Mana`;
-/// sin él (los datos de MuMain no traen el `skill.bmd` del S6) la línea de la habilidad no sale.
+/// The box lines (`RenderItemInfo` with `Sell = false`). `skill_mana(i)` = `SkillAttribute[i].Mana`;
+/// without it (MuMain's data lacks the S6 `skill.bmd`) the skill line is not shown.
 pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana: &dyn Fn(u16) -> Option<u32>) -> Vec<TipLine> {
     let stats = super::convert(attr, item, hero.level);
     let t = item.kind();
@@ -215,7 +215,7 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
     let excellent = item.excellent & 63 > 0;
     let mut out = vec![TipLine::gap()];
 
-    // Nombre: `GlobalText[620]` "Excellent" delante y `+nivel` detrás.
+    // Name: `GlobalText[620]` "Excellent" before and `+level` after.
     let mut name = attr.name.clone();
     if excellent {
         name = format!("Excellent {name}");
@@ -226,7 +226,7 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
     out.push(TipLine { text: name, color: name_color(item, &stats), bold: true });
     out.push(TipLine::gap());
 
-    // Daño (`GlobalText[40 + TwoHand]`), en azul si es excelente.
+    // Damage (`GlobalText[40 + TwoHand]`), in blue if excellent.
     if stats.damage_min > 0 && g != ETC {
         let (lo, hi) = (stats.damage_min.min(stats.damage_max), stats.damage_max);
         let label = if attr.two_hand { "Two-Handed Damage" } else { "One-Handed Damage" };
@@ -250,7 +250,7 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
         out.push(TipLine::new(format!("Moving speed: {}", attr.walk_speed), TextColor::White)); // 68
     }
 
-    // Durabilidad (`bDurExist`, ZzzInventory.cpp ≈4538-4750).
+    // Durability (`bDurExist`, ZzzInventory.cpp ≈4538-4750).
     let dur_exist = ((attr.durability > 0 || attr.magic_durability > 0) && ((t < k(WING, 0) || t >= k(HELPER, 0)) && t < k(POTION, 0)))
         || (k(WING, 0)..=k(WING, 6)).contains(&t)
         || (k(WING, 36)..=k(WING, 43)).contains(&t);
@@ -267,7 +267,7 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
         }
     }
 
-    // Requisitos: en rojo con `GlobalText[74]` "(lacking %d)" si no llega.
+    // Requirements: in red with `GlobalText[74]` "(lacking %d)" if not met.
     let mut require = |text: String, need: u32, have: Option<u32>| {
         match have.filter(|&h| h < need) {
             Some(h) => {
@@ -297,8 +297,8 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
         require(format!("Available command: {}", stats.require_charisma), stats.require_charisma, stat(4)); // 698
     }
 
-    // `RequireClass`: "Can be equipped by %s" (61), en blanco la clase propia y en rojo oscuro el resto;
-    // nada si la llevan todas. (`IsRequireClassRenderItem` deja fuera a unos pocos objetos especiales.)
+    // `RequireClass`: "Can be equipped by %s" (61), own class in white and the rest in dark red;
+    // nothing if every class can wear it. (`IsRequireClassRenderItem` excludes a few special items.)
     let special_no_class = [k(HELPER, 19), k(HELPER, 29), k(WING, 26), k(HELPER, 10), k(HELPER, 37), k(WING, 15), k(WING, 32), k(WING, 33), k(WING, 34)]
         .contains(&t)
         || (k(WING, 30)..=k(WING, 31)).contains(&t)
@@ -315,7 +315,7 @@ pub fn item_info(attr: &ItemAttribute, item: &Item, hero: &HeroView, skill_mana:
         }
     }
 
-    // Opciones (azul), y tras la suerte su segunda línea (94).
+    // Options (blue), and after luck its second line (94).
     for (o, v) in &stats.specials {
         let mana = match o {
             Special::Skill(s) => match skill_mana(*s) {
@@ -364,16 +364,16 @@ mod tests {
         let lines = item_info(&kris(), &item, &hero, &|_| Some(0));
         let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
         assert_eq!(texts[1], "Excellent Kris +7");
-        // Excelente y con opciones: verde, en negrita.
+        // Excellent with options: green, bold.
         assert_eq!((lines[1].color, lines[1].bold), (TextColor::Green, true));
         assert!(texts.contains(&"One-Handed Damage: 57 ~ 62"), "{texts:?}");
         assert!(texts.contains(&"Attack speed: 50"));
         assert!(texts.contains(&"Durability: [20/45]"), "{texts:?}");
-        // Le falta fuerza: dos líneas en rojo.
+        // Lacking strength: two lines in red.
         let s = texts.iter().position(|t| t.starts_with("Strength Requirement")).unwrap();
         assert_eq!(lines[s].color, TextColor::Red);
         assert!(texts[s + 1].starts_with("(lacking "));
-        // Todas las clases: sin líneas de clase.
+        // All classes: no class lines.
         assert!(!texts.iter().any(|t| t.starts_with("Can be equipped")));
         assert!(texts.contains(&"Luck (success rate of Jewel of Soul +25%)"));
         assert!(texts.contains(&"Additional Dmg +4"));

@@ -1,11 +1,11 @@
-// Luz de los modelos del original (`BMD::Transform` con `LightEnable` + `RenderMesh`):
-// cada vértice recibe `BodyLight · max(normal·L · 0.8 + 0.4, 0.2)`, con L = (1.3, 0, 2) en MU
-// (`HighLight` siempre activo), limitado a [0, 1] como el color de OpenGL. `BodyLight` es la luz
-// del terreno donde está el modelo. El original multiplica en sRGB: aquí se pasa a lineal.
+// Model lighting from the original (`BMD::Transform` with `LightEnable` + `RenderMesh`):
+// each vertex gets `BodyLight · max(normal·L · 0.8 + 0.4, 0.2)`, with L = (1.3, 0, 2) in MU
+// (`HighLight` always on), clamped to [0, 1] like the OpenGL color. `BodyLight` is the terrain
+// light where the model stands. The original multiplies in sRGB; here it is converted to linear.
 //
-// Además (`model_light.rs`): un color plano por el que multiplicar (`glColor3fv`), coordenadas de
-// cromado según la normal (`g_chrome`, `ZzzBMD.cpp:1054-1108`; copia de `render::chrome_uv`) y
-// `RENDER_DARK` (la mezcla la pone `ModelLight::specialize`).
+// Also (`model_light.rs`): a flat color to multiply by (`glColor3fv`), chrome coordinates from
+// the normal (`g_chrome`, `ZzzBMD.cpp:1054-1108`; copy of `render::chrome_uv`) and
+// `RENDER_DARK` (the blend is set by `ModelLight::specialize`).
 
 import bevy_pbr::render::{
     pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
@@ -16,18 +16,18 @@ import bevy_pbr::render::{
 };
 
 struct ModelLight {
-    // rgb: luz del original (sin pasar a lineal); a: 1 = iluminar por la normal, 0 = sin luz.
+    // rgb: original light (not linearized); a: 1 = light by the normal, 0 = unlit.
     light: vec4<f32>,
 };
 
 struct ModelParams {
-    // rgb: color plano (sin pasar a lineal).
+    // rgb: flat color (not linearized).
     tint: vec4<f32>,
-    // 0 = coordenadas del modelo; 1..8 = `ChromeMode`.
+    // 0 = model coordinates; 1..8 = `ChromeMode`.
     chrome: u32,
     // 1 = `RENDER_DARK`.
     dark: u32,
-    // 1 = la luz va en el `MeshTag` de la entidad (8 bits por canal).
+    // 1 = the light comes in the entity's `MeshTag` (8 bits per channel).
     tag_light: u32,
     _pad: u32,
 };
@@ -35,12 +35,12 @@ struct ModelParams {
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var<uniform> model_light: ModelLight;
 @group(constants::MATERIAL_BIND_GROUP) @binding(101) var<uniform> params: ModelParams;
 
-// (1.3, 0, 2) de MU en ejes de Bevy (x, z, -y).
+// MU's (1.3, 0, 2) in Bevy axes (x, z, -y).
 const LIGHT_DIR: vec3<f32> = vec3<f32>(1.3, 2.0, 0.0);
-// `LightVector` (`ZzzBMD.cpp:49`), en MU.
+// `LightVector` (`ZzzBMD.cpp:49`), in MU axes.
 const LIGHT_VECTOR: vec3<f32> = vec3<f32>(0.0, -0.1, -0.8);
 
-// `g_chrome` con la normal en ejes de MU y `WorldTime` en ms.
+// `g_chrome` with the normal in MU axes and `WorldTime` in ms.
 fn chrome_uv(mode: u32, n: vec3<f32>, world_time: f32) -> vec2<f32> {
     let wt = floor(world_time);
     let wave = (wt % 10000.0) * 0.0001;
@@ -62,7 +62,7 @@ fn chrome_uv(mode: u32, n: vec3<f32>, world_time: f32) -> vec2<f32> {
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var vin = in;
     if params.chrome != 0u {
-        // Normal sin normalizar (interpolada como las coordenadas del original), de Bevy a MU.
+        // Unnormalized normal (interpolated like the original's coordinates), from Bevy to MU axes.
         let n = vec3<f32>(in.world_normal.x, -in.world_normal.z, in.world_normal.y);
         @if(VERTEX_UVS_A) {
             vin.uv = chrome_uv(params.chrome, n, globals.time * 1000.0);
@@ -83,7 +83,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 body = vec3<f32>(f32(tag & 255u), f32((tag >> 8u) & 255u), f32((tag >> 16u) & 255u)) / 255.0;
             }
         }
-        // Sin girar la normal en las caras de atrás: el original tampoco lo hace.
+        // Back faces do not flip the normal: neither does the original.
         let n = normalize(in.world_normal);
         let intensity = max(dot(n, LIGHT_DIR) * 0.8 + 0.4, 0.2);
         let l = clamp(body * intensity, vec3<f32>(0.0), vec3<f32>(1.0));

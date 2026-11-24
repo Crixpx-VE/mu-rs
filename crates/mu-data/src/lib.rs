@@ -1,9 +1,9 @@
-//! Lectores de los formatos de archivo del cliente de MU Online (Season 6).
+//! Readers for the MU Online (Season 6) client file formats.
 //!
-//! No depende de ningún motor gráfico: todo devuelve datos en crudo
-//! (bytes RGBA, alturas, índices), y el cliente decide cómo dibujarlos.
+//! Does not depend on any graphics engine: everything returns raw data
+//! (RGBA bytes, heights, indices), and the client decides how to draw it.
 //!
-//! Referencias:
+//! References:
 //! - `referencias/xulek-muonline/Client.Data` (C#)
 //! - `referencias/muonlinejs` (TypeScript, licencia MIT)
 

@@ -1,32 +1,32 @@
-//! Interfaz 2D de la pantalla de login, como la del Main 5.2 (S6):
+//! 2D interface of the login screen, like Main 5.2's (S6):
 //!
-//! - logo MU con su brillo y las líneas de copyright y versión (`NewRenderLogInScene`, ZzzScene.cpp);
-//! - barra de abajo con los botones Menu y Credit (`CLoginMainWin`);
-//! - selección de servidor: grupos y servidores con su barra de carga (`CServerSelWin`);
-//! - ventana de login: cuenta, contraseña en asteriscos, OK y Cancel (`CLoginWin`);
-//! - caja de mensajes (`CMsgWin`) y menú de sistema de Esc (`CSysMenuWin`);
-//! - opciones (`COptionWin`) con sus casillas y barras (`CSlider`): el volumen de los efectos y
-//!   el de la música van a sound.rs; el resto se guarda en `options::GameOptions` (sin efecto
-//!   todavía). La barra de la música es añadida: el original solo tiene la de los efectos;
-//! - créditos (`CCreditWin`) con `Data/Local/credit.bmd`, las ilustraciones `im*_*.jpg` que se
-//!   funden y la música `Mutheme`;
-//! - el gestor de ventanas (`CUIMng`): ventana activa, orden de delante a atrás y botones (`CButton`).
+//! - MU logo with its glow and the copyright and version lines (`NewRenderLogInScene`, ZzzScene.cpp);
+//! - bottom bar with the Menu and Credit buttons (`CLoginMainWin`);
+//! - server selection: groups and servers with their load bar (`CServerSelWin`);
+//! - login window: account, password in asterisks, OK and Cancel (`CLoginWin`);
+//! - message box (`CMsgWin`) and Esc system menu (`CSysMenuWin`);
+//! - options (`COptionWin`) with their checkboxes and sliders (`CSlider`): the effects and music
+//!   volumes go to sound.rs; the rest is stored in `options::GameOptions` (no effect
+//!   yet). The music slider is an addition: the original only has the effects one;
+//! - credits (`CCreditWin`) with `Data/Local/credit.bmd`, the fading `im*_*.jpg`
+//!   illustrations and the `Mutheme` music;
+//! - the window manager (`CUIMng`): active window, front-to-back order and buttons (`CButton`).
 //!
-//! **Coordenadas.** El logo y las líneas de abajo van en la pantalla de 640×480 estirada a la
-//! ventana. Las ventanas del original, en cambio, van en píxeles reales de la ventana, sin escalar
-//! (se centran con el ancho y el alto de la pantalla). Aquí se toman los píxeles de una ventana de
-//! referencia de 1024×768 ([`REF_HEIGHT`]): a 1024×768 sale píxel a píxel como el original, y en
-//! las demás resoluciones se escala igual que el resto de la interfaz (1 px de Bevy UI = 1 unidad
-//! de la pantalla virtual de 480 de alto, ver mainframe.rs). Los textos usan las mismas
-//! conversiones del original (`int(x / g_fScreenRate_x)`).
+//! **Coordinates.** The logo and the bottom lines live on the 640×480 screen stretched to the
+//! window. The original's windows, however, use real window pixels, unscaled
+//! (centered using the screen width and height). Here the pixels of a 1024×768 reference
+//! window are used ([`REF_HEIGHT`]): at 1024×768 it matches the original pixel for pixel, and at
+//! other resolutions it scales like the rest of the interface (1 Bevy UI px = 1 unit
+//! of the 480-high virtual screen, see mainframe.rs). Texts use the original's same
+//! conversions (`int(x / g_fScreenRate_x)`).
 //!
-//! **Sin servidor todavía:** la lista de servidores es un solo grupo, "mu-rs", con un servidor
-//! (Non-PvP, 0 % de carga); al elegirlo se abre la ventana de login, que acepta cualquier cuenta y
-//! contraseña no vacías y pasa a la selección de personaje. El último usuario se guarda en
+//! **No server yet:** the server list is a single group, "mu-rs", with one server
+//! (Non-PvP, 0 % load); choosing it opens the login window, which accepts any non-empty account and
+//! password and moves on to character selection. The last user is saved in
 //! `mu-launcher.txt` (`usuario=`).
 //!
-//! Lógica en `Update` (los botones reaccionan al soltar el ratón, como `CButton::Update`); el
-//! fundido del logo, a 25 ticks por segundo e interpolado.
+//! Logic runs in `Update` (buttons react on mouse release, like `CButton::Update`); the
+//! logo fade at 25 ticks per second, interpolated.
 
 use std::collections::HashMap;
 
@@ -44,7 +44,7 @@ use bevy::ui_render::prelude::{MaterialNode, UiMaterial, UiMaterialKey, UiMateri
 use crate::Args;
 use crate::scene::{GameScene, LoadStep};
 
-/// Ventanas de la selección de personaje (crear personaje, borrar, los mensajes de esa pantalla).
+/// Character selection windows (create character, delete, that screen's messages).
 #[path = "login_ui_char.rs"]
 mod character;
 use crate::sound::SoundQueue;
@@ -57,7 +57,7 @@ impl Plugin for LoginUiPlugin {
         embedded_asset!(app, "login_logo.wesl");
         let ui_scene = || in_state(GameScene::Login).or_else(in_state(GameScene::CharacterSelect));
         let leave = |mut c: Commands, ui: Option<Res<LoginUi>>| {
-            // El servidor elegido se queda para la ventana del personaje (`g_ServerListManager`).
+            // The chosen server is kept for the character window (`g_ServerListManager`).
             if let Some((name, index, non_pvp)) = ui.and_then(|u| u.selected_server.clone()) {
                 c.insert_resource(crate::char_info::SelectedServer { name, index, non_pvp });
             }
@@ -67,10 +67,10 @@ impl Plugin for LoginUiPlugin {
         app.add_plugins(UiMaterialPlugin::<LogoMaterial>::default())
             .add_systems(OnEnter(GameScene::Login), spawn_login_ui)
             .add_systems(OnExit(GameScene::Login), (crate::scene::despawn::<LoginUiRoot>, leave))
-            // En la selección de personaje, el mismo gestor (`CUIMng::CreateCharacterScene`).
+            // In character selection, the same manager (`CUIMng::CreateCharacterScene`).
             .add_systems(OnEnter(GameScene::CharacterSelect), character::spawn_character_ui)
             .add_systems(OnExit(GameScene::CharacterSelect), (crate::scene::despawn::<LoginUiRoot>, leave))
-            // Tab es de las cajas de texto.
+            // Tab belongs to the text boxes.
             .add_systems(PreUpdate, keep_tab.after(bevy::input::InputSystems).run_if(ui_scene()))
             .add_systems(FixedUpdate, logo_tick.run_if(in_state(GameScene::Login)))
             .add_systems(Update, (update_ui, draw_windows).chain().after(crate::charselect::CharSelectSystems).run_if(ui_scene()))
@@ -83,7 +83,7 @@ impl Plugin for LoginUiPlugin {
                 )
                     .run_if(in_state(GameScene::CharacterSelect)),
             )
-            // La música de los créditos pisa la del login (login.rs la pide cada fotograma).
+            // The credits music overrides the login one (login.rs requests it every frame).
             .add_systems(
                 PostUpdate,
                 credit_music.before(crate::sound::SoundSystems).run_if(in_state(GameScene::Login)),
@@ -91,26 +91,26 @@ impl Plugin for LoginUiPlugin {
     }
 }
 
-/// `PlayMp3(MUSIC_MUTHEME)` mientras se ven los créditos (LoginMainWin.cpp:107-116); al
-/// cerrarlos vuelve `login_theme`.
+/// `PlayMp3(MUSIC_MUTHEME)` while the credits are shown (LoginMainWin.cpp:107-116); when
+/// they close, `login_theme` comes back.
 fn credit_music(ui: Option<Res<LoginUi>>, mut sound: ResMut<SoundQueue>) {
     if ui.is_some_and(|ui| ui.is_shown(Win::Credit)) {
         sound.music("Mutheme");
     }
 }
 
-// --- Medidas ---------------------------------------------------------------------------------------
+// --- Sizes ---------------------------------------------------------------------------------------
 
-/// Alto de la ventana de referencia para los píxeles de las ventanas (1024×768).
+/// Reference window height for window pixels (1024×768).
 const REF_HEIGHT: f32 = 768.0;
-/// Unidades de la interfaz (pantalla virtual de 480 de alto) por píxel del original.
+/// Interface units (480-high virtual screen) per original pixel.
 const K: f32 = 480.0 / REF_HEIGHT;
-/// `g_hFixFont`: alto 13 − 1 = 12 px, en cualquier resolución (Winmain.cpp:1464-1474).
+/// `g_hFixFont`: height 13 − 1 = 12 px, at any resolution (Winmain.cpp:1464-1474).
 const FIX_FONT: f32 = 12.0;
-/// `g_hFont` a 1024×768: `FontHeight` 14 − 1 = 13 px (Winmain.cpp:1456-1471).
+/// `g_hFont` at 1024×768: `FontHeight` 14 − 1 = 13 px (Winmain.cpp:1456-1471).
 const FONT: f32 = 13.0;
-/// El original pinta las letras sin suavizar (`NONANTIALIASED_QUALITY`).
-/// Suavizado de la letra (el original no lo tenía; con la Noto Sans de `fonts.rs` se ve nítida).
+/// Font smoothing (the original draws without it, `NONANTIALIASED_QUALITY`; with the Noto Sans
+/// from `fonts.rs` it looks sharp).
 const SMOOTHING: FontSmoothing = FontSmoothing::AntiAliased;
 
 /// `CServerSelWin` (ServerSelWin.h:26-29, ServerSelWin.cpp:19-22).
@@ -120,13 +120,13 @@ const SERVER_W: i32 = 193;
 const SERVER_H: i32 = 26;
 const SSW_GAP_W: i32 = 28;
 const SSW_GAP_H: i32 = 5;
-/// Barra de carga dentro del botón del servidor (`SSW_GB_POS_X/Y`) y su tamaño.
+/// Load bar inside the server button (`SSW_GB_POS_X/Y`) and its size.
 const GAUGE_X: i32 = 16;
 const GAUGE_Y: i32 = 19;
 const GAUGE_W: i32 = 160;
 const GAUGE_H: i32 = 4;
-/// Alto de la caja de descripción (`CWinEx` con `server_ex01/02/03` y 10 líneas: 6 + 6 + 4×10).
-/// El original la cuenta para colocar los botones, pero no la llega a dibujar.
+/// Height of the description box (`CWinEx` with `server_ex01/02/03` and 10 lines: 6 + 6 + 4×10).
+/// The original counts it to place the buttons, but never draws it.
 const DESC_H: i32 = 52;
 const SSW_SERVER_MAX: i32 = 16;
 /// `(108 + 28) × 2 + 193` × `26 × 16 + 5 × 2 + 26 + 52` (ServerSelWin.cpp:87).
@@ -141,81 +141,81 @@ const LOGIN_H: i32 = 245;
 /// `CMsgWin` (MsgWin.cpp:44).
 const MSG_W: i32 = 352;
 const MSG_H: i32 = 113;
-/// `CSysMenuWin` en el login: 213 de ancho y `SetLine(6)`: 64 + 43 + 8 × 6 (SysMenuWin.cpp:41-75).
+/// `CSysMenuWin` on the login: 213 wide and `SetLine(6)`: 64 + 43 + 8 × 6 (SysMenuWin.cpp:41-75).
 const SYS_W: i32 = 213;
 const SYS_H: i32 = 64 + 43 + 8 * 6;
-/// `CLoginMainWin`: botones de 54×30.
+/// `CLoginMainWin`: 54×30 buttons.
 const BAR_BTN_W: i32 = 54;
 const BAR_BTN_H: i32 = 30;
 
-/// `COptionWin` (OptionWin.cpp:35-77): `CWinEx` de 213 de ancho con la cabecera `op2_back1`
-/// (213×65), el pie `op1_back2` (213×43) y `SetLine(30)` lados de 8. Aquí 8 líneas más (64) para
-/// la barra de la música añadida.
+/// `COptionWin` (OptionWin.cpp:35-77): 213-wide `CWinEx` with the `op2_back1` header
+/// (213×65), the `op1_back2` footer (213×43) and `SetLine(30)` 8-high sides. Here 8 more lines (64) for
+/// the added music slider.
 const OPT_W: i32 = 213;
 const OPT_EXTRA: i32 = 8 * 8;
 const OPT_SIDE: i32 = 8 * 30 + OPT_EXTRA;
 const OPT_H: i32 = 65 + 43 + OPT_SIDE;
-/// `OW_BTN_GAP` y `OW_SLD_GAP`.
+/// `OW_BTN_GAP` and `OW_SLD_GAP`.
 const OW_BTN_GAP: i32 = 25;
 const OW_SLD_GAP: i32 = 48;
-/// Casillas de 16×16 (`BITMAP_CHECK_BTN`).
+/// 16×16 checkboxes (`BITMAP_CHECK_BTN`).
 const CHECK: i32 = 16;
-/// `CSlider`: pulgar de 13×13, fondo de 98×13 y la barra en (3, 3)-(95, 10) (OptionWin.cpp:63-74).
+/// `CSlider`: 13×13 thumb, 98×13 background and the bar at (3, 3)-(95, 10) (OptionWin.cpp:63-74).
 const SLD_W: i32 = 98;
 const SLD_H: i32 = 13;
 const THUMB: i32 = 13;
 const THUMB_RANGE: i32 = SLD_W - THUMB;
 const GAUGE_RECT: (i32, i32, i32, i32) = (3, 3, 95, 10);
-/// Barras: volumen de los efectos, de la música (añadida) y límite de efectos.
+/// Sliders: effects volume, music volume (added) and effects limit.
 const SLD_EFFECT_VOL: usize = 0;
 const SLD_MUSIC_VOL: usize = 1;
 const SLD_RENDER_LV: usize = 2;
 const SLD_MAX: usize = 3;
-/// `SetSlideRange`: 9 para el volumen (también el de la música) y 4 para el límite de efectos.
+/// `SetSlideRange`: 9 for the volume (also music) and 4 for the effects limit.
 const SLD_RANGE: [i32; SLD_MAX] = [9, 9, 4];
-/// Con el botón apretado a un lado del pulgar, el original lo mueve un paso por fotograma
-/// (iba a 25): aquí un paso por tick de 25 por segundo.
+/// With the button held to one side of the thumb, the original moves it one step per frame
+/// (it ran at 25): here one step per tick at 25 per second.
 const SLD_STEP: f32 = 1.0 / 25.0;
 
-/// `CCreditWin` (CreditWin.cpp:19-26): tiempos en ms.
+/// `CCreditWin` (CreditWin.cpp:19-26): times in ms.
 const CRW_ILLUST_FADE_TIME: f32 = 2000.0;
 const CRW_ILLUST_SHOW_TIME: f32 = 22000.0;
 const CRW_TEXT_FADE_TIME: f32 = 300.0;
 const CRW_NAME_SHOW_TIME: f32 = 2300.0;
 const CRW_ILLUST_MAX: u8 = 8;
-/// `SCreditItem`: 1 byte de clase y 32 de nombre, 400 en `credit.bmd` (CreditWin.h:20-40).
+/// `SCreditItem`: 1 class byte and 32 name bytes, 400 in `credit.bmd` (CreditWin.h:20-40).
 const CRW_NAME_MAX: usize = 32;
 const CRW_ITEM_MAX: usize = 400;
-/// `CreateFont(18, ..., FW_BOLD, ...)` a 1024 de ancho (CreditWin.cpp:83-90).
+/// `CreateFont(18, ..., FW_BOLD, ...)` at 1024 wide (CreditWin.cpp:83-90).
 const CREDIT_FONT: f32 = 18.0;
-/// Las ilustraciones `m_apszIllustPath` (CreditWin.cpp:66-81).
+/// The `m_apszIllustPath` illustrations (CreditWin.cpp:66-81).
 const ILLUST: [&str; CRW_ILLUST_MAX as usize * 2] = [
     "im1_1.jpg", "im1_2.jpg", "im2_1.jpg", "im2_2.jpg", "im3_1.jpg", "im3_2.jpg", "im4_1.jpg", "im4_2.jpg",
     "im5_1.jpg", "im5_2.jpg", "im6_1.jpg", "im6_2.jpg", "im7_1.jpg", "im7_2.jpg", "im8_1.jpg", "im8_2.jpg",
 ];
-/// La única línea añadida a los créditos de Webzen: al final, como un nombre más de "THANKS TO".
+/// The only line added to Webzen's credits: at the end, as one more "THANKS TO" name.
 const CREDIT_PORT: &str = "Port: crixpx";
 
-/// Máximos de las cajas de texto (`MAX_ID_SIZE`, `MAX_PASSWORD_SIZE`, _define.h).
+/// Text box limits (`MAX_ID_SIZE`, `MAX_PASSWORD_SIZE`, _define.h).
 const MAX_ID: usize = 10;
 const MAX_PASSWORD: usize = 20;
-/// Tamaño de la caja de texto: `Init(g_hWnd, 140, 14, ...)`, en la pantalla de 640×480.
+/// Text box size: `Init(g_hWnd, 140, 14, ...)`, on the 640×480 screen.
 const INPUT_W: f32 = 140.0;
 const INPUT_H: f32 = 14.0;
-/// El cursor de texto parpadea con `m_iCaretBlinkTemp % 24 < 12`, un paso por fotograma del original.
+/// The text caret blinks with `m_iCaretBlinkTemp % 24 < 12`, one step per original frame.
 const CARET_PERIOD: f32 = 24.0 / 25.0;
 
-/// Colores del original (UIBaseDef.h).
+/// Original colors (UIBaseDef.h).
 const WHITE: [u8; 3] = [255, 255, 255];
 const BR_GRAY: [u8; 3] = [226, 226, 226];
 const YELLOW: [u8; 3] = [255, 255, 121];
 const BR_YELLOW: [u8; 3] = [255, 238, 193];
 const ORANGE: [u8; 3] = [255, 180, 0];
 const BR_ORANGE: [u8; 3] = [255, 217, 39];
-/// `SetTextColor(255, 255, 230, 210)` de las cajas de la cuenta y la contraseña (ARGB).
+/// `SetTextColor(255, 255, 230, 210)` of the account and password boxes (ARGB).
 const INPUT_COLOR: [u8; 3] = [255, 230, 210];
 
-/// Textos (`GlobalText` de Text_eng.bmd del S6).
+/// Texts (`GlobalText` from the S6 Text_eng.bmd).
 const TEXT_COPYRIGHT: &str = "(c) Copyright 2001 Webzen"; // 454
 const TEXT_RIGHTS: &str = " All Rights Reserved."; // 455
 const TEXT_ACCOUNT: &str = "Account"; // 450
@@ -229,15 +229,15 @@ const TEXT_WHISPER: &str = "Beep sound for whispering"; // 387
 const TEXT_VOLUME: &str = "Volume"; // 389
 const TEXT_SLIDE_HELP: &str = "Slide Help"; // 919
 const TEXT_EFFECT_LIMIT: &str = "+Effect limitation"; // 1840
-/// La barra añadida de la música (no hay texto para ella en Text_eng.bmd).
+/// The added music slider (Text_eng.bmd has no text for it).
 const TEXT_MUSIC: &str = "Music";
 const TEXT_SERVER_FULL: &str = "The server is full"; // 416
 const TEXT_ENTER_ACCOUNT: &str = "Enter your account"; // 403
 const TEXT_ENTER_PASSWORD: &str = "Enter your password"; // 404
-/// 565-567: aviso de los grupos sin ningún servidor Non-PvP.
+/// 565-567: warning for groups without any Non-PvP server.
 const TEXT_PVP: [&str; 3] = ["Since Helheim server ", "tends to be crowded", "we recommend that you use other servers."];
 
-/// Pantalla en píxeles de la ventana de referencia.
+/// Screen in reference window pixels.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Screen {
     w: i32,
@@ -245,14 +245,14 @@ struct Screen {
 }
 
 impl Screen {
-    /// `g_fScreenRate_x` / `g_fScreenRate_y`: píxeles por unidad de la pantalla de 640×480.
+    /// `g_fScreenRate_x` / `g_fScreenRate_y`: pixels per unit of the 640×480 screen.
     fn rate_x(self) -> f32 {
         self.w as f32 / 640.0
     }
     fn rate_y(self) -> f32 {
         self.h as f32 / 480.0
     }
-    /// `int(x / g_fScreenRate_x)`: los textos se colocan en unidades enteras de 640×480.
+    /// `int(x / g_fScreenRate_x)`: texts are placed in whole 640×480 units.
     fn snap_x(self, x: f32) -> f32 {
         (x / self.rate_x()).floor() * self.rate_x()
     }
@@ -261,7 +261,7 @@ impl Screen {
     }
 }
 
-/// Rectángulo (x, y, ancho, alto) en píxeles; dentro como `PtInRect` (sin el borde derecho ni el de abajo).
+/// Rectangle (x, y, width, height) in pixels; containment like `PtInRect` (excluding the right and bottom edges).
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct IRect {
     x: i32,
@@ -279,12 +279,12 @@ impl IRect {
     }
 }
 
-/// `CUIMng::CreateLoginScene` (UIMng.cpp:233-234): `int(567 / 600 × alto) − 30 − 11`.
+/// `CUIMng::CreateLoginScene` (UIMng.cpp:233-234): `int(567 / 600 × height) − 30 − 11`.
 fn bar_y(s: Screen) -> i32 {
     (567.0 / 600.0 * s.h as f32) as i32 - BAR_BTN_H - 11
 }
 
-/// `CLoginMainWin`: la barra mide el ancho de la pantalla menos 30 a cada lado (LoginMainWin.cpp:46).
+/// `CLoginMainWin`: the bar is the screen width minus 30 on each side (LoginMainWin.cpp:46).
 fn bar_rect(s: Screen) -> IRect {
     IRect::new(30, bar_y(s), s.w - 60, BAR_BTN_H)
 }
@@ -293,19 +293,19 @@ fn menu_rect(s: Screen) -> IRect {
     IRect::new(30, bar_y(s), BAR_BTN_W, BAR_BTN_H)
 }
 
-/// Pegado al borde derecho de la barra (LoginMainWin.cpp:65-67).
+/// Flush with the bar's right edge (LoginMainWin.cpp:65-67).
 fn credit_rect(s: Screen) -> IRect {
     let bar = bar_rect(s);
     IRect::new(bar.x + bar.w - BAR_BTN_W, bar.y, BAR_BTN_W, BAR_BTN_H)
 }
 
-/// `CServerSelWin`, centrada (UIMng.cpp:238-240).
+/// `CServerSelWin`, centered (UIMng.cpp:238-240).
 fn ssw_rect(s: Screen) -> IRect {
     IRect::new((s.w - SSW_W) / 2, (s.h - SSW_H) / 2, SSW_W, SSW_H)
 }
 
-/// Botón de grupo `i` (`CServerSelWin::SetPosition`, ServerSelWin.cpp:108-144): el 0 (servidor de
-/// pruebas) centrado abajo, del 1 al 10 en la columna izquierda y del 11 al 20 en la derecha.
+/// Group button `i` (`CServerSelWin::SetPosition`, ServerSelWin.cpp:108-144): 0 (test
+/// server) centered at the bottom, 1 to 10 in the left column and 11 to 20 in the right one.
 fn group_rect(s: Screen, i: usize) -> IRect {
     let r = ssw_rect(s);
     let base = r.y + r.h - (GROUP_H * 11 + SSW_GAP_H * 2 + DESC_H);
@@ -317,8 +317,8 @@ fn group_rect(s: Screen, i: usize) -> IRect {
     IRect::new(x, y, GROUP_W, GROUP_H)
 }
 
-/// Servidor `j` de `n` (`SetServerBtnPosition`, ServerSelWin.cpp:146-168): entre las dos columnas,
-/// desde la altura del primer grupo de la izquierda (o más arriba si no caben en 10 filas).
+/// Server `j` of `n` (`SetServerBtnPosition`, ServerSelWin.cpp:146-168): between the two columns,
+/// from the height of the first left group (or higher if they do not fit in 10 rows).
 fn server_rect(s: Screen, j: usize, n: usize) -> IRect {
     let g = group_rect(s, 1);
     let left_sum = GROUP_H * 10;
@@ -327,25 +327,25 @@ fn server_rect(s: Screen, j: usize, n: usize) -> IRect {
     IRect::new(g.x + GROUP_W + SSW_GAP_W, base + SERVER_H * j as i32, SERVER_W, SERVER_H)
 }
 
-/// `CLoginWin`: centrada en horizontal y a 2/3 en vertical (UIMng.cpp:244-246).
+/// `CLoginWin`: centered horizontally and at 2/3 vertically (UIMng.cpp:244-246).
 fn login_rect(s: Screen) -> IRect {
     IRect::new((s.w - LOGIN_W) / 2, (s.h - LOGIN_H) * 2 / 3, LOGIN_W, LOGIN_H)
 }
 
-/// Marco de la caja de texto de la cuenta (0) o la contraseña (1) (LoginWin.cpp:92-93).
+/// Frame of the account (0) or password (1) text box (LoginWin.cpp:92-93).
 fn field_rect(s: Screen, field: Field) -> IRect {
     let l = login_rect(s);
     let dy = if field == Field::Id { 106 } else { 131 };
     IRect::new(l.x + 109, l.y + dy, 156, 23)
 }
 
-/// Donde empieza el texto de la caja: `int((marco + 6) / g_fScreenRate)` (LoginWin.cpp:97-101).
+/// Where the box text starts: `int((frame + 6) / g_fScreenRate)` (LoginWin.cpp:97-101).
 fn input_origin(s: Screen, field: Field) -> Vec2 {
     let f = field_rect(s, field);
     Vec2::new(s.snap_x((f.x + 6) as f32), s.snap_y((f.y + 6) as f32))
 }
 
-/// Zona que da el foco al pulsar: `CheckMouseIn(x, y − 4, ancho, alto + 8)` en 640×480 (UIControls.cpp:3628).
+/// Area that takes focus on click: `CheckMouseIn(x, y − 4, width, height + 8)` in 640×480 (UIControls.cpp:3628).
 fn input_click_rect(s: Screen, field: Field) -> IRect {
     let o = input_origin(s, field);
     let (rx, ry) = (s.rate_x(), s.rate_y());
@@ -356,37 +356,37 @@ fn msg_rect(s: Screen) -> IRect {
     IRect::new((s.w - MSG_W) / 2, (s.h - MSG_H) / 2, MSG_W, MSG_H)
 }
 
-/// `CSysMenuWin` centrado: `SetLine(6)` en el login y `SetLine(10)` en la selección de personaje.
+/// Centered `CSysMenuWin`: `SetLine(6)` on the login and `SetLine(10)` in character selection.
 fn sys_rect_for(s: Screen, scene: UiScene) -> IRect {
     let h = if scene == UiScene::Character { 64 + 43 + 8 * 10 } else { SYS_H };
     IRect::new((s.w - SYS_W) / 2, (s.h - h) / 2, SYS_W, h)
 }
 
-/// `CWinEx` de `COptionWin`, centrado (OptionWin.cpp:75-76).
+/// `COptionWin`'s `CWinEx`, centered (OptionWin.cpp:75-76).
 fn opt_rect(s: Screen) -> IRect {
     IRect::new((s.w - OPT_W) / 2, (s.h - OPT_H) / 2, OPT_W, OPT_H)
 }
 
-/// Casilla `i` (`COptionWin::SetPosition`, OptionWin.cpp:86-105): en x + 52, desde y + 52 cada 41.
+/// Checkbox `i` (`COptionWin::SetPosition`, OptionWin.cpp:86-105): at x + 52, from y + 52 every 41.
 fn check_rect(s: Screen, i: usize) -> IRect {
     let r = opt_rect(s);
     IRect::new(r.x + 52, r.y + 52 + i as i32 * (OW_BTN_GAP + CHECK), CHECK, CHECK)
 }
 
-/// Esquina de la barra `i`: 48 por debajo de la última casilla y cada 61.
+/// Corner of slider `i`: 48 below the last checkbox and every 61.
 fn slider_origin(s: Screen, i: usize) -> IVec2 {
     let last = check_rect(s, 2);
     IVec2::new(last.x, last.y + CHECK + OW_SLD_GAP + i as i32 * (OW_SLD_GAP + SLD_H))
 }
 
-/// Botón Close de las opciones, centrado en y + 301 (bajado lo que crece la ventana).
+/// Options Close button, centered at y + 301 (moved down by the window's growth).
 fn opt_close_rect(s: Screen) -> IRect {
     let r = opt_rect(s);
     IRect::new(r.x + (OPT_W - 108) / 2, r.y + 301 + OPT_EXTRA, 108, 30)
 }
 
-/// `CCreditWin::SetPosition` (CreditWin.cpp:107-124): el adorno abajo a la derecha, con el pie a
-/// 527/600 del alto, y el botón de cerrar dentro de él en (122, 63).
+/// `CCreditWin::SetPosition` (CreditWin.cpp:107-124): the ornament at the bottom right, with its foot at
+/// 527/600 of the height, and the close button inside it at (122, 63).
 fn credit_deco_rect(s: Screen) -> IRect {
     let base = (527.0 / 600.0 * s.h as f32) as i32;
     IRect::new(s.w - 189, base - 103, 189, 103)
@@ -397,9 +397,9 @@ fn credit_close_rect(s: Screen) -> IRect {
     IRect::new(d.x + 122, d.y + 63, 54, 30)
 }
 
-// --- Estado ----------------------------------------------------------------------------------------
+// --- State ---------------------------------------------------------------------------------------
 
-/// Ventanas del login (las de `CUIMng::CreateLoginScene` que hay de momento).
+/// Login windows (those of `CUIMng::CreateLoginScene` that exist for now).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Win {
     MainBar,
@@ -409,11 +409,11 @@ enum Win {
     Option,
     Credit,
     Msg,
-    /// `CCharMakeWin` (selección de personaje).
+    /// `CCharMakeWin` (character selection).
     CharMake,
 }
 
-/// Escena del gestor (`UIM_SCENE_LOGIN` / `UIM_SCENE_CHARACTER`).
+/// Manager scene (`UIM_SCENE_LOGIN` / `UIM_SCENE_CHARACTER`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum UiScene {
     Login,
@@ -422,17 +422,17 @@ enum UiScene {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Btn {
-    /// "Select Server" del menú de sistema (solo en la selección de personaje).
+    /// "Select Server" of the system menu (character selection only).
     SysServerSelect,
-    /// Clase de la ventana de crear.
+    /// Class of the create window.
     Job(crate::account::Class),
     MakeOk,
     MakeCancel,
     Menu,
     Credit,
-    /// Botón de grupo por su posición (`m_iBtnPos`).
+    /// Group button by its position (`m_iBtnPos`).
     Group(usize),
-    /// Servidor del grupo elegido, por orden.
+    /// Server of the chosen group, by order.
     Server(usize),
     LoginOk,
     LoginCancel,
@@ -441,30 +441,30 @@ enum Btn {
     SysExit,
     SysOption,
     SysClose,
-    /// Casillas de `COptionWin`: ataque automático, aviso de susurros y ayuda deslizante.
+    /// `COptionWin` checkboxes: auto attack, whisper alert and sliding help.
     OptAutoAttack,
     OptWhisper,
     OptSlideHelp,
     OptClose,
-    /// Pulgar de la barra `i` (`CSlider::m_btnThumb`).
+    /// Thumb of slider `i` (`CSlider::m_btnThumb`).
     OptThumb(usize),
     CreditClose,
 }
 
-/// `CSlider` horizontal (Slider.cpp). Las posiciones van relativas a la esquina de la barra,
-/// que se recalcula cada fotograma (la ventana puede cambiar de tamaño).
+/// Horizontal `CSlider` (Slider.cpp). Positions are relative to the slider's corner,
+/// which is recomputed every frame (the window can be resized).
 #[derive(Clone, Debug)]
 struct Slider {
-    /// `m_nSlidePos` y `m_nSlideRange`.
+    /// `m_nSlidePos` and `m_nSlideRange`.
     pos: i32,
     range: i32,
-    /// Pulgar: x desde la esquina de la barra.
+    /// Thumb: x from the slider's corner.
     thumb: i32,
-    /// `m_byState`: `SLD_STATE_UP` (1), `SLD_STATE_DN` (2) y `SLD_STATE_THUMB_DRG` (0x10).
+    /// `m_byState`: `SLD_STATE_UP` (1), `SLD_STATE_DN` (2) and `SLD_STATE_THUMB_DRG` (0x10).
     state: u8,
     capture: i32,
     limit: i32,
-    /// Tiempo hasta el siguiente paso con el botón apretado a un lado del pulgar.
+    /// Time until the next step with the button held to one side of the thumb.
     step_clock: f32,
 }
 
@@ -504,12 +504,12 @@ impl Slider {
         self.thumb = if self.pos == self.range { THUMB_RANGE } else { self.thumb_at(self.pos) };
     }
 
-    /// Ancho de la barra de color (`CGaugeBar::SetValue`).
+    /// Width of the colored bar (`CGaugeBar::SetValue`).
     fn gauge(&self) -> i32 {
         self.pos.clamp(0, self.range) * (GAUGE_RECT.2 - GAUGE_RECT.0) / self.range
     }
 
-    /// `CSlider::Update` con el ratón relativo a la esquina de la barra.
+    /// `CSlider::Update` with the mouse relative to the slider's corner.
     fn update(&mut self, cursor: Option<IVec2>, held: bool, up: bool, dt: f32) {
         if up {
             self.set_thumb();
@@ -559,7 +559,7 @@ impl Slider {
     }
 }
 
-/// `SHOW_STATE` de los créditos.
+/// Credits `SHOW_STATE`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Fade {
     Hide,
@@ -568,20 +568,20 @@ enum Fade {
     Out,
 }
 
-/// `SCreditItem`: clase (1 departamento, 2 equipo, 3 nombre) y nombre.
+/// `SCreditItem`: class (1 department, 2 team, 3 name) and name.
 #[derive(Clone, Debug)]
 struct CreditItem {
     class: u8,
     name: String,
 }
 
-/// `CRW_INDEX_*`: departamento, equipo y los nombres.
+/// `CRW_INDEX_*`: department, team and the names.
 const CRW_INDEX_DEPARTMENT: usize = 0;
 const CRW_INDEX_TEAM: usize = 1;
 const CRW_INDEX_NAME: usize = 2;
 const CRW_INDEX_MAX: usize = 6;
 
-/// Estado de `CCreditWin`.
+/// `CCreditWin` state.
 struct Credits {
     items: Vec<CreditItem>,
     illust_state: Fade,
@@ -593,8 +593,8 @@ struct Credits {
     index: [usize; CRW_INDEX_MAX],
     text_state: [Fade; CRW_INDEX_NAME + 1],
     text_clock: f32,
-    /// Alfa de las tres franjas negras que tapan las líneas (`CRW_SPR_TXT_HIDE0..2`); empiezan
-    /// tapando y no se reinician al volver a abrir.
+    /// Alpha of the three black strips covering the lines (`CRW_SPR_TXT_HIDE0..2`); they start
+    /// covering and are not reset when reopened.
     hide_alpha: [f32; CRW_INDEX_NAME + 1],
 }
 
@@ -623,12 +623,12 @@ impl Credits {
         self.items.get(self.index[slot]).map_or("", |c| c.name.as_str())
     }
 
-    /// `CCreditWin::Init` (CreditWin.cpp:237-250). Devuelve si hay que cerrar.
+    /// `CCreditWin::Init` (CreditWin.cpp:237-250). Returns whether it must close.
     fn init(&mut self) -> bool {
         self.illust_state = Fade::In;
         self.illust_clock = 0.0;
         self.illust = 0;
-        // `LoadIllust`: las dos nuevas empiezan transparentes.
+        // `LoadIllust`: the two new ones start transparent.
         self.illust_alpha = 0.0;
         self.text_state = [Fade::In; CRW_INDEX_NAME + 1];
         self.text_clock = 0.0;
@@ -637,11 +637,11 @@ impl Credits {
         self.set_text_index()
     }
 
-    /// `CCreditWin::SetTextIndex` (CreditWin.cpp:338-370): el siguiente departamento, equipo y
-    /// hasta 4 nombres. Una clase 0 termina los créditos (devuelve si hay que cerrar).
+    /// `CCreditWin::SetTextIndex` (CreditWin.cpp:338-370): the next department, team and
+    /// up to 4 names. A class 0 ends the credits (returns whether it must close).
     ///
-    /// El original cuenta un nombre menos cuando hay 4 seguidos (el cuarto no llegaba a verse);
-    /// aquí se cuentan todos para que no falte ninguno de los créditos.
+    /// The original counts one name less when there are 4 in a row (the fourth was never shown);
+    /// here all are counted so that no credit is missing.
     fn set_text_index(&mut self) -> bool {
         if self.class(self.now) == 0 {
             return true;
@@ -667,7 +667,7 @@ impl Credits {
         false
     }
 
-    /// `AnimationIllust` (CreditWin.cpp:273-314), `dt` en ms.
+    /// `AnimationIllust` (CreditWin.cpp:273-314), `dt` in ms.
     fn animate_illust(&mut self, dt: f32) {
         match self.illust_state {
             Fade::In => {
@@ -696,8 +696,8 @@ impl Credits {
         }
     }
 
-    /// `AnimationText` (CreditWin.cpp:372-430): la franja negra se aclara (aparece la línea) o se
-    /// oscurece (desaparece). Devuelve si hay que cerrar.
+    /// `AnimationText` (CreditWin.cpp:372-430): the black strip fades out (the line appears) or
+    /// darkens (it disappears). Returns whether it must close.
     fn animate_text(&mut self, class: usize, dt: f32) -> bool {
         match self.text_state[class] {
             Fade::In => {
@@ -739,8 +739,8 @@ impl Credits {
     }
 }
 
-/// `CCreditWin::LoadText` (CreditWin.cpp:318-336): `Data/Local/credit.bmd`, 400 × 33 bytes con
-/// `BuxConvert`, y detrás de lo último que hay la línea propia del port.
+/// `CCreditWin::LoadText` (CreditWin.cpp:318-336): `Data/Local/credit.bmd`, 400 × 33 bytes with
+/// `BuxConvert`, and after the last entry, the port's own line.
 fn load_credits(data: &std::path::Path) -> Vec<CreditItem> {
     let path = mu_data::fs::find(data, "Local").and_then(|d| mu_data::fs::find(&d, "credit.bmd"));
     let Some(Ok(mut bytes)) = path.map(std::fs::read) else {
@@ -759,12 +759,12 @@ fn load_credits(data: &std::path::Path) -> Vec<CreditItem> {
         .map(|c| {
             let name = &c[1..];
             let end = name.iter().position(|&b| b == 0).unwrap_or(name.len());
-            // Windows-1252 (en inglés no hay más que ASCII).
+            // Windows-1252 (English text is plain ASCII).
             CreditItem { class: c[0], name: name[..end].iter().map(|&b| b as char).collect() }
         })
         .collect();
-    // El archivo acaba en relleno (clase 205): ahí termina lo que se enseña. La línea propia va
-    // como un nombre más con el equipo en blanco, igual que "All of WEBZEN STAFF".
+    // The file ends in padding (class 205): what is shown ends there. The own line goes
+    // as one more name with a blank team, like "All of WEBZEN STAFF".
     let end = items.iter().position(|c| !(1..=3).contains(&c.class)).unwrap_or(items.len());
     items.insert(end, CreditItem { class: 2, name: " ".into() });
     items.insert(end + 1, CreditItem { class: 3, name: CREDIT_PORT.into() });
@@ -775,9 +775,9 @@ fn load_credits(data: &std::path::Path) -> Vec<CreditItem> {
 enum Field {
     Id,
     Pass,
-    /// Nombre del personaje nuevo.
+    /// New character's name.
     CharName,
-    /// Contraseña para borrar.
+    /// Password for deleting.
     DelPass,
 }
 
@@ -787,9 +787,9 @@ enum MsgKind {
     None,
     Cancel,
     Ok,
-    /// `MWT_BTN_BOTH`: OK y Cancel.
+    /// `MWT_BTN_BOTH`: OK and Cancel.
     Both,
-    /// `MWT_STR_INPUT`: caja de contraseña, OK y Cancel.
+    /// `MWT_STR_INPUT`: password box, OK and Cancel.
     Input,
 }
 
@@ -799,7 +799,7 @@ enum MsgCode {
     InputId,
     InputPassword,
     GameEndCountdown,
-    // Selección de personaje (MsgWin.cpp).
+    // Character selection (MsgWin.cpp).
     MinLength,
     IdSpaceError,
     SpecialName,
@@ -809,9 +809,9 @@ enum MsgCode {
     DeleteSuccess,
     ResidentWrong,
     CreateFail,
-    /// `MESSAGE_WAIT`: esperando al servidor (sin botones).
+    /// `MESSAGE_WAIT`: waiting for the server (no buttons).
     Wait,
-    // Login con el servidor (`ReceiveLogIn` / `ReceiveJoinServer`, WSclient.cpp:12760).
+    // Login with the server (`ReceiveLogIn` / `ReceiveJoinServer`, WSclient.cpp:12760).
     ServerLost,
     LoginFailPassword,
     LoginFailId,
@@ -823,16 +823,16 @@ enum MsgCode {
     LoginFailError,
 }
 
-/// Lo que el gestor pide a la red (lo manda `update_ui`).
+/// What the manager asks of the network (sent by `update_ui`).
 #[derive(Clone, Debug, PartialEq)]
 enum NetOut {
-    /// `SendRequestServerList` al Connect Server.
+    /// `SendRequestServerList` to the Connect Server.
     ServerList,
-    /// `SendRequestServerAddress`: conectar al Game Server de ese id.
+    /// `SendRequestServerAddress`: connect to the Game Server with that id.
     Connect(u16),
-    /// Un mensaje al Game Server.
+    /// A message to the Game Server.
     Game(mu_protocol::game::ClientMessage),
-    /// Cerrar la conexión con el Game Server.
+    /// Close the Game Server connection.
     Close,
 }
 
@@ -842,8 +842,8 @@ struct Message {
     lines: Vec<String>,
 }
 
-/// `CServerGroup::SBP_*`: columna del botón del grupo. La derecha y el centro (servidor de
-/// pruebas) llegarán con la lista del connect server.
+/// `CServerGroup::SBP_*`: column of the group button. The right one and the center (test
+/// server) will come with the connect server list.
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum GroupPos {
@@ -853,11 +853,11 @@ enum GroupPos {
 }
 
 struct ServerInfo {
-    /// Id en el Connect Server.
+    /// Id in the Connect Server.
     id: u16,
-    /// Número del servidor dentro del grupo (`m_iIndex`, desde 1).
+    /// Server number within the group (`m_iIndex`, from 1).
     index: i32,
-    /// Carga (`m_iPercent`): 100 = lleno, 128 o más = preparándose.
+    /// Load (`m_iPercent`): 100 = full, 128 or more = getting ready.
     percent: i32,
     /// `m_byNonPvP`: 0 normal, 1 Non-PvP, 2 Gold PvP, 3 Gold.
     non_pvp: u8,
@@ -866,15 +866,15 @@ struct ServerInfo {
 struct ServerGroup {
     name: String,
     pos: GroupPos,
-    /// Botón donde va (`m_iBtnPos`), lo pone `UpdateDisplay`.
+    /// Button it goes on (`m_iBtnPos`), set by `UpdateDisplay`.
     btn: usize,
-    /// Ningún servidor Non-PvP (`m_bPvPServer`).
+    /// No Non-PvP server (`m_bPvPServer`).
     pvp: bool,
     servers: Vec<ServerInfo>,
 }
 
 impl ServerInfo {
-    /// `CServerListManager::InsertServer` (ServerListManager.cpp:177-212) con los textos 560-562.
+    /// `CServerListManager::InsertServer` (ServerListManager.cpp:177-212) with texts 560-562.
     fn label(&self, group: &str) -> String {
         let state = if self.percent >= 128 {
             "Now preparing"
@@ -891,7 +891,7 @@ impl ServerInfo {
         }
     }
 
-    /// `adwServerBtnClr[m_byNonPvP]`: normal, pulsado y ratón encima (ServerSelWin.cpp:200-206).
+    /// `adwServerBtnClr[m_byNonPvP]`: normal, pressed and hover (ServerSelWin.cpp:200-206).
     fn colors(&self) -> [[u8; 3]; 3] {
         match self.non_pvp {
             1 => [YELLOW, YELLOW, BR_YELLOW],
@@ -901,12 +901,12 @@ impl ServerInfo {
     }
 }
 
-/// Caja de texto (`CUITextInputBox`, un `edit` de Windows por debajo).
+/// Text box (`CUITextInputBox`, a Windows `edit` underneath).
 struct TextBox {
     text: String,
-    /// Posición del cursor, en caracteres.
+    /// Caret position, in characters.
     caret: usize,
-    /// Todo seleccionado (`GiveFocus(TRUE)`): lo siguiente que se escriba lo sustituye.
+    /// Everything selected (`GiveFocus(TRUE)`): the next thing typed replaces it.
     select_all: bool,
     max: usize,
     password: bool,
@@ -926,7 +926,7 @@ impl TextBox {
         self.text.char_indices().nth(i).map_or(self.text.len(), |(b, _)| b)
     }
 
-    /// Quita lo seleccionado (todo). Devuelve si había algo.
+    /// Removes the selection (everything). Returns whether there was anything.
     fn take_selection(&mut self) -> bool {
         if !self.select_all {
             return false;
@@ -948,7 +948,7 @@ impl TextBox {
         self.caret += 1;
     }
 
-    /// Ctrl+V: el texto del portapapeles en el cursor (hasta llenar la caja).
+    /// Ctrl+V: the clipboard text at the caret (until the box is full).
     fn paste(&mut self, text: &str) {
         self.take_selection();
         for c in crate::clipboard::paste_text(text) {
@@ -956,12 +956,12 @@ impl TextBox {
         }
     }
 
-    /// Ctrl+C: lo seleccionado o, sin selección, todo. Las contraseñas no se copian (`ES_PASSWORD`).
+    /// Ctrl+C: the selection or, with no selection, everything. Passwords are not copied (`ES_PASSWORD`).
     fn copy_text(&self) -> Option<&str> {
         (!self.password).then_some(self.text.as_str())
     }
 
-    /// Ctrl+X: lo copia y deja la caja vacía (nada en las contraseñas).
+    /// Ctrl+X: copies it and empties the box (nothing for passwords).
     fn cut(&mut self) -> Option<String> {
         if self.password {
             return None;
@@ -988,73 +988,73 @@ impl TextBox {
         self.text.remove(b);
     }
 
-    /// Mueve el cursor (y quita la selección, como el `edit`).
+    /// Moves the caret (and clears the selection, like the `edit`).
     fn move_to(&mut self, caret: usize) {
         self.select_all = false;
         self.caret = caret.min(self.len());
     }
 
-    /// Lo que se ve: la contraseña en asteriscos (`ES_PASSWORD`).
+    /// What is shown: the password as asterisks (`ES_PASSWORD`).
     fn shown(&self) -> String {
         if self.password { "*".repeat(self.len()) } else { self.text.clone() }
     }
 }
 
-/// Lo que pasa fuera de la interfaz.
+/// What happens outside the interface.
 enum Outcome {
-    /// Login aceptado con esta cuenta.
+    /// Login accepted with this account.
     Enter(String),
-    /// Fin de la cuenta atrás de "Exit Game".
+    /// End of the "Exit Game" countdown.
     Exit,
-    /// "Select Server" desde la selección de personaje: de vuelta al login.
+    /// "Select Server" from character selection: back to the login.
     ServerSelect,
 }
 
 #[derive(Resource)]
 struct LoginUi {
-    /// Ventanas de delante a atrás (`m_WinList`): la primera es la que puede estar activa.
+    /// Windows front to back (`m_WinList`): the first one is the one that can be active.
     order: Vec<Win>,
     shown: Vec<Win>,
-    /// La primera de `order` está activa (`m_bActive`).
+    /// The first of `order` is active (`m_bActive`).
     active: bool,
-    /// Activar la primera en la próxima pasada (`m_bWinActive`).
+    /// Activate the first one on the next pass (`m_bWinActive`).
     pending_active: bool,
-    /// `m_bSysMenuWinShow`: cambia con cada Esc.
+    /// `m_bSysMenuWinShow`: toggles with each Esc.
     sys_flag: bool,
-    /// Botón apretado (`CButton::m_pBtnHeld`).
+    /// Held button (`CButton::m_pBtnHeld`).
     held: Option<Btn>,
-    /// Ventana bajo el ratón: solo sus botones responden (`ActiveBtns`).
+    /// Window under the mouse: only its buttons respond (`ActiveBtns`).
     btn_window: Option<Win>,
     cursor: Option<IVec2>,
 
     groups: Vec<ServerGroup>,
-    /// Botón de grupo elegido (`m_iSelectServerBtnIndex`).
+    /// Chosen group button (`m_iSelectServerBtnIndex`).
     selected_group: Option<usize>,
-    /// Servidor elegido para el título de la ventana de login: grupo, número, Non-PvP.
+    /// Server chosen for the login window title: group, number, Non-PvP.
     selected_server: Option<(String, i32, u8)>,
 
     id: TextBox,
     pass: TextBox,
     focus: Option<Field>,
-    /// La ventana de login aún no se ha dibujado (`FirstLoad`).
+    /// The login window has not been drawn yet (`FirstLoad`).
     first_load: bool,
     caret_clock: f32,
 
     msg: Message,
-    /// Cuenta atrás de "Exit Game" (`m_nGameExit`, `m_dDeltaTickSum`).
+    /// "Exit Game" countdown (`m_nGameExit`, `m_dDeltaTickSum`).
     exit_count: i32,
     exit_clock: f32,
 
     sounds: u32,
     outcome: Option<Outcome>,
 
-    /// Fundido del logo (`g_fMULogoAlpha`) en este tick y en el anterior.
+    /// Logo fade (`g_fMULogoAlpha`) this tick and the previous one.
     logo: f32,
     prev_logo: f32,
 
-    /// `g_pOption` (se copia de `options::GameOptions` antes de cada pasada y se devuelve después).
+    /// `g_pOption` (copied from `options::GameOptions` before each pass and returned afterwards).
     opts: crate::options::GameOptions,
-    /// Volumen de los efectos y de la música (sound.rs) y lo que se pide cambiar.
+    /// Effects and music volume (sound.rs) and the requested changes.
     sfx: u8,
     music: u8,
     set_sfx: Option<u8>,
@@ -1063,29 +1063,29 @@ struct LoginUi {
     credits: Credits,
 
     scene: UiScene,
-    /// Ventana de crear: el nombre, la clase elegida (`m_nSelJob`) y cuántas veces se ha elegido
-    /// una (la vista previa vuelve a empezar).
+    /// Create window: the name, the chosen class (`m_nSelJob`) and how many times one has been
+    /// chosen (the preview restarts).
     char_name: TextBox,
     job: crate::account::Class,
     job_picks: u32,
-    /// Contraseña para borrar un personaje (`MWT_STR_INPUT`).
+    /// Password for deleting a character (`MWT_STR_INPUT`).
     del_pass: TextBox,
-    /// Lo que cuenta charselect.rs: la cuenta, cuántos personajes tiene y el elegido.
+    /// What charselect.rs reports: the account, how many characters it has and the selected one.
     account: String,
     char_count: usize,
     char_selected: Option<(usize, String, u8)>,
-    /// Para charselect.rs (personaje creado o borrado).
+    /// For charselect.rs (character created or deleted).
     scene_events: Vec<crate::charselect::SceneEvent>,
-    /// Para la red.
+    /// For the network.
     net_out: Vec<NetOut>,
-    /// Clases que el servidor deja crear (`CharacterCreationUnlockFlags`).
+    /// Classes the server allows creating (`CharacterCreationUnlockFlags`).
     class_unlock: u8,
 }
 
 impl LoginUi {
     fn new(saved_id: &str, credits: Vec<CreditItem>) -> Self {
         let mut ui = Self {
-            // Orden de creación (`AddHead`, UIMng.cpp:207-252): la última creada queda delante.
+            // Creation order (`AddHead`, UIMng.cpp:207-252): the last one created ends up in front.
             order: vec![Win::Credit, Win::Login, Win::ServerSel, Win::MainBar, Win::Option, Win::SysMenu, Win::Msg],
             shown: Vec::new(),
             active: false,
@@ -1125,7 +1125,7 @@ impl LoginUi {
             char_count: 0,
             char_selected: None,
             scene_events: Vec::new(),
-            // `ConnectConnectionServer` al entrar en el login.
+            // `ConnectConnectionServer` on entering the login.
             net_out: vec![NetOut::ServerList],
             class_unlock: 0,
         };
@@ -1145,7 +1145,7 @@ impl LoginUi {
         self.active && self.order.first() == Some(&w)
     }
 
-    /// `CUIMng::SetActiveWin`: la de delante deja de estar activa y `w` pasa delante.
+    /// `CUIMng::SetActiveWin`: the front one stops being active and `w` moves to the front.
     fn set_active_win(&mut self, w: Win) {
         self.active = false;
         if self.is_shown(w) {
@@ -1162,7 +1162,7 @@ impl LoginUi {
         self.set_active_win(w);
     }
 
-    /// `CUIMng::HideWin`: se oculta y pasa al final; la nueva primera se activa.
+    /// `CUIMng::HideWin`: hidden and moved to the end; the new first one becomes active.
     fn hide_win(&mut self, w: Win) {
         if self.order.first() == Some(&w) {
             self.active = false;
@@ -1182,7 +1182,7 @@ impl LoginUi {
         self.show_win(Win::MainBar);
     }
 
-    /// `CServerSelWin::UpdateDisplay`: reparte los grupos en los botones.
+    /// `CServerSelWin::UpdateDisplay`: distributes the groups over the buttons.
     fn update_display(&mut self) {
         let (mut test, mut left, mut right) = (false, 0, 0);
         for g in &mut self.groups {
@@ -1220,7 +1220,7 @@ impl LoginUi {
                 self.exit_clock = 0.0;
                 (MsgKind::None, countdown_text(self.exit_count))
             }
-            // `GlobalText` 390, 1715, 391, 1654, 1712, 1713, 1714, 401 y 1716.
+            // `GlobalText` 390, 1715, 391, 1654, 1712, 1713, 1714, 401 and 1716.
             MsgCode::MinLength => (MsgKind::Ok, "Type more than 4 letters".into()),
             MsgCode::IdSpaceError => (MsgKind::Ok, "It contains prohibited words.".into()),
             MsgCode::SpecialName => (MsgKind::Ok, "Cannot use symbols.".into()),
@@ -1230,7 +1230,7 @@ impl LoginUi {
                 (MsgKind::Both, format!("Would you like to delete {name} character?"))
             }
             MsgCode::DeleteResident => {
-                // `InitResidentNumInput`: la caja vacía y con el foco.
+                // `InitResidentNumInput`: the box empty and focused.
                 self.del_pass = TextBox::new("", MAX_PASSWORD, true);
                 self.give_focus(Field::DelPass, false);
                 (MsgKind::Input, "Please enter your WEBZEN.COM password.".into())
@@ -1239,7 +1239,7 @@ impl LoginUi {
             MsgCode::ResidentWrong => (MsgKind::Ok, "The password you have entered is incorrect.".into()),
             MsgCode::CreateFail => (MsgKind::Ok, "Incorrect character name was entered or same character name exists.".into()),
             MsgCode::Wait => (MsgKind::None, "Please wait".into()),
-            // `GlobalText` 402, 407, 414, 415, 416, 417, 405 + 406, 408 y 409.
+            // `GlobalText` 402, 407, 414, 415, 416, 417, 405 + 406, 408 and 409.
             MsgCode::ServerLost => (MsgKind::Ok, "You are disconnected from the server.".into()),
             MsgCode::LoginFailPassword => (MsgKind::Ok, "Password is incorrect".into()),
             MsgCode::LoginFailId => (MsgKind::Ok, "Your account is invalid".into()),
@@ -1247,7 +1247,7 @@ impl LoginUi {
             MsgCode::LoginFailServerBusy => (MsgKind::Ok, "The server is full".into()),
             MsgCode::LoginFailBlocked => (MsgKind::Ok, "This account is blocked".into()),
             MsgCode::LoginFailVersion => {
-                // Dos líneas (`lpszMsg`, `lpszMsg2`).
+                // Two lines (`lpszMsg`, `lpszMsg2`).
                 self.msg = Message {
                     code: Some(code),
                     kind: MsgKind::Ok,
@@ -1290,7 +1290,7 @@ impl LoginUi {
         }
     }
 
-    /// Botones de una ventana, en el orden en que se registran y se dibujan.
+    /// Buttons of a window, in the order they are registered and drawn.
     fn buttons(&self, s: Screen, w: Win) -> Vec<ButtonDef> {
         let mut out = Vec::new();
         match w {
@@ -1306,8 +1306,8 @@ impl LoginUi {
                         id: Btn::Group(g.btn),
                         rect: group_rect(s, g.btn),
                         tex: Tex::GroupBtn,
-                        // `Create(108, 26, BITMAP_LOG_IN, 4, 2, 1, -1, 3)`: normal 0, encima 1,
-                        // pulsado 2 y elegido 3.
+                        // `Create(108, 26, BITMAP_LOG_IN, 4, 2, 1, -1, 3)`: normal 0, hover 1,
+                        // pressed 2 and selected 3.
                         frames: [0, 2, 1],
                         check_frame: Some(3),
                         checked: self.selected_group == Some(g.btn),
@@ -1356,9 +1356,9 @@ impl LoginUi {
             }
             Win::CharMake => self.char_make_buttons(s, &mut out),
             Win::SysMenu => {
-                // `CSysMenuWin::SetPosition` (SysMenuWin.cpp:83-96). "Select Server" está
-                // deshabilitado en el login y sin fotograma de deshabilitado: no se dibuja; en la
-                // selección de personaje están los cuatro.
+                // `CSysMenuWin::SetPosition` (SysMenuWin.cpp:83-96). "Select Server" is
+                // disabled on the login and has no disabled frame: it is not drawn; in
+                // character selection all four are there.
                 let r = self.sys_rect(s);
                 let x = r.x + (SYS_W - 108) / 2;
                 let gap = 4 + 30;
@@ -1381,8 +1381,8 @@ impl LoginUi {
                 }
             }
             Win::Option => {
-                // Casillas: `Create(16, 16, BITMAP_CHECK_BTN, 2, 0, 0, -1, 1, 1, 1)`: 0 sin marcar
-                // y 1 marcada en los tres estados (OptionWin.cpp:52-56).
+                // Checkboxes: `Create(16, 16, BITMAP_CHECK_BTN, 2, 0, 0, -1, 1, 1, 1)`: 0 unchecked
+                // and 1 checked in all three states (OptionWin.cpp:52-56).
                 let checks = [
                     (Btn::OptAutoAttack, self.opts.auto_attack),
                     (Btn::OptWhisper, self.opts.whisper_sound),
@@ -1417,7 +1417,7 @@ impl LoginUi {
         out
     }
 
-    /// Pulgar de la barra `i` (un `CButton` de un fotograma; el `CSlider` lo actualiza y lo dibuja).
+    /// Thumb of slider `i` (a one-frame `CButton`; the `CSlider` updates and draws it).
     fn thumb_button(&self, s: Screen, i: usize) -> ButtonDef {
         let o = slider_origin(s, i);
         ButtonDef {
@@ -1431,7 +1431,7 @@ impl LoginUi {
         }
     }
 
-    /// `COptionWin::UpdateDisplay` (OptionWin.cpp:132-139): las barras toman los valores actuales.
+    /// `COptionWin::UpdateDisplay` (OptionWin.cpp:132-139): the sliders take the current values.
     fn option_display(&mut self) {
         let values = [self.sfx as i32, self.music as i32, self.opts.render_level as i32];
         for (slider, v) in self.sliders.iter_mut().zip(values) {
@@ -1440,8 +1440,8 @@ impl LoginUi {
         }
     }
 
-    /// `CWin::CursorInWin(WA_ALL)`. La caja de mensajes, el menú de sistema, las opciones y los
-    /// créditos ocupan toda la pantalla (`CWin::Create(ancho, alto)` de la pantalla).
+    /// `CWin::CursorInWin(WA_ALL)`. The message box, system menu, options and
+    /// credits cover the whole screen (`CWin::Create(width, height)` of the screen).
     fn win_rect(s: Screen, w: Win) -> IRect {
         match w {
             Win::MainBar => bar_rect(s),
@@ -1451,12 +1451,12 @@ impl LoginUi {
         }
     }
 
-    /// La primera ventana visible (de delante a atrás) bajo el ratón.
+    /// The first visible window (front to back) under the mouse.
     fn window_under(&self, s: Screen, cursor: Option<IVec2>) -> Option<Win> {
         self.order.iter().copied().find(|&w| self.is_shown(w) && Self::win_rect(s, w).contains(cursor))
     }
 
-    /// Estado de un botón para dibujarlo (`CButton::Update`): encima, apretado o normal.
+    /// Button state for drawing (`CButton::Update`): hover, pressed or normal.
     fn button_state(&self, b: &ButtonDef, w: Win) -> BtnState {
         let inside = self.btn_window == Some(w) && b.rect.contains(self.cursor);
         match self.held {
@@ -1466,7 +1466,7 @@ impl LoginUi {
         }
     }
 
-    /// `CButton::Update`: se aprieta al bajar el botón del ratón y es un clic si se suelta encima.
+    /// `CButton::Update`: pressed when the mouse button goes down, a click if released over it.
     fn update_button(&mut self, b: &ButtonDef, w: Win, down: bool, up: bool) -> bool {
         let inside = self.btn_window == Some(w) && b.rect.contains(self.cursor);
         if inside && down {
@@ -1485,7 +1485,7 @@ impl LoginUi {
         click
     }
 
-    /// Una pasada de `CUIMng::Update` y de `NewMoveLogInScene`.
+    /// One pass of `CUIMng::Update` and `NewMoveLogInScene`.
     fn update(&mut self, s: Screen, input: &FrameInput) {
         self.cursor = input.cursor;
         if self.pending_active && self.order.first().is_some_and(|&w| self.is_shown(w)) {
@@ -1517,7 +1517,7 @@ impl LoginUi {
             if w == Win::Login {
                 self.login_while_shown(s, input);
             }
-            // La caja de la ventana de crear y la de la contraseña para borrar.
+            // The create window's box and the delete password box.
             if (w == Win::CharMake && self.is_active(w)) || (w == Win::Msg && self.msg.kind == MsgKind::Input) {
                 self.type_keys(input);
             }
@@ -1526,8 +1526,8 @@ impl LoginUi {
             }
         }
 
-        // `NewMoveCharacterScene` (ZzzScene.cpp:940-1027): Esc abre el menú de sistema si no hay
-        // otra ventana delante.
+        // `NewMoveCharacterScene` (ZzzScene.cpp:940-1027): Esc opens the system menu if no
+        // other window is in front.
         if self.scene == UiScene::Character {
             if input.esc
                 && !(self.is_shown(Win::Msg)
@@ -1540,7 +1540,7 @@ impl LoginUi {
                 self.show_win(Win::SysMenu);
             }
         }
-        // `NewMoveLogInScene` (ZzzScene.cpp:1254-1267): Esc abre el menú de sistema desde la lista.
+        // `NewMoveLogInScene` (ZzzScene.cpp:1254-1267): Esc opens the system menu from the list.
         else if input.esc
             && !(self.is_shown(Win::Msg)
                 || self.is_shown(Win::Login)
@@ -1554,15 +1554,15 @@ impl LoginUi {
             self.sounds += 1;
             self.show_win(Win::SysMenu);
         }
-        // El original solo suelta el botón desde el propio botón; si su ventana se ha ocultado
-        // mientras tanto, se quedaría apretado para siempre.
+        // The original only releases the button from the button itself; if its window was hidden
+        // meanwhile, it would stay pressed forever.
         if input.up {
             self.held = None;
         }
         self.caret_clock += input.dt;
     }
 
-    /// `UpdateWhileActive` de cada ventana.
+    /// `UpdateWhileActive` of each window.
     fn while_active(&mut self, w: Win, clicks: &[Btn], input: &FrameInput) {
         match w {
             Win::MainBar => {
@@ -1570,8 +1570,8 @@ impl LoginUi {
                     self.show_win(Win::SysMenu);
                     self.sys_flag = true;
                 } else if clicks.contains(&Btn::Credit) {
-                    // LoginMainWin.cpp:107-116: los créditos (y su música, `credit_music`). La
-                    // lista de servidores que se pide no se enseña mientras se ven.
+                    // LoginMainWin.cpp:107-116: the credits (and their music, `credit_music`). The
+                    // requested server list is not shown while they are open.
                     self.show_win(Win::Credit);
                     if self.credits.init() {
                         self.close_credits();
@@ -1583,7 +1583,7 @@ impl LoginUi {
                 for &c in clicks {
                     if let Btn::Group(i) = c {
                         self.selected_group = Some(i);
-                        // `SendRequestServerList`: sin servidor, la respuesta llega ya.
+                        // `SendRequestServerList`: without a server, the reply arrives immediately.
                         self.server_list_received();
                     }
                 }
@@ -1598,8 +1598,8 @@ impl LoginUi {
                     if percent < 100 {
                         self.hide_win(Win::ServerSel);
                         self.selected_server = Some((name, index, non_pvp));
-                        // `SendRequestServerAddress` → el servidor de juego saluda (`ReceiveJoinServer`)
-                        // y entonces se abre la ventana de login.
+                        // `SendRequestServerAddress` → the game server greets (`ReceiveJoinServer`)
+                        // and then the login window opens.
                         self.net_out.push(NetOut::Connect(id));
                     } else if percent < 128 {
                         self.popup(MsgCode::ServerBusy);
@@ -1662,7 +1662,7 @@ impl LoginUi {
                 if clicks.contains(&Btn::SysExit) {
                     self.popup(MsgCode::GameEndCountdown);
                 } else if clicks.contains(&Btn::SysServerSelect) {
-                    // `SendRequestLogOut(2)` → `ReceiveLogOut`: de vuelta a la lista de servidores.
+                    // `SendRequestLogOut(2)` → `ReceiveLogOut`: back to the server list.
                     self.hide_win(Win::SysMenu);
                     self.outcome = Some(Outcome::ServerSelect);
                 } else if clicks.contains(&Btn::SysOption) {
@@ -1694,7 +1694,7 @@ impl LoginUi {
                 let dt = input.dt * 1000.0;
                 for class in 0..=CRW_INDEX_NAME {
                     if self.credits.animate_text(class, dt) {
-                        // Clase 0: `PlayBuffer(SOUND_CLICK01)` y `CloseWin`.
+                        // Class 0: `PlayBuffer(SOUND_CLICK01)` and `CloseWin`.
                         self.sounds += 1;
                         self.close_credits();
                         return;
@@ -1705,8 +1705,8 @@ impl LoginUi {
         }
     }
 
-    /// `CCreditWin::CloseWin` (CreditWin.cpp:227-235): vuelve a pedir la lista de servidores (que
-    /// enseña su ventana y la barra) y la música del login (`credit_music` deja de pedir `Mutheme`).
+    /// `CCreditWin::CloseWin` (CreditWin.cpp:227-235): requests the server list again (which
+    /// shows its window and the bar) and the login music (`credit_music` stops requesting `Mutheme`).
     fn close_credits(&mut self) {
         self.hide_win(Win::Credit);
         self.credits.illust_state = Fade::Hide;
@@ -1717,14 +1717,14 @@ impl LoginUi {
     fn option_while_active(&mut self, clicks: &[Btn], input: &FrameInput) {
         let s = input.screen;
         for i in 0..SLD_MAX {
-            // `m_btnThumb.Update()`: el pulgar suena al soltarlo encima.
+            // `m_btnThumb.Update()`: the thumb sounds when released over it.
             let thumb = self.thumb_button(s, i);
             self.update_button(&thumb, Win::Option, input.down, input.up);
             let o = slider_origin(s, i);
             let rel = input.cursor.map(|c| c - o);
             self.sliders[i].update(rel, input.held, input.up, input.dt);
         }
-        // Las casillas ya han cambiado al pulsarlas (`m_bCheck = !m_bCheck`).
+        // The checkboxes already changed when pressed (`m_bCheck = !m_bCheck`).
         if clicks.contains(&Btn::OptAutoAttack) {
             self.opts.auto_attack = !self.opts.auto_attack;
         } else if clicks.contains(&Btn::OptWhisper) {
@@ -1767,21 +1767,21 @@ impl LoginUi {
         } else if self.pass.text.is_empty() {
             self.popup(MsgCode::InputPassword);
         } else {
-            // `SendRequestLogIn`: la respuesta llega en `net_message` (`ReceiveLogIn`).
+            // `SendRequestLogIn`: the reply arrives in `net_message` (`ReceiveLogIn`).
             let tick = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u32);
             self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::login(&self.id.text, &self.pass.text, tick)));
         }
     }
 
-    /// `CLoginWin::CancelLogin`: `ConnectConnectionServer`, otra vez la lista de servidores.
+    /// `CLoginWin::CancelLogin`: `ConnectConnectionServer`, the server list again.
     fn cancel_login(&mut self) {
         self.hide_win(Win::Login);
         self.net_out.push(NetOut::Close);
         self.net_out.push(NetOut::ServerList);
     }
 
-    /// `ReceiveServerList`: la lista del Connect Server en un grupo "mu-rs" (Non-PvP). El número
-    /// de cada servidor en su grupo es `id % 20 + 1`.
+    /// `ReceiveServerList`: the Connect Server list in one "mu-rs" group (Non-PvP). Each
+    /// server's number in its group is `id % 20 + 1`.
     fn receive_server_list(&mut self, list: &[(u16, u8)]) {
         let servers: Vec<ServerInfo> =
             list.iter().map(|&(id, load)| ServerInfo { id, index: (id % 20) as i32 + 1, percent: load as i32, non_pvp: 1 }).collect();
@@ -1790,7 +1790,7 @@ impl LoginUi {
         self.server_list_received();
     }
 
-    /// Lo que llega de la red.
+    /// What arrives from the network.
     fn net_status(&mut self, status: &crate::net::NetStatus) {
         use crate::net::NetStatus;
         match status {
@@ -1848,7 +1848,7 @@ impl LoginUi {
                 self.show_win(Win::Login);
                 self.give_focus(Field::Pass, true);
             }
-            // Contraseña o cuenta mal, ya conectada...: otra vez la ventana de login.
+            // Wrong password or account, already connected...: the login window again.
             Some(
                 MsgCode::LoginFailPassword
                 | MsgCode::LoginFailId
@@ -1858,7 +1858,7 @@ impl LoginUi {
                 self.show_win(Win::Login);
                 self.give_focus(Field::Pass, true);
             }
-            // Sin conexión: a la lista de servidores (`ConnectConnectionServer`).
+            // No connection: to the server list (`ConnectConnectionServer`).
             Some(
                 MsgCode::ServerLost
                 | MsgCode::LoginFailServerBusy
@@ -1882,10 +1882,10 @@ impl LoginUi {
         self.hide_win(Win::Msg);
     }
 
-    /// `CLoginWin::UpdateWhileShow`: las cajas de texto (clic para el foco y teclado).
+    /// `CLoginWin::UpdateWhileShow`: the text boxes (click to focus and keyboard).
     fn login_while_shown(&mut self, s: Screen, input: &FrameInput) {
         if self.first_load {
-            // `FirstLoad` (LoginWin.cpp:165-172): con la cuenta guardada, a la contraseña.
+            // `FirstLoad` (LoginWin.cpp:165-172): with a saved account, go to the password.
             self.first_load = false;
             let field = if self.id.text.is_empty() { Field::Id } else { Field::Pass };
             self.give_focus(field, false);
@@ -1900,7 +1900,7 @@ impl LoginUi {
         self.type_keys(input);
     }
 
-    /// Teclas para la caja con el foco (`edit` de Windows).
+    /// Keys for the focused box (Windows `edit`).
     fn type_keys(&mut self, input: &FrameInput) {
         for key in &input.keys {
             let Some(field) = self.focus else { return };
@@ -1943,7 +1943,7 @@ impl LoginUi {
                     b.move_to(n);
                 }
                 Key::Tab => {
-                    // `SetTabTarget`: la otra caja, con todo seleccionado (solo en el login).
+                    // `SetTabTarget`: the other box, fully selected (login only).
                     match field {
                         Field::Id => self.give_focus(Field::Pass, true),
                         Field::Pass => self.give_focus(Field::Id, true),
@@ -1962,7 +1962,7 @@ fn countdown_text(n: i32) -> String {
     format!("You will exit game in {n} seconds.")
 }
 
-/// `SeparateTextIntoLines` con `MW_MSG_ROW_MAX` (52) y 2 líneas como mucho: corta por espacios.
+/// `SeparateTextIntoLines` with `MW_MSG_ROW_MAX` (52) and at most 2 lines: splits at spaces.
 fn separate_lines(text: &str) -> Vec<String> {
     const ROW: usize = 51;
     let mut lines = vec![String::new()];
@@ -1989,53 +1989,53 @@ enum BtnState {
     Active,
 }
 
-/// Botón (`CButton`): rectángulo, textura con los fotogramas en vertical y texto opcional.
+/// Button (`CButton`): rectangle, texture with the frames stacked vertically and optional text.
 struct ButtonDef {
     id: Btn,
     rect: IRect,
     tex: Tex,
-    /// Fotograma normal, pulsado y con el ratón encima.
+    /// Normal, pressed and hover frames.
     frames: [u32; 3],
-    /// Fotograma de elegido (`nCheckUpFrame`), para los tres estados.
+    /// Selected frame (`nCheckUpFrame`), for all three states.
     check_frame: Option<u32>,
     checked: bool,
-    /// Texto (con `g_hFixFont`, centrado) y sus colores normal, pulsado y encima.
+    /// Text (with `g_hFixFont`, centered) and its normal, pressed and hover colors.
     text: Option<(String, [[u8; 3]; 3])>,
 }
 
 impl ButtonDef {
-    /// Botón de 3 fotogramas con el texto pintado en la textura (`Create(w, h, tex, 3, 2, 1)`).
+    /// 3-frame button with the text painted on the texture (`Create(w, h, tex, 3, 2, 1)`).
     fn image(id: Btn, rect: IRect, tex: Tex) -> Self {
         Self { id, rect, tex, frames: [0, 2, 1], check_frame: None, checked: false, text: None }
     }
 }
 
-// --- Entrada ---------------------------------------------------------------------------------------
+// --- Input ---------------------------------------------------------------------------------------
 
-/// Lo que se ha pulsado en este fotograma (`CInput`).
+/// What was pressed this frame (`CInput`).
 struct FrameInput {
-    /// Ratón en píxeles de la pantalla de referencia.
+    /// Mouse in reference screen pixels.
     cursor: Option<IVec2>,
-    /// Pantalla de referencia de este fotograma.
+    /// Reference screen of this frame.
     screen: Screen,
     down: bool,
-    /// Botón izquierdo apretado (`IsLBtnHeldDn`).
+    /// Left button held (`IsLBtnHeldDn`).
     held: bool,
     up: bool,
     esc: bool,
     enter: bool,
     ctrl: bool,
-    /// Teclas para las cajas de texto (con repetición).
+    /// Keys for the text boxes (with repeat).
     keys: Vec<Key>,
     dt: f32,
 }
 
-/// Tamaño de la pantalla virtual (unidades de la interfaz) y de referencia.
+/// Size of the virtual screen (interface units) and of the reference one.
 fn screen_size(window: Option<&Window>, scale: f32) -> (Vec2, Screen) {
     let ui = window
         .filter(|w| w.width() >= 1.0 && w.height() >= 1.0)
         .map_or(Vec2::new(640.0, 480.0), |w| Vec2::new(w.width(), w.height()) / scale.max(1e-3));
-    // Redondeado: 1024 / 1.6 puede salir 639.99994.
+    // Rounded: 1024 / 1.6 can come out as 639.99994.
     (ui, Screen { w: (ui.x / K).round() as i32, h: (ui.y / K).round() as i32 })
 }
 
@@ -2065,7 +2065,7 @@ fn update_ui(
         MessageReader<crate::net::FromServer>,
     ),
 ) {
-    // Lo que ha llegado de la red, antes de la pasada (`ProtocolCompiler`).
+    // What arrived from the network, before the pass (`ProtocolCompiler`).
     for st in status.read() {
         ui.net_status(st);
     }
@@ -2077,7 +2077,7 @@ fn update_ui(
     let cursor = window
         .and_then(|w| w.cursor_position())
         .map(|c| (c / scale.0.max(1e-3) / K).floor().as_ivec2());
-    // `g_pOption` y el volumen de sound.rs (las opciones del juego pueden cambiarlo).
+    // `g_pOption` and the sound.rs volume (the game options can change it).
     (ui.sfx, ui.music) = crate::sound::volumes(audio.as_deref(), &sound);
     ui.opts = *opts;
     let input = FrameInput {
@@ -2127,7 +2127,7 @@ fn update_ui(
             exit.write(AppExit::Success);
         }
         Some(Outcome::ServerSelect) => {
-            // `SendRequestLogOut(2)`: de vuelta a la lista de servidores, sin conexión.
+            // `SendRequestLogOut(2)`: back to the server list, disconnected.
             net.send(mu_protocol::game::ClientMessage::Logout { kind: 2 });
             net.close();
             crate::scene::load_world(&mut args, &mut load, crate::scene::LOGIN_WORLD, false, GameScene::Login);
@@ -2137,7 +2137,7 @@ fn update_ui(
     }
 }
 
-// --- Texturas --------------------------------------------------------------------------------------
+// --- Textures ------------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Tex {
@@ -2165,13 +2165,13 @@ enum Tex {
     SliderBack,
     CloseBtn,
     CreditLogo,
-    /// Ilustración de los créditos (`ILLUST`), se carga cuando hace falta (`LoadIllust`).
+    /// Credits illustration (`ILLUST`), loaded when needed (`LoadIllust`).
     Illust(u8),
-    /// Caja de la contraseña de borrar (`BITMAP_MSG_WIN_INPUT`).
+    /// Delete password box (`BITMAP_MSG_WIN_INPUT`).
     MsgInput,
-    /// Fondo del nombre en la ventana de crear (`BITMAP_LOG_IN` de la selección).
+    /// Name background in the create window (character selection's `BITMAP_LOG_IN`).
     CharId,
-    /// Vista previa de la ventana de crear (la imagen la pone charselect.rs).
+    /// Create window preview (the image is set by charselect.rs).
     Preview,
 }
 
@@ -2205,7 +2205,7 @@ impl Tex {
         Tex::CreditLogo,
     ];
 
-    /// `OpenLogoSceneData` (ZzzOpenData.cpp:4866-4890) y las comunes (ZzzOpenData.cpp:5254-5269).
+    /// `OpenLogoSceneData` (ZzzOpenData.cpp:4866-4890) and the common ones (ZzzOpenData.cpp:5254-5269).
     fn file(self) -> &'static str {
         match self {
             Tex::GroupBtn => "cha_bt.tga",
@@ -2245,12 +2245,12 @@ struct LoginTextures(HashMap<Tex, Handle<Image>>);
 
 // --- Logo ------------------------------------------------------------------------------------------
 
-/// Logo y brillo con las mezclas del original: el brillo suma (`additive`) y el logo descarta
-/// lo que tiene un alfa de 0.25 o menos.
+/// Logo and glow with the original's blending: the glow is additive (`additive`) and the logo discards
+/// anything with alpha 0.25 or less.
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(LogoKey)]
 struct LogoMaterial {
-    /// `glColor4f` (el color ya pasado a lineal).
+    /// `glColor4f` (the color already converted to linear).
     #[uniform(0)]
     color: Vec4,
     #[texture(1)]
@@ -2288,7 +2288,7 @@ impl UiMaterial for LogoMaterial {
                 });
             }
         } else {
-            // `EnableAlphaTest`: mezcla por alfa y `glAlphaFunc(GL_GREATER, 0.25)`.
+            // `EnableAlphaTest`: alpha blending and `glAlphaFunc(GL_GREATER, 0.25)`.
             fragment.shader_defs.push("LOGO_ALPHA_TEST".into());
         }
     }
@@ -2300,7 +2300,7 @@ struct LogoPart {
     material: Handle<LogoMaterial>,
 }
 
-/// `g_fMULogoAlpha += 0.02` hasta 10 (ZzzScene.cpp:1405-1406), por tick.
+/// `g_fMULogoAlpha += 0.02` up to 10 (ZzzScene.cpp:1405-1406), per tick.
 fn logo_tick(mut ui: ResMut<LoginUi>) {
     ui.prev_logo = ui.logo;
     ui.logo = (ui.logo + 0.02).min(10.0);
@@ -2314,9 +2314,9 @@ fn draw_logo(
 ) {
     let a = ui.prev_logo + (ui.logo - ui.prev_logo) * fixed.overstep_fraction();
     for part in &parts {
-        // `glColor4f(a − 0.3, …)` para el brillo y `glColor4f(a, …)` para el logo (se recorta a 0..1).
-        // El original mezcla en sRGB y Bevy en lineal: el color se pasa a lineal para que el
-        // resultado se vea igual.
+        // `glColor4f(a − 0.3, …)` for the glow and `glColor4f(a, …)` for the logo (clamped to 0..1).
+        // The original blends in sRGB and Bevy in linear: the color is converted to linear so the
+        // result looks the same.
         let level = if part.glow { a - 0.3 } else { a }.clamp(0.0, 1.0);
         let lin = level.powf(2.2);
         let color = Vec4::new(lin, lin, lin, level);
@@ -2328,12 +2328,12 @@ fn draw_logo(
     }
 }
 
-// --- Creación --------------------------------------------------------------------------------------
+// --- Creation ------------------------------------------------------------------------------------
 
 #[derive(Component)]
 struct LoginUiRoot;
 
-/// Capa de las ventanas: sus hijos se rehacen cuando cambia lo que hay que dibujar.
+/// Window layer: its children are rebuilt when what must be drawn changes.
 #[derive(Component)]
 struct WindowsLayer;
 
@@ -2381,8 +2381,8 @@ fn spawn_login_ui(
             Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
         ))
         .with_children(|root| {
-            // Logo: (320 − 128 × 0.8, 25) y 256 × 0.8 por 128 × 0.8 en 640×480 (ZzzScene.cpp:1415-1423).
-            // Primero el brillo (suma) y encima el logo.
+            // Logo: (320 − 128 × 0.8, 25) and 256 × 0.8 by 128 × 0.8 on 640×480 (ZzzScene.cpp:1415-1423).
+            // First the glow (additive) and the logo on top.
             for (texture, glow) in [(glow, true), (mark, false)] {
                 let Some(texture) = texture else { continue };
                 let material = materials.add(LogoMaterial { color: Vec4::new(0.0, 0.0, 0.0, 0.0), texture, additive: glow });
@@ -2400,9 +2400,9 @@ fn spawn_login_ui(
                 ));
             }
 
-            // Líneas de abajo (ZzzScene.cpp:1430-1449): `g_hFont`, blanco sobre negro al 50 %,
-            // con el pie del texto a 1 unidad del borde: el copyright acaba en x = 335 y lo
-            // siguiente empieza ahí; la versión, a la izquierda.
+            // Bottom lines (ZzzScene.cpp:1430-1449): `g_hFont`, white on 50 % black,
+            // with the text baseline 1 unit from the edge: the copyright ends at x = 335 and the
+            // next part starts there; the version, on the left.
             let line = |text: String| {
                 (
                     Text::new(text),
@@ -2421,7 +2421,7 @@ fn spawn_login_ui(
                 line(TEXT_RIGHTS.into()),
                 Node { position_type: PositionType::Absolute, left: Val::Percent(335.0 / 640.0 * 100.0), bottom, ..default() },
             ));
-            // `GlobalText[456]` = "Ver %s" con la versión del ejecutable.
+            // `GlobalText[456]` = "Ver %s" with the executable's version.
             root.spawn((
                 line(format!("Ver {}", env!("CARGO_PKG_VERSION"))),
                 Node { position_type: PositionType::Absolute, left: Val::Px(0.0), bottom, ..default() },
@@ -2434,25 +2434,25 @@ fn spawn_login_ui(
         });
 }
 
-// --- Dibujo de las ventanas ------------------------------------------------------------------------
+// --- Window drawing ------------------------------------------------------------------------------
 
-/// Una pieza de lo que hay que dibujar, en píxeles de la pantalla de referencia.
+/// One piece of what must be drawn, in reference screen pixels.
 #[derive(Clone, PartialEq, Debug)]
 enum Item {
-    /// Imagen (o el trozo `src`) en un rectángulo; `tile` repite la textura en vez de estirarla.
+    /// Image (or the `src` part) in a rectangle; `tile` repeats the texture instead of stretching it.
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, src: Option<Rect>, tile: bool, alpha: u8 },
-    /// Línea de los créditos: letra de 18 en negrita, centrada en `w`.
+    /// Credits line: 18-size bold font, centered in `w`.
     BigText { x: f32, y: f32, w: f32, text: String, color: [u8; 3] },
-    /// Rectángulo de color (`RenderColor`).
+    /// Color rectangle (`RenderColor`).
     Fill { x: f32, y: f32, w: f32, h: f32, color: [u8; 4] },
-    /// Texto con la esquina de arriba a la izquierda en (x, y); con `center`, centrado en ese ancho.
+    /// Text with its top-left corner at (x, y); with `center`, centered in that width.
     Text { x: f32, y: f32, center: Option<f32>, text: String, color: [u8; 3] },
-    /// Caja de texto: lo que hay antes y después del cursor, si está todo seleccionado y si se ve el cursor.
+    /// Text box: what is before and after the caret, whether everything is selected and whether the caret shows.
     Input { x: f32, y: f32, w: f32, h: f32, before: String, after: String, selected: bool, caret: bool },
 }
 
 impl LoginUi {
-    /// Lo que se dibuja, de la ventana de atrás a la de delante (`CUIMng::Render`).
+    /// What is drawn, from the back window to the front one (`CUIMng::Render`).
     fn items(&self, s: Screen) -> Vec<Item> {
         let mut out = Vec::new();
         for &w in self.order.iter().rev() {
@@ -2461,7 +2461,7 @@ impl LoginUi {
             }
             match w {
                 Win::MainBar => {
-                    // `m_sprDeco` con el punto de anclaje en (105, 59), detrás del botón Credit.
+                    // `m_sprDeco` with its anchor at (105, 59), behind the Credit button.
                     let c = credit_rect(s);
                     out.push(image(Tex::Deco, IRect::new(c.x - 105, c.y - 59, 189, 103)));
                     self.push_buttons(s, w, &mut out);
@@ -2469,7 +2469,7 @@ impl LoginUi {
                 Win::ServerSel => {
                     self.push_buttons(s, w, &mut out);
                     if let Some(g) = self.selected() {
-                        // `CGaugeBar` de 160×4: se ve la parte izquierda, `percent` % de la textura.
+                        // 160×4 `CGaugeBar`: the left part is shown, `percent` % of the texture.
                         let n = g.servers.len().min(SSW_SERVER_MAX as usize);
                         for (j, info) in g.servers.iter().take(n).enumerate() {
                             let r = server_rect(s, j, n);
@@ -2488,7 +2488,7 @@ impl LoginUi {
                             }
                         }
                         if g.pvp {
-                            // En la pantalla de 640×480, no en la ventana (ServerSelWin.cpp:491-497).
+                            // On the 640×480 screen, not in the window (ServerSelWin.cpp:491-497).
                             for (i, text) in TEXT_PVP.iter().enumerate() {
                                 out.push(Item::Text {
                                     x: 90.0 * s.rate_x(),
@@ -2504,7 +2504,7 @@ impl LoginUi {
                 Win::Login => self.push_login(s, &mut out),
                 Win::SysMenu => {
                     out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
-                    // `CWinEx`: piedra repetida dentro (a 3 px del borde), cabecera, pie y laterales.
+                    // `CWinEx`: stone tiled inside (3 px from the edge), header, footer and sides.
                     let r = self.sys_rect(s);
                     let side = r.h - 64 - 43;
                     out.push(tiled(Tex::SysStone, IRect::new(r.x + 3, r.y + 3, r.w - 6, r.h - 6)));
@@ -2544,7 +2544,7 @@ impl LoginUi {
                         }
                     }
                     if self.msg.kind == MsgKind::Input {
-                        // `m_sprInput` (171×23) y la caja de la contraseña a (+10, +8) de él.
+                        // `m_sprInput` (171×23) and the password box at (+10, +8) from it.
                         let r = IRect::new(m.x + 32, m.y + 72 + 4, 171, 23);
                         out.push(image(Tex::MsgInput, r));
                         out.push(self.input_item(s, Field::DelPass, Vec2::new(s.snap_x((r.x + 10) as f32), s.snap_y((r.y + 8) as f32))));
@@ -2557,7 +2557,7 @@ impl LoginUi {
         out
     }
 
-    /// Caja de texto `field` con el texto empezando en `origin`.
+    /// Text box `field` with the text starting at `origin`.
     fn input_item(&self, s: Screen, field: Field, origin: Vec2) -> Item {
         let b = self.field(field);
         let shown = b.shown();
@@ -2590,8 +2590,8 @@ impl LoginUi {
             let top = frame as f32 * h;
             out.push(Item::Image { tex: b.tex, x, y, w, h, src: Some(Rect::new(0.0, top, w, top + h)), tile: false, alpha: 255 });
             if let Some((text, colors)) = &b.text {
-                // `CButton::Render` (Button.cpp:200-209): centrado en el ancho, a media altura y
-                // medio punto más abajo (punto y medio al apretarlo) en la pantalla de 640×480.
+                // `CButton::Render` (Button.cpp:200-209): centered in the width, at half height and
+                // half a point lower (a point and a half when pressed) on the 640×480 screen.
                 let (color, add) = match state {
                     BtnState::Up => (colors[0], 0.5),
                     BtnState::Down => (colors[1], 1.5),
@@ -2605,9 +2605,9 @@ impl LoginUi {
 
     /// `COptionWin::RenderControls` (OptionWin.cpp:189-227).
     fn push_option(&self, s: Screen, out: &mut Vec<Item>) {
-        // `CWin` de toda la pantalla: negro al 50 %.
+        // Full-screen `CWin`: 50 % black.
         out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
-        // `CWinEx`: la piedra repetida dentro, cabecera `op2_back1`, pie y laterales.
+        // `CWinEx`: the stone tiled inside, `op2_back1` header, footer and sides.
         let r = opt_rect(s);
         out.push(tiled(Tex::SysStone, IRect::new(r.x + 3, r.y + 3, r.w - 6, r.h - 6)));
         out.push(image(Tex::OptTop, IRect::new(r.x, r.y, OPT_W, 65)));
@@ -2622,7 +2622,7 @@ impl LoginUi {
             text,
             color: WHITE,
         };
-        // `GlobalText[385]` centrado arriba.
+        // `GlobalText[385]` centered at the top.
         out.push(Item::Text {
             x: s.snap_x(r.x as f32),
             y: s.snap_y((r.y + 10) as f32),
@@ -2634,8 +2634,8 @@ impl LoginUi {
             let c = check_rect(s, i);
             out.push(label(c.x + 24, c.y + 4, t.into()));
         }
-        // Barras: el nombre 18 por encima, el valor a la derecha (el límite de efectos se
-        // enseña como `nivel × 2 + 5`), y la barra: fondo, color repetido y pulgar.
+        // Sliders: the name 18 above, the value on the right (the effects limit is
+        // shown as `level × 2 + 5`), and the slider: background, tiled color and thumb.
         let values = [self.sfx as i32, self.music as i32, self.opts.render_level as i32 * 2 + 5];
         for (i, (name, value)) in [TEXT_VOLUME, TEXT_MUSIC, TEXT_EFFECT_LIMIT].into_iter().zip(values).enumerate() {
             let o = slider_origin(s, i);
@@ -2656,9 +2656,9 @@ impl LoginUi {
     /// `CCreditWin::RenderControls` (CreditWin.cpp:171-225).
     fn push_credits(&self, s: Screen, out: &mut Vec<Item>) {
         let c = &self.credits;
-        // `SetBgAlpha(255)`: fondo negro opaco de toda la pantalla.
+        // `SetBgAlpha(255)`: opaque black full-screen background.
         out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 255] });
-        // Ilustraciones de 400×400 en (0, 126) y (400, 126) de la pantalla de 800×600.
+        // 400×400 illustrations at (0, 126) and (400, 126) of the 800×600 screen.
         if c.illust_state != Fade::Hide {
             let alpha = c.illust_alpha.clamp(0.0, 255.0) as u8;
             for side in 0..2u8 {
@@ -2669,8 +2669,8 @@ impl LoginUi {
         out.push(image(Tex::Deco, credit_deco_rect(s)));
         out.push(sprite800(s, Tex::CreditLogo, 241.0, 549.0, 290.0, 41.0, 255));
 
-        // Departamento y equipo en gris claro y los nombres en amarillo claro, centrados en la
-        // pantalla de 640×480 (o en columnas de un cuarto o un tercio del ancho).
+        // Department and team in light gray and the names in light yellow, centered on the
+        // 640×480 screen (or in columns of a quarter or a third of the width).
         let (rx, ry) = (s.rate_x(), s.rate_y());
         let line = |x: f32, y: f32, w: f32, text: &str, color| Item::BigText { x: x * rx, y: y * ry, w, text: text.into(), color };
         let full = s.w as f32;
@@ -2691,7 +2691,7 @@ impl LoginUi {
         for (i, &x) in columns.iter().enumerate() {
             out.push(line(x, 72.0, w, c.name(CRW_INDEX_NAME + i), BR_YELLOW));
         }
-        // Las tres franjas negras de 800×42 que tapan (y destapan) cada línea.
+        // The three 800×42 black strips that cover (and uncover) each line.
         for (i, a) in c.hide_alpha.iter().enumerate() {
             let (sx, sy) = (s.w as f32 / 800.0, s.h as f32 / 600.0);
             out.push(Item::Fill {
@@ -2739,7 +2739,7 @@ impl LoginUi {
         };
         out.push(label(30, 113, TEXT_ACCOUNT.into()));
         out.push(label(30, 139, TEXT_PASSWORD.into()));
-        // `GlobalText[461]` "[%s-%d Server]" o `[460]` "[%s-%d(Non-PvP) Server]".
+        // `GlobalText[461]` "[%s-%d Server]" or `[460]` "[%s-%d(Non-PvP) Server]".
         if let Some((name, index, non_pvp)) = &self.selected_server {
             let title = match non_pvp {
                 1 => format!("[{name}-{index}(Non-PvP) Server]"),
@@ -2760,8 +2760,8 @@ fn tiled(tex: Tex, r: IRect) -> Item {
     Item::Image { tex, x: r.x as f32, y: r.y as f32, w: r.w as f32, h: r.h as f32, src: None, tile: true, alpha: 255 }
 }
 
-/// `CSprite` de `org_w`×`org_h` (el trozo de arriba a la izquierda de la textura) en la pantalla
-/// de 800×600 estirada (`SPR_SIZING_DATUMS_LT` con `fScaleX/Y` = pantalla / 800×600).
+/// `CSprite` of `org_w`×`org_h` (the top-left part of the texture) on the stretched
+/// 800×600 screen (`SPR_SIZING_DATUMS_LT` with `fScaleX/Y` = screen / 800×600).
 fn sprite800(s: Screen, tex: Tex, x: f32, y: f32, org_w: f32, org_h: f32, alpha: u8) -> Item {
     let (sx, sy) = (s.w as f32 / 800.0, s.h as f32 / 600.0);
     Item::Image {
@@ -2797,7 +2797,7 @@ fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTexture
                 img.color = Color::srgba_u8(255, 255, 255, *alpha);
             }
             if *tile {
-                // Una repetición por cada píxel de la textura del original.
+                // One repetition per original texture pixel.
                 img.image_mode = NodeImageMode::Tiled { tile_x: true, tile_y: true, stretch_value: K };
             }
             p.spawn((absolute(*x, *y, *w, *h), img));
@@ -2847,7 +2847,7 @@ fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTexture
                     // `m_dwSelectBackColor` (150, 150, 150).
                     first.insert(BackgroundColor(Color::srgb_u8(150, 150, 150)));
                 }
-                // El cursor no ocupa sitio: 2 px de ancho y el alto de la letra, en gris (200, 200, 200).
+                // The caret takes no space: 2 px wide and the font height, in gray (200, 200, 200).
                 row.spawn(Node { width: Val::Px(0.0), height: Val::Percent(100.0), ..default() }).with_children(|c| {
                     if caret {
                         c.spawn((absolute(0.0, 0.0, 2.0, FIX_FONT), BackgroundColor(Color::srgb_u8(200, 200, 200))));
@@ -2859,7 +2859,7 @@ fn spawn_item(p: &mut ChildSpawnerCommands, item: &Item, textures: &LoginTexture
     }
 }
 
-/// Rehace las ventanas cuando cambia algo de lo que se dibuja.
+/// Rebuilds the windows when something drawn changes.
 #[allow(clippy::too_many_arguments)]
 fn draw_windows(
     mut commands: Commands,
@@ -2876,11 +2876,11 @@ fn draw_windows(
     let Ok(layer) = layer.single() else { return };
     let (_, s) = screen_size(windows.single().ok(), scale.0);
     let items = ui.items(s);
-    // La capa es otra cada vez que se entra en el login.
+    // The layer is a different one each time the login is entered.
     if last.0 == Some(layer) && last.1 == items {
         return;
     }
-    // `LoadIllust`: las ilustraciones de los créditos se cargan al necesitarlas (una vez).
+    // `LoadIllust`: the credits illustrations are loaded when needed (once).
     for item in &items {
         if let Item::Image { tex: tex @ Tex::Illust(_), .. } = item
             && !textures.0.contains_key(tex)

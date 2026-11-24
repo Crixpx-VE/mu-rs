@@ -1,28 +1,28 @@
-//! Qué modelo dibuja cada objeto y cómo se coloca en una casilla del inventario.
+//! Which model each item draws and how it is placed in an inventory slot.
 //!
-//! - [`model_file`]: los `AccessModel` de `OpenItems` y `OpenPlayers` (ZzzOpenData.cpp:108-457 y
-//!   648-1296) para el tipo `MODEL_ITEM + tipo` (`grupo · 512 + índice`). Las armaduras están en
-//!   `Data\Player` (y se dibujan con el esqueleto de `player.bmd`), el resto en `Data\Item`. Lo que no
-//!   está en esta tabla (mascotas raras, objetos de eventos...) lo sacan los `Items/Models/*.json` de
-//!   MuMain ([`read_model_json`]).
-//! - [`screen_pose`]: lo que hacen `RenderItem3D` (ZzzInventory.cpp:10605-10975: el punto de la casilla
-//!   donde va el objeto) y `RenderObjectScreen` (ZzzInventory.cpp:8553-10603: desplazamiento, ángulo,
-//!   escala y `BodyHeight` de cada tipo). Están los grupos de equipo, alas, anillos y colgantes,
-//!   pociones y joyas; los objetos de eventos y de la tienda tienen muchos casos sueltos que no se han
-//!   pasado y usan la regla general de su grupo.
+//! - [`model_file`]: the `AccessModel` calls of `OpenItems` and `OpenPlayers` (ZzzOpenData.cpp:108-457 and
+//!   648-1296) for type `MODEL_ITEM + type` (`group · 512 + index`). Armor lives in
+//!   `Data\Player` (and is drawn with the `player.bmd` skeleton), the rest in `Data\Item`. Whatever is not
+//!   in this table (rare pets, event items...) comes from MuMain's `Items/Models/*.json`
+//!   ([`read_model_json`]).
+//! - [`screen_pose`]: what `RenderItem3D` (ZzzInventory.cpp:10605-10975: the slot point
+//!   where the item goes) and `RenderObjectScreen` (ZzzInventory.cpp:8553-10603: offset, angle,
+//!   scale and `BodyHeight` per type) do. Covers equipment groups, wings, rings and pendants,
+//!   potions and jewels; event and shop items have many special cases that have not been
+//!   ported and use their group's general rule.
 
 use super::group::*;
 use super::{Item, kind};
 
-/// Archivo del modelo: carpeta dentro de `Data` (`Item`, `Player`...) y nombre.
+/// Model file: folder inside `Data` (`Item`, `Player`...) and name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ModelFile {
     pub dir: &'static str,
     pub name: String,
 }
 
-/// `AccessModel(tipo, dir, nombre, i)` (LoadData.cpp:21-30): `nombre0i.bmd` con `i` < 10,
-/// `nombrei.bmd` si no y `nombre.bmd` con `i` = -1.
+/// `AccessModel(type, dir, name, i)` (LoadData.cpp:21-30): `name0i.bmd` with `i` < 10,
+/// `namei.bmd` otherwise and `name.bmd` with `i` = -1.
 fn access(dir: &'static str, base: &str, i: i32) -> Option<ModelFile> {
     let name = match i {
         -1 => format!("{base}.bmd"),
@@ -40,7 +40,7 @@ fn player(base: &str, i: i32) -> Option<ModelFile> {
     access("Player", base, i)
 }
 
-/// El modelo del objeto (`None` = el original no carga ninguno para ese tipo en esta tabla).
+/// The item's model (`None` = the original loads none for that type in this table).
 pub fn model_file(group: u8, index: u16) -> Option<ModelFile> {
     let i = index as i32;
     match group {
@@ -192,7 +192,7 @@ pub fn model_file(group: u8, index: u16) -> Option<ModelFile> {
     }
 }
 
-/// Cascos, armaduras, pantalones, guantes y botas (`OpenPlayers`, ZzzOpenData.cpp:146-443).
+/// Helms, armors, pants, gloves and boots (`OpenPlayers`, ZzzOpenData.cpp:146-443).
 fn armor_file(group: u8, i: i32) -> Option<ModelFile> {
     let part = match group {
         HELM => "Helm",
@@ -205,10 +205,10 @@ fn armor_file(group: u8, i: i32) -> Option<ModelFile> {
     match i {
         0..=9 => male(i + 1),
         10..=14 => player(&format!("{part}Elf"), i - 9),
-        // `MODEL_HELM+15` no se carga (el set de Dragón Legendario no tiene casco).
+        // `MODEL_HELM+15` is not loaded (the Legendary Dragon set has no helm).
         15 if group == HELM => None,
         15..=28 => male(i + 1),
-        // Kundun (HDK) y Cuervo (CW): los cascos 32 y 37 no existen.
+        // Kundun (HDK) and Raven (CW): helms 32 and 37 do not exist.
         29..=33 => {
             if group == HELM && i == 32 {
                 None
@@ -224,13 +224,13 @@ fn armor_file(group: u8, i: i32) -> Option<ModelFile> {
             }
         }
         39..=53 => male(i + 1),
-        // `MODEL_*+59..61` (sin guantes).
+        // `MODEL_*+59..61` (no gloves).
         59..=61 if group != GLOVES => male(i + 1),
         _ => None,
     }
 }
 
-/// `Data/Items/Models/GroupNN_*.json` de MuMain: (índice, archivo relativo a `Data`).
+/// MuMain's `Data/Items/Models/GroupNN_*.json`: (index, file relative to `Data`).
 pub fn read_model_json(text: &str) -> Vec<(u8, u16, String)> {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(text) else { return Vec::new() };
     let group = v["group"].as_u64().unwrap_or(0) as u8;
@@ -246,28 +246,28 @@ pub fn read_model_json(text: &str) -> Vec<(u8, u16, String)> {
         .collect()
 }
 
-/// Cómo se dibuja un objeto en una casilla (`RenderItem3D` + `RenderObjectScreen`).
+/// How an item is drawn in a slot (`RenderItem3D` + `RenderObjectScreen`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ScreenPose {
-    /// Dónde va dentro del rectángulo de la casilla (fracción de ancho y alto: `sx += Width · a`).
+    /// Where it goes inside the slot rectangle (fraction of width and height: `sx += Width · a`).
     pub anchor: [f32; 2],
-    /// `Position[0..2] +=` en el espacio de la cámara de los objetos (x derecha, y arriba).
+    /// `Position[0..2] +=` in the item camera space (x right, y up).
     pub offset: [f32; 3],
-    /// `ObjectSelect.Angle` (grados, `AngleMatrix`).
+    /// `ObjectSelect.Angle` (degrees, `AngleMatrix`).
     pub angle: [f32; 3],
     /// `o->Scale`.
     pub scale: f32,
-    /// `b->BodyHeight`: el hueso raíz de `player.bmd` baja tanto (cascos -160, armaduras -100...).
+    /// `b->BodyHeight`: how far the `player.bmd` root bone goes down (helms -160, armors -100...).
     pub body_height: f32,
-    /// Se posa con el esqueleto de `player.bmd` (`ObjectSelect.Type = MODEL_PLAYER`).
+    /// Posed with the `player.bmd` skeleton (`ObjectSelect.Type = MODEL_PLAYER`).
     pub player_skeleton: bool,
 }
 
-/// `RENDER_ITEMVIEW_FAR` y `RENDER_ITEMVIEW_NEAR` (_define.h:107-108).
+/// `RENDER_ITEMVIEW_FAR` and `RENDER_ITEMVIEW_NEAR` (_define.h:107-108).
 pub const ITEMVIEW_FAR: f32 = 2000.0;
 pub const ITEMVIEW_NEAR: f32 = 20.0;
-/// `gluPerspective2(1.f, ...)` de la cámara de los objetos (`CNewUI3DCamera::Render`,
-/// NewUI3DRenderMng.cpp:106-110): un grado de campo vertical.
+/// `gluPerspective2(1.f, ...)` of the item camera (`CNewUI3DCamera::Render`,
+/// NewUI3DRenderMng.cpp:106-110): one degree of vertical field.
 pub const ITEMVIEW_FOV_DEG: f32 = 1.0;
 
 /// `RenderItem3D`: `sx += Width · a[0]`, `sy += Height · a[1]`.
@@ -323,7 +323,7 @@ fn anchor(item: &Item) -> [f32; 2] {
                 1 => [0.5, 0.5],
                 _ => [0.0, 0.0],
             },
-            // El original compara 33-37 con `MODEL_HELPER+33`... (no con `ITEM_`): nunca coinciden.
+            // The original compares 33-37 with `MODEL_HELPER+33`... (not `ITEM_`): they never match.
             32 => [0.5, 0.5],
             _ => [0.5, 0.7],
         },
@@ -362,7 +362,7 @@ fn anchor(item: &Item) -> [f32; 2] {
     a
 }
 
-/// `RenderObjectScreen`: desplazamiento y ángulo (la cadena de `if` del principio y los `switch` del final).
+/// `RenderObjectScreen`: offset and angle (the `if` chain at the start and the `switch`es at the end).
 fn offset_angle(item: &Item, two_hand: bool) -> ([f32; 3], [f32; 3]) {
     let (g, i, level) = (item.group, item.index as i32, item.level as i32);
     let mut o = [0.0f32; 3];
@@ -538,7 +538,7 @@ fn offset_angle(item: &Item, two_hand: bool) -> ([f32; 3], [f32; 3]) {
         _ => [270.0, -10.0, 0.0],
     };
     o[2] += dz;
-    // Los `switch` de después (ZzzInventory.cpp ≈9660-9737).
+    // The later `switch`es (ZzzInventory.cpp ≈9660-9737).
     match (g, i) {
         (SWORD, 26) => {
             o[0] -= 0.02;
@@ -578,7 +578,7 @@ fn offset_angle(item: &Item, two_hand: bool) -> ([f32; 3], [f32; 3]) {
     (o, angle)
 }
 
-/// `RenderObjectScreen`: `Scale` (ZzzInventory.cpp ≈9790-10590) y `BodyHeight`.
+/// `RenderObjectScreen`: `Scale` (ZzzInventory.cpp ≈9790-10590) and `BodyHeight`.
 fn scale_height(item: &Item, offset: &mut [f32; 3]) -> (f32, f32) {
     let (g, i) = (item.group, item.index as i32);
     let body_height = match g {
@@ -660,7 +660,7 @@ fn scale_height(item: &Item, offset: &mut [f32; 3]) -> (f32, f32) {
     (scale, body_height)
 }
 
-/// Cómo se dibuja `item` en una casilla del inventario (`two_hand` = `ItemAttribute.TwoHand`).
+/// How `item` is drawn in an inventory slot (`two_hand` = `ItemAttribute.TwoHand`).
 pub fn screen_pose(item: &Item, two_hand: bool) -> ScreenPose {
     let anchor = anchor(item);
     let (mut offset, angle) = offset_angle(item, two_hand);
@@ -668,10 +668,10 @@ pub fn screen_pose(item: &Item, two_hand: bool) -> ScreenPose {
     ScreenPose { anchor, offset, angle, scale, body_height, player_skeleton: (HELM..=BOOTS).contains(&item.group) }
 }
 
-/// `CreateScreenVector(sx, sy, Target, false)` + `VectorMA(MousePosition, k, Target - MousePosition)` con
-/// la cámara de los objetos (identidad, `MousePosition` = 0): el punto de la pantalla de 640×480 a la
-/// profundidad `k · RENDER_ITEMVIEW_FAR` (0.1, o 0.07 si va en el ratón), en el espacio de la cámara
-/// (x derecha, y arriba, -z delante), con la pantalla de 4:3. Sale `p1 · k`, con
+/// `CreateScreenVector(sx, sy, Target, false)` + `VectorMA(MousePosition, k, Target - MousePosition)` with
+/// the item camera (identity, `MousePosition` = 0): the 640×480 screen point at
+/// depth `k · RENDER_ITEMVIEW_FAR` (0.1, or 0.07 when held by the mouse), in camera space
+/// (x right, y up, -z forward), with a 4:3 screen. The result is `p1 · k`, with
 /// `p1 = ((sx - 320) · FAR · tan(fov/2) / 240, -(sy - 240) · FAR · tan(fov/2) / 240, -FAR)`.
 pub fn screen_point(sx: f32, sy: f32, picked: bool) -> [f32; 3] {
     let k = if picked { 0.07 } else { 0.1 };
@@ -681,7 +681,7 @@ pub fn screen_point(sx: f32, sy: f32, picked: bool) -> [f32; 3] {
     [(sx - 320.0) * unit * k, -(sy - 240.0) * unit * k, -ITEMVIEW_FAR * k]
 }
 
-/// Posición del objeto (espacio de la cámara) en el rectángulo `(x, y, w, h)` de la pantalla de 640×480.
+/// Item position (camera space) in the `(x, y, w, h)` rectangle of the 640×480 screen.
 pub fn item_position(pose: &ScreenPose, rect: [f32; 4], picked: bool) -> [f32; 3] {
     let sx = rect[0] + rect[2] * pose.anchor[0];
     let sy = rect[1] + rect[3] * pose.anchor[1];
@@ -715,7 +715,7 @@ mod tests {
         assert_eq!(f(POTION, 17).as_deref(), Some("Item/Devil00.bmd"));
     }
 
-    /// Los modelos de la tabla existen en la `Data` del S6 (los que no, se cuentan).
+    /// The table's models exist in the S6 `Data` (missing ones are counted).
     #[test]
     fn modelos_en_los_datos() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data");
@@ -737,7 +737,7 @@ mod tests {
         }
         eprintln!("modelos: {found} encontrados, faltan {missing:?}");
         assert!(found > 400, "{found}");
-        // Todo el equipo normal está.
+        // All the normal equipment is there.
         for (g, i) in [(0, 0), (0, 5), (1, 3), (2, 2), (3, 4), (4, 0), (4, 10), (5, 2), (6, 4), (7, 1), (8, 5), (9, 10), (10, 3), (11, 7), (12, 0), (12, 4), (13, 8), (14, 13)] {
             let m = model_file(g, i).unwrap();
             assert!(crate::fs::find(&data.join(m.dir), &m.name).is_some(), "{}/{}", m.dir, m.name);
@@ -746,17 +746,17 @@ mod tests {
 
     #[test]
     fn postura_en_el_inventario() {
-        // Kris: (0.8, 0.85) de la casilla, desplazada (-0.02, 0.03), (180, 270, 15) y escala 0.0025.
+        // Kris: (0.8, 0.85) of the slot, offset (-0.02, 0.03), (180, 270, 15) and scale 0.0025.
         let p = screen_pose(&Item::new(SWORD, 0), false);
         assert_eq!(p.anchor, [0.8, 0.85]);
         assert_eq!((p.offset, p.angle, p.scale), ([-0.02, 0.03, 0.0], [180.0, 270.0, 15.0], 0.0025));
-        // Las de dos manos, 25 grados.
+        // Two-handed ones, 25 degrees.
         assert_eq!(screen_pose(&Item::new(SWORD, 5), true).angle, [180.0, 270.0, 25.0]);
-        // Armadura: esqueleto del personaje, `BodyHeight` -100, escala 0.0039.
+        // Armor: character skeleton, `BodyHeight` -100, scale 0.0039.
         let a = screen_pose(&Item::new(ARMOR, 1), false);
         assert!(a.player_skeleton);
         assert_eq!((a.body_height, a.scale, a.angle, a.anchor), (-100.0, 0.0039, [270.0, -10.0, 0.0], [0.5, 0.8]));
-        // Escudos de lado; alas a 0.002; joyas 0.0035 con su desplazamiento.
+        // Shields sideways; wings at 0.002; jewels 0.0035 with their offset.
         assert_eq!(screen_pose(&Item::new(SHIELD, 2), false).angle, [270.0, 270.0, 0.0]);
         assert_eq!(screen_pose(&Item::new(WING, 1), false).scale, 0.002);
         let bless = screen_pose(&Item::new(POTION, 13), false);
@@ -765,10 +765,10 @@ mod tests {
 
     #[test]
     fn punto_de_la_pantalla() {
-        // El centro de la pantalla queda en el eje, a 200 (0.1 · FAR) o 140 (0.07 · FAR).
+        // The screen center lies on the axis, at 200 (0.1 · FAR) or 140 (0.07 · FAR).
         assert_eq!(screen_point(320.0, 240.0, false), [0.0, 0.0, -200.0]);
         assert_eq!(screen_point(320.0, 240.0, true), [0.0, 0.0, -140.0]);
-        // El borde de arriba, a tan(0.5°) · 200 hacia arriba.
+        // The top edge, tan(0.5°) · 200 upwards.
         let top = screen_point(320.0, 0.0, false);
         assert!((top[1] - 200.0 * 0.5f32.to_radians().tan()).abs() < 1e-4);
         let right = screen_point(640.0, 240.0, false);

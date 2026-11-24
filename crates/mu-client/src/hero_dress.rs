@@ -1,18 +1,18 @@
-//! El equipo del inventario puesto en el personaje, con su brillo.
+//! Inventory equipment worn by the character, with its glow.
 //!
-//! - **Piezas**: casco, armadura, pantalones, guantes y botas equipados cambian la pieza de la clase
-//!   por el modelo del objeto (`BodyPart[BODYPART_*].Type = MODEL_HELM + índice`...), posado con el
-//!   mismo esqueleto; el arma de la mano derecha, la del objeto (`Weapon[0]`). Las mallas de piel de
-//!   esas piezas (`BITMAP_SKIN`, la cara del casco...) llevan la piel de la clase (`BITMAP_SKIN + Skin`,
-//!   ZzzBMD.cpp:949-953), que es la textura de piel de la pieza de la clase; las `hid*` no se dibujan.
-//! - **Brillo**: las pasadas de `RenderPartObjectEffect` ([`item_passes`]) con la luz del héroe
-//!   (`AbilityLight` = (1, 1, 1), character.rs): la normal va en el tinte de la pieza y el resto son
-//!   entidades más con la misma malla (que posa la animación de siempre) y su material.
-//! - **Cuándo**: al cambiar el equipo (`Inventory::equipment_rev`) o el límite de efectos; también al
-//!   aparecer el personaje en un mapa.
+//! - **Pieces**: equipped helm, armor, pants, gloves and boots replace the class piece
+//!   with the item's model (`BodyPart[BODYPART_*].Type = MODEL_HELM + index`...), posed with the
+//!   same skeleton; the right-hand weapon uses the item's (`Weapon[0]`). The skin meshes of
+//!   those pieces (`BITMAP_SKIN`, the helm's face...) get the class skin (`BITMAP_SKIN + Skin`,
+//!   ZzzBMD.cpp:949-953), i.e. the skin texture of the class piece; `hid*` meshes are not drawn.
+//! - **Glow**: the `RenderPartObjectEffect` passes ([`item_passes`]) with the hero's light
+//!   (`AbilityLight` = (1, 1, 1), character.rs): the normal pass goes in the piece's tint and the rest
+//!   are extra entities with the same mesh (posed by the usual animation) and their own material.
+//! - **When**: when the equipment changes (`Inventory::equipment_rev`) or the effects limit does; also
+//!   when the character appears on a map.
 //!
-//! No están: el arma o el escudo de la mano izquierda, las alas y las mascotas (van enganchados a
-//! huesos con sus propias animaciones), ni los adornos de +15 (`NextGradeObjectRender`).
+//! Not included: the left-hand weapon or shield, wings and pets (they attach to
+//! bones with their own animations), nor the +15 ornaments (`NextGradeObjectRender`).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -37,12 +37,12 @@ impl Plugin for HeroDressPlugin {
     }
 }
 
-/// Materiales del brillo del equipo cuyo color cambia con el tiempo.
+/// Equipment glow materials whose color changes over time.
 #[derive(Component)]
 pub struct HeroGlow(Vec<(Handle<ModelMaterial>, GlowLight)>);
 
-/// La textura de una malla de una pieza: la suya, la piel de la clase para las de piel de las piezas
-/// del equipo, o ninguna (`hid*`, `BITMAP_HIDE`). Las piezas de la clase, tal cual.
+/// The texture of one mesh of a piece: its own, the class skin for skin meshes of equipment
+/// pieces, or none (`hid*`, `BITMAP_HIDE`). Class pieces are left as they are.
 pub fn part_texture(name: &str, equipped: bool, class_part: &Bmd) -> Option<String> {
     if !equipped {
         return Some(name.to_string());
@@ -59,7 +59,7 @@ pub fn part_texture(name: &str, equipped: bool, class_part: &Bmd) -> Option<Stri
     Some(name.to_string())
 }
 
-/// Las pasadas de brillo de las mallas del equipo (para `load_character_dressed`).
+/// Glow passes of the equipment meshes (for `load_character_dressed`).
 #[derive(Default)]
 pub struct GlowBuilder {
     bitmaps: HashMap<Bitmap, Option<Handle<Image>>>,
@@ -67,7 +67,7 @@ pub struct GlowBuilder {
 }
 
 impl GlowBuilder {
-    /// Pone la luz de la pasada normal en el tinte de `base` y devuelve las demás pasadas de la malla.
+    /// Puts the normal pass's light in `base`'s tint and returns the mesh's other passes.
     #[allow(clippy::too_many_arguments)]
     pub fn passes(
         &mut self,
@@ -104,7 +104,7 @@ impl GlowBuilder {
                 (true, None) => own.clone(),
             };
             let c = p.light.at(0.0);
-            // Con luz (`LightTransform`): la del héroe por la normal y el color de la pasada en el tinte.
+            // Lit (`LightTransform`): the hero's light by the normal and the pass color in the tint.
             let lit = look.color == LookColor::Lit;
             let mut mat = crate::objects::object_material(image, &look, if lit { [1.0; 3] } else { c }, None, k, false);
             mat.extension.params.tint = Vec4::new(c[0], c[1], c[2], 1.0);
@@ -118,7 +118,7 @@ impl GlowBuilder {
     }
 }
 
-/// El equipo que se ve en el personaje (`None` = nada puesto).
+/// The equipment shown on the character (`None` = nothing worn).
 fn dress_from(inv: &Inventory, data: &ItemData, render_level: u8) -> Option<Dress> {
     let piece = |s: u8| inv.equipment[s as usize].and_then(|item| Some((data.model_path(&item)?, item)));
     let dress = Dress {
@@ -144,7 +144,7 @@ fn redress(
     mut last: Local<Option<(u32, u8)>>,
 ) {
     let Ok((e, p, children)) = players.single() else {
-        // Sin personaje (cargando otro mapa): al volver a salir se vuelve a vestir.
+        // No character (loading another map): it gets dressed again when it reappears.
         *last = None;
         return;
     };
@@ -155,7 +155,7 @@ fn redress(
     let first = last.is_none();
     *last = Some(key);
     let dress = dress_from(&inv, &data, opts.render_level);
-    // Recién aparecido y sin nada puesto: ya está como lo cargó `spawn_player`.
+    // Just spawned with nothing worn: already as `spawn_player` loaded it.
     if first && dress.is_none() {
         return;
     }
@@ -173,7 +173,7 @@ fn redress(
     }
 }
 
-/// El color de las pasadas que laten (excelente, +3 a +6, antiguos).
+/// Color of the pulsing passes (excellent, +3 to +6, ancient).
 fn animate_glow(time: Res<Time<Real>>, glows: Query<&HeroGlow>, mut materials: ResMut<Assets<ModelMaterial>>) {
     let t = time.elapsed_secs() * 1000.0;
     for g in &glows {
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(part_texture("hide.jpg", true, &class), None);
         assert_eq!(part_texture("skin_barbarian_01.jpg", true, &class).as_deref(), Some("skin_warrior_01.jpg"));
         assert_eq!(part_texture("upper_03_m.jpg", true, &class).as_deref(), Some("upper_03_m.jpg"));
-        // Las piezas de la clase no cambian.
+        // Class pieces do not change.
         assert_eq!(part_texture("hide.jpg", false, &class).as_deref(), Some("hide.jpg"));
     }
 }

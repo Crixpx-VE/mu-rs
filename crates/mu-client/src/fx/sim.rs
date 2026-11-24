@@ -1,6 +1,6 @@
-//! Simulación del motor de efectos: un tick a 25 Hz que hace lo mismo que el original en
-//! `MoveEffects`, `MoveJoints` y `MoveParticles` (en ese orden, como `MainScene.cpp`), y luego
-//! crea lo que se pidió durante el tick con la función de creación de cada tipo.
+//! Effect engine simulation: a 25 Hz tick that does what the original does in
+//! `MoveEffects`, `MoveJoints` and `MoveParticles` (in that order, as in `MainScene.cpp`), and then
+//! creates whatever was requested during the tick with each kind's create function.
 
 use std::collections::HashMap;
 
@@ -10,42 +10,42 @@ use super::core::*;
 use super::core::Spawn;
 use crate::terrain::{LoadedTerrain, TerrainLights};
 
-/// Límites del original (`_define.h`).
+/// Limits of the original (`_define.h`).
 pub const MAX_PARTICLES: usize = 3000;
 pub const MAX_JOINTS: usize = 500;
 pub const MAX_EFFECTS: usize = 300;
-/// Ticks de la lógica del original por segundo (`REFERENCE_FPS`).
+/// Original logic ticks per second (`REFERENCE_FPS`).
 pub const TICKS_PER_SECOND: f32 = 25.0;
-/// Distancia (MU) hasta la que los objetos del mapa sueltan sus efectos.
+/// Distance (MU) within which map objects emit their effects.
 pub const OBJECT_FX_DISTANCE: f32 = 3000.0;
 
-/// Todo lo vivo del motor.
+/// Everything alive in the engine.
 #[derive(Resource, Default)]
 pub struct FxWorld {
     pub particles: Vec<Particle>,
     pub joints: Vec<Joint>,
     pub effects: Vec<Effect>,
-    /// Sprites de este tick (`CreateSprite`); se vacían al empezar el siguiente.
+    /// Sprites of this tick (`CreateSprite`); cleared when the next one starts.
     pub sprites: Vec<SpriteFx>,
     pub rng: Rng,
     pub next_effect_id: u32,
     pub earthquake: f32,
     pub ticks: u64,
-    /// Lo pedido desde fuera del motor (personajes, objetos del mapa) para el próximo tick.
+    /// Requests from outside the engine (characters, map objects) for the next tick.
     pub pending: Vec<Spawn>,
-    /// Habilidades en curso (`AttackTime` de cada personaje).
+    /// Skills in progress (each character's `AttackTime`).
     pub casts: Vec<Cast>,
-    /// Estelas de las armas.
+    /// Weapon trails.
     pub blurs: Vec<Blur>,
-    /// Objetos del mapa con código de efectos (los registra `objects.rs`).
+    /// Map objects with effect code (registered by `objects.rs`).
     pub map_objects: Vec<MapObject>,
-    /// Sonidos pedidos en los ticks (`PlayBuffer`); los toca `sound.rs`.
+    /// Sounds requested during the ticks (`PlayBuffer`); played by `sound.rs`.
     pub sounds: Vec<&'static str>,
 }
 
 impl FxWorld {
-    /// `CreateBlur`: añade un punto a la estela del arma de `owner` (o la crea). `frame` es el
-    /// número de fotograma de dibujo (los puntos de un fotograma sustituyen a los del anterior).
+    /// `CreateBlur`: adds a point to `owner`'s weapon trail (or creates it). `frame` is the
+    /// draw frame number (the points of one frame replace those of the previous one).
     pub fn create_blur(&mut self, owner: Entity, p1: Vec3, p2: Vec3, light: Vec3, mapping: i32, short: bool, frame: u64) {
         if let Some(b) = self.blurs.iter_mut().find(|b| b.live && b.owner == owner) {
             b.light = light;
@@ -69,14 +69,14 @@ impl FxWorld {
     }
 }
 
-/// Personajes que pueden seguir los efectos, actualizados por quien los mueve.
+/// Characters that effects can follow, updated by whoever moves them.
 #[derive(Resource, Default)]
 pub struct Actors {
     pub map: HashMap<Entity, Actor>,
     pub hero: Option<Entity>,
 }
 
-/// Componente con la foto de un personaje para el motor (lo actualiza `character.rs`).
+/// Component with a snapshot of a character for the engine (updated by `character.rs`).
 #[derive(Component, Clone)]
 pub struct ActorState(pub Actor);
 
@@ -84,7 +84,7 @@ pub fn gather_actors(mut actors: ResMut<Actors>, world: Res<FxWorld>, q: Query<(
     actors.map.clear();
     for (e, s, is_hero) in &q {
         let mut a = s.0.clone();
-        // `m_vPosSword`: lo calcula la habilidad en curso del personaje.
+        // `m_vPosSword`: computed by the character's skill in progress.
         if let Some(c) = world.casts.iter().find(|c| c.owner == e) {
             a.pos_sword = c.pos_sword;
         }
@@ -129,8 +129,8 @@ pub fn tick(
         sounds,
     };
 
-    // Objetos del mapa (`MoveObjects` / `UpdateObjectVisual`): solo los cercanos, como el original,
-    // que solo mueve los bloques que se ven.
+    // Map objects (`MoveObjects` / `UpdateObjectVisual`): only nearby ones, like the original,
+    // which only moves the visible blocks.
     let hero_pos = ctx.hero_actor().map(|a| a.position);
     for o in map_objects.iter_mut() {
         if hero_pos.is_some_and(|h| (o.position.truncate() - h.truncate()).length() > OBJECT_FX_DISTANCE) {
@@ -145,14 +145,14 @@ pub fn tick(
         o.created = true;
     }
 
-    // Habilidades en curso (`MoveCharactersClient` va antes que `MoveEffects`): `AttackStage` cada
-    // tick y el efecto final al llegar a `g_iLimitAttackTime`.
+    // Skills in progress (`MoveCharactersClient` runs before `MoveEffects`): `AttackStage` every
+    // tick and the final effect on reaching `g_iLimitAttackTime`.
     for c in casts.iter_mut() {
         let kind = registry.skills.get(&c.skill).copied().unwrap_or_default();
         if let Some(stage) = kind.stage {
             stage(c, &mut ctx);
         }
-        // Como el original: AttackStage, AttackTime += 1 y entonces se mira el límite (mismo tick).
+        // As in the original: AttackStage, AttackTime += 1, then the limit is checked (same tick).
         c.attack_time += 1;
         if c.attack_time >= LIMIT_ATTACK_TIME {
             if let Some(finish) = kind.finish {
@@ -163,20 +163,20 @@ pub fn tick(
     }
     casts.retain(|c| c.live);
 
-    // Estelas de las armas (`MoveBlurs`).
+    // Weapon trails (`MoveBlurs`).
     for b in world_blurs.iter_mut() {
         b.age();
     }
     world_blurs.retain(|b| b.live);
 
-    // Efectos (`MoveEffect`): lo propio del tipo y luego `LifeTime -= 1`.
+    // Effects (`MoveEffect`): the kind's own logic, then `LifeTime -= 1`.
     for e in effects.iter_mut() {
         e.prev_position = e.position;
         e.prev_angle = e.angle;
         match registry.effects.get(&e.ty).and_then(|k| k.step) {
             Some(step) => step(e, &mut ctx),
             None => {
-                // Por defecto: animar y avanzar en su dirección (`MoveParticle(o, true)`).
+                // Default: animate and move along its direction (`MoveParticle(o, true)`).
                 e.animation_frame += e.velocity;
                 e.position += rotate(e.angle, e.direction);
             }
@@ -187,7 +187,7 @@ pub fn tick(
         }
     }
 
-    // Estelas (`MoveJoint`): avanzar por su −Y local, lo propio del tipo, dejar cola, vida.
+    // Trails (`MoveJoint`): move along local −Y, the kind's own logic, leave a tail, lifetime.
     for j in joints.iter_mut() {
         j.position += rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0));
         if let Some(step) = registry.joints.get(&j.ty).and_then(|k| k.step) {
@@ -202,7 +202,7 @@ pub fn tick(
         }
     }
 
-    // Partículas (`MoveParticles`): vida, avance con su velocidad girada y lo propio del tipo.
+    // Particles (`MoveParticles`): lifetime, move by its rotated velocity and the kind's own logic.
     for p in particles.iter_mut() {
         p.prev_position = p.position;
         p.prev_scale = p.scale;
@@ -219,7 +219,7 @@ pub fn tick(
         }
     }
 
-    // Crear lo pedido (y lo que pidan a su vez las funciones de creación).
+    // Create what was requested (and whatever the create functions request in turn).
     let mut rounds = 0;
     while !ctx.spawns.is_empty() && rounds < 8 {
         rounds += 1;

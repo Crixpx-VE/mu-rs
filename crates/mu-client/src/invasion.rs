@@ -1,14 +1,14 @@
-//! Ambiente de invasión de dragones (`EnableEvent` del original; el servidor lo activa con el
-//! paquete C1 0B <encendido> <evento>: evento 1 = dragones rojos, 3 = dorados).
+//! Dragon invasion ambience (the original's `EnableEvent`; the server turns it on with packet
+//! C1 0B <on> <event>: event 1 = red dragons, 3 = golden dragons).
 //!
-//! Lo que cambia mientras está activo (GOBoid.cpp / ZzzLodTerrain.cpp):
-//! - los pájaros dejan paso a dragones que cruzan el cielo (ver `boids.rs`);
-//! - 1 de cada 40 ticks sale un meteorito (`MODEL_FIRE` subtipo 3, bola de fuego) cerca del
-//!   personaje (ver `fx/kinds/fire.rs`);
-//! - una zona más oscura de radio 16 casillas sigue al personaje (luz -0.3, -0.3, -0.2);
-//! - la hierba se mueve 5 veces más rápido (ver `grass.rs`).
+//! What changes while it is active (GOBoid.cpp / ZzzLodTerrain.cpp):
+//! - birds give way to dragons flying across the sky (see `boids.rs`);
+//! - 1 in 40 ticks a meteor (`MODEL_FIRE` subtype 3, fireball) spawns near the
+//!   character (see `fx/kinds/fire.rs`);
+//! - a darker zone of radius 16 tiles follows the character (light -0.3, -0.3, -0.2);
+//! - grass moves 5 times faster (see `grass.rs`).
 //!
-//! Hasta que lo mande el servidor, solo con `--invasion 1|3`.
+//! Until the server sends it, only with `--invasion 1|3`.
 
 use bevy::prelude::*;
 
@@ -30,7 +30,7 @@ impl Plugin for InvasionPlugin {
     }
 }
 
-/// Evento activo: 0 = ninguno, 1 = dragones rojos, 3 = dragones dorados.
+/// Active event: 0 = none, 1 = red dragons, 3 = golden dragons.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Invasion(pub u8);
 
@@ -40,7 +40,7 @@ impl Invasion {
     }
 }
 
-/// La zona oscura que sigue al personaje (`AddTerrainLight(héroe, (-0.3,-0.3,-0.2), 16)`).
+/// The dark zone that follows the character (`AddTerrainLight(hero, (-0.3,-0.3,-0.2), 16)`).
 fn darken_around_hero(inv: Res<Invasion>, players: Query<&Player>, mut lights: ResMut<TerrainLights>) {
     if !inv.active() {
         return;
@@ -78,9 +78,9 @@ fn update_label(inv: Res<Invasion>, mut q: Query<&mut Text, With<InvasionLabel>>
 }
 
 
-// --- Meteoritos -------------------------------------------------------------------------
+// --- Meteors ----------------------------------------------------------------------------
 
-/// Azar propio para la posición de los meteoritos (el original usa su `rand()` global).
+/// Own RNG for meteor positions (the original uses its global `rand()`).
 #[derive(Resource, Default)]
 struct MeteorRng(u32);
 
@@ -97,8 +97,8 @@ impl MeteorRng {
     }
 }
 
-/// `GOBoid.cpp` ≈1497: 1 de cada 40 ticks, `CreateEffect(MODEL_FIRE, héroe + (rand%600-200,
-/// rand%400+200, 300), 0, (1,1,1), 3)`. El meteorito lo mueve y dibuja el motor (`fx/kinds/fire.rs`).
+/// `GOBoid.cpp` ≈1497: 1 in 40 ticks, `CreateEffect(MODEL_FIRE, hero + (rand%600-200,
+/// rand%400+200, 300), 0, (1,1,1), 3)`. The effect engine moves and draws the meteor (`fx/kinds/fire.rs`).
 fn spawn_meteors(
     inv: Res<Invasion>,
     mut rng: ResMut<MeteorRng>,

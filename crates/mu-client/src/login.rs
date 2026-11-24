@@ -1,22 +1,22 @@
-//! Pantalla de login: el mapa 74 recorrido por una cámara de paseo, con la música `login_theme`.
+//! Login screen: map 74 traversed by a tour camera, with the `login_theme` music.
 //!
-//! El recorrido es el del original: los puntos de `Data/World74/CWScript74.cws` (firma `CWS\0`,
-//! número de puntos u32 y por punto 28 bytes: índice i32, x, y, z f32, pausa en ticks i32,
-//! velocidad f32 y nivel de distancia f32), en bucle y a la velocidad de cada punto.
+//! The route is the original's: the points of `Data/World74/CWScript74.cws` (signature `CWS\0`,
+//! point count u32 and 28 bytes per point: index i32, x, y, z f32, pause in ticks i32,
+//! speed f32 and distance level f32), looped, at each point's speed.
 //!
-//! El movimiento es moderno: en vez de ir en línea recta de punto a punto y girar con retraso
-//! (`CCameraMove::UpdateTourWayPoint`, que además saca la cámara del centro de los pasillos en
-//! las curvas), la cámara va por una curva suave (Catmull-Rom centrípeta) que pasa por todos los
-//! puntos, siempre por el centro del pasillo, y mira a un punto algo más adelante de la curva:
-//! empieza a girar antes de cada esquina y nunca da tirones. Se calcula a 25 ticks por segundo y
-//! se dibuja interpolado, igual a cualquier fps.
+//! The motion is modern: instead of going in a straight line from point to point and turning late
+//! (`CCameraMove::UpdateTourWayPoint`, which also pulls the camera off the corridor center in
+//! curves), the camera follows a smooth curve (centripetal Catmull-Rom) through all the
+//! points, always along the corridor center, and looks at a point a bit further along the curve:
+//! it starts turning before each corner and never jerks. Computed at 25 ticks per second and
+//! drawn interpolated, the same at any fps.
 //!
-//! La vista es la del S6 original (`MoveMainCamera` de `ZzzScene.cpp` del Main 5.2): altura del ojo
-//! `-300 - 100 + D - 150` con `D = 1100 · nivel · 0.1` (`110 · nivel - 550`), inclinación -112.5° (mira
-//! 22.5° hacia arriba), campo de visión de 65° en vertical y alcance `390 · nivel`. El nivel de
-//! distancia se interpola entre el de cada punto." La niebla negra (de MuMain; el original la tiene apagada) va del alcance a ×1.25.
+//! The view is the original S6 one (`MoveMainCamera` in Main 5.2's `ZzzScene.cpp`): eye height
+//! `-300 - 100 + D - 150` with `D = 1100 · level · 0.1` (`110 · level - 550`), pitch -112.5° (looks
+//! 22.5° up), 65° vertical field of view and range `390 · level`. The distance
+//! level is interpolated between the points' levels. The black fog (from MuMain; the original has it off) goes from the range to ×1.25.
 //!
-//! La interfaz 2D (logo, servidores y ventana de login) está en login_ui.rs.
+//! The 2D interface (logo, servers and login window) is in login_ui.rs.
 
 use bevy::prelude::*;
 
@@ -36,18 +36,18 @@ impl Plugin for LoginPlugin {
     }
 }
 
-/// `kMinTourAccel` / `kMaxTourAccel`: velocidad por tick.
+/// `kMinTourAccel` / `kMaxTourAccel`: speed per tick.
 const MIN_ACCEL: f32 = 0.1;
 const MAX_ACCEL: f32 = 100.0;
-/// `SetAngleFrustum(-112.5)`: 22.5° hacia arriba.
+/// `SetAngleFrustum(-112.5)`: 22.5° up.
 const PITCH: f32 = -112.5;
-/// `CameraFOV = 65` (vertical, `gluPerspective`) en el login con el paseo.
+/// `CameraFOV = 65` (vertical, `gluPerspective`) on the login tour.
 const TOUR_VFOV: f32 = 65.0;
-/// Giro del original (`UpdateTourWayPoint`): como mucho 1° por tick y `diferencia / 30`, a los 25 fps
-/// fijos de entonces. En las curvas cerradas tarda (la primera es de unos 117°).
+/// The original's turning (`UpdateTourWayPoint`): at most 1° per tick and `difference / 30`, at the fixed 25 fps
+/// of the time. Sharp curves take a while (the first is about 117°).
 const MAX_ROTATE: f32 = 1.0;
 const ROTATE_DIVISOR: f32 = 30.0;
-/// Muestras por tramo para medir la curva.
+/// Samples per segment to measure the curve.
 const SAMPLES: usize = 64;
 
 #[derive(Clone, Copy)]
@@ -59,13 +59,13 @@ struct Waypoint {
     level: f32,
 }
 
-/// La curva cerrada que pasa por los puntos, medida por longitud.
+/// The closed curve through the points, measured by length.
 struct Path {
     points: Vec<Waypoint>,
-    /// Longitud acumulada al principio de cada tramo (`len[i]` = inicio del tramo i → i+1) y total.
+    /// Accumulated length at the start of each segment (`len[i]` = start of segment i → i+1) and total.
     starts: Vec<f32>,
     total: f32,
-    /// Por tramo: (t, longitud acumulada desde el inicio del tramo) de cada muestra.
+    /// Per segment: (t, accumulated length from the segment start) of each sample.
     tables: Vec<Vec<(f32, f32)>>,
 }
 
@@ -93,7 +93,7 @@ impl Path {
         Self { points, starts, total, tables }
     }
 
-    /// Tramo y parámetro `t` a la distancia `s` del principio de la curva.
+    /// Segment and parameter `t` at distance `s` from the start of the curve.
     fn locate(&self, s: f32) -> (usize, f32) {
         let s = s.rem_euclid(self.total.max(1.0));
         let i = self.starts.partition_point(|&st| st <= s).saturating_sub(1);
@@ -110,26 +110,26 @@ impl Path {
         segment_point(&self.points, i, t)
     }
 
-    /// Nivel de distancia en `s`: de el del punto de salida al del de llegada del tramo.
+    /// Distance level at `s`: from the segment's start point level to its end point level.
     fn level(&self, s: f32) -> f32 {
         let (i, t) = self.locate(s);
         let n = self.points.len();
         self.points[i].level + (self.points[(i + 1) % n].level - self.points[i].level) * t
     }
 
-    /// Velocidad en `s`: la del punto al que va el tramo (`targetWaypoint->fCameraMoveAccel`).
+    /// Speed at `s`: that of the point the segment heads to (`targetWaypoint->fCameraMoveAccel`).
     fn speed(&self, s: f32) -> f32 {
         let (i, _) = self.locate(s);
         self.points[(i + 1) % self.points.len()].accel.clamp(MIN_ACCEL, MAX_ACCEL)
     }
 }
 
-/// Catmull-Rom centrípeta del tramo `i` → `i+1` (bucle cerrado), `t` de 0 a 1.
+/// Centripetal Catmull-Rom of segment `i` → `i+1` (closed loop), `t` from 0 to 1.
 fn segment_point(points: &[Waypoint], i: usize, t: f32) -> Vec2 {
     let n = points.len();
     let p = |k: usize| points[k % n].pos;
     let (p0, p1, p2, p3) = (p(i + n - 1), p(i), p(i + 1), p(i + 2));
-    // Nudos con alfa 0.5 (no se pasa de las esquinas como la uniforme).
+    // Knots with alpha 0.5 (does not overshoot corners like the uniform one).
     let knot = |a: Vec2, b: Vec2| (a - b).length().sqrt().max(1e-3);
     let (t0, t1) = (0.0, knot(p0, p1));
     let t2 = t1 + knot(p1, p2);
@@ -146,14 +146,14 @@ fn segment_point(points: &[Waypoint], i: usize, t: f32) -> Vec2 {
 #[derive(Resource)]
 struct Tour {
     path: Path,
-    /// Distancia recorrida por la curva, en este tick y en el anterior (para interpolar).
+    /// Distance traveled along the curve, this tick and the previous one (for interpolation).
     s: f32,
     prev_s: f32,
-    /// Pausa en el punto al que se llegó (ticks que quedan).
+    /// Pause at the reached point (ticks left).
     wait: i32,
-    /// Tramo del último punto pasado (para las pausas).
+    /// Segment of the last point passed (for pauses).
     segment: usize,
-    /// Giro de la cámara (grados de MU) en este tick y en el anterior.
+    /// Camera yaw (MU degrees) this tick and the previous one.
     yaw: f32,
     prev_yaw: f32,
 }
@@ -178,7 +178,7 @@ fn read_script(bytes: &[u8]) -> Option<Vec<Waypoint>> {
         .collect()
 }
 
-/// Empieza en el primer punto, yendo hacia el segundo (`SetTourMode(TRUE, FALSE, 1)` del original).
+/// Starts at the first point, heading to the second (the original's `SetTourMode(TRUE, FALSE, 1)`).
 fn start_tour(mut commands: Commands, args: Res<Args>) {
     let file = format!("CWScript{}.cws", args.world);
     let points = mu_data::fs::read(&args.data.join(format!("World{}", args.world)), &file)
@@ -195,20 +195,20 @@ fn start_tour(mut commands: Commands, args: Res<Args>) {
     commands.insert_resource(Tour { path, s, prev_s: s, wait: 0, segment: 0, yaw, prev_yaw: yaw });
 }
 
-/// Distancia de la cámara por detrás del punto del recorrido: `D = 1100 · nivel · 0.1` del original.
+/// Camera distance behind the tour point: the original's `D = 1100 · level · 0.1`.
 fn behind(path: &Path, s: f32) -> f32 {
     110.0 * path.level(s)
 }
 
-/// Rumbo de MU (0 = +Y, 90 = +X) desde la cámara (`D` por detrás en el camino) hasta el punto
-/// del recorrido: como en el original, el punto dobla las esquinas antes que la cámara y esta empieza
-/// a girar antes de llegar, pero aquí la cámara sigue por el centro del camino.
+/// MU heading (0 = +Y, 90 = +X) from the camera (`D` behind on the path) to the tour
+/// point: as in the original, the point turns corners before the camera and the camera starts
+/// turning before arriving, but here the camera stays on the path center.
 fn look_heading(path: &Path, s: f32) -> f32 {
     let d = path.at(s) - path.at(s - behind(path, s));
     d.x.atan2(d.y).to_degrees().rem_euclid(360.0)
 }
 
-/// Un tick: avanza por la curva a la velocidad del tramo (y espera en los puntos con pausa).
+/// One tick: advances along the curve at the segment's speed (and waits at points with a pause).
 fn step_tour(tour: Option<ResMut<Tour>>) {
     let Some(mut t) = tour else { return };
     let t = &mut *t;
@@ -239,7 +239,7 @@ fn signed_delta(from: f32, to: f32) -> f32 {
     (to - from + 540.0).rem_euclid(360.0) - 180.0
 }
 
-/// Coloca la cámara entre el tick anterior y este.
+/// Places the camera between the previous tick and this one.
 fn place_camera(
     tour: Option<Res<Tour>>,
     fixed: Res<Time<Fixed>>,
@@ -253,7 +253,7 @@ fn place_camera(
     let level = t.path.level(s);
     // `CameraPosition[2] = -300 - 100 + D - 150`.
     let height = -300.0 - 100.0 + 1100.0 * level * 0.1 - 150.0;
-    // `CameraViewFar = 390 · nivel`.
+    // `CameraViewFar = 390 · level`.
     let far = 390.0 * level;
     for (mut tf, mut proj, fog) in &mut cameras {
         *tf = crate::camera::mu_view(eye.extend(height), PITCH, yaw);
@@ -261,21 +261,21 @@ fn place_camera(
             fog.falloff = bevy::pbr::FogFalloff::Linear { start: far / MU_SCALE, end: far * 1.25 / MU_SCALE };
         }
         if let Projection::Perspective(p) = &mut *proj {
-            // `gluPerspective(65, aspecto, near 20, far × 1.4)`.
+            // `gluPerspective(65, aspect, near 20, far × 1.4)`.
             p.fov = TOUR_VFOV.to_radians();
             p.near = 20.0 / MU_SCALE;
             p.far = far * 1.4 / MU_SCALE;
         }
     }
 }
-/// Niebla negra del login (la distancia la pone `place_camera`).
+/// Black login fog (its distance is set by `place_camera`).
 fn add_fog(mut commands: Commands, cameras: Query<Entity, (With<Camera3d>, With<IsDefaultUiCamera>)>) {
     for e in &cameras {
         commands.entity(e).insert(DistanceFog { color: Color::BLACK, ..default() });
     }
 }
 
-/// Al salir: sin niebla y con el campo de visión y el alcance del juego.
+/// On exit: no fog, and the game's field of view and range.
 fn restore_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Projection), (With<Camera3d>, With<IsDefaultUiCamera>)>) {
     for (e, mut proj) in &mut cameras {
         commands.entity(e).remove::<DistanceFog>();

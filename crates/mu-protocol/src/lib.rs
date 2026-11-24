@@ -1,8 +1,8 @@
-//! Protocolo de red de MU Online (Season 6 Episode 3, compatible con OpenMU).
+//! MU Online network protocol (Season 6 Episode 3, OpenMU-compatible).
 //!
-//! Lo usan tanto el cliente como el servidor, así que un cambio aquí afecta a los dos.
+//! Used by both client and server, so a change here affects both.
 //!
-//! Referencia: `referencias/OpenMU/src/Network/Packets/**/*.xml` (licencia MIT).
+//! Reference: `referencias/OpenMU/src/Network/Packets/**/*.xml` (MIT license).
 
 pub mod connect;
 pub mod crypto;

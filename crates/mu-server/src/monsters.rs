@@ -1,20 +1,20 @@
-//! Monstruos y NPC del mundo: dónde aparecen (`datos/MonsterSetBase.txt`, ver `tools/gen_spawns.py`), sus
-//! datos (`datos/Monster.txt`) y cómo pasean.
+//! World monsters and NPCs: where they spawn (`datos/MonsterSetBase.txt`, see `tools/gen_spawns.py`), their
+//! data (`datos/Monster.txt`) and how they roam.
 //!
-//! - NPC (sección 0 de `MonsterSetBase`): en su casilla, mirando a su dirección, quietos.
-//! - Zonas (sección 1): `Count` monstruos en casillas al azar de la zona que se pueden pisar y no son
-//!   zona segura.
-//! - Sueltos (sección 2): en su casilla.
+//! - NPCs (section 0 of `MonsterSetBase`): on their tile, facing their direction, standing still.
+//! - Zones (section 1): `Count` monsters on random walkable, non-safe-zone tiles
+//!   of the zone.
+//! - Single spawns (section 2): on their tile.
 //!
-//! Pasear es lo de `BasicMonsterIntelligence.TickWithoutTargetAsync` de OpenMU: cada `AttackSpeed`
-//! milisegundos, si algún jugador lo ve y no está andando, va a una casilla al azar a como mucho
-//! `MoveRange` en cada eje (`Monster.RandomMoveAsync`), con un paso cada `MoveSpeed` milisegundos (por la
-//! distancia del paso, `Monster.GetStepDelay`) y sin pisar la zona segura (`CanWalkOnSafezone`). Como
-//! mucho 15 pasos por paseo (los que caben en el paquete). Además no sale de su zona (las sueltas: su
-//! `Range` o, si es 0, su `MoveRange` alrededor de su casilla); OpenMU no lo limita y con el tiempo los
-//! monstruos se irían repartiendo por todo el mapa.
+//! Roaming follows OpenMU's `BasicMonsterIntelligence.TickWithoutTargetAsync`: every `AttackSpeed`
+//! milliseconds, if some player sees it and it is not walking, it goes to a random tile at most
+//! `MoveRange` away on each axis (`Monster.RandomMoveAsync`), one step every `MoveSpeed` milliseconds (times the
+//! step distance, `Monster.GetStepDelay`) and never onto the safe zone (`CanWalkOnSafezone`). At
+//! most 15 steps per walk (as many as fit in the packet). It also never leaves its zone (single spawns: their
+//! `Range` or, if 0, their `MoveRange` around their tile); OpenMU does not limit this, and over time the
+//! monsters would spread over the whole map.
 //!
-//! Aún no: perseguir y atacar (`ViewRange`, `AttackRange`), morir y reaparecer (`RegenTime`).
+//! Not yet: chasing and attacking (`ViewRange`, `AttackRange`), dying and respawning (`RegenTime`).
 
 use std::collections::{HashMap, VecDeque};
 use std::path::Path;
@@ -23,13 +23,13 @@ use std::time::{Duration, Instant};
 use mu_data::terrain::{self, attr};
 use mu_protocol::game::{self, ScopeMonster, ServerMessage};
 
-/// Ids de objeto de los monstruos: de 1 a esto (los jugadores van por encima).
+/// Monster object ids: from 1 up to this (players go above).
 pub const MAX_MONSTERS: usize = 0x1FFF;
 
-/// Pasos como mucho de un paseo (`MAX_WALK_STEPS`).
+/// Max steps of one walk (`MAX_WALK_STEPS`).
 const MAX_STEPS: usize = game::MAX_WALK_STEPS;
 
-/// Una fila de `Monster.txt`.
+/// One row of `Monster.txt`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Info {
     pub number: u16,
@@ -37,9 +37,9 @@ pub struct Info {
     pub level: u16,
     pub move_range: u8,
     pub view_range: u8,
-    /// Milisegundos por casilla.
+    /// Milliseconds per tile.
     pub move_speed: u32,
-    /// Milisegundos entre una decisión y la siguiente (`AttackDelay` en OpenMU).
+    /// Milliseconds between one decision and the next (`AttackDelay` in OpenMU).
     pub attack_speed: u32,
 }
 
@@ -75,10 +75,10 @@ pub fn parse_monster_txt(text: &str) -> HashMap<u16, Info> {
     out
 }
 
-/// Una fila de `MonsterSetBase.txt`.
+/// One row of `MonsterSetBase.txt`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpawnRow {
-    /// 0 NPC, 1 zona, 2 suelto.
+    /// 0 NPC, 1 zone, 2 single.
     pub section: u8,
     pub number: u16,
     pub map: u8,
@@ -87,12 +87,12 @@ pub struct SpawnRow {
     pub y1: u8,
     pub x2: u8,
     pub y2: u8,
-    /// 0..7, o -1 al azar.
+    /// 0..7, or -1 for random.
     pub dir: i8,
     pub count: u16,
 }
 
-/// Secciones 0 (NPC), 1 (zonas) y 2 (sueltos); las de invasiones y eventos se saltan.
+/// Sections 0 (NPC), 1 (zones) and 2 (single); invasion and event sections are skipped.
 pub fn parse_setbase(text: &str) -> Vec<SpawnRow> {
     let mut rows = Vec::new();
     let mut section: Option<u8> = None;
@@ -147,7 +147,7 @@ pub fn parse_setbase(text: &str) -> Vec<SpawnRow> {
     rows
 }
 
-/// Un monstruo o NPC en el mundo.
+/// A monster or NPC in the world.
 pub struct Mob {
     pub id: u16,
     pub number: u16,
@@ -155,9 +155,9 @@ pub struct Mob {
     pub x: u8,
     pub y: u8,
     pub dir: u8,
-    /// Zona por la que puede pasear (incluida): `(x1, y1, x2, y2)`.
+    /// Zone it may roam in (inclusive): `(x1, y1, x2, y2)`.
     home: (u8, u8, u8, u8),
-    /// NPC y monstruos con `MoveRange` 0 no se mueven.
+    /// NPCs and monsters with `MoveRange` 0 do not move.
     walks: bool,
     move_range: u8,
     move_speed: u32,
@@ -168,13 +168,13 @@ pub struct Mob {
 }
 
 impl Mob {
-    /// Cómo lo ve un jugador que lo tiene delante ahora.
+    /// How a player who has it in view sees it right now.
     pub fn scope(&self) -> ScopeMonster {
         let (tx, ty) = self.path.back().copied().unwrap_or((self.x, self.y));
         ScopeMonster { id: self.id, number: self.number, x: self.x, y: self.y, target_x: tx, target_y: ty, rotation: self.dir }
     }
 
-    /// Cuánto tarda en dar el paso a `to` (`MoveSpeed` por la distancia, `Monster.GetStepDelay`).
+    /// How long the step to `to` takes (`MoveSpeed` times the distance, `Monster.GetStepDelay`).
     fn step_delay(&self, to: (u8, u8)) -> Duration {
         let diagonal = to.0 != self.x && to.1 != self.y;
         let ms = self.move_speed as f64 * if diagonal { std::f64::consts::SQRT_2 } else { 1.0 };
@@ -182,7 +182,7 @@ impl Mob {
     }
 }
 
-/// Un paseo que empieza: lo tienen que ver los que ven al monstruo.
+/// A walk that starts: those who see the monster must see it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Walked {
     pub id: u16,
@@ -191,14 +191,14 @@ pub struct Walked {
 
 #[derive(Default)]
 pub struct Mobs {
-    /// Por id: `list[id - 1]`.
+    /// By id: `list[id - 1]`.
     pub list: Vec<Mob>,
     terrains: HashMap<u8, Grid>,
     rng: Rng,
 }
 
 impl Mobs {
-    /// Los de `datos/` con el terreno del cliente en `data` (`EncTerrainN.att`).
+    /// Those from `datos/`, with the client terrain in `data` (`EncTerrainN.att`).
     pub fn load(data: &Path) -> Self {
         let infos = parse_monster_txt(include_str!("../datos/Monster.txt"));
         let rows = parse_setbase(include_str!("../datos/MonsterSetBase.txt"));
@@ -248,7 +248,7 @@ impl Mobs {
                 } else {
                     (row.x1, row.y1)
                 };
-                // La zona por la que pasea: la suya; si es una casilla, su `Range` (o su `MoveRange`) alrededor.
+                // The zone it roams: its own; if it is a single tile, its `Range` (or its `MoveRange`) around it.
                 let around = if row.range > 0 { row.range } else { info.move_range };
                 let home = if (row.x1, row.y1) == (row.x2, row.y2) {
                     (row.x1.saturating_sub(around), row.y1.saturating_sub(around), row.x2.saturating_add(around), row.y2.saturating_add(around))
@@ -256,7 +256,7 @@ impl Mobs {
                     (row.x1, row.y1, row.x2, row.y2)
                 };
                 let dir = if row.dir < 0 { (rng.next() % 8) as u8 } else { row.dir as u8 };
-                // Que no decidan todos a la vez.
+                // So they do not all decide at the same time.
                 let first = Duration::from_millis(info.attack_speed as u64 + rng.next() % 1000);
                 list.push(Mob {
                     id: list.len() as u16 + 1,
@@ -288,8 +288,8 @@ impl Mobs {
         self.list.get((id as usize).checked_sub(1)?)
     }
 
-    /// Avanza hasta `now`: los que andan dan sus pasos y los que ve alguien (`observed(id)`) y están
-    /// quietos deciden si pasean. Devuelve los paseos que empiezan.
+    /// Advances to `now`: walking ones take their steps, and idle ones seen by someone (`observed(id)`)
+    /// decide whether to roam. Returns the walks that start.
     pub fn tick(&mut self, now: Instant, observed: impl Fn(u16) -> bool) -> Vec<Walked> {
         let mut out = Vec::new();
         let Self { list, terrains, rng } = self;
@@ -350,11 +350,11 @@ impl Mobs {
     }
 }
 
-/// Las banderas de las casillas de un mapa (`EncTerrainN.att`, ver [`attr`]).
+/// The tile flags of a map (`EncTerrainN.att`, see [`attr`]).
 pub struct Grid(Vec<u16>);
 
 impl Default for Grid {
-    /// Todo pisable.
+    /// All walkable.
     fn default() -> Self {
         Self(vec![0; terrain::SIZE * terrain::SIZE])
     }
@@ -378,12 +378,12 @@ impl Grid {
     }
 }
 
-/// Un monstruo puede estar en una casilla que se pisa y no es zona segura.
+/// A monster can stand on a walkable, non-safe-zone tile.
 fn monster_can_stand(t: &Grid, x: u8, y: u8) -> bool {
     t.walkable(x as usize, y as usize) && t.attribute(x as usize, y as usize) & attr::SAFE_ZONE == 0
 }
 
-/// Una casilla al azar de la zona en la que puede estar un monstruo.
+/// A random tile of the zone where a monster can stand.
 fn free_tile(t: &Grid, (x1, y1, x2, y2): (u8, u8, u8, u8), rng: &mut Rng) -> Option<(u8, u8)> {
     let (w, h) = (x2 as u64 - x1 as u64 + 1, y2 as u64 - y1 as u64 + 1);
     for _ in 0..100 {
@@ -395,8 +395,8 @@ fn free_tile(t: &Grid, (x1, y1, x2, y2): (u8, u8, u8, u8), rng: &mut Rng) -> Opt
     None
 }
 
-/// Camino más corto en pasos (sin la casilla de salida) de `from` a `to` sin salir de `home` ni de
-/// `reach` casillas alrededor de `from`, por casillas donde puede estar un monstruo.
+/// Shortest path in steps (excluding the start tile) from `from` to `to` without leaving `home` nor
+/// `reach` tiles around `from`, over tiles where a monster can stand.
 fn short_path(t: &Grid, from: (u8, u8), to: (u8, u8), home: (u8, u8, u8, u8), reach: usize) -> Option<Vec<(u8, u8)>> {
     let side = 2 * reach + 1;
     let ox = from.0 as i32 - reach as i32;
@@ -478,7 +478,7 @@ mod tests {
     #[test]
     fn lee_monster_set_base() {
         let rows = parse_setbase(include_str!("../datos/MonsterSetBase.txt"));
-        // El entrenador de Lorencia, una zona de arañas y nada de otras secciones.
+        // The Lorencia trainer, a spider zone and nothing from other sections.
         assert!(rows.contains(&SpawnRow { section: 0, number: 226, map: 0, range: 0, x1: 122, y1: 110, x2: 122, y2: 110, dir: 3, count: 1 }));
         assert!(rows.iter().any(|r| r.section == 1 && r.number == 3 && r.map == 0 && (r.x1, r.y1, r.x2, r.y2) == (180, 90, 226, 244) && r.count == 45));
         assert!(rows.iter().all(|r| r.section <= 2));
@@ -493,7 +493,7 @@ mod tests {
         assert_eq!((rows[1].x1, rows[1].y1, rows[1].x2, rows[1].y2), (10, 30, 20, 40));
     }
 
-    /// Terreno todo pisable con una pared en x = 5 (de y 0 a 8) y zona segura en (0..3, 0..3).
+    /// All-walkable terrain with a wall at x = 5 (y 0 to 8) and a safe zone at (0..3, 0..3).
     fn terreno_de_prueba() -> Grid {
         let mut t = Grid::default();
         for y in 0..9 {
@@ -514,7 +514,7 @@ mod tests {
         assert_eq!(p.last(), Some(&(6, 4)));
         assert!(p.iter().all(|&(x, y)| monster_can_stand(&t, x, y)));
         assert!(p.windows(2).all(|w| game::direction_between(w[0], w[1]).is_some()));
-        // Sin salir de su zona no llega.
+        // It cannot get there without leaving its zone.
         assert_eq!(short_path(&t, (4, 4), (6, 4), (0, 0, 6, 6), 8), None);
         assert!(!monster_can_stand(&t, 1, 1));
     }
@@ -532,9 +532,9 @@ mod tests {
         assert_eq!(mobs.get(4).map(|m| (m.number, m.x, m.y, m.dir)), Some((226, 30, 30, 3)));
         assert!(mobs.list[..3].iter().all(|m| (10..=14).contains(&m.x) && (10..=14).contains(&m.y)));
 
-        // Nadie los ve: no se mueven.
+        // Nobody sees them: they do not move.
         assert!(mobs.tick(start + Duration::from_secs(10), |_| false).is_empty());
-        // Los ve alguien: pasean (el NPC no), por casillas seguidas y dentro de su zona.
+        // Someone sees them: they roam (not the NPC), over adjacent tiles and inside their zone.
         let mut walked = 0;
         for s in 0..200 {
             let now = start + Duration::from_secs(10) + Duration::from_millis(100 * s);

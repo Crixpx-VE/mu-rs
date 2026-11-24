@@ -1,10 +1,10 @@
-//! Prueba de login de punta a punta contra un servidor real (OpenMU o el nuestro).
+//! End-to-end login test against a real server (OpenMU or ours).
 //!
-//!   cargo run -p mu-protocol --example login -- <usuario> <contraseña> [connect_server=127.0.0.1:44405]
+//!   cargo run -p mu-protocol --example login -- <user> <password> [connect_server=127.0.0.1:44405]
 //!
-//! Hace lo mismo que el cliente: pide la lista al Connect Server, se conecta al primer
-//! Game Server, espera el saludo, manda el login cifrado y muestra la respuesta.
-//! (OpenMU crea por defecto cuentas de prueba como test0/test0 ... test9/test9.)
+//! Does the same as the client: asks the Connect Server for the list, connects to the first
+//! Game Server, waits for the greeting, sends the encrypted login and prints the reply.
+//! (OpenMU creates test accounts by default, such as test0/test0 ... test9/test9.)
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -65,7 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut crypto = ClientCrypto::default();
     let mut buf = PacketBuffer::default();
 
-    // Esperar el saludo (el servidor puede mandar otros paquetes antes; se ignoran).
+    // Wait for the greeting (the server may send other packets first; they are ignored).
     loop {
         let p = crypto.decrypt(&next_packet(&mut gs, &mut buf)?)?;
         if let Some(m @ game::ServerMessage::GameServerEntered { .. }) = game::ServerMessage::decode(&p) {

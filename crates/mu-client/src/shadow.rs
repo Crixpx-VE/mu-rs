@@ -1,22 +1,22 @@
-//! Sombras de los modelos en el suelo (`BMD::RenderBodyShadow` / `CalcShadowPosition`):
-//! personajes, pájaros y dragones. Los objetos del mapa no tienen: sus sombras ya vienen
-//! pintadas en la luz del terreno.
+//! Model shadows on the ground (`BMD::RenderBodyShadow` / `CalcShadowPosition`):
+//! characters, birds and dragons. Map objects have none: their shadows are already
+//! baked into the terrain light.
 //!
-//! Cada vértice del modelo, relativo a su origen, se inclina hacia -X según su altura y se
-//! aplasta contra el suelo, 5 unidades por encima:
+//! Each model vertex, relative to its origin, is sheared towards -X by its height and
+//! flattened onto the ground, 5 units above it:
 //!
 //! ```text
 //! x += z · (x + 2000) / (z − 4000)
-//! z  = altura del terreno en (x, y) + 5
+//! z  = terrain height at (x, y) + 5
 //! ```
 //!
-//! Cómo se pinta depende del mapa (`RenderPartObjectEffect`, ZzzObject.cpp:9336-9358):
-//! - en casi todos, negro opaco (`DisableAlphaBlend` + `glColor3f(0, 0, 0)`); va con `Blend::Shadow`
-//!   a opacidad 1, que es lo mismo;
-//! - en Atlans (`WorldActive == 7`), negro al 20 % (`EnableAlphaTest` + `glColor4f(0, 0, 0, 0.2)`; la
-//!   prueba de alfa la quita `DisableTexture`) y sin escribir profundidad (`RenderBodyShadow`), así que
-//!   donde se solapan dos trozos oscurece más: `Blend::Blend3`;
-//! - en Kalima (`InHellas`) e Icarus (`WD_10HEAVEN`), ninguna.
+//! How it is drawn depends on the map (`RenderPartObjectEffect`, ZzzObject.cpp:9336-9358):
+//! - on almost all, opaque black (`DisableAlphaBlend` + `glColor3f(0, 0, 0)`); done with `Blend::Shadow`
+//!   at opacity 1, which is the same;
+//! - in Atlans (`WorldActive == 7`), 20 % black (`EnableAlphaTest` + `glColor4f(0, 0, 0, 0.2)`; the
+//!   alpha test is removed by `DisableTexture`) without depth writes (`RenderBodyShadow`), so
+//!   overlapping pieces get darker: `Blend::Blend3`;
+//! - in Kalima (`InHellas`) and Icarus (`WD_10HEAVEN`), none.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -29,12 +29,12 @@ use mu_data::terrain::Terrain;
 use crate::fx::material::{Blend, FxMaterial};
 use crate::terrain::MU_SCALE;
 
-/// Opacidad de la sombra en Atlans (`glColor4f(0, 0, 0, 0.2)`).
+/// Shadow opacity in Atlans (`glColor4f(0, 0, 0, 0.2)`).
 const ATLANS_OPACITY: f32 = 0.2;
-/// `shearX` y `shearHeight` de la proyección.
+/// Projection `shearX` and `shearHeight`.
 const SHEAR_X: f32 = 2000.0;
 const SHEAR_HEIGHT: f32 = 4000.0;
-/// Altura sobre el suelo.
+/// Height above the ground.
 const LIFT: f32 = 5.0;
 
 pub struct ShadowPlugin;
@@ -50,20 +50,20 @@ impl Plugin for ShadowPlugin {
     }
 }
 
-/// Si el mapa cargado tiene sombras (lo consulta [`Builder::finish`]).
+/// Whether the loaded map has shadows (read by [`Builder::finish`]).
 static ENABLED: AtomicBool = AtomicBool::new(true);
 
-/// Cómo son las sombras en `world` (nuestro número de mapa): `None` = no hay; si no, mezcla y opacidad.
+/// What shadows look like in `world` (our map number): `None` = none; otherwise blend and opacity.
 fn world_style(world: u16) -> Option<(Blend, f32)> {
     match world as i32 - 1 {
-        // Kalima 1-7 (`InHellas`) e Icarus.
+        // Kalima 1-7 (`InHellas`) and Icarus.
         24..=29 | 36 | 10 => None,
         7 => Some((Blend::Blend3, ATLANS_OPACITY)),
         _ => Some((Blend::Shadow, 1.0)),
     }
 }
 
-/// Al cambiar de mapa, el material y si se dibujan.
+/// On map change, the material and whether they are drawn.
 fn world_shadow(
     args: Res<crate::Args>,
     material: Option<Res<ShadowMaterial>>,
@@ -88,13 +88,13 @@ fn world_shadow(
 #[derive(Resource)]
 pub struct ShadowMaterial(pub Handle<FxMaterial>);
 
-/// La malla de sombra de un modelo (en coordenadas del mundo; se rehace cada fotograma) y su entidad.
+/// A model's shadow mesh (in world coordinates; rebuilt every frame) and its entity.
 #[derive(Component, Clone)]
 pub struct Shadow(pub Handle<Mesh>, pub Entity);
 
-/// Crea la entidad de una sombra vacía y devuelve su malla.
+/// Spawns an empty shadow entity and returns its mesh.
 pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, material: &ShadowMaterial) -> Shadow {
-    // Un triángulo degenerado y oculta: Bevy avisa de cada malla vacía que sube.
+    // A hidden degenerate triangle: Bevy warns about every empty mesh it uploads.
     let mesh = meshes.add(build(vec![[0.0; 3]; 3]));
     let entity = commands
         .spawn((
@@ -104,7 +104,7 @@ pub fn spawn(commands: &mut Commands, meshes: &mut Assets<Mesh>, material: &Shad
             Transform::default(),
             Visibility::Hidden,
             crate::scene::WorldEntity,
-            // La malla cambia de sitio cada fotograma: su caja inicial no vale.
+            // The mesh moves every frame: its initial bounding box is useless.
             NoFrustumCulling,
         ))
         .id();
@@ -119,8 +119,8 @@ fn build(positions: Vec<[f32; 3]>) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; n])
 }
 
-/// Junta los triángulos de sombra de un modelo. `origin` es la posición del modelo en MU y
-/// `rotation` lleva los vértices del modelo (MU, ya posados) a su giro en el mundo.
+/// Collects a model's shadow triangles. `origin` is the model's position in MU and
+/// `rotation` takes the model's vertices (MU, already posed) to its world orientation.
 pub struct Builder<'a> {
     terrain: Option<&'a Terrain>,
     origin: Vec3,
@@ -134,7 +134,7 @@ impl<'a> Builder<'a> {
         Self { terrain, origin, rotation, scale, out: Vec::new() }
     }
 
-    /// Añade los vértices (triángulos sueltos) de una malla posada.
+    /// Adds the vertices (loose triangles) of a posed mesh.
     pub fn add(&mut self, positions: &[[f32; 3]]) {
         if !ENABLED.load(Ordering::Relaxed) {
             return;
@@ -142,7 +142,7 @@ impl<'a> Builder<'a> {
         self.out.reserve(positions.len());
         for p in positions {
             let mut r = self.rotation * (Vec3::from_array(*p) * self.scale);
-            // `CalcShadowPosition` con el eje X (Classic).
+            // `CalcShadowPosition` with the X axis (Classic).
             r.x += r.z * (r.x + SHEAR_X) / (r.z - SHEAR_HEIGHT);
             let (x, y) = (self.origin.x + r.x, self.origin.y + r.y);
             let z = self.terrain.map_or(self.origin.z, |t| t.height_at(x / MU_SCALE, y / MU_SCALE)) + LIFT;
@@ -151,7 +151,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    /// Pone la sombra en su malla y la muestra u oculta (sin nada, se oculta sin tocar la malla).
+    /// Puts the shadow in its mesh and shows or hides it (if empty, hides it without touching the mesh).
     pub fn finish(self, shadow: &Shadow, meshes: &mut Assets<Mesh>, visibility: Option<Mut<Visibility>>) {
         let visible = !self.out.is_empty();
         if visible && let Some(mut m) = meshes.get_mut(&shadow.0) {

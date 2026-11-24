@@ -1,5 +1,5 @@
-//! Dónde aparece un personaje nuevo: una casilla al azar de la zona segura de su mapa de inicio
-//! (la ciudad), sacada del terreno del cliente (`EncTerrainN.att`: zona segura y se puede andar).
+//! Where a new character appears: a random tile in the safe zone of its home map
+//! (the town), taken from the client terrain (`EncTerrainN.att`: safe zone and walkable).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -12,7 +12,7 @@ pub struct Spawns {
     seed: AtomicU64,
 }
 
-/// Mapas de inicio de las clases (Lorencia, Noria, Elbeland).
+/// Home maps of the classes (Lorencia, Noria, Elbeland).
 const HOME_MAPS: [u8; 3] = [0, 3, 51];
 
 impl Spawns {
@@ -36,7 +36,7 @@ impl Spawns {
         Self { tiles, seed: AtomicU64::new(seed) }
     }
 
-    /// Una casilla de la zona segura de `map`.
+    /// A safe-zone tile of `map`.
     pub fn pick(&self, map: u8) -> (u8, u8) {
         let Some(list) = self.tiles.get(&map).filter(|l| !l.is_empty()) else { return (130, 130) };
         // xorshift64.

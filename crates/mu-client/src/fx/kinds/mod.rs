@@ -1,5 +1,5 @@
-//! El código de cada tipo de efecto, traducido de MuMain. Cada archivo es una familia y tiene
-//! `pub fn register(r: &mut Registry)` que registra sus tipos.
+//! Code for each effect kind, translated from MuMain. Each file is one family and has
+//! `pub fn register(r: &mut Registry)`, which registers its kinds.
 
 pub mod particles_1;
 pub mod particles_2;

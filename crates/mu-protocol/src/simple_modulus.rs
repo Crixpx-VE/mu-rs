@@ -1,14 +1,14 @@
-//! Cifrado "SimpleModulus" de los paquetes C3/C4 (variante Season 6).
+//! "SimpleModulus" encryption of C3/C4 packets (Season 6 variant).
 //!
-//! El contenido del paquete (lo que va tras la cabecera) se parte en bloques de 8 bytes.
-//! Cada bloque se cifra en 11 bytes:
-//! - 4 valores de 18 bits (multiplicación modular con las claves) = 9 bytes
-//! - 1 byte con el tamaño real del bloque y 1 byte de checksum
+//! The packet content (what follows the header) is split into 8-byte blocks.
+//! Each block is encrypted into 11 bytes:
+//! - 4 values of 18 bits (modular multiplication with the keys) = 9 bytes
+//! - 1 byte with the block's real size and 1 checksum byte
 //!
-//! El primer byte del contenido cifrado es un contador (0..=255) que sube con cada
-//! paquete; sirve para detectar paquetes repetidos o perdidos.
+//! The first byte of the encrypted content is a counter (0..=255) that increases with each
+//! packet; it detects repeated or lost packets.
 //!
-//! Traducido de `referencias/OpenMU/src/Network/SimpleModulus/*.cs` (licencia MIT).
+//! Translated from `referencias/OpenMU/src/Network/SimpleModulus/*.cs` (MIT license).
 
 const DECRYPTED_BLOCK: usize = 8;
 const ENCRYPTED_BLOCK: usize = 11;
@@ -16,7 +16,7 @@ const BLOCK_SIZE_XOR: u8 = 0x3D;
 const BLOCK_CHECKSUM_XOR: u8 = 0xF8;
 const BITS_PER_VALUE: usize = 18;
 
-/// Claves: módulo, multiplicador (de cifrar o de descifrar) y xor; 4 de cada.
+/// Keys: modulus, multiplier (encrypt or decrypt) and xor; 4 of each.
 #[derive(Debug, Clone, Copy)]
 pub struct Keys {
     pub modulus: [u32; 4],
@@ -25,7 +25,7 @@ pub struct Keys {
 }
 
 impl Keys {
-    /// Desde el formato de 12 números de los archivos `Enc*.dat`/`Dec*.dat`.
+    /// From the 12-number format of the `Enc*.dat`/`Dec*.dat` files.
     pub const fn from_array(k: [u32; 12]) -> Self {
         Self {
             modulus: [k[0], k[1], k[2], k[3]],
@@ -35,22 +35,22 @@ impl Keys {
     }
 }
 
-/// Claves por defecto (las de los clientes oficiales, también en OpenMU).
+/// Default keys (those of the official clients, also in OpenMU).
 pub mod default_keys {
     use super::Keys;
-    /// Servidor → cliente: el servidor cifra con esta...
+    /// Server → client: the server encrypts with this one...
     pub const SERVER_ENCRYPT: Keys = Keys::from_array([
         73326, 109989, 98843, 171058, 13169, 19036, 35482, 29587, 62004, 64409, 35374, 64599,
     ]);
-    /// ...y el cliente descifra con esta.
+    /// ...and the client decrypts with this one.
     pub const CLIENT_DECRYPT: Keys = Keys::from_array([
         73326, 109989, 98843, 171058, 18035, 30340, 24701, 11141, 62004, 64409, 35374, 64599,
     ]);
-    /// Cliente → servidor: el cliente cifra con esta...
+    /// Client → server: the client encrypts with this one...
     pub const CLIENT_ENCRYPT: Keys = Keys::from_array([
         128079, 164742, 70235, 106898, 23489, 11911, 19816, 13647, 48413, 46165, 15171, 37433,
     ]);
-    /// ...y el servidor descifra con esta.
+    /// ...and the server decrypts with this one.
     pub const SERVER_DECRYPT: Keys = Keys::from_array([
         128079, 164742, 70235, 106898, 31544, 2047, 57011, 10183, 48413, 46165, 15171, 37433,
     ]);
@@ -73,7 +73,7 @@ impl std::fmt::Display for DecryptError {
 
 impl std::error::Error for DecryptError {}
 
-/// Un sentido de la conexión: lleva sus claves y su contador.
+/// One direction of the connection: holds its keys and its counter.
 #[derive(Debug, Clone)]
 pub struct SimpleModulus {
     keys: Keys,
@@ -89,15 +89,15 @@ impl SimpleModulus {
         Self { keys, counter: 0 }
     }
 
-    /// Cifra un paquete C3/C4 completo (en claro) y devuelve el paquete cifrado.
-    /// Los C1/C2 se devuelven tal cual.
+    /// Encrypts a complete (plaintext) C3/C4 packet and returns the encrypted packet.
+    /// C1/C2 packets are returned unchanged.
     pub fn encrypt(&mut self, packet: &[u8]) -> Vec<u8> {
         let first = packet[0];
         if first < 0xC3 {
             return packet.to_vec();
         }
         let hl = header_len(first);
-        // El contador va delante del contenido.
+        // The counter goes before the content.
         let mut content = Vec::with_capacity(packet.len() - hl + 1);
         content.push(self.counter);
         content.extend_from_slice(&packet[hl..]);
@@ -118,8 +118,8 @@ impl SimpleModulus {
         out
     }
 
-    /// Descifra un paquete C3/C4 completo. El resultado conserva el tipo C3/C4
-    /// (para saber que venía cifrado), sin el contador.
+    /// Decrypts a complete C3/C4 packet. The result keeps the C3/C4 type
+    /// (to tell it was encrypted), without the counter.
     pub fn decrypt(&mut self, packet: &[u8]) -> Result<Vec<u8>, DecryptError> {
         let first = *packet.first().ok_or(DecryptError::BadLength(0))?;
         if first < 0xC3 {
@@ -218,8 +218,8 @@ fn write_size(out: &mut [u8], hl: usize, total: usize) {
     }
 }
 
-// Cada valor ocupa 18 bits seguidos dentro del bloque: 16 bits "normales" (en orden
-// big-endian dentro del flujo de bits) y 2 bits extra con lo que sobra del módulo.
+// Each value takes 18 consecutive bits in the block: 16 "normal" bits (big-endian
+// within the bit stream) and 2 extra bits with the modulus overflow.
 
 fn bit_offset(i: usize) -> u32 {
     (i * BITS_PER_VALUE % 8) as u32
@@ -262,8 +262,8 @@ mod tests {
     use super::*;
     use crate::xor::{XOR32_KEY, xor32_decrypt, xor32_encrypt};
 
-    /// Paquete "ping" real capturado de un cliente oficial (de los tests de OpenMU).
-    /// El cliente aplica Xor32 y luego SimpleModulus; el servidor deshace en orden inverso.
+    /// Real "ping" packet captured from an official client (from the OpenMU tests).
+    /// The client applies Xor32 and then SimpleModulus; the server undoes them in reverse order.
     #[test]
     fn descifra_ping_real_del_cliente() {
         let encrypted = [
@@ -289,11 +289,11 @@ mod tests {
         xor32_encrypt(&mut xored, &XOR32_KEY);
         let encrypted = SimpleModulus::new(CLIENT_ENCRYPT).encrypt(&xored);
 
-        // Cabecera y primer bloque (8 bytes llenos) idénticos al cliente oficial.
+        // Header and first block (8 full bytes) identical to the official client.
         assert_eq!(encrypted[..2 + 11], official[..2 + 11]);
-        // El último bloque solo lleva 3 bytes útiles: el cliente oficial rellena el resto
-        // con lo que hubiera en memoria y nosotros con ceros. Ambos son válidos:
-        // el servidor descifra el nuestro al mismo paquete.
+        // The last block only carries 3 useful bytes: the official client pads the rest
+        // with whatever was in memory and we pad with zeros. Both are valid:
+        // the server decrypts ours to the same packet.
         let mut back = SimpleModulus::new(SERVER_DECRYPT).decrypt(&encrypted).unwrap();
         xor32_decrypt(&mut back, &XOR32_KEY);
         assert_eq!(back, plain);
@@ -304,7 +304,7 @@ mod tests {
         for (enc, dec) in [(CLIENT_ENCRYPT, SERVER_DECRYPT), (SERVER_ENCRYPT, CLIENT_DECRYPT)] {
             let mut a = SimpleModulus::new(enc);
             let mut b = SimpleModulus::new(dec);
-            // 300 paquetes: el contador da la vuelta (255 → 0).
+            // 300 packets: the counter wraps around (255 → 0).
             for n in 0..300usize {
                 let len = 3 + n % 40;
                 let mut p: Vec<u8> = (0..len).map(|i| (i * 7 + n) as u8).collect();
@@ -313,7 +313,7 @@ mod tests {
                 let c = a.encrypt(&p);
                 assert_eq!(b.decrypt(&c).unwrap(), p, "paquete {n}");
             }
-            // C4 grande.
+            // Large C4.
             let mut big = vec![0xC4, 0x01, 0x2C];
             big.extend((0..297).map(|i| i as u8));
             assert_eq!(b.decrypt(&a.encrypt(&big)).unwrap(), big);
@@ -327,9 +327,9 @@ mod tests {
         let mut b = SimpleModulus::new(SERVER_DECRYPT);
         let c = a.encrypt(&p);
         assert!(b.decrypt(&c).is_ok());
-        // Repetir el mismo paquete (ataque de "replay"): el contador no cuadra.
+        // Repeating the same packet (replay attack): the counter does not match.
         assert!(matches!(b.decrypt(&c), Err(DecryptError::Counter { .. })));
-        // Alterar un byte.
+        // Tamper with one byte.
         let mut c2 = a.encrypt(&p);
         c2[5] ^= 0x40;
         assert!(b.decrypt(&c2).is_err());
