@@ -32,6 +32,7 @@ pub mod effects_bitmaps1;
 pub mod effects_bitmaps2;
 pub mod effects_monk;
 pub mod effects_monsters1;
+pub mod effects_monsters2;
 
 use super::core::Registry;
 
@@ -65,4 +66,5 @@ pub fn register_all(r: &mut Registry) {
     effects_bitmaps2::register(r);
     effects_monk::register(r);
     effects_monsters1::register(r);
+    effects_monsters2::register(r);
 }
