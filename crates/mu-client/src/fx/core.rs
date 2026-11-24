@@ -960,6 +960,8 @@ pub struct Registry {
     pub skills: std::collections::HashMap<i32, SkillKind>,
     /// Map objects by (`WorldActive`, object type).
     pub objects: std::collections::HashMap<(i32, i32), ObjectStep>,
+    /// Kinds registered twice (the later one wins): ('p'/'j'/'e', type). Checked by the tests.
+    pub duplicates: Vec<(char, i32)>,
 }
 
 impl Registry {
@@ -971,13 +973,19 @@ impl Registry {
         self.skills.insert(skill, kind);
     }
     pub fn particle(&mut self, ty: i32, kind: ParticleKind) {
-        self.particles.insert(ty, kind);
+        if self.particles.insert(ty, kind).is_some() {
+            self.duplicates.push(('p', ty));
+        }
     }
     pub fn joint(&mut self, ty: i32, kind: JointKind) {
-        self.joints.insert(ty, kind);
+        if self.joints.insert(ty, kind).is_some() {
+            self.duplicates.push(('j', ty));
+        }
     }
     pub fn effect(&mut self, ty: i32, kind: EffectKind) {
-        self.effects.insert(ty, kind);
+        if self.effects.insert(ty, kind).is_some() {
+            self.duplicates.push(('e', ty));
+        }
     }
 }
 

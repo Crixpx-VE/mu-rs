@@ -1,5 +1,20 @@
-//! Code for each effect kind, translated from MuMain. Each file is one family and has
+//! Code for each effect kind, translated from MuMain and Main 5.2. Each file is one family and has
 //! `pub fn register(r: &mut Registry)`, which registers its kinds.
+//!
+//! Coverage (Main 5.2 with the Rage Fighter code, as MuMain): every `case` type of
+//! `CreateParticle`/`MoveParticles` (98), `CreateJoint`/`MoveJoint` (31) and
+//! `CreateEffect`/`MoveEffect` (447) is registered; `fx::smoke_tests` runs them all.
+//! What remains is inside the kinds, marked `TODO(original)`, and waits for engine systems:
+//! - client-side hits and damage (`CheckClientArrow`, `AttackCharacterRange`), network serials;
+//! - owner state the snapshots lack or cannot write (`Actor` buffs, target index, light, alpha,
+//!   velocity, `Visible`, bone `Dummy` flags), map objects or joints as effect owners;
+//! - bones and mesh vertices of an effect's own model (sparks on a sword's bones, `RenderMeshEffect`);
+//! - `ModelDraw` render modes: chrome/metal, `RENDER_DARK`, texture override, per-mesh light;
+//! - object blurs (`CreateObjectBlur`), water waves (`AddWaterWave`), `StopBuffer`, Castle Siege
+//!   and Kanturu event state, action lengths for `PlayAnimation`;
+//! - `.bmd` files the generated model table does not list (loaded in loops in `MapManager.cpp`,
+//!   `Event.cpp`, `ZzzOpenData.cpp`): those effects run but draw no model yet;
+//! - `MODEL_FENRIR_THUNDER` subtypes 0 and 3 (`objects_kanturu.rs` has only 1 and 2).
 
 pub mod common;
 pub mod particles_1;

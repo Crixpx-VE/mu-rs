@@ -79,6 +79,11 @@ fn run(world: &mut FxWorld, registry: &Registry, actors: &Actors, world_active: 
 }
 
 #[test]
+fn no_kind_registered_twice() {
+    assert_eq!(registry().duplicates, vec![], "kinds registered by two files (the later one wins)");
+}
+
+#[test]
 fn every_effect_kind_runs() {
     let registry = registry();
     let (actors, hero) = actors();

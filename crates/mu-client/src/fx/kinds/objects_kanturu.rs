@@ -20,9 +20,9 @@
 //! while it stays visible). As in Heaven (`objects_2.rs`): an [`FX_MAP_ANCHOR`] marker acts as
 //! `o->Target` and they are recreated when the object moves again after a gap.
 //!
-//! Also here are the effects only these maps use, which the engine did not have: `MODEL_GHOST`,
-//! `MODEL_FENRIR_THUNDER` (subtypes 1 and 2) and `BITMAP_MAGIC` (subtypes 2, 3 and 7); they are only
-//! registered if nobody else did. The butterflies (`MODEL_BUTTERFLY01`) are those of
+//! Also here is `MODEL_FENRIR_THUNDER` (subtypes 1 and 2), which only these maps use; it is only
+//! registered if nobody else did. `MODEL_GHOST` is in `effects_wizard.rs` and the `BITMAP_MAGIC`
+//! effect in `effects_bitmaps1.rs`. The butterflies (`MODEL_BUTTERFLY01`) are those of
 //! `objects_kalima.rs` and the `BITMAP_TWINTAIL_WATER` water the one of `particles_2.rs`.
 //!
 //! Sounds: those of Kanturu 1 and 2 (`SOUND_KANTURU_1ST_*`, `SOUND_KANTURU_2ND_*`) are not in
@@ -76,9 +76,7 @@ pub fn register(r: &mut Registry) {
     let mut effect = |ty: i32, kind: EffectKind| {
         r.effects.entry(ty).or_insert(kind);
     };
-    effect(MODEL_GHOST, EffectKind { create: Some(ghost_create), step: Some(ghost_step), draw: None });
     effect(MODEL_FENRIR_THUNDER, EffectKind { create: Some(fenrir_thunder_create), step: Some(fenrir_thunder_step), draw: None });
-    effect(BITMAP_MAGIC, EffectKind { create: Some(magic_create), step: Some(magic_step), draw: None });
 }
 
 // --- Common --------------------------------------------------------------------------------------
@@ -723,52 +721,6 @@ fn move_tail(e: &mut Effect) {
     e.position += rotate(e.angle, e.direction);
 }
 
-// --- MODEL_GHOST ------------------------------------------------------------------------------------
-
-/// `CreateEffect` (`ZzzEffect.cpp:687-704`). Main 5.2 loads no model for `MODEL_GHOST`
-/// (`RenderObject` draws nothing): only its `BITMAP_LIGHT` is visible.
-fn ghost_create(e: &mut Effect, ctx: &mut Ctx) {
-    e.kind = 0;
-    e.blend_mesh_light = 1.0;
-    e.velocity = 1.0;
-    e.life_time = 1000.0;
-    e.gravity = 1.0;
-    e.distance = 1.0;
-    e.position.z += rf(ctx, 200) - 100.0;
-    e.position.y += rf(ctx, 200) - 100.0;
-    e.position.x += rf(ctx, 200) - 100.0;
-    e.angle.z += rf(ctx, 360);
-    e.direction = Vec3::new(0.0, rf(ctx, 8) * 0.1 - 5.0, 0.0);
-    e.scale += rf(ctx, 5) / 40.0;
-    e.start_position = e.position;
-    e.light = Vec3::new(0.01, 0.01, 0.03);
-    e.visible = false;
-}
-
-/// `MoveEffect` (`ZzzEffect.cpp:7357-7386`).
-fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
-    let _ = effect_luminosity(e, ctx);
-    if ctx.rand() % 40 == 1 {
-        e.velocity = -e.velocity;
-        e.gravity = e.velocity * (rf(ctx, 3) + 5.0);
-    }
-    if ctx.rand() % 40 == 1 {
-        e.velocity = -e.velocity;
-        e.distance = e.velocity * (rf(ctx, 3) + 1.0);
-    }
-    if (e.position - e.start_position).length() >= 500.0 && e.kind == 0 {
-        e.life_time = 50.0;
-        e.kind = 1;
-    }
-    let wave = ((ctx.world_time as i32 % 10000) as f32 * 0.0001).sin();
-    e.angle.z += wave * e.gravity;
-    e.angle.x += wave * e.distance / 3.0;
-    let l = e.blend_mesh_light;
-    e.light = Vec3::new(l / 10.0, l / 10.0, l / 4.0);
-    ctx.create_particle(BITMAP_LIGHT, e.position, e.angle, e.light, 9, e.scale, None);
-    move_tail(e);
-}
-
 // --- MODEL_FENRIR_THUNDER ---------------------------------------------------------------------------
 
 /// `m_iAnimation` (0 = appearing, 1 = fading out).
@@ -819,53 +771,6 @@ fn fenrir_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
         e.angle += Vec3::splat(0.15);
-    }
-    move_tail(e);
-}
-
-// --- BITMAP_MAGIC (effect) --------------------------------------------------------------------------
-
-/// `CreateEffect` (`ZzzEffect.cpp:1296-1339`).
-fn magic_create(e: &mut Effect, _ctx: &mut Ctx) {
-    let scale = e.scale;
-    e.life_time = 20.0;
-    e.scale = 0.5;
-    match e.sub_type {
-        0 => e.life_time = 15.0,
-        8 => {
-            e.life_time = 30.0;
-            e.scale = 1.0;
-        }
-        9 => {
-            e.life_time = 40.0;
-            e.scale = 2.4;
-            e.head_angle = Vec3::ZERO;
-        }
-        10 => {
-            e.life_time = 44.0;
-            e.scale = 12.0;
-            e.alpha = 0.0;
-        }
-        11 => {
-            e.life_time = 24.0;
-            e.scale = 0.8;
-            e.head_angle = Vec3::ZERO;
-        }
-        // `Scale · 0.1` with the `Scale` argument (0.9 if not passed).
-        12 => e.scale = scale * 0.1,
-        _ => {}
-    }
-    // Subtypes 2, 3, 4 and 7 are not drawn (`RenderEffects`, `ZzzEffect.cpp:19274-19332`).
-    e.visible = false;
-}
-
-/// `MoveEffect` (`ZzzEffect.cpp:8244-8266`): subtypes 2, 3 and 7 (rising flares).
-/// TODO(original): the other subtypes (and the ground marks of 1 and 8-12) are not used by anything yet.
-fn magic_step(e: &mut Effect, ctx: &mut Ctx) {
-    let _ = effect_luminosity(e, ctx);
-    if matches!(e.sub_type, 2 | 3 | 7) && e.life_time > 5.0 && e.life_time < 10.0 {
-        let sub = if e.sub_type == 3 { 10 } else { 0 };
-        ctx.create_particle(BITMAP_FLARE, e.position, e.angle, e.light, sub, 0.19, Some(Target::Effect(e.id)));
     }
     move_tail(e);
 }

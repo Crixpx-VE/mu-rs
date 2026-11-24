@@ -268,7 +268,7 @@ pub fn set_earthquake_at(ctx: &mut Ctx, pos: Vec3, magnitude: f32) {
 }
 
 /// The owner (or any target) if it is a character, from a draw function.
-pub fn owner_actor<'a>(owner: Option<Target>, actors: &'a std::collections::HashMap<Entity, Actor>) -> Option<&'a Actor> {
+pub fn owner_actor(owner: Option<Target>, actors: &std::collections::HashMap<Entity, Actor>) -> Option<&Actor> {
     match owner? {
         Target::Actor(e) => actors.get(&e),
         Target::Effect(_) => None,
