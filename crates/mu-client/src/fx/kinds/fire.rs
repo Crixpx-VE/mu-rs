@@ -1,15 +1,15 @@
-//! `MODEL_FIRE` (`Skill/Fire01.bmd`): el meteorito de la invasión de dragones (subtipo 3).
+//! `MODEL_FIRE` (`Skill/Fire01.bmd`): the dragon invasion meteor (subtype 3).
 //!
-//! Traducido de `ZzzEffect.cpp`: `CreateEffect` (≈2075-2175), `MoveEffect` (≈6898-7148) y el
-//! segundo movimiento del subtipo 3 (≈7726). `GOBoid.cpp` (≈1493) lo crea 1 de cada 40 ticks
-//! durante la invasión a 300 por encima del héroe.
+//! Ported from `ZzzEffect.cpp`: `CreateEffect` (≈2075-2175), `MoveEffect` (≈6898-7148) and the
+//! second move of subtype 3 (≈7726). `GOBoid.cpp` (≈1493) creates it 1 in 40 ticks during the
+//! invasion, 300 above the hero.
 //!
-//! El subtipo 3 no dibuja la roca: oculta la malla 0 (`HiddenMesh = 0`) y la malla de fuego
-//! (`BlendMesh = 1`) queda con `BlendMeshLight = 0`. Lo que se ve es una bola de `BITMAP_FIRE`
-//! subtipo 8 con destellos `BITMAP_SHINY + 1` que gira en espiral (`GetMagicScrew`), y una luz
-//! roja en el suelo. Avanza 12 hacia -Y en horizontal y se apaga a los 80 movimientos.
+//! Subtype 3 does not draw the rock: it hides mesh 0 (`HiddenMesh = 0`) and the fire mesh
+//! (`BlendMesh = 1`) stays at `BlendMeshLight = 0`. What shows is a `BITMAP_FIRE` subtype 8 ball
+//! with `BITMAP_SHINY + 1` flares spiralling (`GetMagicScrew`), and a red light on the ground.
+//! It moves 12 towards -Y horizontally and dies after 80 moves.
 //!
-//! Solo está el subtipo 3; los demás (habilidades de otras clases y monstruos) quedan por traducir.
+//! Only subtype 3 is ported; the rest (other classes' and monsters' skills) are still to do.
 
 use bevy::math::Vec3;
 
@@ -28,12 +28,12 @@ fn fire_create(e: &mut Effect, _ctx: &mut Ctx) {
             e.scale = 0.3;
             e.direction = Vec3::new(0.0, -12.0, 0.0);
         }
-        // TODO(original): subtipos 0-2 y 4-9.
+        // TODO(original): subtypes 0-2 and 4-9.
         _ => e.life_time = 0.0,
     }
 }
 
-/// Luminosity del principio de `MoveEffect`.
+/// Luminosity from the start of `MoveEffect`.
 fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
     if e.life_time < 5.0 {
@@ -42,16 +42,16 @@ fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     l
 }
 
-/// Un `MoveEffect` del subtipo 3 + la cola común (`MoveParticle(o, true)`).
+/// One subtype 3 `MoveEffect` + the common tail (`MoveParticle(o, true)`).
 fn fire_move(e: &mut Effect, ctx: &mut Ctx) {
     let lum = luminosity(e, ctx);
     e.hidden_mesh = 0;
     e.blend_mesh_light = 0.0;
-    // Mallas ocultas o negras: no hay nada que dibujar del modelo.
+    // Meshes hidden or black: nothing of the model to draw.
     e.visible = false;
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(lum, lum * 0.1, 0.0), 2.0);
 
-    // `GetMagicScrew(iIndex * 5371)`: el original usa el hueco del efecto; aquí su número.
+    // `GetMagicScrew(iIndex * 5371)`: the original uses the effect's slot; here its id.
     let slot = (e.id % 300) as i32;
     let pos = e.position + magic_screw(slot * 5371, 1.0, ctx.world_time) * 50.0;
     ctx.create_particle(BITMAP_FIRE, pos, Vec3::ZERO, Vec3::ONE, 8, e.scale * 2.5, None);
@@ -62,8 +62,8 @@ fn fire_move(e: &mut Effect, ctx: &mut Ctx) {
     e.position += rotate(e.angle, e.direction);
 }
 
-/// El subtipo 3, si sigue vivo, se vuelve a mover en el mismo tick 1 de cada 2 veces
-/// (cada movimiento resta 1 de vida; la última resta la hace el núcleo).
+/// Subtype 3, while alive, moves again in the same tick 1 in 2 times
+/// (each move subtracts 1 life; the core does the last subtraction).
 fn fire_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type != 3 {
         return;

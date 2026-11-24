@@ -1,4 +1,4 @@
-//! Lector binario little-endian sencillo para los formatos de MU.
+//! Simple little-endian binary reader for MU formats.
 
 use crate::{Error, Result};
 
@@ -53,7 +53,7 @@ impl<'a> Reader<'a> {
         Ok([self.f32()?, self.f32()?, self.f32()?])
     }
 
-    /// Cadena de tamaño fijo terminada en `\0`.
+    /// Fixed-size `\0`-terminated string.
     pub fn string(&mut self, len: usize) -> Result<String> {
         let b = self.bytes(len)?;
         let end = b.iter().position(|&c| c == 0).unwrap_or(len);

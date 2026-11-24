@@ -1,31 +1,31 @@
-//! Objetos del mapa con efectos de Raklion (`WD_57ICECITY`, `WD_58ICECITY_BOSS`), Vulcanus
-//! (`WD_63PK_FIELD`), Barracks y Refuge de Balgass (`WD_41CHANGEUP3RD_1ST`, `WD_42CHANGEUP3RD_2ND`),
-//! Karutan 1 y 2 (`WD_80KARUTAN1`, `WD_81KARUTAN2`) y Chaos Castle (`WD_18CHAOS_CASTLE..`).
+//! Map objects with effects for Raklion (`WD_57ICECITY`, `WD_58ICECITY_BOSS`), Vulcanus
+//! (`WD_63PK_FIELD`), Balgass Barracks and Refuge (`WD_41CHANGEUP3RD_1ST`, `WD_42CHANGEUP3RD_2ND`),
+//! Karutan 1 and 2 (`WD_80KARUTAN1`, `WD_81KARUTAN2`) and Chaos Castle (`WD_18CHAOS_CASTLE..`).
 //!
-//! Traducido de `GM_Raklion.cpp`, `GM_PK_Field.cpp`, `GM3rdChangeUp.cpp`, `GMKarutan1.cpp` y
-//! `CSChaosCastle.cpp` (Main 5.2): `CreateObject`, `MoveObject` (con `PlayObjectSound` /
-//! `PlayEffectSound`, que van antes), lo que `RenderObjectMesh` crea (partículas, sprites, cambios de
-//! acción) y `RenderObjectVisual` (que empieza siempre con el `rand()` de `Luminosity`,
-//! `ZzzObject.cpp:2775`). El dibujo de las mallas está en `mu_data::objects::rules_raklion`.
+//! Ported from `GM_Raklion.cpp`, `GM_PK_Field.cpp`, `GM3rdChangeUp.cpp`, `GMKarutan1.cpp` and
+//! `CSChaosCastle.cpp` (Main 5.2): `CreateObject`, `MoveObject` (with `PlayObjectSound` /
+//! `PlayEffectSound`, which run first), what `RenderObjectMesh` creates (particles, sprites, action
+//! changes) and `RenderObjectVisual` (which always starts with the `Luminosity` `rand()`,
+//! `ZzzObject.cpp:2775`). Mesh drawing lives in `mu_data::objects::rules_raklion`.
 //!
-//! Animación: los objetos con `ModelRules::fx_animation` (pingüinos y orcas de Raklion, insecto 66
-//! de Karutan, la luz 84 de Refuge) llevan aquí su `o->AnimationFrame` / `o->CurrentAction` con
-//! `BMD::PlayAnimation` (`ZzzBMD.cpp:408-479`) y `SetAction` (`ZzzObject.cpp:444-459`) y lo dejan en
-//! `user[`[`fx_anim`]`::*]` para que `objects.rs` dibuje lo mismo.
+//! Animation: objects with `ModelRules::fx_animation` (Raklion penguins and orcas, Karutan insect
+//! 66, Refuge light 84) advance their `o->AnimationFrame` / `o->CurrentAction` here with
+//! `BMD::PlayAnimation` (`ZzzBMD.cpp:408-479`) and `SetAction` (`ZzzObject.cpp:444-459`) and store it
+//! in `user[`[`fx_anim`]`::*]` so `objects.rs` draws the same thing.
 //!
-//! También van aquí los efectos que solo crean estos objetos: `MODEL_WARP4/5/6` (el portal de Raklion,
-//! `ZzzEffect.cpp:668-686`, `:7334-7360`, y su dibujo en `CGM_Raklion::RenderObjectMesh`,
-//! GM_Raklion.cpp:1393-1419) y `BITMAP_FIRE_RED` (la columna de fuego de Refuge, `ZzzEffect.cpp:1286`,
+//! Also here are the effects only these objects create: `MODEL_WARP4/5/6` (the Raklion portal,
+//! `ZzzEffect.cpp:668-686`, `:7334-7360`, drawn in `CGM_Raklion::RenderObjectMesh`,
+//! GM_Raklion.cpp:1393-1419) and `BITMAP_FIRE_RED` (the Refuge fire pillar, `ZzzEffect.cpp:1286`,
 //! `:8918-8923`).
 //!
-//! Sin traducir (dependen de eventos del servidor; se deja el estado inicial):
-//! - Raklion: `MoveEffect` / `CreateMapEffect` (hielo que cae y temblor al llamar al jefe,
-//!   GM_Raklion.cpp:2801-2929) y `m_bCanGoBossMap` (empieza en `true`: el portal se ve y la puerta 82
-//!   se anima). `BITMAP_GATHERING` del 57 está comentado en el original (GM_Raklion.cpp:1358).
-//! - Chaos Castle: el derrumbe por niveles (`g_byCurrCastleLevel`, `MoveChaosCastleAllObject`,
-//!   `RenderTerrainVisual`) y el parpadeo de los objetos al caer el héroe (`m_bActionStart`).
-//!   `InChaosCastle()` sin argumento siempre es falso en Main 5.2 (MapManager.cpp:1649): aquí va con
-//!   `WorldActive`, como MuMain y el cliente de verdad (igual que `leaves.rs`).
+//! Not ported (they depend on server events; the initial state is kept):
+//! - Raklion: `MoveEffect` / `CreateMapEffect` (falling ice and shake when the boss is summoned,
+//!   GM_Raklion.cpp:2801-2929) and `m_bCanGoBossMap` (starts `true`: the portal shows and door 82
+//!   animates). The `BITMAP_GATHERING` of 57 is commented out in the original (GM_Raklion.cpp:1358).
+//! - Chaos Castle: the level-by-level collapse (`g_byCurrCastleLevel`, `MoveChaosCastleAllObject`,
+//!   `RenderTerrainVisual`) and the objects blinking when the hero falls (`m_bActionStart`).
+//!   `InChaosCastle()` without an argument is always false in Main 5.2 (MapManager.cpp:1649): here it
+//!   uses `WorldActive`, like MuMain and the real client (same as `leaves.rs`).
 
 use std::sync::Mutex;
 
@@ -46,7 +46,7 @@ const WD_63PK_FIELD: i32 = 63;
 const WD_80KARUTAN1: i32 = 80;
 const WD_81KARUTAN2: i32 = 81;
 
-/// `BodyLight` (0.5, 0.6, 1) por `BlendMeshLight` 0.8 de `MODEL_WARP4/5/6` (GM_Raklion.cpp:1400-1403).
+/// `BodyLight` (0.5, 0.6, 1) times `BlendMeshLight` 0.8 of `MODEL_WARP4/5/6` (GM_Raklion.cpp:1400-1403).
 const WARP4_LIGHT: Vec3 = Vec3::new(0.5, 0.6, 1.0);
 const WARP4_BLEND_LIGHT: f32 = 0.8;
 
@@ -73,7 +73,7 @@ pub fn register(r: &mut Registry) {
         r.object(WD_63PK_FIELD, ty, vulcanus);
     }
 
-    // --- Barracks y Refuge ---
+    // --- Barracks and Refuge ---
     for world in [WD_41CHANGEUP3RD_1ST, WD_42CHANGEUP3RD_2ND] {
         for ty in [2, 3, 5, 6, 58, 59, 60, 74, 75, 79, 84, 85, 88, 89, 90, 92] {
             r.object(world, ty, balgass);
@@ -88,7 +88,7 @@ pub fn register(r: &mut Registry) {
         }
     }
 
-    // --- Chaos Castle: todos los tipos (para `MoveChaosCastleObjectSetting`, una vez por tick) ---
+    // --- Chaos Castle: all types (for `MoveChaosCastleObjectSetting`, once per tick) ---
     for world in WD_18CHAOS_CASTLE..=WD_18CHAOS_CASTLE_END {
         for ty in 0..=35 {
             r.object(world, ty, chaos_castle);
@@ -96,37 +96,37 @@ pub fn register(r: &mut Registry) {
     }
 }
 
-// --- Común -------------------------------------------------------------------------------------------
+// --- Common ------------------------------------------------------------------------------------------
 
-/// `rand() % n` como `f32`.
+/// `rand() % n` as `f32`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// El `rand()` de `Luminosity` al principio de `RenderObjectVisual` (`ZzzObject.cpp:2775`).
+/// The `Luminosity` `rand()` at the start of `RenderObjectVisual` (`ZzzObject.cpp:2775`).
 fn visual_luminosity(ctx: &mut Ctx) {
     let _ = ctx.rand();
 }
 
-/// Pide un sonido de un búfer de un canal: varios objetos en el mismo tick son una sola petición.
+/// Requests a sound from a single-channel buffer: several objects in the same tick are one request.
 fn play_once(ctx: &mut Ctx, id: &'static str) {
     if !ctx.sounds.contains(&id) {
         ctx.play_sound(id);
     }
 }
 
-/// `(TerrainWall[héroe] & TW_SAFEZONE) == TW_SAFEZONE`: `Hero->SafeZone`.
+/// `(TerrainWall[hero] & TW_SAFEZONE) == TW_SAFEZONE`: `Hero->SafeZone`.
 fn hero_in_safe_zone(ctx: &Ctx) -> bool {
     ctx.hero_actor()
         .map(|h| h.position)
         .is_some_and(|p| ctx.terrain_attribute(p.x, p.y) & mu_data::terrain::attr::SAFE_ZONE != 0)
 }
 
-/// Nubes que siguen al objeto (`CreateParticle(BITMAP_CLOUD, ..., o)` mientras `HiddenMesh != -2`,
-/// y `HiddenMesh = -2`). Las nubes de los subtipos 0-5 y 7 viven mientras su objeto se ve y al morir
-/// le ponen `HiddenMesh = 0` para que las vuelva a crear (`ZzzEffectParticle.cpp`). Como las nubes de
-/// Heaven (`objects_2.rs`): las sigue una marca ([`FX_MAP_ANCHOR`]) que muere cuando el objeto deja de
-/// moverse, y se vuelven a crear cuando vuelve a moverse tras un hueco (`user[3]`: último tick).
+/// Clouds following the object (`CreateParticle(BITMAP_CLOUD, ..., o)` while `HiddenMesh != -2`,
+/// then `HiddenMesh = -2`). Clouds of subtypes 0-5 and 7 live while their object is visible and on
+/// death set its `HiddenMesh = 0` so it recreates them (`ZzzEffectParticle.cpp`). Like the Heaven
+/// clouds (`objects_2.rs`): they follow an anchor ([`FX_MAP_ANCHOR`]) that dies when the object stops
+/// moving, and are recreated when it moves again after a gap (`user[3]`: last tick).
 fn object_clouds(o: &mut MapObject, ctx: &mut Ctx, light: Vec3, sub_types: &[i32], count: usize) {
     let gap = ctx.world_time - o.user[3];
     o.user[3] = ctx.world_time;
@@ -141,7 +141,7 @@ fn object_clouds(o: &mut MapObject, ctx: &mut Ctx, light: Vec3, sub_types: &[i32
     o.hidden_mesh = -2;
 }
 
-/// Fuego de tres tipos al azar con su resplandor rojo (Vulcanus 6, Karutan 113).
+/// Fire of three random kinds with its red glow (Vulcanus 6, Karutan 113).
 fn fire_point(o: &MapObject, ctx: &mut Ctx) {
     ctx.create_sprite(BITMAP_LIGHT, o.position, 2.0 * o.scale, Vec3::new(1.0, 0.2, 0.0), 0.0, 0);
     let light = Vec3::ONE;
@@ -152,32 +152,32 @@ fn fire_point(o: &MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Chispas que saltan (Vulcanus 4, Balgass 90).
+/// Jumping sparks (Vulcanus 4, Balgass 90).
 fn sparks(o: &MapObject, ctx: &mut Ctx) {
     let light = Vec3::new(1.0, 0.4, 0.4);
     if ctx.rand() % 3 == 0 {
         let ax = (ctx.rand() % 40 + 120) as f32;
         let az = rf(ctx, 30);
         let angle = Vec3::new(ax, 0.0, az) + o.angle;
-        // `o` como `Target`: el subtipo 4 no lo usa.
+        // `o` as `Target`: subtype 4 does not use it.
         ctx.create_joint(BITMAP_JOINT_SPARK, o.position, o.position, angle, 4, None, o.scale);
         ctx.create_particle(BITMAP_SPARK, o.position, angle, light, 9, o.scale, None);
     }
 }
 
-/// Humo rojo que sale del suelo (Vulcanus 3, Balgass 89).
+/// Red smoke rising from the ground (Vulcanus 3, Balgass 89).
 fn red_mist(o: &MapObject, ctx: &mut Ctx) {
     if ctx.rand() % 4 == 0 {
         let red = rf(ctx, 3) * 0.01 + 0.015;
-        // `o` como dueño: el subtipo 11 no lo usa.
+        // `o` as owner: subtype 11 does not use it.
         ctx.create_particle(BITMAP_CLOUD, o.position, o.angle, Vec3::new(red, 0.0, 0.0), 11, o.scale, None);
     }
 }
 
-// --- Animación de los objetos con `fx_animation` -----------------------------------------------------
+// --- Animation of objects with `fx_animation` --------------------------------------------------------
 
-/// `BMD::PlayAnimation` (`ZzzBMD.cpp:408-479`) con `Loop = false`, que es como quedan todas las
-/// acciones al cargar (`ZzzBMD.cpp:2587`): `keys` fotogramas, `lock` = `LockPositions`.
+/// `BMD::PlayAnimation` (`ZzzBMD.cpp:408-479`) with `Loop = false`, which is how every action is
+/// left after loading (`ZzzBMD.cpp:2587`): `keys` frames, `lock` = `LockPositions`.
 fn play_animation(frame: f32, speed: f32, keys: usize, lock: bool) -> f32 {
     if keys <= 1 {
         return frame;
@@ -194,20 +194,20 @@ fn play_animation(frame: f32, speed: f32, keys: usize, lock: bool) -> f32 {
     f
 }
 
-/// Fotogramas y `LockPositions` de la acción `action` del modelo del objeto.
+/// Frame count and `LockPositions` of action `action` of the object's model.
 fn action_keys(o: &MapObject, action: usize) -> Option<(usize, bool)> {
     let a = o.model.as_ref()?.actions.get(action)?;
     Some((a.frames, a.lock_positions.is_some()))
 }
 
-/// Estado de la animación propia del objeto: (fotograma, acción).
+/// The object's own animation state: (frame, action).
 fn anim_state(o: &MapObject) -> (f32, usize) {
     (o.user[fx_anim::FRAME], o.user[fx_anim::ACTION].max(0.0) as usize)
 }
 
-/// `MoveObject`: `PlayAnimation(&o->AnimationFrame, ..., fSpeed)` (`ZzzObject.cpp:3830`), que no hace
-/// nada si la acción no existe en el modelo; luego los huesos de esta pose (`Calc_RenderObject`:
-/// `BMD::Animation` usa la acción 0 si la pedida no existe).
+/// `MoveObject`: `PlayAnimation(&o->AnimationFrame, ..., fSpeed)` (`ZzzObject.cpp:3830`), which does
+/// nothing if the action does not exist in the model; then this pose's bones (`Calc_RenderObject`:
+/// `BMD::Animation` uses action 0 if the requested one does not exist).
 fn anim_advance(o: &mut MapObject, speed: f32) {
     let (frame, action) = anim_state(o);
     o.user[fx_anim::PREV_FRAME] = frame;
@@ -221,7 +221,7 @@ fn anim_advance(o: &mut MapObject, speed: f32) {
     o.bones = o.model.as_ref().map(|m| std::sync::Arc::new(m.bone_matrices_at(pose_action, frame)));
 }
 
-/// `SetAction(o, Action)` (`ZzzObject.cpp:444-459`): si la acción existe y es otra, empieza en 0.
+/// `SetAction(o, Action)` (`ZzzObject.cpp:444-459`): if the action exists and differs, start at frame 0.
 fn set_action(o: &mut MapObject, action: usize) {
     let (_, current) = anim_state(o);
     if action_keys(o, action).is_none() || current == action {
@@ -232,13 +232,13 @@ fn set_action(o: &mut MapObject, action: usize) {
     o.animation_frame = 0.0;
 }
 
-/// `o->CurrentAction = action` a secas (las orcas): no toca el fotograma.
+/// Plain `o->CurrentAction = action` (the orcas): leaves the frame alone.
 fn put_action(o: &mut MapObject, action: usize) {
     o.user[fx_anim::ACTION] = action as f32;
 }
 
-/// `o->AnimationFrame` dentro de la acción 0 de los objetos animados por grupos (`velocity · ticks`,
-/// como lo deja `PlayAnimation`, que da la vuelta).
+/// `o->AnimationFrame` within action 0 for group-animated objects (`velocity · ticks`, wrapped as
+/// `PlayAnimation` leaves it).
 fn group_frame(o: &MapObject) -> f32 {
     let Some((keys, lock)) = action_keys(o, 0) else { return 0.0 };
     let keys = if lock { keys.saturating_sub(1) } else { keys };
@@ -250,7 +250,7 @@ fn group_frame(o: &MapObject) -> f32 {
 
 // --- Raklion (`GM_Raklion.cpp`) -----------------------------------------------------------------------
 
-/// Pingüinos 16 y 17 (`RenderObjectMesh` 1120-1164) con la `PlaySpeed` de cada acción
+/// Penguins 16 and 17 (`RenderObjectMesh` 1120-1164) with each action's `PlaySpeed`
 /// (`MapManager.cpp:1190-1195`: 0.8, 0.8, 1, 1; `ZzzObject.cpp:3819-3822`).
 fn raklion_penguin(o: &mut MapObject, ctx: &mut Ctx) {
     let (_, action) = anim_state(o);
@@ -277,9 +277,9 @@ fn raklion_penguin(o: &mut MapObject, ctx: &mut Ctx) {
     visual_luminosity(ctx);
 }
 
-/// Orcas 19, 20 y 21 (`RenderObjectMesh` 1165-1344): agua al saltar. Al acabar el salto pasan a la
-/// acción 1 (`o->CurrentAction = 1`, que el modelo no tiene: la animación se queda quieta) y vuelven a
-/// la 0 cuando `rand() % 40` da su número. Velocidad: `o->Velocity` (0.16).
+/// Orcas 19, 20 and 21 (`RenderObjectMesh` 1165-1344): water when jumping. After the jump they go to
+/// action 1 (`o->CurrentAction = 1`, which the model lacks: the animation freezes) and return to 0
+/// when `rand() % 40` hits their number. Speed: `o->Velocity` (0.16).
 fn raklion_whale(o: &mut MapObject, ctx: &mut Ctx) {
     anim_advance(o, o.velocity);
     let (frame, action) = anim_state(o);
@@ -356,7 +356,7 @@ fn raklion_whale(o: &mut MapObject, ctx: &mut Ctx) {
     visual_luminosity(ctx);
 }
 
-/// Fuego azul (70, mapa del jefe) y rojo (80): `RenderObjectVisual` 1720-1771.
+/// Blue fire (70, boss map) and red fire (80): `RenderObjectVisual` 1720-1771.
 fn raklion_fire(o: &mut MapObject, ctx: &mut Ctx) {
     o.hidden_mesh = -2;
     visual_luminosity(ctx);
@@ -369,14 +369,14 @@ fn raklion_fire(o: &mut MapObject, ctx: &mut Ctx) {
     ctx.create_particle(BITMAP_FIRE_HIK1_MONO, o.position, o.angle, light, 2, o.scale, None);
 }
 
-/// Portal al jefe (`CreateObject` 73-85): tres anillos a 520 de altura (subtipo 1). El objeto
-/// `MODEL_WARP4` en sí está a z = 0 (`MapManager.cpp:791-809`), bajo el suelo.
-/// TODO(original): el propio modelo `warp01` del objeto (`RenderObjectMesh` 1393-1419) no se dibuja.
+/// Boss portal (`CreateObject` 73-85): three rings at height 520 (subtype 1). The `MODEL_WARP4`
+/// object itself is at z = 0 (`MapManager.cpp:791-809`), below the ground.
+/// TODO(original): the object's own `warp01` model (`RenderObjectMesh` 1393-1419) is not drawn.
 fn raklion_warp(o: &mut MapObject, ctx: &mut Ctx) {
     if o.created {
         return;
     }
-    // En `CreateObject` la luz del objeto es (0, 0, 0); el efecto la pone en cada tick.
+    // In `CreateObject` the object light is (0, 0, 0); the effect sets it every tick.
     let light = Vec3::ZERO;
     let p = o.position;
     ctx.create_effect(MODEL_WARP4, Vec3::new(p.x, p.y - 40.0, p.z + 520.0), o.angle, light, 1, None, -1, 0, 0, 0.0);
@@ -393,7 +393,7 @@ fn warp_create(e: &mut Effect, ctx: &mut Ctx) {
     e.velocity = rf(ctx, 100) / 1000.0 + 0.01;
 }
 
-/// `CreateEffect(MODEL_WARP6)` (`ZzzEffect.cpp:668-673`): `Gravity` no se inicializa (0).
+/// `CreateEffect(MODEL_WARP6)` (`ZzzEffect.cpp:668-673`): `Gravity` is not initialized (0).
 fn warp6_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 0xffffff as f32;
     e.blend_mesh = -2;
@@ -401,10 +401,10 @@ fn warp6_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.gravity = 0.0;
 }
 
-/// `MoveEffect` de `MODEL_WARP*` (`ZzzEffect.cpp:7334-7360`) + la cola común (`PlayAnimation`,
+/// `MoveEffect` for `MODEL_WARP*` (`ZzzEffect.cpp:7334-7360`) + the common tail (`PlayAnimation`,
 /// `MoveParticle(o, true)`).
 fn warp_step(e: &mut Effect, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `MoveEffect`.
+    // `Luminosity` from the start of `MoveEffect`.
     let _ = ctx.rand();
     let t = ctx.world_time;
     if e.sub_type == 0 {
@@ -420,9 +420,9 @@ fn warp_step(e: &mut Effect, ctx: &mut Ctx) {
     e.position += rotate(e.angle, e.direction);
 }
 
-/// `CGM_Raklion::RenderObjectMesh` (1393-1419): `BodyLight = (0.5, 0.6, 1)`, `BlendMeshLight = 0.8` y
-/// `RenderBody(RENDER_TEXTURE)` (4), `RenderBody(RENDER_BRIGHT)` (5) o `RenderMesh(0)` (6); con
-/// `BlendMesh = -2` todas las mallas suman con `BodyLight · BlendMeshLight`.
+/// `CGM_Raklion::RenderObjectMesh` (1393-1419): `BodyLight = (0.5, 0.6, 1)`, `BlendMeshLight = 0.8` and
+/// `RenderBody(RENDER_TEXTURE)` (4), `RenderBody(RENDER_BRIGHT)` (5) or `RenderMesh(0)` (6); with
+/// `BlendMesh = -2` all meshes are additive with `BodyLight · BlendMeshLight`.
 fn warp_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.light = WARP4_LIGHT;
@@ -451,7 +451,7 @@ fn vulcanus(o: &mut MapObject, ctx: &mut Ctx) {
             let gap = if start != 90 { 40 } else { 10 };
             if lumi >= start as f32 && lumi <= (start + gap) as f32 {
                 for _ in 0..20 {
-                    // `o` como dueño: el subtipo 6 no lo usa.
+                    // `o` as owner: subtype 6 does not use it.
                     ctx.create_particle(BITMAP_WATERFALL_2, o.position, o.angle, Vec3::ONE, 6, o.scale, None);
                 }
             }
@@ -479,8 +479,8 @@ fn vulcanus(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Pez de lava 68 (`RenderObjectMesh` 536-568): dos resplandores rojos en el hueso 6 y humo del
-/// hueso 4 en los fotogramas 7-13. (El 67 no se dibuja: ver `rules_raklion`.)
+/// Lava fish 68 (`RenderObjectMesh` 536-568): two red glows on bone 6 and smoke from bone 4 on
+/// frames 7-13. (67 is not drawn: see `rules_raklion`.)
 fn vulcanus_fish(o: &MapObject, ctx: &mut Ctx) {
     let fire = Vec3::new(1.0, 0.0, 0.0);
     ctx.create_sprite(BITMAP_LIGHT, o.bone_world(6, Vec3::ZERO), o.scale * 5.0, fire, 0.0, 0);
@@ -494,10 +494,10 @@ fn vulcanus_fish(o: &MapObject, ctx: &mut Ctx) {
     }
 }
 
-// --- Barracks y Refuge de Balgass (`GM3rdChangeUp.cpp`) ---------------------------------------------
+// --- Balgass Barracks and Refuge (`GM3rdChangeUp.cpp`) ----------------------------------------------
 
 fn balgass(o: &mut MapObject, ctx: &mut Ctx) {
-    // `PlayEffectSound` (356-375), al principio de `MoveObject`.
+    // `PlayEffectSound` (356-375), at the start of `MoveObject`.
     match o.ty {
         74 | 75 => {
             let id = if ctx.rand() % 2 == 0 { "SOUND_3RD_CHANGE_UP_BG_CAGE1" } else { "SOUND_3RD_CHANGE_UP_BG_CAGE2" };
@@ -542,7 +542,7 @@ fn balgass(o: &mut MapObject, ctx: &mut Ctx) {
         }
         5 => {
             if ctx.rand() % 2 == 0 {
-                // `(int)((o->Timer++) + 2) % 4`: con el valor de antes de sumar.
+                // `(int)((o->Timer++) + 2) % 4`: with the value before incrementing.
                 let t = o.timer;
                 o.timer += 1.0;
                 if ((t + 2.0) as i32) % 4 == 0 {
@@ -594,7 +594,7 @@ fn balgass(o: &mut MapObject, ctx: &mut Ctx) {
         }
         88 => {
             if ctx.rand() % 4 == 0 {
-                // `o` como dueño: el subtipo 10 no lo usa.
+                // `o` as owner: subtype 10 does not use it.
                 ctx.create_particle(BITMAP_CLOUD, o.position, o.angle, white, 10, o.scale, None);
             }
         }
@@ -603,8 +603,8 @@ fn balgass(o: &mut MapObject, ctx: &mut Ctx) {
         92 => {
             if fire_pillar_sin(ctx) > 0.9 {
                 for _ in 0..2 {
-                    // `CreateEffect(..., 0, NULL, -1, 0, o->Scale)`: la escala cae en `Skill` (WORD); la del
-                    // efecto queda la de por defecto (0.9).
+                    // `CreateEffect(..., 0, NULL, -1, 0, o->Scale)`: the scale lands in `Skill` (WORD); the
+                    // effect keeps the default scale (0.9).
                     let kind = (o.scale as i32) & 0xFFFF;
                     ctx.create_effect(BITMAP_FIRE_RED, o.position, o.angle, Vec3::new(1.0, 0.4, 0.4), 0, None, -1, kind, 0, 0.0);
                 }
@@ -614,22 +614,22 @@ fn balgass(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// `(sin(WorldTime·0.0005) + 1)·0.5` de la columna de fuego (92).
+/// `(sin(WorldTime·0.0005) + 1)·0.5` of the fire pillar (92).
 fn fire_pillar_sin(ctx: &Ctx) -> f32 {
     ((ctx.world_time * 0.0005).sin() + 1.0) * 0.5
 }
 
 fn draw_nothing(_: &Effect, _: &DrawCtx, _: &mut DrawList) {}
 
-/// `CreateEffect(BITMAP_FIRE_RED)` (`ZzzEffect.cpp:1286-1288`): 40 ticks, sin modelo.
+/// `CreateEffect(BITMAP_FIRE_RED)` (`ZzzEffect.cpp:1286-1288`): 40 ticks, no model.
 fn fire_red_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 40.0;
     e.visible = false;
 }
 
-/// `MoveEffect` de `BITMAP_FIRE_RED` (`ZzzEffect.cpp:8918-8923`): una llama roja al azar cerca.
+/// `MoveEffect` for `BITMAP_FIRE_RED` (`ZzzEffect.cpp:8918-8923`): a red flame at a random nearby spot.
 fn fire_red_step(e: &mut Effect, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `MoveEffect`.
+    // `Luminosity` from the start of `MoveEffect`.
     let _ = ctx.rand();
     let x = (ctx.rand() % 32 - 16) as f32;
     let y = (ctx.rand() % 32 - 16) as f32;
@@ -641,7 +641,7 @@ fn fire_red_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- Karutan (`GMKarutan1.cpp`) ---------------------------------------------------------------------
 
 fn karutan(o: &mut MapObject, ctx: &mut Ctx) {
-    // `PlayObjectSound` (353-362), antes de `MoveObject` (`w_MapProcess.cpp:237`).
+    // `PlayObjectSound` (353-362), before `MoveObject` (`w_MapProcess.cpp:237`).
     if matches!(o.ty, 58 | 66) {
         play_once(ctx, "SOUND_KARUTAN_INSECT_ENV");
     }
@@ -653,8 +653,8 @@ fn karutan(o: &mut MapObject, ctx: &mut Ctx) {
             o.hidden_mesh = -2;
         }
         114..=116 | 118 => o.hidden_mesh = -2,
-        // 66: `PlaySpeed` 0.15 en las dos acciones (`MapManager.cpp:1202-1203`); `RenderObjectMesh`
-        // (192-198) cambia de acción al llegar al fotograma 19.
+        // 66: `PlaySpeed` 0.15 on both actions (`MapManager.cpp:1202-1203`); `RenderObjectMesh`
+        // (192-198) switches action on reaching frame 19.
         66 => {
             anim_advance(o, 0.15);
             if anim_state(o).0 >= 19.0 {
@@ -696,7 +696,7 @@ fn karutan(o: &mut MapObject, ctx: &mut Ctx) {
         116 => {
             if ctx.rand() % 8 == 0 {
                 ctx.create_particle(BITMAP_SMOKE, o.position, o.angle, Vec3::new(0.5, 0.9, 0.5), 69, o.scale, None);
-                // `o->Light` de un objeto del mapa: (0, 0, 0). `o` como dueño: el subtipo 13 no lo usa.
+                // A map object's `o->Light`: (0, 0, 0). `o` as owner: subtype 13 does not use it.
                 ctx.create_particle(BITMAP_SMOKE, o.position, o.angle, Vec3::ZERO, 13, o.scale * 2.0, None);
             }
         }
@@ -707,21 +707,21 @@ fn karutan(o: &mut MapObject, ctx: &mut Ctx) {
 
 // --- Chaos Castle (`CSChaosCastle.cpp`) -------------------------------------------------------------
 
-/// Estado de todo el mapa (`MoveObjects` / `MoveChaosCastleObjectSetting`).
+/// Whole-map state (`MoveObjects` / `MoveChaosCastleObjectSetting`).
 struct CastleTick {
-    /// `world_time` del último tick en que se hizo `MoveChaosCastleObjectSetting`.
+    /// `world_time` of the last tick that ran `MoveChaosCastleObjectSetting`.
     time: f32,
-    /// `objectCount` de `MoveObjects` en este tick.
+    /// `MoveObjects`' `objectCount` this tick.
     obj_count: i32,
-    /// `visibleObject`: los objetos 3 de este tick (el `MoveObjectSetting` del siguiente usa este).
+    /// `visibleObject`: type 3 objects this tick (the next tick's `MoveObjectSetting` uses it).
     visible: i32,
-    /// `g_bActionMatch` (empieza en `true` y no se vuelve a poner nunca).
+    /// `g_bActionMatch` (starts `true` and is never set again).
     action_match: bool,
 }
 
 static CASTLE: Mutex<CastleTick> = Mutex::new(CastleTick { time: f32::NAN, obj_count: 0, visible: 0, action_match: true });
 
-/// `MoveChaosCastleObjectSetting` (97-119) la primera vez que se llama en cada tick.
+/// `MoveChaosCastleObjectSetting` (97-119) on its first call each tick.
 fn castle_setting(ctx: &mut Ctx) {
     let visible = {
         let mut s = CASTLE.lock().unwrap_or_else(|e| e.into_inner());
@@ -730,7 +730,7 @@ fn castle_setting(ctx: &mut Ctx) {
         }
         s.time = ctx.world_time;
         s.obj_count = 0;
-        // `visibleObject = 0` va después de `MoveObjectSetting`: este usa el del tick anterior.
+        // `visibleObject = 0` comes after `MoveObjectSetting`, which uses the previous tick's value.
         std::mem::take(&mut s.visible)
     };
     if ctx.rand() % 10 == 0 && visible != 0 {
@@ -748,15 +748,15 @@ fn castle_setting(ctx: &mut Ctx) {
     }
 }
 
-/// `o->LifeTime` y `o->PKKey` del rayo de los objetos 0-3 (`user[0]`, `user[1]`).
+/// `o->LifeTime` and `o->PKKey` of the bolt on objects 0-3 (`user[0]`, `user[1]`).
 const CASTLE_LIFE: usize = 0;
 const CASTLE_PKKEY: usize = 1;
 
 fn chaos_castle(o: &mut MapObject, ctx: &mut Ctx) {
     castle_setting(ctx);
 
-    // `MoveChaosCastleObject` (121-152, desde `MoveObjectOnEffect`): el rayo cae sobre un objeto 3 de
-    // los que se ven.
+    // `MoveChaosCastleObject` (121-152, from `MoveObjectOnEffect`): the bolt strikes one of the
+    // visible type 3 objects.
     if o.ty == 3 {
         let mut s = CASTLE.lock().unwrap_or_else(|e| e.into_inner());
         s.visible += 1;
@@ -775,7 +775,7 @@ fn chaos_castle(o: &mut MapObject, ctx: &mut Ctx) {
     }
 
     visual_luminosity(ctx);
-    // `RenderChaosCastleVisual` (303-488), con `g_byCurrCastleLevel` = 255 (sin evento).
+    // `RenderChaosCastleVisual` (303-488), with `g_byCurrCastleLevel` = 255 (no event).
     let mist = Vec3::new(0.05, 0.05, 0.1);
     match o.ty {
         6 => object_clouds(o, ctx, mist, &[0], 10),
@@ -812,14 +812,14 @@ mod tests {
 
     #[test]
     fn play_animation_como_el_original() {
-        // 20 fotogramas sin `LockPositions`: 19.2 + 0.8 = 20 → vuelve a 0.
+        // 20 frames without `LockPositions`: 19.2 + 0.8 = 20 → wraps to 0.
         assert!((play_animation(19.2, 0.8, 20, false) - 0.0).abs() < 1e-4);
         assert!((play_animation(19.5, 0.8, 20, false) - 0.3).abs() < 1e-4);
-        // Con `LockPositions` la vuelta es en `keys - 1`.
+        // With `LockPositions` it wraps at `keys - 1`.
         assert!((play_animation(18.5, 0.8, 20, true) - 0.3).abs() < 1e-4);
-        // Un solo fotograma: no se mueve.
+        // A single frame: does not move.
         assert_eq!(play_animation(0.0, 0.8, 1, false), 0.0);
-        // Velocidad 5 (Karutan 107) con 30 fotogramas.
+        // Speed 5 (Karutan 107) with 30 frames.
         assert!((play_animation(28.0, 5.0, 30, false) - 3.0).abs() < 1e-4);
     }
 }

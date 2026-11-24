@@ -1,18 +1,18 @@
-//! Material de los efectos con los modos de mezcla exactos del original (`ZzzOpenglUtil.cpp`):
+//! Effects material with the original's exact blend modes (`ZzzOpenglUtil.cpp`):
 //!
-//! | `Blend`     | función del original     | mezcla OpenGL                         | profundidad |
+//! | `Blend`     | original function        | OpenGL blend                          | depth       |
 //! |-------------|--------------------------|---------------------------------------|-------------|
-//! | `Glow`      | `EnableAlphaBlend`       | ONE, ONE (suma)                        | no escribe  |
-//! | `Subtract`  | `EnableAlphaBlendMinus`  | ZERO, ONE_MINUS_SRC_COLOR (oscurece)   | no escribe  |
-//! | `Blend2`    | `EnableAlphaBlend2`      | ONE_MINUS_SRC_COLOR, ONE               | no escribe  |
-//! | `Blend3`    | `EnableAlphaBlend3`      | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | no escribe  |
-//! | `Blend4`    | `EnableAlphaBlend4`      | ONE, ONE_MINUS_SRC_ALPHA               | no escribe  |
-//! | `AlphaTest` | `EnableAlphaTest`        | SRC_ALPHA, ONE_MINUS_SRC_ALPHA + alfa > 0.25 | escribe |
-//! | `Opaque`    | `DisableAlphaBlend`      | sin mezcla                             | escribe     |
-//! | `LightMap`  | `EnableLightMap`         | ZERO, SRC_COLOR (multiplica)           | escribe     |
-//! | `Shadow`    | `RenderBodyShadow`       | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | escribe, y no pinta dos veces el mismo punto |
+//! | `Glow`      | `EnableAlphaBlend`       | ONE, ONE (additive)                    | no write    |
+//! | `Subtract`  | `EnableAlphaBlendMinus`  | ZERO, ONE_MINUS_SRC_COLOR (darkens)    | no write    |
+//! | `Blend2`    | `EnableAlphaBlend2`      | ONE_MINUS_SRC_COLOR, ONE               | no write    |
+//! | `Blend3`    | `EnableAlphaBlend3`      | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | no write    |
+//! | `Blend4`    | `EnableAlphaBlend4`      | ONE, ONE_MINUS_SRC_ALPHA               | no write    |
+//! | `AlphaTest` | `EnableAlphaTest`        | SRC_ALPHA, ONE_MINUS_SRC_ALPHA + alpha > 0.25 | write |
+//! | `Opaque`    | `DisableAlphaBlend`      | no blending                            | write       |
+//! | `LightMap`  | `EnableLightMap`         | ZERO, SRC_COLOR (multiply)             | write       |
+//! | `Shadow`    | `RenderBodyShadow`       | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | write, never paints the same point twice |
 //!
-//! Siempre sin recorte de caras ocultas (el original las desactiva en casi todos los modos).
+//! Back-face culling is always off (the original disables it in almost every mode).
 
 use bevy::asset::embedded_asset;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -33,7 +33,7 @@ impl Plugin for FxMaterialPlugin {
     }
 }
 
-/// Modo de mezcla del original.
+/// The original's blend mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[repr(u8)]
 pub enum Blend {
@@ -46,13 +46,13 @@ pub enum Blend {
     AlphaTest,
     Opaque,
     LightMap,
-    /// Sombra de los modelos en el suelo: se mezcla una sola vez por punto (lo que cae a la misma
-    /// profundidad que algo ya dibujado se descarta), así los trozos que se solapan no oscurecen más.
+    /// Model shadows on the ground: blended once per point (fragments at the same depth as
+    /// something already drawn are discarded), so overlapping pieces do not darken further.
     Shadow,
 }
 
 impl Blend {
-    /// Escribe en el búfer de profundidad.
+    /// Writes to the depth buffer.
     pub fn writes_depth(self) -> bool {
         matches!(self, Blend::AlphaTest | Blend::Opaque | Blend::LightMap | Blend::Shadow)
     }
@@ -111,7 +111,7 @@ impl Material for FxMaterial {
     }
 
     fn alpha_mode(&self) -> AlphaMode {
-        // Todo lo que mezcla va a la pasada transparente (ordenada de lejos a cerca).
+        // Everything that blends goes to the transparent pass (sorted back to front).
         match self.blend {
             Blend::Opaque => AlphaMode::Opaque,
             _ => AlphaMode::Blend,
@@ -138,7 +138,7 @@ impl Material for FxMaterial {
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(blend.writes_depth());
             if blend == Blend::Shadow {
-                // Profundidad invertida de Bevy: "más cerca" es mayor. Estricto: el mismo punto no pasa dos veces.
+                // Bevy uses reversed depth: "closer" is greater. Strict, so the same point never passes twice.
                 depth.depth_compare = Some(bevy::render::render_resource::CompareFunction::Greater);
             }
         }

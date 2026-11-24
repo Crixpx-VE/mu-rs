@@ -1,15 +1,15 @@
-//! Núcleo del motor de efectos: los mismos objetos que el original (`PARTICLE`, `JOINT`, el
-//! `OBJECT` de los efectos y los sprites de un fotograma) y el contexto con el que se crean y se
-//! mueven (`CreateParticle`, `CreateJoint`, `CreateEffect`, `CreateSprite`, `rand()`...).
+//! Effects engine core: the same objects as the original (`PARTICLE`, `JOINT`, the effects'
+//! `OBJECT` and single-frame sprites) and the context used to create and move them
+//! (`CreateParticle`, `CreateJoint`, `CreateEffect`, `CreateSprite`, `rand()`...).
 //!
-//! Reglas para traducir código de MuMain a este motor:
-//! - Todo va en coordenadas de MU (Z arriba, 100 unidades por casilla) y ángulos en grados.
-//! - La lógica corre a 25 ticks por segundo: `FPS_ANIMATION_FACTOR` = 1 y
-//!   `rand_fps_check(n)` = [`Ctx::rand_fps_check`] (1 de cada n ticks). Las fórmulas se copian tal cual.
+//! Rules for porting MuMain code to this engine:
+//! - Everything is in MU coordinates (Z up, 100 units per tile) and angles in degrees.
+//! - Logic runs at 25 ticks per second: `FPS_ANIMATION_FACTOR` = 1 and
+//!   `rand_fps_check(n)` = [`Ctx::rand_fps_check`] (1 in n ticks). Formulas are copied verbatim.
 //! - `rand()` → [`Ctx::rand`]; `Random::RangeFloat/RangeInt(a, b)` → [`Ctx::range_f`] / [`Ctx::range_i`].
 //! - `AngleMatrix(angle, m)` + `VectorRotate(v, m, out)` → `rotate(angle, v)`;
 //!   `VectorIRotate` → `irotate(angle, v)`.
-//! - `o->Target` / `o->Owner` (un personaje) → `Target::Actor`; consultar con [`Ctx::actor`].
+//! - `o->Target` / `o->Owner` (a character) → `Target::Actor`; look it up with [`Ctx::actor`].
 //!   `b->TransformPosition(BoneTransform[i], p, out)` → [`Actor::bone_world`].
 //! - `RequestTerrainHeight(x, y)` → [`Ctx::terrain_height`]; `AddTerrainLight` → [`Ctx::add_terrain_light`].
 //! - `WorldTime` (ms) → [`Ctx::world_time`].
@@ -26,9 +26,9 @@ use crate::terrain::TerrainLights;
 pub use super::tables::ids::*;
 pub use super::material::Blend;
 
-// --- Matemáticas del original -------------------------------------------------------------------
+// --- Original math ------------------------------------------------------------------------------
 
-/// `AngleMatrix`: giro de MU con ángulos en grados (x, y, z) = Rz·Ry·Rx.
+/// `AngleMatrix`: MU rotation with angles in degrees (x, y, z) = Rz·Ry·Rx.
 pub fn angle_matrix(angle: Vec3) -> Mat3 {
     let a = angle * (std::f32::consts::PI / 180.0);
     Mat3::from_quat(Quat::from_euler(EulerRot::ZYX, a.z, a.y, a.x))
@@ -39,12 +39,12 @@ pub fn rotate(angle: Vec3, v: Vec3) -> Vec3 {
     angle_matrix(angle) * v
 }
 
-/// `AngleMatrix(angle) + VectorIRotate(v)` (giro inverso).
+/// `AngleMatrix(angle) + VectorIRotate(v)` (inverse rotation).
 pub fn irotate(angle: Vec3, v: Vec3) -> Vec3 {
     angle_matrix(angle).transpose() * v
 }
 
-/// `CreateAngle(x1, y1, x2, y2)`: rumbo de MU en grados (0 = hacia -Y).
+/// `CreateAngle(x1, y1, x2, y2)`: MU heading in degrees (0 = towards -Y).
 pub fn create_angle(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     let (dx, dy) = (x2 - x1, y2 - y1);
     if dx.abs() < f32::EPSILON && dy.abs() < f32::EPSILON {
@@ -53,7 +53,7 @@ pub fn create_angle(x1: f32, y1: f32, x2: f32, y2: f32) -> f32 {
     dx.atan2(-dy).to_degrees().rem_euclid(360.0)
 }
 
-/// `TurnAngle2(angle, target, step)`: gira hacia `target` como mucho `step` grados.
+/// `TurnAngle2(angle, target, step)`: turns towards `target` by at most `step` degrees.
 pub fn turn_angle(angle: f32, target: f32, step: f32) -> f32 {
     if step <= 0.0 {
         return angle.rem_euclid(360.0);
@@ -62,9 +62,9 @@ pub fn turn_angle(angle: f32, target: f32, step: f32) -> f32 {
     (angle + delta.clamp(-step, step)).rem_euclid(360.0)
 }
 
-// --- Azar ---------------------------------------------------------------------------------------
+// --- Randomness ---------------------------------------------------------------------------------
 
-/// Generador del original: `rand()` devuelve 0..=32767 como el de MSVC.
+/// The original's generator: `rand()` returns 0..=32767 like MSVC's.
 #[derive(Clone)]
 pub struct Rng(u32);
 
@@ -76,37 +76,37 @@ impl Default for Rng {
 
 impl Rng {
     pub fn rand(&mut self) -> i32 {
-        // LCG de MSVC (mismo rango que el original).
+        // MSVC LCG (same range as the original).
         self.0 = self.0.wrapping_mul(214_013).wrapping_add(2_531_011);
         ((self.0 >> 16) & 0x7FFF) as i32
     }
 }
 
-// --- Personajes y objetivos -----------------------------------------------------------------------
+// --- Characters and targets -----------------------------------------------------------------------
 
-/// Foto de un personaje (o monstruo) en este tick, para los efectos que lo siguen.
+/// Snapshot of a character (or monster) this tick, for the effects that follow it.
 #[derive(Clone)]
 pub struct Actor {
     pub position: Vec3,
-    /// Ángulos en grados (el del cuerpo es `angle.z`).
+    /// Angles in degrees (the body heading is `angle.z`).
     pub angle: Vec3,
     pub scale: f32,
-    /// Huesos del modelo en su pose actual (espacio del modelo).
+    /// Model bones in their current pose (model space).
     pub bones: Arc<Vec<Mat34>>,
     pub action: usize,
     pub frame: f32,
-    /// Arma en la mano derecha: id del modelo (`MODEL_SWORD + n`...) y nivel (+0..+15).
+    /// Right-hand weapon: model id (`MODEL_SWORD + n`...) and level (+0..+15).
     pub weapon: Option<(i32, u8)>,
-    /// Hueso de la mano del arma (`LinkBone`).
+    /// Weapon hand bone (`LinkBone`).
     pub weapon_bone: usize,
     pub live: bool,
-    /// `m_vPosSword`: punto que calcula la habilidad en curso (p. ej. Death Stab).
+    /// `m_vPosSword`: point computed by the current skill (e.g. Death Stab).
     pub pos_sword: Vec3,
 }
 
 impl Actor {
-    /// `b->TransformPosition(BoneTransform[bone], offset, out)` con la posición, giro y escala del
-    /// personaje: el punto `offset` (en ejes del hueso) en el mundo.
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` with the character's position,
+    /// rotation and scale: the point `offset` (in bone axes) in world space.
     pub fn bone_world(&self, bone: usize, offset: Vec3) -> Vec3 {
         let local = match self.bones.get(bone) {
             Some(m) => Vec3::from_array(bmd::transform_point(m, offset.to_array())),
@@ -116,17 +116,17 @@ impl Actor {
     }
 }
 
-/// A quién sigue un efecto (`o->Target` / `o->Owner`).
+/// What an effect follows (`o->Target` / `o->Owner`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
     Actor(Entity),
-    /// Otro efecto del motor, por su número único.
+    /// Another engine effect, by its unique id.
     Effect(u32),
 }
 
-// --- Objetos del motor ------------------------------------------------------------------------------
+// --- Engine objects ---------------------------------------------------------------------------------
 
-/// `PARTICLE` del original.
+/// The original's `PARTICLE`.
 #[derive(Clone)]
 pub struct Particle {
     pub ty: i32,
@@ -149,7 +149,7 @@ pub struct Particle {
     pub num_bone: i32,
     pub repeatedly: bool,
     pub repeatedly_height: f32,
-    /// Estado del tick anterior, para interpolar al dibujar.
+    /// Previous tick state, for interpolation when drawing.
     pub prev_position: Vec3,
     pub prev_scale: f32,
     pub prev_light: Vec3,
@@ -187,30 +187,30 @@ impl Particle {
     }
 }
 
-/// `RenderType` de las estelas.
+/// Trail `RenderType`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum JointRender {
-    /// `RENDER_TYPE_ALPHA_BLEND` → suma.
+    /// `RENDER_TYPE_ALPHA_BLEND` → additive.
     #[default]
     AlphaBlend,
     /// `RENDER_TYPE_ALPHA_TEST`.
     AlphaTest,
-    /// `RENDER_TYPE_ALPHA_BLEND_MINUS` → resta.
+    /// `RENDER_TYPE_ALPHA_BLEND_MINUS` → subtractive.
     AlphaBlendMinus,
     /// `RENDER_TYPE_ALPHA_BLEND_OTHER` → `Blend2`.
     AlphaBlendOther,
 }
 
-/// Cómo se desplaza la textura de una estela al dibujarla (casos especiales de `DescribeJoint`).
+/// How a trail's texture scrolls when drawn (special cases of `DescribeJoint`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum JointScroll {
     #[default]
     None,
-    /// `BITMAP_JOINT_THUNDER`: U·2 − scroll en una cara y + scroll·2 en la otra.
+    /// `BITMAP_JOINT_THUNDER`: U·2 − scroll on one face and + scroll·2 on the other.
     Thunder,
     /// `bTileMapping`: U = (NumTails − j) / 16, ×2, − 2·scroll.
     Tile,
-    /// `BITMAP_FLARE_FORCE` (subtipos 0-4, 11-13): U − scroll.
+    /// `BITMAP_FLARE_FORCE` (subtypes 0-4, 11-13): U − scroll.
     Flare,
 }
 
@@ -218,7 +218,7 @@ pub const RENDER_FACE_ONE: u8 = 1;
 pub const RENDER_FACE_TWO: u8 = 2;
 pub const MAX_TAILS: usize = 200;
 
-/// `JOINT` del original: una estela hecha de "colas" (cruces de 4 puntos) que se van dejando atrás.
+/// The original's `JOINT`: a trail made of "tails" (4-point crosses) left behind as it moves.
 #[derive(Clone)]
 pub struct Joint {
     pub ty: i32,
@@ -247,10 +247,10 @@ pub struct Joint {
     pub reverse_uv: u8,
     pub create_tails: bool,
     pub max_tails: usize,
-    /// Colas: la [0] es la más nueva. Cada una son 4 puntos (cruz alrededor de la posición).
+    /// Tails: [0] is the newest. Each is 4 points (a cross around the position).
     pub tails: Vec<[Vec3; 4]>,
     pub scroll: JointScroll,
-    /// Contador libre para el código de cada tipo (lo que el original guardaba en campos sueltos).
+    /// Free slots for each type's code (what the original kept in assorted fields).
     pub user: [f32; 4],
     pub live: bool,
 }
@@ -276,7 +276,7 @@ impl Joint {
             collision: false,
             velocity: 0.0,
             direction: Vec3::ZERO,
-            // CreateJoint tiene PKKey = -1 por defecto.
+            // CreateJoint defaults PKKey to -1.
             pk_key: -1,
             skill: 0,
             weapon: 0.0,
@@ -292,7 +292,7 @@ impl Joint {
         }
     }
 
-    /// `CreateTail`/`SetNewestTail`: una cruz de 4 puntos de ancho `scale` girada con `angle`.
+    /// `CreateTail`/`SetNewestTail`: a 4-point cross of width `scale` rotated by `angle`.
     pub fn make_tail(&self) -> [Vec3; 4] {
         let m = angle_matrix(self.angle);
         let h = self.scale * 0.5;
@@ -304,7 +304,7 @@ impl Joint {
         ]
     }
 
-    /// `FollowTail`: las colas se desplazan una posición y se deja una nueva delante.
+    /// `FollowTail`: tails shift by one and a new one is added at the front.
     pub fn follow_tail(&mut self) {
         let tail = self.make_tail();
         self.tails.insert(0, tail);
@@ -313,10 +313,10 @@ impl Joint {
     }
 }
 
-/// El `OBJECT` de los efectos (`Effects[]`): normalmente un modelo `.bmd` que se mueve.
+/// The effects' `OBJECT` (`Effects[]`): usually a moving `.bmd` model.
 #[derive(Clone)]
 pub struct Effect {
-    /// Número único (para que otros efectos lo sigan con `Target::Effect`).
+    /// Unique id (so other effects can follow it with `Target::Effect`).
     pub id: u32,
     pub ty: i32,
     pub sub_type: i32,
@@ -330,7 +330,7 @@ pub struct Effect {
     pub alpha_target: f32,
     pub scale: f32,
     pub life_time: f32,
-    /// Velocidad de la animación del modelo (fotogramas por tick).
+    /// Model animation speed (frames per tick).
     pub velocity: f32,
     pub gravity: f32,
     pub distance: f32,
@@ -345,20 +345,20 @@ pub struct Effect {
     pub owner: Option<Target>,
     pub target: Option<Target>,
     pub pk_key: i32,
-    /// `Kind` del original (el argumento `Skill` de `CreateEffect`).
+    /// The original's `Kind` (the `Skill` argument of `CreateEffect`).
     pub kind: i32,
-    /// `Skill` del original (el argumento `SkillIndex`).
+    /// The original's `Skill` (the `SkillIndex` argument).
     pub skill: i32,
     pub weapon: i32,
     pub weapon_level: i32,
     pub ai: i32,
     pub live: bool,
-    /// Se dibuja con el modelo de su tipo (si `false`, solo emite partículas o se dibuja a mano).
+    /// Drawn with its type's model (if `false`, it only emits particles or is drawn by hand).
     pub visible: bool,
-    /// Estado del tick anterior, para interpolar.
+    /// Previous tick state, for interpolation.
     pub prev_position: Vec3,
     pub prev_angle: Vec3,
-    /// Campos libres para lo que cada tipo necesite guardar.
+    /// Free fields for whatever each type needs to store.
     pub user: [f32; 8],
 }
 
@@ -406,7 +406,7 @@ impl Effect {
     }
 }
 
-/// `CreateSprite`: un cuadrado mirando a la cámara que dura un tick.
+/// `CreateSprite`: a camera-facing quad that lasts one tick.
 #[derive(Clone, Copy)]
 pub struct SpriteFx {
     pub ty: i32,
@@ -414,42 +414,42 @@ pub struct SpriteFx {
     pub scale: f32,
     pub light: Vec3,
     pub rotation: f32,
-    /// 0 suma, 1 resta, 2 prueba de alfa, 3 `Blend2` (`DescribeSprite`).
+    /// 0 additive, 1 subtractive, 2 alpha test, 3 `Blend2` (`DescribeSprite`).
     pub sub_type: i32,
     pub alpha: f32,
 }
 
-// --- Objetos del mapa con efectos (`MoveObject` / `UpdateObjectVisual`) --------------------------
+// --- Map objects with effects (`MoveObject` / `UpdateObjectVisual`) ------------------------------
 
-/// Un objeto del mapa que suelta efectos (el `OBJECT` de los objetos del mundo). Lo dibuja
-/// `objects.rs`; aquí solo está lo que necesita su código de efectos.
+/// A map object that emits effects (the world objects' `OBJECT`). It is drawn by `objects.rs`;
+/// here is only what its effects code needs.
 #[derive(Clone)]
 pub struct MapObject {
-    /// `o->Type`: el tipo del objeto en el mapa (índice de `EncTerrainN.obj`).
+    /// `o->Type`: the object type on the map (index into `EncTerrainN.obj`).
     pub ty: i32,
     pub position: Vec3,
-    /// Grados (x, y, z), como `o->Angle`.
+    /// Degrees (x, y, z), like `o->Angle`.
     pub angle: Vec3,
     pub scale: f32,
-    /// `o->Light`: la luz del terreno donde está.
+    /// `o->Light`: the terrain light where it stands.
     pub light: Vec3,
-    /// Modelo (para los efectos pegados a sus huesos) y velocidad de su animación (fotogramas/tick).
+    /// Model (for effects attached to its bones) and its animation speed (frames/tick).
     pub model: Option<Arc<mu_data::bmd::Bmd>>,
     pub velocity: f32,
-    /// `o->AnimationFrame` en este tick.
+    /// `o->AnimationFrame` this tick.
     pub animation_frame: f32,
-    /// Huesos en la pose de este tick (se rellenan antes de llamar al código del objeto).
+    /// Bones in this tick's pose (filled before calling the object's code).
     pub bones: Option<Arc<Vec<Mat34>>>,
-    /// `o->Timer`, `o->HiddenMesh`... y campos libres para el código de cada tipo.
+    /// `o->Timer`, `o->HiddenMesh`... and free fields for each type's code.
     pub timer: f32,
     pub hidden_mesh: i32,
     pub user: [f32; 4],
-    /// Ya se hizo lo de `CreateObject` (efectos que el original crea una sola vez al cargar).
+    /// `CreateObject` work already done (effects the original creates only once at load).
     pub created: bool,
 }
 
 impl MapObject {
-    /// `b->TransformPosition(BoneTransform[bone], offset, out)` + posición, giro y escala del objeto.
+    /// `b->TransformPosition(BoneTransform[bone], offset, out)` + the object's position, rotation and scale.
     pub fn bone_world(&self, bone: usize, offset: Vec3) -> Vec3 {
         let local = match self.bones.as_ref().and_then(|b| b.get(bone)) {
             Some(m) => Vec3::from_array(bmd::transform_point(m, offset.to_array())),
@@ -459,34 +459,34 @@ impl MapObject {
     }
 }
 
-/// Código de efectos de un tipo de objeto en un mapa: se llama una vez por tick.
+/// Effects code for an object type on a map: called once per tick.
 pub type ObjectStep = fn(&mut MapObject, &mut Ctx);
 
-// --- Estela del arma (`Blur`, ZzzEffectBlurSpark.cpp) ---------------------------------------------
+// --- Weapon trail (`Blur`, ZzzEffectBlurSpark.cpp) ------------------------------------------------
 
-/// `MAX_BLUR_TAILS`: puntos como mucho de una estela de arma.
+/// `MAX_BLUR_TAILS`: maximum points of a weapon trail.
 pub const MAX_BLUR_TAILS: usize = 30;
-/// `MAX_BLUR_LIFETIME`: vida de una estela normal (las "cortas" viven 15).
+/// `MAX_BLUR_LIFETIME`: lifetime of a normal trail ("short" ones live 15).
 pub const MAX_BLUR_LIFETIME: i32 = 30;
 
-/// Estela de un arma: dos listas de puntos (empuñadura `p1` y punta `p2`), la [0] la más nueva.
+/// Weapon trail: two point lists (hilt `p1` and tip `p2`), [0] the newest.
 #[derive(Clone)]
 pub struct Blur {
     pub owner: Entity,
     pub p1: Vec<Vec3>,
     pub p2: Vec<Vec3>,
     pub light: Vec3,
-    /// `BlurMapping`: textura `BITMAP_BLUR + n` (3 → `BLUR2`, 4 → `BLUR`, 5 → `BLUR + 3`).
+    /// `BlurMapping`: texture `BITMAP_BLUR + n` (3 → `BLUR2`, 4 → `BLUR`, 5 → `BLUR + 3`).
     pub mapping: i32,
     pub life: i32,
-    /// Puntos añadidos en el último fotograma (el siguiente los sustituye si no ha pasado un tick).
+    /// Points added in the last frame (the next frame replaces them unless a tick has passed).
     pub frame_samples: usize,
     pub frame: u64,
     pub live: bool,
 }
 
 impl Blur {
-    /// `AddBlurSample`: cada fotograma sustituye los puntos del anterior hasta que un tick los fija.
+    /// `AddBlurSample`: each frame replaces the previous frame's points until a tick commits them.
     pub fn add_sample(&mut self, p1: Vec3, p2: Vec3, frame: u64) {
         if self.frame != frame {
             let replaced = self.frame_samples.min(self.p1.len());
@@ -502,12 +502,12 @@ impl Blur {
         self.frame_samples = (self.frame_samples + 1).min(self.p1.len());
     }
 
-    /// `MoveBlurs`: un tick: se pierde lo más viejo y la vida baja.
+    /// `MoveBlurs`: one tick: the oldest point is dropped and life decreases.
     pub fn age(&mut self) {
         self.frame_samples = 0;
         self.life -= 1;
         let shrink = |v: &mut Vec<Vec3>| {
-            // Number -= 1 y desplazar: la [0] se duplica y caen las dos más viejas.
+            // Number -= 1 and shift: [0] is duplicated and the two oldest fall off.
             if !v.is_empty() {
                 v.pop();
                 if let Some(&first) = v.first() {
@@ -527,7 +527,7 @@ impl Blur {
         }
     }
 
-    /// Textura según `BlurMapping` (`RenderBlurs`).
+    /// Texture by `BlurMapping` (`RenderBlurs`).
     pub fn texture(&self) -> i32 {
         match self.mapping {
             3 => BITMAP_BLUR2,
@@ -538,24 +538,24 @@ impl Blur {
     }
 }
 
-// --- Habilidades -----------------------------------------------------------------------------------
+// --- Skills ----------------------------------------------------------------------------------------
 
-/// `g_iLimitAttackTime`: cuando `AttackTime` llega aquí se lanza el efecto final de la habilidad.
+/// `g_iLimitAttackTime`: when `AttackTime` reaches this, the skill's final effect fires.
 pub const LIMIT_ATTACK_TIME: i32 = 15;
 
-/// Una habilidad en curso de un personaje: lo que el original guarda en el `CHARACTER`
-/// (`Skill`, `AttackTime`, `TargetCharacter`, `m_vPosSword`...). Cada tick: `AttackTime += 1`,
-/// se llama a `stage` (`AttackStage`/`AttackEffect`) y al llegar a [`LIMIT_ATTACK_TIME`] a
-/// `finish` (el `switch` de `ZzzCharacter.cpp` ≈ 4154-4437); entonces termina.
+/// A character's skill in progress: what the original stores in `CHARACTER`
+/// (`Skill`, `AttackTime`, `TargetCharacter`, `m_vPosSword`...). Each tick: `AttackTime += 1`,
+/// `stage` is called (`AttackStage`/`AttackEffect`), and on reaching [`LIMIT_ATTACK_TIME`]
+/// `finish` (the `switch` in `ZzzCharacter.cpp` ≈ 4154-4437); then it ends.
 #[derive(Clone)]
 pub struct Cast {
     pub owner: Entity,
     pub skill: i32,
     pub attack_time: i32,
-    /// Objetivo (`TargetCharacter`) y su posición (o el punto del suelo elegido).
+    /// Target (`TargetCharacter`) and its position (or the chosen ground point).
     pub target: Option<Target>,
     pub target_position: Vec3,
-    /// `m_vPosSword` y otros datos que el original guarda en el personaje.
+    /// `m_vPosSword` and other data the original stores in the character.
     pub pos_sword: Vec3,
     pub user: [f32; 8],
     pub live: bool,
@@ -571,42 +571,42 @@ pub type SkillStage = fn(&mut Cast, &mut Ctx);
 
 #[derive(Clone, Copy, Default)]
 pub struct SkillKind {
-    /// Cada tick mientras dura (`AttackStage` + `AttackEffect`).
+    /// Every tick while it lasts (`AttackStage` + `AttackEffect`).
     pub stage: Option<SkillStage>,
-    /// Al llegar `AttackTime` a [`LIMIT_ATTACK_TIME`].
+    /// When `AttackTime` reaches [`LIMIT_ATTACK_TIME`].
     pub finish: Option<SkillStage>,
 }
 
-// --- Peticiones de creación ---------------------------------------------------------------------
+// --- Spawn requests -----------------------------------------------------------------------------
 
-/// Lo que se pide crear durante un tick; se crea al acabar el tick (con su función de creación).
+/// What is requested during a tick; created when the tick ends (with its create function).
 pub enum Spawn {
     Particle(Particle),
     Joint(Joint),
     Effect(Effect),
 }
 
-// --- Contexto --------------------------------------------------------------------------------------
+// --- Context ---------------------------------------------------------------------------------------
 
-/// Lo que ven las funciones de cada tipo de efecto mientras se crean o se mueven.
+/// What each effect type's functions see while being created or moved.
 pub struct Ctx<'a> {
     pub rng: &'a mut Rng,
-    /// `WorldTime`: milisegundos desde que arrancó el juego.
+    /// `WorldTime`: milliseconds since the game started.
     pub world_time: f32,
     pub terrain: Option<&'a Terrain>,
     pub hero: Option<Entity>,
     pub actors: &'a std::collections::HashMap<Entity, Actor>,
-    /// Posición de los efectos vivos al empezar el tick (para `Target::Effect`).
+    /// Positions of live effects at tick start (for `Target::Effect`).
     pub effect_positions: &'a std::collections::HashMap<u32, Vec3>,
     pub spawns: &'a mut Vec<Spawn>,
     pub sprites: &'a mut Vec<SpriteFx>,
     pub lights: &'a mut TerrainLights,
-    /// `EarthQuake`: temblor de cámara (se suma a la inclinación).
+    /// `EarthQuake`: camera shake (added to the pitch).
     pub earthquake: &'a mut f32,
     pub next_effect_id: &'a mut u32,
-    /// `gMapManager.WorldActive`: mapa actual con la numeración del original (Lorencia = 0).
+    /// `gMapManager.WorldActive`: current map in the original's numbering (Lorencia = 0).
     pub world_active: i32,
-    /// `PlayBuffer`: sonidos pedidos (`SOUND_*`), los reproduce `sound.rs`.
+    /// `PlayBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
     pub sounds: &'a mut Vec<&'static str>,
 }
 
@@ -620,17 +620,17 @@ impl Ctx<'_> {
         self.sounds.push(id);
     }
 
-    /// `rand_fps_check(n)`: verdadero 1 de cada `n` ticks (siempre si n ≤ 1).
+    /// `rand_fps_check(n)`: true 1 in `n` ticks (always if n ≤ 1).
     pub fn rand_fps_check(&mut self, n: i32) -> bool {
         n <= 1 || self.rand() % n == 0
     }
 
-    /// `Random::RangeFloat(a, b)` (ambos incluidos).
+    /// `Random::RangeFloat(a, b)` (both inclusive).
     pub fn range_f(&mut self, a: f32, b: f32) -> f32 {
         a + (b - a) * (self.rand() as f32 / 32767.0)
     }
 
-    /// `Random::RangeInt(a, b)` (ambos incluidos).
+    /// `Random::RangeInt(a, b)` (both inclusive).
     pub fn range_i(&mut self, a: i32, b: i32) -> i32 {
         if b <= a {
             return a;
@@ -642,12 +642,12 @@ impl Ctx<'_> {
         self.world_time
     }
 
-    /// `RequestTerrainHeight(x, y)` en unidades de MU.
+    /// `RequestTerrainHeight(x, y)` in MU units.
     pub fn terrain_height(&self, x: f32, y: f32) -> f32 {
         self.terrain.map_or(0.0, |t| t.height_at(x / 100.0, y / 100.0))
     }
 
-    /// `TerrainWall[...]` (atributos de la casilla) en una posición de MU.
+    /// `TerrainWall[...]` (tile attributes) at an MU position.
     pub fn terrain_attribute(&self, x: f32, y: f32) -> u16 {
         let (tx, ty) = ((x / 100.0).max(0.0) as usize, (y / 100.0).max(0.0) as usize);
         self.terrain.map_or(0, |t| if tx < 256 && ty < 256 { t.attribute(tx, ty) } else { 0 })
@@ -664,7 +664,7 @@ impl Ctx<'_> {
         self.actors.get(&self.hero?)
     }
 
-    /// Posición de lo que sigue (personaje o efecto).
+    /// Position of the followed target (character or effect).
     pub fn target_position(&self, t: Option<Target>) -> Option<Vec3> {
         match t? {
             Target::Actor(e) => self.actors.get(&e).map(|a| a.position),
@@ -672,12 +672,12 @@ impl Ctx<'_> {
         }
     }
 
-    /// `AddTerrainLight(x, y, light, range, PrimaryTerrainLight)`: x, y en MU, radio en casillas.
+    /// `AddTerrainLight(x, y, light, range, PrimaryTerrainLight)`: x, y in MU, radius in tiles.
     pub fn add_terrain_light(&mut self, x: f32, y: f32, light: Vec3, range: f32) {
         self.lights.add(Vec2::new(x / 100.0, y / 100.0), light.to_array(), range);
     }
 
-    /// `SetEarthQuake`: el temblor más fuerte del tick.
+    /// `SetEarthQuake`: the strongest shake of the tick wins.
     pub fn set_earthquake(&mut self, amount: f32) {
         if amount.abs() > self.earthquake.abs() {
             *self.earthquake = amount;
@@ -695,7 +695,7 @@ impl Ctx<'_> {
         self.spawns.push(Spawn::Joint(Joint::new(ty, position, target_position, angle, sub_type, target, scale)));
     }
 
-    /// `CreateJoint` con `PKKey` y `SkillIndex` (los que el original pasa a veces).
+    /// `CreateJoint` with `PKKey` and `SkillIndex` (which the original sometimes passes).
     #[allow(clippy::too_many_arguments)]
     pub fn create_joint_ex(&mut self, ty: i32, position: Vec3, target_position: Vec3, angle: Vec3, sub_type: i32, target: Option<Target>, scale: f32, pk_key: i32, skill: i32) {
         let mut j = Joint::new(ty, position, target_position, angle, sub_type, target, scale);
@@ -705,7 +705,7 @@ impl Ctx<'_> {
     }
 
     /// `CreateEffect(Type, Position, Angle, Light, SubType, Owner, PKKey, Skill, SkillIndex, ..., Scale)`.
-    /// Devuelve el número del efecto creado.
+    /// Returns the created effect's id.
     #[allow(clippy::too_many_arguments)]
     pub fn create_effect(&mut self, ty: i32, position: Vec3, angle: Vec3, light: Vec3, sub_type: i32, owner: Option<Target>, pk_key: i32, kind: i32, skill: i32, scale: f32) -> u32 {
         *self.next_effect_id += 1;
@@ -714,66 +714,66 @@ impl Ctx<'_> {
         id
     }
 
-    /// `CreateSprite(Type, Position, Scale, Light, Owner, Rotation, SubType)`: dura este tick.
+    /// `CreateSprite(Type, Position, Scale, Light, Owner, Rotation, SubType)`: lasts this tick.
     pub fn create_sprite(&mut self, ty: i32, position: Vec3, scale: f32, light: Vec3, rotation: f32, sub_type: i32) {
         self.sprites.push(SpriteFx { ty, position, scale, light, rotation, sub_type, alpha: 1.0 });
     }
 }
 
-// --- Dibujo ----------------------------------------------------------------------------------------
+// --- Drawing ---------------------------------------------------------------------------------------
 
-/// Un sprite a dibujar este fotograma (`RenderSprite`): centrado en `position`, `width`×`height`
-/// unidades de MU, girado `rotation` grados en el plano de la pantalla.
+/// A sprite to draw this frame (`RenderSprite`): centered at `position`, `width`×`height`
+/// MU units, rotated `rotation` degrees in the screen plane.
 #[derive(Clone, Copy)]
 pub struct SpriteDraw {
     pub texture: i32,
     pub position: Vec3,
     pub width: f32,
     pub height: f32,
-    /// Color (rgb) y alfa (a), como el color del vértice del original.
+    /// Color (rgb) and alpha (a), like the original's vertex color.
     pub color: [f32; 4],
     pub rotation: f32,
-    /// (u, v, ancho, alto) en la textura; v = 0 arriba.
+    /// (u, v, width, height) in the texture; v = 0 at the top.
     pub uv: [f32; 4],
     pub blend: Blend,
 }
 
-/// Marca en el suelo (`RenderTerrainAlphaBitmap`): un cuadrado pegado al terreno.
+/// Ground mark (`RenderTerrainAlphaBitmap`): a quad draped on the terrain.
 #[derive(Clone, Copy)]
 pub struct DecalDraw {
     pub texture: i32,
-    /// Centro en MU (x, y).
+    /// Center in MU (x, y).
     pub center: Vec2,
-    /// Tamaño en unidades de MU.
+    /// Size in MU units.
     pub width: f32,
     pub height: f32,
     pub color: [f32; 4],
     pub rotation: f32,
-    /// Altura sobre el suelo (unidades de MU).
+    /// Height above the ground (MU units).
     pub lift: f32,
     pub blend: Blend,
 }
 
-/// Un modelo `.bmd` a dibujar este fotograma (`RenderObject` de un efecto).
+/// A `.bmd` model to draw this frame (an effect's `RenderObject`).
 #[derive(Clone, Copy)]
 pub struct ModelDraw {
-    /// `MODEL_*` (efectos, ítems...).
+    /// `MODEL_*` (effects, items...).
     pub model: i32,
     pub position: Vec3,
     pub angle: Vec3,
     pub scale: f32,
-    /// `BodyLight`: color de todo el modelo.
+    /// `BodyLight`: color of the whole model.
     pub light: Vec3,
     pub alpha: f32,
     pub action: usize,
     pub frame: f32,
-    /// Malla (por su índice de textura) que se suma con `BlendMeshLight` y desplazamiento de UV.
+    /// Mesh (by texture index) drawn additively with `BlendMeshLight` and a UV offset.
     pub blend_mesh: i32,
     pub blend_mesh_light: f32,
     pub blend_mesh_tex_coord: Vec2,
-    /// `HiddenMesh`: -1 ninguna, -2 todas, n = esa.
+    /// `HiddenMesh`: -1 none, -2 all, n = that one.
     pub hidden_mesh: i32,
-    /// `RENDER_BRIGHT`: todo el modelo sumando.
+    /// `RENDER_BRIGHT`: whole model additive.
     pub bright: bool,
 }
 
@@ -796,7 +796,7 @@ impl ModelDraw {
         }
     }
 
-    /// El modelo de un efecto con su estado (lo que hace `RenderObject`).
+    /// An effect's model with its state (what `RenderObject` does).
     pub fn of_effect(e: &Effect) -> Self {
         Self {
             model: e.ty,
@@ -816,18 +816,18 @@ impl ModelDraw {
     }
 }
 
-/// Un cuadrado libre en el mundo (`RenderPlane3D`, cintas hechas a mano...): 4 esquinas en MU.
+/// A free quad in the world (`RenderPlane3D`, hand-built ribbons...): 4 corners in MU.
 #[derive(Clone, Copy)]
 pub struct QuadDraw {
     pub texture: i32,
     pub corners: [Vec3; 4],
-    /// (u, v) de cada esquina.
+    /// (u, v) of each corner.
     pub uv: [[f32; 2]; 4],
     pub color: [f32; 4],
     pub blend: Blend,
 }
 
-/// Lo que se dibuja este fotograma; lo rellenan las funciones `draw` de cada tipo.
+/// What is drawn this frame; filled by each type's `draw` function.
 #[derive(Default)]
 pub struct DrawList {
     pub sprites: Vec<SpriteDraw>,
@@ -836,7 +836,7 @@ pub struct DrawList {
     pub models: Vec<ModelDraw>,
 }
 
-/// Tamaño en píxeles y canales (3 = JPG, 4 = TGA) de una textura `BITMAP_*`.
+/// Size in pixels and channel count (3 = JPG, 4 = TGA) of a `BITMAP_*` texture.
 #[derive(Clone, Copy, Debug)]
 pub struct TexInfo {
     pub width: f32,
@@ -844,7 +844,7 @@ pub struct TexInfo {
     pub components: u8,
 }
 
-/// Lo que ve una función de dibujo: consultar texturas y el tiempo.
+/// What a draw function sees: texture lookup and time.
 pub struct DrawCtx<'a> {
     pub world_time: f32,
     pub tex_info: &'a dyn Fn(i32) -> Option<TexInfo>,
@@ -857,7 +857,7 @@ impl DrawCtx<'_> {
     }
 }
 
-// --- Registro de tipos -----------------------------------------------------------------------------
+// --- Type registry ---------------------------------------------------------------------------------
 
 pub type ParticleCreate = fn(&mut Particle, &mut Ctx);
 pub type ParticleStep = fn(&mut Particle, &mut Ctx);
@@ -868,8 +868,8 @@ pub type EffectCreate = fn(&mut Effect, &mut Ctx);
 pub type EffectStep = fn(&mut Effect, &mut Ctx);
 pub type EffectDraw = fn(&Effect, &DrawCtx, &mut DrawList);
 
-/// Funciones de un tipo de partícula (lo que el original tiene en los `switch` de
-/// `CreateParticle`, `MoveParticles` y `DescribeParticle`). `None` = comportamiento por defecto.
+/// Functions of a particle type (what the original has in the `switch`es of `CreateParticle`,
+/// `MoveParticles` and `DescribeParticle`). `None` = default behavior.
 #[derive(Clone, Copy, Default)]
 pub struct ParticleKind {
     pub create: Option<ParticleCreate>,
@@ -887,24 +887,24 @@ pub struct JointKind {
 pub struct EffectKind {
     pub create: Option<EffectCreate>,
     pub step: Option<EffectStep>,
-    /// Si es `None` se dibuja el modelo del tipo (si existe) con [`ModelDraw::of_effect`].
+    /// If `None`, the type's model (if any) is drawn with [`ModelDraw::of_effect`].
     pub draw: Option<EffectDraw>,
 }
 
-/// Todos los tipos registrados (cada módulo de `fx/kinds/` añade los suyos).
+/// All registered types (each `fx/kinds/` module adds its own).
 #[derive(Default, bevy::prelude::Resource)]
 pub struct Registry {
     pub particles: std::collections::HashMap<i32, ParticleKind>,
     pub joints: std::collections::HashMap<i32, JointKind>,
     pub effects: std::collections::HashMap<i32, EffectKind>,
-    /// Habilidades por número `AT_SKILL_*`.
+    /// Skills by `AT_SKILL_*` number.
     pub skills: std::collections::HashMap<i32, SkillKind>,
-    /// Objetos del mapa por (`WorldActive`, tipo del objeto).
+    /// Map objects by (`WorldActive`, object type).
     pub objects: std::collections::HashMap<(i32, i32), ObjectStep>,
 }
 
 impl Registry {
-    /// Registra el código de efectos de los objetos `ty` del mapa `world_active` (Lorencia = 0).
+    /// Registers the effects code for objects `ty` on map `world_active` (Lorencia = 0).
     pub fn object(&mut self, world_active: i32, ty: i32, step: ObjectStep) {
         self.objects.insert((world_active, ty), step);
     }
@@ -922,8 +922,8 @@ impl Registry {
     }
 }
 
-/// Dibujo por defecto de una partícula (`RenderParticles`): un sprite del tamaño de su textura
-/// por la escala, con la mezcla según la textura (JPG = suma, TGA = prueba de alfa).
+/// Default particle drawing (`RenderParticles`): a sprite of its texture size times the scale,
+/// blended by texture type (JPG = additive, TGA = alpha test).
 pub fn default_particle_draw(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some(t) = ctx.tex(p.tex_type) else { return };
     out.sprites.push(SpriteDraw {
@@ -938,7 +938,7 @@ pub fn default_particle_draw(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     });
 }
 
-/// Mezcla por defecto de partículas y marcas: JPG (3 canales) suma; TGA prueba de alfa.
+/// Default blend for particles and marks: JPG (3 channels) additive; TGA alpha test.
 pub fn default_blend(t: TexInfo) -> Blend {
     if t.components == 3 { Blend::Glow } else { Blend::AlphaTest }
 }

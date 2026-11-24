@@ -1,32 +1,29 @@
-//! Selección de personaje (`CHARACTER_SCENE`) del S6: el mapa 75 (`WD_74NEW_CHARACTER_SCENE`, rama
-//! `PJH_NEW_SERVER_SELECT_MAP` del Main 5.2) visto con una cámara fija, los personajes de la cuenta
-//! en sus huecos, un globo con nombre, gremio, clase y nivel sobre cada uno y la barra de abajo
-//! (Crear, Menú, Conectar, Borrar).
+//! S6 character selection (`CHARACTER_SCENE`): map 75 (`WD_74NEW_CHARACTER_SCENE`, Main 5.2
+//! `PJH_NEW_SERVER_SELECT_MAP` branch) seen from a fixed camera, the account's characters in their
+//! slots, a balloon with name, guild, class and level above each, and the bottom bar
+//! (Create, Menu, Connect, Delete).
 //!
-//! Sin servidor todavía: la cuenta tiene un solo personaje, un Dark Knight de nivel 1 con el nombre
-//! del usuario guardado (`usuario=` de `mu-launcher.txt`) o "mu-rs".
-//!
-//! - **Cámara** (`MoveMainCamera`, ZzzScene.cpp:1768-1776): ángulos (-84.5, 0, -75) en
-//!   (9758.93, 18913.11, 675.5), `CameraFOV` 35, near 20 y alcance 3500 (`g_shCameraLevel` 0,
-//!   ZzzScene.cpp:1676-1679) × 1.4. Sin niebla (`FogEnable = false`, ZzzScene.cpp:1043).
-//!   El 3D se dibuja solo en la franja (0, 25)-(640, 455) (`BeginOpengl(0,25,640,430)`,
-//!   ZzzScene.cpp:1064): aquí la cámara ocupa toda la ventana con el campo de visión agrandado para que
-//!   esa franja vea los mismos 35°, y dos bandas negras tapan lo de fuera.
-//! - **Personajes** (`ReceiveCharacterList`, WSclient.cpp:497-502): hueco, posición y giro; altura
-//!   fija 169.5 (ZzzScene.cpp:1104-1105), escala 1.2 (ZzzCharacter.cpp:11736-11747). De pie con la
-//!   espada en la mano (`SetPlayerStop`: fuera de zona segura y con arma de una mano →
-//!   `PLAYER_STOP_SWORD`, ZzzCharacter.cpp:300-305), a 0.26 fotogramas por tick (ZzzOpenData.cpp:332).
-//!   Luz fija 0.4 (0.5 el del hueco 0, que es `Hero`) más 1 el seleccionado (ZzzScene.cpp:1071-1085,
-//!   ZzzCharacter.cpp:8900-8909 y 8986-8990).
-//! - **Seleccionado** (ZzzScene.cpp:1077-1150): luz blanca en el suelo, dos marcas `gmmzine` girando
-//!   en sentidos contrarios (1.8 y 1.2 casillas, brillo `sin(WorldTime·0.0015)·0.3 + 0.5`) y cada
-//!   tick las partículas `BITMAP_EFFECT` 4 (rayo) y 5 (chispas que suben).
-//! - **Entrada** (`NewMoveCharacterScene`, ZzzScene.cpp:976-1027): clic en un personaje = elegirlo
-//!   (en el vacío, ninguno); doble clic o Enter = entrar; los clics sobre la barra no cuentan.
-//! - **Interfaz** (`CUIMng::CreateCharacterScene`, UIMng.cpp:255-300; `CCharSelMainWin`,
-//!   `CCharInfoBalloon`): en el original va en píxeles de la ventana sin escalar; aquí, como el resto,
-//!   en la pantalla virtual (640×480 a lo alto, `UiScale`), con la barra pegada a los lados.
-//! - **Música**: sigue `login_theme`, la del login (ZzzScene.cpp:1220); la para la carga.
+//! - **Camera** (`MoveMainCamera`, ZzzScene.cpp:1768-1776): angles (-84.5, 0, -75) at
+//!   (9758.93, 18913.11, 675.5), `CameraFOV` 35, near 20 and range 3500 (`g_shCameraLevel` 0,
+//!   ZzzScene.cpp:1676-1679) × 1.4. No fog (`FogEnable = false`, ZzzScene.cpp:1043).
+//!   3D is drawn only in the strip (0, 25)-(640, 455) (`BeginOpengl(0,25,640,430)`,
+//!   ZzzScene.cpp:1064): here the camera covers the whole window with a wider field of view so that
+//!   strip sees the same 35°, and two black bands cover the rest.
+//! - **Characters** (`ReceiveCharacterList`, WSclient.cpp:497-502): slot, position and rotation; fixed
+//!   height 169.5 (ZzzScene.cpp:1104-1105), scale 1.2 (ZzzCharacter.cpp:11736-11747). Standing with
+//!   the sword in hand (`SetPlayerStop`: outside a safe zone with a one-handed weapon →
+//!   `PLAYER_STOP_SWORD`, ZzzCharacter.cpp:300-305), at 0.26 frames per tick (ZzzOpenData.cpp:332).
+//!   Fixed light 0.4 (0.5 for slot 0, which is `Hero`) plus 1 for the selected one (ZzzScene.cpp:1071-1085,
+//!   ZzzCharacter.cpp:8900-8909 and 8986-8990).
+//! - **Selected** (ZzzScene.cpp:1077-1150): white light on the ground, two `gmmzine` marks spinning
+//!   in opposite directions (1.8 and 1.2 tiles, brightness `sin(WorldTime·0.0015)·0.3 + 0.5`) and every
+//!   tick the `BITMAP_EFFECT` particles 4 (bolt) and 5 (rising sparks).
+//! - **Input** (`NewMoveCharacterScene`, ZzzScene.cpp:976-1027): click a character = select it
+//!   (empty space, none); double click or Enter = enter; clicks on the bar do not count.
+//! - **UI** (`CUIMng::CreateCharacterScene`, UIMng.cpp:255-300; `CCharSelMainWin`,
+//!   `CCharInfoBalloon`): the original uses unscaled window pixels; here, like the rest, the virtual
+//!   screen (640×480 by height, `UiScale`), with the bar stretched to the sides.
+//! - **Music**: keeps `login_theme`, the login one (ZzzScene.cpp:1220); loading stops it.
 
 use std::f32::consts::FRAC_PI_2;
 
@@ -44,9 +41,9 @@ use crate::terrain::{LoadedTerrain, MU_SCALE};
 
 pub struct CharSelectPlugin;
 
-/// Los sistemas de esta pantalla: van antes que el gestor de ventanas (login_ui.rs), que así
-/// recibe los botones de la barra en el mismo fotograma y no comparte con ella el Enter o el clic
-/// con el que se cierra una ventana.
+/// This screen's systems: they run before the window manager (login_ui.rs), so it receives the
+/// bar buttons in the same frame and does not share with the bar the Enter or click that closes
+/// a window.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CharSelectSystems;
 
@@ -69,7 +66,7 @@ impl Plugin for CharSelectPlugin {
                     .in_set(CharSelectSystems)
                     .run_if(here()),
             )
-            // Donde se coloca la cámara del juego: así manda esta.
+            // Where the game camera is placed, so this one wins.
             .add_systems(
                 PostUpdate,
                 place_camera.in_set(crate::camera::CameraMoved).before(TransformSystems::Propagate).run_if(here()),
@@ -82,22 +79,22 @@ impl Plugin for CharSelectPlugin {
     }
 }
 
-// --- Cámara ----------------------------------------------------------------------------------------
+// --- Camera ----------------------------------------------------------------------------------------
 
-/// `CameraPosition` y `CameraAngle` de la selección (ZzzScene.cpp:1771-1776).
+/// Selection `CameraPosition` and `CameraAngle` (ZzzScene.cpp:1771-1776).
 const CAMERA_EYE: Vec3 = Vec3::new(9758.93, 18913.11, 675.5);
 const CAMERA_PITCH: f32 = -84.5;
 const CAMERA_YAW: f32 = -75.0;
-/// `CameraFOV = 35` (vertical, `gluPerspective`) fuera del paseo del login (ZzzScene.cpp:1552).
+/// `CameraFOV = 35` (vertical, `gluPerspective`) outside the login fly-through (ZzzScene.cpp:1552).
 const VFOV: f32 = 35.0;
-/// `CameraViewNear` (ZzzOpenglUtil.cpp:19: nadie lo cambia) y `CameraViewFar` × 1.4.
+/// `CameraViewNear` (ZzzOpenglUtil.cpp:19: never changed) and `CameraViewFar` × 1.4.
 const NEAR: f32 = 20.0;
 const FAR: f32 = 3500.0 * 1.4;
-/// La franja del 3D en la pantalla virtual: de y = 25 a 455 (`BeginOpengl(0,25,640,430)`).
+/// The 3D strip on the virtual screen: y = 25 to 455 (`BeginOpengl(0,25,640,430)`).
 const VIEW_TOP: f32 = 25.0;
 const VIEW_HEIGHT: f32 = 430.0;
 
-/// Campo de visión vertical de toda la ventana para que la franja del 3D vea `VFOV`.
+/// Vertical field of view of the whole window so the 3D strip sees `VFOV`.
 fn full_vfov() -> f32 {
     2.0 * ((VFOV / 2.0).to_radians().tan() * 480.0 / VIEW_HEIGHT).atan()
 }
@@ -114,7 +111,7 @@ fn setup_camera(mut commands: Commands, mut cameras: Query<(Entity, &mut Transfo
     }
 }
 
-/// La cámara no se mueve: se vuelve a poner cada fotograma (como el original), por si algo la tocó.
+/// The camera does not move: it is reset every frame (like the original) in case something touched it.
 fn place_camera(mut cameras: Query<&mut Transform, (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>) {
     let view = crate::camera::mu_view(CAMERA_EYE, CAMERA_PITCH, CAMERA_YAW);
     for mut tf in &mut cameras {
@@ -122,7 +119,7 @@ fn place_camera(mut cameras: Query<&mut Transform, (With<Camera3d>, With<IsDefau
     }
 }
 
-/// Al salir: el campo de visión y el alcance del juego.
+/// On exit: restores the game field of view and range.
 fn restore_camera(mut cameras: Query<&mut Projection, (With<Camera3d>, With<IsDefaultUiCamera>, Without<PreviewCamera>)>) {
     for mut proj in &mut cameras {
         if let Projection::Perspective(p) = &mut *proj {
@@ -133,19 +130,19 @@ fn restore_camera(mut cameras: Query<&mut Projection, (With<Camera3d>, With<IsDe
     }
 }
 
-// --- Personajes ------------------------------------------------------------------------------------
+// --- Characters ------------------------------------------------------------------------------------
 
-/// Huecos de la cuenta: (x, y, giro en grados), WSclient.cpp:497-502.
+/// Account slots: (x, y, rotation in degrees), WSclient.cpp:497-502.
 const SLOTS: [(f32, f32, f32); 5] =
     [(8008.0, 18885.0, 115.0), (7986.0, 19145.0, 90.0), (8046.0, 19400.0, 75.0), (8133.0, 19645.0, 60.0), (8282.0, 19845.0, 35.0)];
-/// Altura de los personajes sin montura (ZzzScene.cpp:1105).
+/// Height of unmounted characters (ZzzScene.cpp:1105).
 const CHARACTER_Z: f32 = 169.5;
-/// Caja para elegir con el ratón: `BoundingBoxMin/Max` de `MODEL_PLAYER` (ZzzCharacter.cpp:11397-11401),
-/// sin girar ni escalar, desde los pies.
+/// Mouse picking box: `MODEL_PLAYER` `BoundingBoxMin/Max` (ZzzCharacter.cpp:11397-11401),
+/// unrotated and unscaled, from the feet.
 const PICK_MIN: Vec3 = Vec3::new(-60.0, -60.0, 0.0);
 const PICK_MAX: Vec3 = Vec3::new(40.0, 40.0, 120.0);
 
-/// Un personaje en su hueco.
+/// A character in its slot.
 #[derive(Component)]
 struct SlotCharacter {
     slot: usize,
@@ -153,35 +150,35 @@ struct SlotCharacter {
     level: u32,
     class: Class,
     guild_status: u8,
-    /// `SetPlayerStop`: animación de reposo.
+    /// `SetPlayerStop`: idle animation.
     action: usize,
-    /// `AnimationFrame` (avanza con el tiempo, sin saltos).
+    /// `AnimationFrame` (advances with time, without jumps).
     frame: f32,
     materials: Vec<Handle<ModelMaterial>>,
-    /// Luz puesta en los materiales (para no tocarlos si no cambia).
+    /// Light set on the materials (to avoid touching them when unchanged).
     light: f32,
 }
 
 impl SlotCharacter {
-    /// Posición en MU (x, y, z).
+    /// Position in MU (x, y, z).
     fn position(&self) -> Vec3 {
         let (x, y, _) = SLOTS[self.slot];
         Vec3::new(x, y, CHARACTER_Z)
     }
-    /// `Angle[2]` en grados.
+    /// `Angle[2]` in degrees.
     fn angle(&self) -> f32 {
         SLOTS[self.slot].2
     }
 }
 
-/// Al entrar: pide la lista de personajes (`SendRequestCharacterList`); llega en `net_messages`.
+/// On enter: requests the character list (`SendRequestCharacterList`); it arrives in `net_messages`.
 fn spawn_characters(mut commands: Commands, mut net: ResMut<crate::net::Net>) {
     commands.insert_resource(CharSceneLink { account: crate::account::current_account(), ..default() });
     net.send(mu_protocol::game::ClientMessage::RequestCharacterList { language: 0 });
 }
 
-/// Lo que llega del servidor: la lista (`ReceiveCharacterList`) y, al conectar, la información del
-/// personaje (`ReceiveJoinMapServer`), que lleva al mapa donde está.
+/// Server messages: the list (`ReceiveCharacterList`) and, on connect, the character information
+/// (`ReceiveJoinMapServer`), which leads to the character's map.
 #[allow(clippy::too_many_arguments)]
 fn net_messages(
     mut commands: Commands,
@@ -222,7 +219,7 @@ fn net_messages(
                     continue;
                 }
                 commands.insert_resource(crate::account::HeroInfo(info.clone()));
-                // `MapId` es `WorldActive`: la carpeta es la siguiente.
+                // `MapId` is `WorldActive`: the folder is the next number.
                 load_world(&mut args, &mut load, info.map as u16 + 1, true, GameScene::Game);
                 next.set(GameScene::Loading);
             }
@@ -231,7 +228,7 @@ fn net_messages(
     }
 }
 
-/// Un personaje de la cuenta en su hueco (`CreateCharacterPointer` de `ReceiveCharacterList`).
+/// An account character in its slot (`CreateCharacterPointer` from `ReceiveCharacterList`).
 fn spawn_slot_character(
     commands: &mut Commands,
     args: &Args,
@@ -241,7 +238,7 @@ fn spawn_slot_character(
     shadow_material: &crate::shadow::ShadowMaterial,
     c: &StoredCharacter,
 ) -> Option<Entity> {
-    // En la selección no es zona segura: el Dark Knight lleva la espada en la mano.
+    // Selection is not a safe zone: the Dark Knight holds the sword in hand.
     let action = crate::character::stop_action(c.class, c.class == Class::Knight);
     let model = crate::character::load_character(args, c.class, action, meshes, materials, images)?;
     let (x, y, angle) = SLOTS[c.slot];
@@ -276,7 +273,7 @@ fn spawn_slot_character(
     Some(e.id())
 }
 
-/// Animación de reposo y sombra.
+/// Idle animation and shadow.
 fn animate(
     time: Res<Time>,
     terrain: Option<Res<LoadedTerrain>>,
@@ -292,13 +289,13 @@ fn animate(
             Quat::from_rotation_z(c.angle().to_radians()),
             c.class.select_scale(),
         );
-        // Fuera de zona segura: la espada en la mano.
+        // Outside a safe zone: sword in hand.
         skinned.pose(c.action, c.frame, false, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
     }
 }
 
-/// `PlaceCharactersForDraw`: luz 0.4 (0.5 el `Hero`, hueco 0) y +1 el seleccionado.
+/// `PlaceCharactersForDraw`: light 0.4 (0.5 for `Hero`, slot 0) and +1 for the selected one.
 fn light_characters(
     sel: Option<Res<CharSelect>>,
     mut q: Query<&mut SlotCharacter>,
@@ -320,8 +317,8 @@ fn light_characters(
     }
 }
 
-/// Cada tick, del seleccionado: luz blanca en el suelo (`AddTerrainLight(..., 1)`) y las partículas
-/// `BITMAP_EFFECT` 4 y 5 con luz 0.15 (ZzzScene.cpp:1077-1083, 1147-1150).
+/// Every tick, for the selected one: white ground light (`AddTerrainLight(..., 1)`) and the
+/// `BITMAP_EFFECT` 4 and 5 particles with light 0.15 (ZzzScene.cpp:1077-1083, 1147-1150).
 fn selected_effects(
     sel: Option<Res<CharSelect>>,
     q: Query<&SlotCharacter>,
@@ -338,9 +335,9 @@ fn selected_effects(
     }
 }
 
-/// Las dos marcas `BITMAP_GM_AURORA` (`Skill/gmmzine`) bajo el seleccionado, sumando
-/// (`RenderTerrainAlphaBitmap`, ZzzScene.cpp:1130-1139). El original gira la textura: aquí se gira
-/// el cuadrado al revés, que es lo mismo.
+/// The two `BITMAP_GM_AURORA` marks (`Skill/gmmzine`) under the selected one, additive
+/// (`RenderTerrainAlphaBitmap`, ZzzScene.cpp:1130-1139). The original rotates the texture; here the
+/// quad is rotated the opposite way, which is equivalent.
 fn aurora(
     sel: Option<Res<CharSelect>>,
     time: Res<Time>,
@@ -349,7 +346,7 @@ fn aurora(
 ) {
     let Some(slot) = sel.and_then(|s| s.selected) else { return };
     let Some(c) = q.iter().find(|c| c.slot == slot) else { return };
-    // `WorldTime` en milisegundos.
+    // `WorldTime` in milliseconds.
     let world_time = time.elapsed_secs() * 1000.0;
     let lumi = (world_time * 0.0015).sin() * 0.3 + 0.5;
     for (size, rotation) in [(1.8, world_time * 0.01), (1.2, -world_time * 0.01)] {
@@ -360,34 +357,34 @@ fn aurora(
             height: size * MU_SCALE,
             color: [lumi, lumi, lumi, 1.0],
             rotation: -rotation,
-            // `Height` por defecto de `RenderTerrainAlphaBitmap`.
+            // Default `Height` of `RenderTerrainAlphaBitmap`.
             lift: 5.0,
             blend: Blend::Glow,
         });
     }
 }
 
-// --- Vista previa de la ventana de crear -----------------------------------------------------------
+// --- Create-window preview -------------------------------------------------------------------------
 
-/// Capa que solo ve la cámara de la vista previa.
+/// Layer seen only by the preview camera.
 const PREVIEW_LAYER: usize = 1;
 
 #[derive(Component)]
 struct PreviewCamera;
 
-/// La cara de la clase elegida (`CharacterView` con `MODEL_FACE + clase` = `Logo/NewFaceNN.bmd`).
+/// Face of the chosen class (`CharacterView` with `MODEL_FACE + class` = `Logo/NewFaceNN.bmd`).
 #[derive(Component)]
 struct PreviewFace {
     choice: (Class, u32),
     model: mu_data::bmd::Bmd,
     meshes: Vec<(usize, Handle<Mesh>)>,
-    /// Acción 1 una vez (al elegir la clase) y luego la 0 en bucle.
+    /// Action 1 once (when the class is chosen), then action 0 looping.
     action: usize,
     frame: f32,
 }
 
-/// `RenderCreateCharacter` (CharMakeWin.cpp:388-445): giro, escala y desplazamiento de cada cara.
-/// La rama del Rage Fighter (de MuMain) no pone giro: se queda el de la cara anterior.
+/// `RenderCreateCharacter` (CharMakeWin.cpp:388-445): rotation, scale and offset of each face.
+/// The Rage Fighter branch (from MuMain) sets no rotation: the previous face's rotation stays.
 fn face_pose(class: Class) -> (Option<Vec3>, f32, Vec3) {
     match class {
         Class::Wizard => (Some(Vec3::new(0.0, 0.0, -40.0)), 5.9, Vec3::ZERO),
@@ -400,15 +397,15 @@ fn face_pose(class: Class) -> (Option<Vec3>, f32, Vec3) {
     }
 }
 
-/// `CharacterAnimation` con `PlaySpeed` 0.3 (la acción 0 de la Summoner, 0.25), × 2 por ser una
-/// cara y otra vez × 2 porque mientras la ventana está activa se anima dos veces por tick.
+/// `CharacterAnimation` with `PlaySpeed` 0.3 (Summoner action 0: 0.25), × 2 because it is a face
+/// and × 2 again because it is animated twice per tick while the window is active.
 fn face_keys_per_tick(class: Class, action: usize) -> f32 {
     let speed = if class == Class::Summoner && action == 0 { 0.25 } else { 0.3 };
     speed * 2.0 * 2.0
 }
 
-/// La cámara (`MoveCharacterCamera` con (10, -500, 48) y ángulo (-90, 0, 0), `CameraFOV` 10)
-/// dibuja la cara en una imagen transparente que la ventana de crear enseña en su sitio.
+/// The camera (`MoveCharacterCamera` at (10, -500, 48), angle (-90, 0, 0), `CameraFOV` 10)
+/// renders the face into a transparent image that the create window shows in place.
 #[allow(clippy::too_many_arguments)]
 fn preview(
     mut commands: Commands,
@@ -427,7 +424,7 @@ fn preview(
     use bevy::render::render_resource::TextureFormat;
     let Some(mut link) = link else { return };
     let size = link.preview_size.max(UVec2::ONE);
-    // La imagen, del tamaño de la vista previa en la pantalla.
+    // The image, sized like the on-screen preview.
     let image_ok = link.preview_image.as_ref().and_then(|h| images.get(h)).is_some_and(|i| i.size() == size);
     if !image_ok {
         let image = images.add(Image::new_target_texture(size.x, size.y, TextureFormat::Rgba8UnormSrgb, None));
@@ -470,7 +467,7 @@ fn preview(
         return;
     };
 
-    // Otra clase (o la misma elegida otra vez): otra cara, desde la acción 1.
+    // Another class (or the same one chosen again): new face, starting at action 1.
     if faces.iter().any(|(_, f)| f.choice != choice) || faces.is_empty() {
         for (e, _) in &faces {
             commands.entity(e).despawn();
@@ -487,7 +484,7 @@ fn preview(
         };
         let bones = model.bone_matrices_at(1, 0.0);
         let (angle, scale, offset) = face_pose(class);
-        // `CharacterView.Object.Angle` empieza en (0, 0, 0).
+        // `CharacterView.Object.Angle` starts at (0, 0, 0).
         let angle = angle.unwrap_or(*last_angle);
         *last_angle = angle;
         let [ax, ay, az] = angle.to_array().map(f32::to_radians);
@@ -511,7 +508,7 @@ fn preview(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
             let mut mat = crate::character::part_material(&dir, &model.meshes[i].texture, &mut images);
-            // `Draw_RenderObject` dibuja las caras con `BodyLight` (4.8, 4.8, 4.8).
+            // `Draw_RenderObject` draws faces with `BodyLight` (4.8, 4.8, 4.8).
             mat.extension.light = Vec4::new(4.8, 4.8, 4.8, 1.0);
             children.push((Mesh3d(mesh.clone()), MeshMaterial3d(materials.add(mat)), RenderLayers::layer(PREVIEW_LAYER)));
             handles.push((i, mesh));
@@ -535,7 +532,7 @@ fn preview(
         f.frame += face_keys_per_tick(class, f.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         let frames = f.model.actions.get(f.action).map_or(1, |a| a.frames.max(1)) as f32;
         if f.frame >= frames {
-            // `CharacterAnimation` devuelve false al dar la vuelta: a la acción 0.
+            // `CharacterAnimation` returns false when it wraps: switch to action 0.
             f.frame -= frames;
             if f.action == 1 {
                 f.action = 0;
@@ -554,73 +551,72 @@ fn preview(
     }
 }
 
-// --- Enlace con las ventanas (login_ui.rs) ---------------------------------------------------------
+// --- Link with the windows (login_ui.rs) -----------------------------------------------------------
 
-/// Lo que se cuentan esta pantalla (3D, barra y globos) y las ventanas del gestor de login_ui.rs
-/// (crear personaje, mensajes, menú de sistema y opciones), que en el original son todas de `CUIMng`.
+/// What this screen (3D, bar and balloons) and the login_ui.rs window manager (create character,
+/// messages, system menu and options) tell each other; in the original they all belong to `CUIMng`.
 #[derive(Resource, Default)]
 pub struct CharSceneLink {
     pub account: String,
-    /// Personajes en la cuenta.
+    /// Characters on the account.
     pub count: usize,
-    /// `SelectedHero`: hueco, nombre y `GuildStatus`.
+    /// `SelectedHero`: slot, name and `GuildStatus`.
     pub selected: Option<(usize, String, u8)>,
-    /// Hay abierta una ventana de pantalla completa: la barra, los personajes y el teclado de
-    /// esta pantalla no responden.
+    /// A full-screen window is open: this screen's bar, characters and keyboard do not respond.
     pub blocked: bool,
-    /// Botones de la barra para las ventanas.
+    /// Bar buttons for the windows.
     pub to_ui: Vec<UiRequest>,
-    /// Lo que han hecho las ventanas.
+    /// What the windows did.
     pub to_scene: Vec<SceneEvent>,
-    /// Vista previa de la ventana de crear (`RenderCreateCharacter`), mientras se ve: la clase y
-    /// cuántas veces se ha elegido una (al cambiar, la animación vuelve a empezar).
+    /// Create-window preview (`RenderCreateCharacter`) while shown: the class and how many times
+    /// one has been chosen (on change, the animation restarts).
     pub preview: Option<(Class, u32)>,
-    /// Tamaño en píxeles reales de la vista previa (410×335 de la ventana de referencia).
+    /// Preview size in real pixels (410×335 of the reference window).
     pub preview_size: UVec2,
-    /// Imagen donde se dibuja (la pone esta pantalla; la enseña la ventana de crear).
+    /// Image it is drawn into (created by this screen; shown by the create window).
     pub preview_image: Option<Handle<Image>>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum UiRequest {
-    /// Menú: `m_SysMenuWin`.
+    /// Menu: `m_SysMenuWin`.
     SysMenu,
-    /// Crear: `m_CharMakeWin`.
+    /// Create: `m_CharMakeWin`.
     Create,
-    /// Borrar: `DeleteCharacter` (los avisos y la confirmación).
+    /// Delete: `DeleteCharacter` (the warnings and the confirmation).
     Delete,
 }
 
 #[derive(Clone, Debug)]
 pub enum SceneEvent {
-    /// `ReceiveCreateCharacter` con éxito.
+    /// Successful `ReceiveCreateCharacter`.
     Created(StoredCharacter),
-    /// `ReceiveDeleteCharacter` con éxito.
+    /// Successful `ReceiveDeleteCharacter`.
     Deleted(String),
 }
 
-// --- Interfaz --------------------------------------------------------------------------------------
+// --- UI --------------------------------------------------------------------------------------------
 
-/// Estado de la pantalla.
+/// Screen state.
 #[derive(Resource, Default)]
 struct CharSelect {
-    /// `SelectedHero`: hueco elegido.
+    /// `SelectedHero`: selected slot.
     selected: Option<usize>,
-    /// `SelectedCharacter`: hueco bajo el cursor.
+    /// `SelectedCharacter`: slot under the cursor.
     hovered: Option<usize>,
-    /// `CButton::m_pBtnHeld`: botón pulsado y aún no soltado.
+    /// `CButton::m_pBtnHeld`: button pressed and not yet released.
     held: Option<CsButton>,
-    /// `CInput`: hora (s) del último clic y si puede ser el primero de un doble clic.
+    /// `CInput`: time (s) of the last click and whether it can be the first of a double click.
     last_press: f32,
     former_down: bool,
-    /// Ya se ha pedido entrar al juego.
+    /// Entering the game has already been requested.
     starting: bool,
 }
 
 #[derive(Component)]
 struct CharSelectUi;
 
-/// Botones de `CCharSelMainWin`.
+/// `CCharSelMainWin` buttons.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
 enum CsButton {
     Create,
@@ -632,7 +628,7 @@ enum CsButton {
 impl CsButton {
     const ALL: [CsButton; 4] = [CsButton::Create, CsButton::Menu, CsButton::Connect, CsButton::Delete];
 
-    /// Textura (`OpenCharacterSceneData`, ZzzOpenData.cpp:4908-4911).
+    /// Texture (`OpenCharacterSceneData`, ZzzOpenData.cpp:4908-4911).
     fn texture(self) -> &'static str {
         match self {
             CsButton::Create => "b_create.tga",
@@ -642,29 +638,29 @@ impl CsButton {
         }
     }
 
-    /// Fotograma de deshabilitado (`CButton::Create`, CharSelMainWin.cpp:41-44): el de Menú no
-    /// tiene (siempre está habilitado).
+    /// Disabled frame (`CButton::Create`, CharSelMainWin.cpp:41-44): Menu has none (it is always
+    /// enabled).
     fn disabled_frame(self) -> Option<f32> {
         (self != CsButton::Menu).then_some(3.0)
     }
 }
 
-/// Fotogramas de los botones (`CButton::Create`: arriba normal, 1 encima, 2 pulsado, 3 deshabilitado).
+/// Button frames (`CButton::Create`: top normal, 1 hover, 2 pressed, 3 disabled).
 const BTN_W: f32 = 54.0;
 const BTN_H: f32 = 30.0;
-/// Globo de `character_ex` (118×54) con el punto de anclaje abajo en el centro (CharInfoBalloon.cpp:25).
+/// `character_ex` balloon (118×54) anchored at the bottom center (CharInfoBalloon.cpp:25).
 const BALLOON_W: f32 = 118.0;
 const BALLOON_H: f32 = 54.0;
-/// Altura sobre los pies del punto del globo (CharInfoBalloon.cpp:43).
+/// Height of the balloon anchor above the feet (CharInfoBalloon.cpp:43).
 const BALLOON_LIFT: f32 = 350.0;
-/// `g_hFixFont`: 13 − 1 = 12 px (Winmain.cpp:1464-1474), cara `GlobalText[18]` = "Gulim".
+/// `g_hFixFont`: 13 − 1 = 12 px (Winmain.cpp:1464-1474), face `GlobalText[18]` = "Gulim".
 const FONT_PX: f32 = 12.0;
 /// `CLRDW_BR_ORANGE` (UIBaseDef.h:15).
 const BR_ORANGE: Color = Color::srgb(255.0 / 255.0, 217.0 / 255.0, 39.0 / 255.0);
-/// Fondo de la barra de información: negro con alfa 143 (CharSelMainWin.cpp:37-38).
+/// Info bar background: black with alpha 143 (CharSelMainWin.cpp:37-38).
 const INFO_ALPHA: f32 = 143.0 / 255.0;
 
-/// Partes de la interfaz que se colocan cada fotograma.
+/// UI pieces placed every frame.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum UiPiece {
     TopBand,
@@ -675,12 +671,12 @@ enum UiPiece {
     Balloon(usize),
 }
 
-/// Colocación de `CCharSelMainWin` en una pantalla virtual de `size` (UIMng.cpp:284-285,
-/// CharSelMainWin.cpp:32-48 y 74-88). Ancho de la ventana: 4 botones + la barra de información
-/// (`ancho − 266`) + 6 = `ancho − 44`, en x = 22 e `y = 567/600 · alto − 30 − 11`.
+/// `CCharSelMainWin` layout on a virtual screen of `size` (UIMng.cpp:284-285,
+/// CharSelMainWin.cpp:32-48 and 74-88). Window width: 4 buttons + the info bar
+/// (`width − 266`) + 6 = `width − 44`, at x = 22 and `y = 567/600 · height − 30 − 11`.
 struct Layout {
     size: Vec2,
-    /// Rectángulo de toda la ventana (`CWin`: lo que cuenta como "ratón sobre la interfaz").
+    /// Rectangle of the whole window (`CWin`: what counts as "mouse over the UI").
     window: Rect,
     deco: Rect,
     info: Rect,
@@ -690,8 +686,8 @@ impl Layout {
     fn new(size: Vec2) -> Self {
         let y = (567.0 / 600.0 * size.y).floor() - BTN_H - 11.0;
         let window = Rect::new(22.0, y, size.x - 22.0, y + BTN_H);
-        // `SetPosition`: Menú a la derecha de Crear (+1), la barra a +2 de Menú y 5 más abajo; Borrar
-        // pegado a la derecha y Conectar a su izquierda (−1); el adorno asoma 22 por la derecha y 59 por arriba.
+        // `SetPosition`: Menu right of Create (+1), the bar +2 after Menu and 5 lower; Delete flush
+        // right and Connect to its left (−1); the decoration sticks out 22 on the right and 59 above.
         let info_x = 22.0 + 2.0 * BTN_W + 1.0 + 2.0;
         Self {
             size,
@@ -712,17 +708,17 @@ impl Layout {
         Rect::new(x, y, x + BTN_W, y + BTN_H)
     }
 
-    /// Alto de cada banda negra fuera de la franja del 3D.
+    /// Height of each black band outside the 3D strip.
     fn band(&self) -> f32 {
         VIEW_TOP * self.size.y / 480.0
     }
 }
 
-/// Unidades de la interfaz (pantalla virtual de 480 de alto) por píxel del original: las ventanas
-/// van en píxeles de una ventana de referencia de 1024×768, como las del login (login_ui.rs).
+/// UI units (480-high virtual screen) per original pixel: windows are laid out in pixels of a
+/// 1024×768 reference window, like the login ones (login_ui.rs).
 pub const K: f32 = 480.0 / 768.0;
 
-/// Tamaño de la pantalla en píxeles de la ventana de referencia (la ventana entre `UiScale` y `K`).
+/// Screen size in reference-window pixels (the window divided by `UiScale` and `K`).
 fn virtual_size(window: Option<&Window>, scale: f32) -> Vec2 {
     let ui = match window {
         Some(w) if w.width() >= 1.0 && w.height() >= 1.0 && scale > 0.0 => Vec2::new(w.width(), w.height()) / scale,
@@ -731,16 +727,16 @@ fn virtual_size(window: Option<&Window>, scale: f32) -> Vec2 {
     (ui / K).round()
 }
 
-/// La letra de la interfaz (`fonts.rs`: Noto Sans en lugar de la Gulim del original).
+/// UI font (`fonts.rs`: Noto Sans instead of the original Gulim).
 fn load_font(_fonts: &mut Assets<Font>) -> FontSource {
     FontSource::default()
 }
 
-/// La fuente, cargada una sola vez.
+/// The font, loaded only once.
 #[derive(Resource, Clone)]
 struct UiFont(FontSource);
 
-/// Nodo con la parte `src` de una imagen de `Data/Interface` (transparente si falta el archivo).
+/// Node showing the `src` part of a `Data/Interface` image (transparent if the file is missing).
 fn image_piece(image: Option<(Handle<Image>, Vec2)>, src: Rect) -> impl Bundle {
     let node = Node { position_type: PositionType::Absolute, ..default() };
     let img = match image {
@@ -750,7 +746,7 @@ fn image_piece(image: Option<(Handle<Image>, Vec2)>, src: Rect) -> impl Bundle {
     (node, img)
 }
 
-/// Una línea del globo centrada en `width` desde `left` (`RenderText(..., RT3_SORT_CENTER)`).
+/// A balloon line centered in `width` from `left` (`RenderText(..., RT3_SORT_CENTER)`).
 fn balloon_line(font: &FontSource, text: String, color: Color, left: f32, top: f32, width: f32) -> impl Bundle {
     (
         Node {
@@ -775,7 +771,7 @@ fn balloon_line(font: &FontSource, text: String, color: Color, left: f32, top: f
     )
 }
 
-/// `CCharInfoBalloon::SetInfo` (CharInfoBalloon.cpp:84-124): nombre, gremio y "clase nivel".
+/// `CCharInfoBalloon::SetInfo` (CharInfoBalloon.cpp:84-124): name, guild and "class level".
 fn guild_text(status: u8) -> &'static str {
     match status {
         255 => "(Commoner)",
@@ -815,11 +811,11 @@ fn spawn_ui(
         Node { position_type: PositionType::Absolute, width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
     ));
     root.with_children(|r| {
-        // Fuera de la franja del 3D (`BeginOpengl(0,25,640,430)`) solo se ve el borrado negro.
+        // Outside the 3D strip (`BeginOpengl(0,25,640,430)`) only the black clear shows.
         r.spawn((band(), UiPiece::TopBand));
         r.spawn((band(), UiPiece::BottomBand));
-        // `RenderControls`: primero el adorno y la barra, luego los botones. Por encima de los
-        // globos (`CUIMng::Render`, UIMng.cpp:719), que se añaden con los personajes.
+        // `RenderControls`: decoration and bar first, then the buttons. Above the balloons
+        // (`CUIMng::Render`, UIMng.cpp:719), which are added with the characters.
         r.spawn((image_piece(deco, Rect::new(0.0, 0.0, 189.0, 103.0)), UiPiece::Deco, ZIndex(1)));
         r.spawn((
             Node { position_type: PositionType::Absolute, ..default() },
@@ -834,14 +830,14 @@ fn spawn_ui(
     commands.insert_resource(BalloonAssets { image: balloon, font });
 }
 
-/// Textura y letra de los globos.
+/// Balloon texture and font.
 #[derive(Resource)]
 struct BalloonAssets {
     image: Option<(Handle<Image>, Vec2)>,
     font: FontSource,
 }
 
-/// Un globo (`CCharInfoBalloon`) por personaje: aparece al crearlo y se va al borrarlo.
+/// One balloon (`CCharInfoBalloon`) per character: appears on creation and goes away on deletion.
 fn sync_balloons(
     mut commands: Commands,
     assets: Option<Res<BalloonAssets>>,
@@ -870,7 +866,7 @@ fn sync_balloons(
                 Visibility::Hidden,
             ))
             .with_children(|b| {
-                // `RenderText` a +7, +23 y +39; la clase en un hueco 10 más a la izquierda y 30 más ancho.
+                // `RenderText` at +7, +23 and +39; the class in a box 10 further left and 30 wider.
                 b.spawn(balloon_line(font, c.name.clone(), Color::WHITE, 0.0, 7.0, BALLOON_W));
                 b.spawn(balloon_line(font, guild_text(c.guild_status).to_string(), Color::WHITE, 0.0, 23.0, BALLOON_W));
                 b.spawn(balloon_line(font, format!("{} {}", c.class.name(), c.level), BR_ORANGE, -10.0, 39.0, BALLOON_W + 30.0));
@@ -880,7 +876,7 @@ fn sync_balloons(
     }
 }
 
-/// Pone cada pieza en su sitio (la barra según el tamaño de la ventana, los globos sobre los personajes).
+/// Places each piece (the bar by window size, the balloons above the characters).
 #[allow(clippy::type_complexity)]
 fn layout_ui(
     windows: Query<&Window>,
@@ -908,7 +904,7 @@ fn layout_ui(
             UiPiece::Info => place(&mut node, layout.info),
             UiPiece::Button(b) => place(&mut node, layout.button(b)),
             UiPiece::Balloon(slot) => {
-                // `Projection` del punto 350 por encima de los pies; esquina = punto − (59, 54).
+                // `Projection` of the point 350 above the feet; corner = point − (59, 54).
                 let anchor = characters.iter().find(|c| c.slot == slot).and_then(|c| {
                     let (cam, gt) = camera?;
                     let p = c.position() + Vec3::Z * BALLOON_LIFT;
@@ -930,7 +926,7 @@ fn layout_ui(
     }
 }
 
-/// Rayo (en MU) bajo el cursor contra la caja de cada personaje: el más cercano a la cámara
+/// Ray (in MU) under the cursor against each character's box: the closest to the camera wins
 /// (`SelectCharacter`, ZzzInterface.cpp:7704-7792).
 fn pick(camera: (&Camera, &GlobalTransform), cursor: Vec2, characters: &Query<&SlotCharacter>) -> Option<usize> {
     let (cam, gt) = camera;
@@ -953,7 +949,7 @@ fn pick(camera: (&Camera, &GlobalTransform), cursor: Vec2, characters: &Query<&S
     best.map(|(_, s)| s)
 }
 
-/// Corte de un rayo (hacia delante) con una caja alineada con los ejes.
+/// Forward ray vs. axis-aligned box intersection.
 fn ray_hits_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> bool {
     let (mut t0, mut t1) = (0.0f32, f32::INFINITY);
     for k in 0..3 {
@@ -973,7 +969,7 @@ fn ray_hits_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> bool {
     true
 }
 
-/// Ratón y teclado: botones (`CButton::Update`), elegir con clic, doble clic y Enter para entrar.
+/// Mouse and keyboard: buttons (`CButton::Update`), click to select, double click or Enter to enter.
 #[allow(clippy::too_many_arguments)]
 fn input(
     windows: Query<&Window>,
@@ -993,15 +989,15 @@ fn input(
     let (Some(mut sel), Some(mut link)) = (sel, link) else { return };
     let window = windows.single().ok();
     let layout = Layout::new(virtual_size(window, scale.0));
-    // Con una ventana de pantalla completa delante, nada de esta pantalla responde (`CUIMng`
-    // solo atiende los botones de la ventana que hay bajo el ratón).
+    // With a full-screen window in front, nothing on this screen responds (`CUIMng` only
+    // handles the buttons of the window under the mouse).
     let blocked = link.blocked;
     let cursor_px = window.and_then(|w| w.cursor_position()).filter(|_| !blocked);
     let cursor = cursor_px.map(|c| c / scale.0 / K);
     let down = mouse.just_pressed(MouseButton::Left) && !blocked;
     let up = mouse.just_released(MouseButton::Left);
 
-    // `CInput`: un clic es doble si llega antes de `GetDoubleClickTime` (500 ms) tras el anterior.
+    // `CInput`: a click is a double click if it comes within `GetDoubleClickTime` (500 ms) of the previous one.
     let mut double = false;
     if down {
         let now = time.elapsed_secs();
@@ -1010,8 +1006,8 @@ fn input(
         sel.last_press = now;
     }
 
-    // `CCharSelMainWin::UpdateDisplay`: Crear si queda algún hueco libre; Conectar y Borrar con
-    // un personaje elegido; Menú siempre.
+    // `CCharSelMainWin::UpdateDisplay`: Create if a slot is free; Connect and Delete with a
+    // character selected; Menu always.
     let free_slot = characters.iter().count() < SLOTS.len();
     let chosen = sel.selected.is_some();
     let enabled = |b: CsButton| match b {
@@ -1020,7 +1016,7 @@ fn input(
         CsButton::Connect | CsButton::Delete => chosen,
     };
 
-    // Botones: se agarra al pulsar encima y cuenta al soltar encima del mismo.
+    // Buttons: grabbed on press over it, triggered on release over the same one.
     let inside = |b: CsButton| cursor.is_some_and(|c| layout.button(b).contains(c));
     let mut clicked = None;
     for b in CsButton::ALL {
@@ -1067,7 +1063,7 @@ fn input(
         None => {}
     }
 
-    // `SelectObjects`: solo con el ratón fuera de la interfaz y por encima de y = 429.
+    // `SelectObjects`: only with the mouse outside the UI and above y = 429.
     let on_ui = cursor.is_some_and(|c| layout.window.contains(c));
     sel.hovered = match (cursor_px, cursor, cameras.single()) {
         (Some(px), Some(c), Ok(cam)) if !on_ui && c.y < 429.0 * layout.size.y / 480.0 => pick(cam, px, &characters),
@@ -1097,8 +1093,8 @@ fn input(
         .map(|c| (c.slot, c.name.clone(), c.guild_status));
 }
 
-/// Lo que han hecho las ventanas: el personaje creado aparece en su hueco y queda elegido; el
-/// borrado desaparece (`ReceiveCreateCharacter` / `ReceiveDeleteCharacter`).
+/// What the windows did: a created character appears in its slot and becomes selected; a deleted
+/// one disappears (`ReceiveCreateCharacter` / `ReceiveDeleteCharacter`).
 #[allow(clippy::too_many_arguments)]
 fn scene_events(
     mut commands: Commands,
@@ -1133,19 +1129,19 @@ fn scene_events(
     }
 }
 
-/// `PlayMp3(login_theme)` del login: sigue sonando aquí (salvo al entrar al juego, que se corta).
+/// Login `PlayMp3(login_theme)`: keeps playing here (except when entering the game, which stops it).
 fn music(sel: Option<Res<CharSelect>>, mut sound: ResMut<crate::sound::SoundQueue>) {
     if !sel.is_some_and(|s| s.starting) {
         sound.music("login_theme");
     }
 }
 
-/// `GetDoubleClickTime` por defecto de Windows.
+/// Windows default `GetDoubleClickTime`.
 const DOUBLE_CLICK_SECS: f32 = 0.5;
 
-/// `StartGame` (ZzzScene.cpp:854-871): con un personaje elegido, `SendRequestJoinMapServer`; la
-/// información del personaje (con su mapa) llega en `net_messages` y entonces se carga el mapa.
-/// `LoadingScene` para la música del login (ZzzScene.cpp:1503).
+/// `StartGame` (ZzzScene.cpp:854-871): with a character selected, `SendRequestJoinMapServer`; the
+/// character information (with its map) arrives in `net_messages` and then the map loads.
+/// `LoadingScene` stops the login music (ZzzScene.cpp:1503).
 fn start_game(
     sel: &mut CharSelect,
     characters: &Query<&SlotCharacter>,

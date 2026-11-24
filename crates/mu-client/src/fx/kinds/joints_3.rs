@@ -1,25 +1,25 @@
-//! Estelas (`JOINT`) de `ZzzEffectJoint.cpp`: `BITMAP_JOINT_FORCE`, `BITMAP_LIGHT`, `BITMAP_PIERCING`,
+//! Trails (`JOINT`) from `ZzzEffectJoint.cpp`: `BITMAP_JOINT_FORCE`, `BITMAP_LIGHT`, `BITMAP_PIERCING`,
 //! `BITMAP_FLARE_FORCE`, `BITMAP_FLASH`, `BITMAP_DRAIN_LIFE_GHOST`, `BITMAP_PIN_LIGHT`,
-//! `BITMAP_FORCEPILLAR`, `BITMAP_SWORDEFF`, `BITMAP_GROUND_WIND` y `BITMAP_LAVA`.
+//! `BITMAP_FORCEPILLAR`, `BITMAP_SWORDEFF`, `BITMAP_GROUND_WIND` and `BITMAP_LAVA`.
 //!
-//! Creación = su caso en `CreateJoint`; movimiento = su caso en `MoveJoint`.
+//! Creation = its case in `CreateJoint`; movement = its case in `MoveJoint`.
 //!
-//! Notas comunes:
-//! - El original NO aplica el avance genérico por −Y·Velocity a `JOINT_FORCE` sub 0, `LIGHT`,
-//!   `PIERCING`, `FLARE_FORCE` ni `FLASH` sub 6; el núcleo sí lo hace, así que esos tipos lo
-//!   deshacen al empezar su `step` ([`undo_generic_move`]).
-//! - `NumTails` del original = `tails.len() - 1` (−1 = sin colas).
-//! - La cola inicial de `CreateJoint` (`bCreateStartTail`) se hace con la posición y el ángulo que
-//!   llegan, antes de que el tipo los cambie.
-//! - Las estelas que en `DescribeJoint` calculan una luminosidad por segmento (`JOINT_FORCE` 0 y 1,
-//!   `FLARE_FORCE` 0-4/11-13) guardan su luz "lógica" en `user[0..3]` y ponen en `light` la luz
-//!   lógica por la luminosidad media de los segmentos.
+//! Common notes:
+//! - The original does NOT apply the generic −Y·Velocity advance to `JOINT_FORCE` sub 0, `LIGHT`,
+//!   `PIERCING`, `FLARE_FORCE` or `FLASH` sub 6; the core does, so those types undo it at the
+//!   start of their `step` ([`undo_generic_move`]).
+//! - The original's `NumTails` = `tails.len() - 1` (−1 = no tails).
+//! - The initial `CreateJoint` tail (`bCreateStartTail`) uses the incoming position and angle,
+//!   before the type changes them.
+//! - Trails that compute a per-segment luminosity in `DescribeJoint` (`JOINT_FORCE` 0 and 1,
+//!   `FLARE_FORCE` 0-4/11-13) keep their "logical" light in `user[0..3]` and set `light` to the
+//!   logical light times the segments' average luminosity.
 
 use bevy::math::{Mat3, Vec3};
 
 use crate::fx::core::*;
 
-/// `Q_PI` del original.
+/// The original's `Q_PI`.
 const Q_PI: f32 = 3.141_592_7;
 
 pub fn register(r: &mut Registry) {
@@ -36,27 +36,27 @@ pub fn register(r: &mut Registry) {
     r.joint(BITMAP_LAVA, JointKind { create: Some(lava_create), step: Some(lava_step) });
 }
 
-// --- Ayudas -----------------------------------------------------------------------------------------
+// --- Helpers ----------------------------------------------------------------------------------------
 
-/// Deshace el avance genérico por −Y·Velocity que el núcleo hizo antes del `step` (el original lo
-/// salta para estos tipos). El ángulo aún no ha cambiado, así que es exacto.
+/// Undoes the generic −Y·Velocity advance the core did before `step` (the original skips it for
+/// these types). The angle has not changed yet, so this is exact.
 fn undo_generic_move(j: &mut Joint) {
     j.position -= rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0));
 }
 
-/// `NumTails` del original.
+/// The original's `NumTails`.
 fn num_tails(j: &Joint) -> i32 {
     j.tails.len() as i32 - 1
 }
 
-/// Mete una cola nueva delante (como `CreateTail`: como mucho `MaxTails` colas).
+/// Pushes a new tail at the front (like `CreateTail`: at most `MaxTails` tails).
 fn push_tail(j: &mut Joint, t: [Vec3; 4]) {
     j.tails.insert(0, t);
     let max = j.max_tails.clamp(1, MAX_TAILS);
     j.tails.truncate(max);
 }
 
-/// `CreateTail(o, Matrix)` con una matriz cualquiera (cruz en los ejes X y Z de `m`).
+/// `CreateTail(o, Matrix)` with an arbitrary matrix (cross on the X and Z axes of `m`).
 fn create_tail_m(j: &mut Joint, m: Mat3) {
     let (h, p) = (j.scale * 0.5, j.position);
     push_tail(
@@ -70,7 +70,7 @@ fn create_tail_m(j: &mut Joint, m: Mat3) {
     );
 }
 
-/// `CreateTailAxis(o, Matrix, 1)` / `FollowTailAxis(o, Matrix, 1)`: cruz en los ejes X e Y de `m`.
+/// `CreateTailAxis(o, Matrix, 1)` / `FollowTailAxis(o, Matrix, 1)`: cross on the X and Y axes of `m`.
 fn create_tail_axis_y(j: &mut Joint, m: Mat3) {
     let (h, p) = (j.scale * 0.5, j.position);
     push_tail(
@@ -84,7 +84,7 @@ fn create_tail_axis_y(j: &mut Joint, m: Mat3) {
     );
 }
 
-/// Luz "lógica" guardada en `user[0..3]` (la que el original tiene en `o->Light`).
+/// "Logical" light stored in `user[0..3]` (what the original keeps in `o->Light`).
 fn logic_light(j: &Joint) -> Vec3 {
     Vec3::new(j.user[0], j.user[1], j.user[2])
 }
@@ -95,8 +95,8 @@ fn set_logic_light(j: &mut Joint, l: Vec3) {
     j.user[2] = l.z;
 }
 
-/// Giro (en el mundo) de un hueso del personaje: lo que el original usa al hacer
-/// `VectorRotate(v, o->Target->BoneTransform[bone])` (allí los huesos ya llevan el giro del objeto).
+/// World rotation of a character bone: what the original uses in
+/// `VectorRotate(v, o->Target->BoneTransform[bone])` (there the bones already include the object rotation).
 fn bone_rotation(a: &Actor, bone: usize) -> Mat3 {
     let r = a.bones.get(bone).map_or(Mat3::IDENTITY, |m| {
         Mat3::from_cols(
@@ -108,21 +108,21 @@ fn bone_rotation(a: &Actor, bone: usize) -> Mat3 {
     angle_matrix(a.angle) * r
 }
 
-/// `TransformByObjectBone(out, o->Target, bone)`: posición del hueso del objetivo. `None` si ya no
-/// existe o está muerto (`!o->Target->Live`).
+/// `TransformByObjectBone(out, o->Target, bone)`: position of the target's bone. `None` if it no
+/// longer exists or is dead (`!o->Target->Live`).
 fn target_bone(ctx: &Ctx, t: Option<Target>, bone: usize) -> Option<Vec3> {
     match t? {
         Target::Actor(_) => {
             let a = ctx.actor(t)?;
             a.live.then(|| a.bone_world(bone, Vec3::ZERO))
         }
-        // TODO(original): los "dummies" (MODEL_DOWN_ATTACK_DUMMY, MODEL_DRAGON_KICK_DUMMY...) son
-        // efectos con huesos; aquí solo tenemos su posición.
+        // TODO(original): the "dummies" (MODEL_DOWN_ATTACK_DUMMY, MODEL_DRAGON_KICK_DUMMY...) are
+        // effects with bones; here we only have their position.
         Target::Effect(_) => ctx.target_position(t),
     }
 }
 
-/// Posición, ángulo (si es un personaje) y `Live` de lo que sigue la estela.
+/// Position, angle (if a character) and `Live` of what the trail follows.
 fn follow_target(ctx: &Ctx, t: Option<Target>) -> Option<(Vec3, Option<Vec3>, bool)> {
     match t? {
         Target::Actor(_) => ctx.actor(t).map(|a| (a.position, Some(a.angle), a.live)),
@@ -130,8 +130,8 @@ fn follow_target(ctx: &Ctx, t: Option<Target>) -> Option<(Vec3, Option<Vec3>, bo
     }
 }
 
-/// `MoveHumming(Position, Angle, TargetPosition, Turn)` (`ZzzAI.cpp`): gira hacia el objetivo y
-/// devuelve la distancia.
+/// `MoveHumming(Position, Angle, TargetPosition, Turn)` (`ZzzAI.cpp`): turns towards the target and
+/// returns the distance.
 fn move_humming(position: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f32 {
     let target_angle = create_angle(position.x, position.y, target.x, target.y);
     angle.z = turn_angle(angle.z, target_angle, turn);
@@ -142,7 +142,7 @@ fn move_humming(position: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f3
     range.length()
 }
 
-/// `CreateJoint(...)` con `PKKey` y `SkillIndex` (que `Ctx::create_joint` no recibe).
+/// `CreateJoint(...)` with `PKKey` and `SkillIndex` (which `Ctx::create_joint` does not take).
 #[allow(clippy::too_many_arguments)]
 fn create_joint_pk(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: Vec3, sub: i32, scale: f32, pk: i32, skill: i32) {
     let mut nj = Joint::new(ty, pos, target_pos, angle, sub, None, scale);
@@ -156,13 +156,13 @@ fn create_joint_pk(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: V
 fn joint_force_create(j: &mut Joint, ctx: &mut Ctx) {
     let start = j.make_tail();
     match j.sub_type {
-        // 0, 10 y 8: giro alrededor de la posición de partida (colas hechas a mano en el step).
+        // 0, 10 and 8: circle around the start position (tails built by hand in step).
         0 | 10 | 8 => {
             j.life_time = 20.0;
             j.create_tails = false;
             j.velocity = 0.0;
             j.max_tails = 18;
-            // NumTails = -1: sin colas.
+            // NumTails = -1: no tails.
             j.tails.clear();
             j.target_position = j.position;
             j.angle.z += 30.0;
@@ -170,7 +170,7 @@ fn joint_force_create(j: &mut Joint, ctx: &mut Ctx) {
             j.position += rotate(j.angle, Vec3::new(0.0, -180.0, 0.0));
             if j.sub_type == 0 {
                 set_logic_light(j, j.light);
-                // `DescribeJoint` solo dibuja la cara de los puntos 0-1 para el subtipo 0.
+                // `DescribeJoint` only draws the face of points 0-1 for subtype 0.
                 j.render_face = RENDER_FACE_TWO;
             }
         }
@@ -225,7 +225,7 @@ fn joint_force_create(j: &mut Joint, ctx: &mut Ctx) {
                     j.life_time = 16.0;
                 }
                 _ => {
-                    // Subtipo 2.
+                    // Subtype 2.
                     j.position.z += 10.0;
                     j.tex_type = BITMAP_INFERNO;
                     j.life_time = 15.0;
@@ -252,8 +252,8 @@ fn joint_force_create(j: &mut Joint, ctx: &mut Ctx) {
     }
 }
 
-/// `NumTails = -1` con `m_bCreateTails = true`: sin cola inicial. Se apagan las colas del núcleo
-/// hasta el primer `step` (si no, el núcleo pondría una cola inicial); `user[3]` = pendiente.
+/// `NumTails = -1` with `m_bCreateTails = true`: no initial tail. Core tails are disabled until
+/// the first `step` (otherwise the core would add an initial tail); `user[3]` = pending.
 fn start_without_tails(j: &mut Joint) {
     j.tails.clear();
     j.create_tails = false;
@@ -267,7 +267,7 @@ fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
     }
     match j.sub_type {
         0 | 10 | 8 => {
-            // Subtipo 0: el original no hace el avance genérico (con Velocity = 0 no cambia nada).
+            // Subtype 0: the original skips the generic advance (with Velocity = 0 nothing changes).
             if j.sub_type == 0 {
                 undo_generic_move(j);
             }
@@ -295,21 +295,21 @@ fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
                         create_joint_pk(ctx, BITMAP_JOINT_THUNDER, prev, j.position, j.angle, 3, s, 5, 10);
                     }
                 }
-                // TODO(original): subtipos 0 y 10, si es del héroe y LifeTime > 18, cada 5 vueltas
-                // AttackCharacterRange(Skill, Position, 150 (0) / 225 (10), Weapon, PKKey); en Battle
-                // Castle, en zona sin ataque: Velocity = 0, LifeTime /= 5 y se corta el bucle.
+                // TODO(original): subtypes 0 and 10, if the hero's and LifeTime > 18, every 5 laps
+                // AttackCharacterRange(Skill, Position, 150 (0) / 225 (10), Weapon, PKKey); in Battle
+                // Castle, in a no-attack zone: Velocity = 0, LifeTime /= 5 and the loop breaks.
             }
             match j.sub_type {
                 10 => {
-                    // TODO(original): con m_bySkillSerialNum != 0 solo divide la luz entre 1.5 si
-                    // LifeTime < 10 (aquí se supone 0).
+                    // TODO(original): with m_bySkillSerialNum != 0 it only divides the light by 1.5
+                    // if LifeTime < 10 (assumed 0 here).
                     let lum = if j.life_time < 10.0 { j.light.x / 1.5 } else { j.life_time / 30.0 };
                     j.light = Vec3::splat(lum);
                 }
                 0 => {
                     let lum = if j.life_time < 10.0 { j.user[0] / 1.5 } else { j.life_time / 30.0 };
                     set_logic_light(j, Vec3::splat(lum));
-                    // DescribeJoint: (MaxTails − j) / MaxTails · 2 · Light[0] por segmento → media.
+                    // DescribeJoint: (MaxTails − j) / MaxTails · 2 · Light[0] per segment → average.
                     let n = num_tails(j).max(0) as f32;
                     let max = j.max_tails as f32;
                     let avg = if n > 0.0 { 2.0 * (max - (n - 1.0) * 0.5) / max } else { 0.0 };
@@ -332,8 +332,8 @@ fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
                 l *= 1.0 / 1.3;
             }
             set_logic_light(j, l);
-            // DescribeJoint: (1 − (NumTails − j) / NumTails) · 2 por segmento; media = (N − 1) / N
-            // con el N que habrá tras el FollowTail del núcleo.
+            // DescribeJoint: (1 − (NumTails − j) / NumTails) · 2 per segment; average = (N − 1) / N
+            // with the N there will be after the core's FollowTail.
             let n = (j.tails.len() + 1).min(j.max_tails.clamp(1, MAX_TAILS)) as f32 - 1.0;
             let avg = if n > 0.0 { (n - 1.0) / n } else { 0.0 };
             j.light = l * avg;
@@ -473,14 +473,14 @@ fn piercing_step(j: &mut Joint, _ctx: &mut Ctx) {
 
 // --- BITMAP_FLARE_FORCE ------------------------------------------------------------------------------
 
-/// Subtipos con la luminosidad por segmento y el desplazamiento de UV de `DescribeJoint`.
+/// Subtypes with the per-segment luminosity and UV scroll of `DescribeJoint`.
 fn flare_force_lit(sub: i32) -> bool {
     (0..=4).contains(&sub) || (11..=13).contains(&sub)
 }
 
 fn flare_force_create(j: &mut Joint, ctx: &mut Ctx) {
     let start = j.make_tail();
-    // `o->Skill = SkillIndex` en la parte común: quien la crea pone el índice en `j.skill`.
+    // `o->Skill = SkillIndex` in the common part: the creator puts the index in `j.skill`.
     let skill_index = j.skill;
     j.life_time = 20.0;
     j.create_tails = false;
@@ -520,7 +520,7 @@ fn flare_force_create(j: &mut Joint, ctx: &mut Ctx) {
         j.skill = 0;
         j.max_tails = 1;
         j.weapon = 30.0;
-        // Hueso del personaje del que sale (5-7).
+        // Character bone it comes out of (5-7).
         j.multi_use = skill_index as f32;
         j.velocity = 0.0;
         j.target_position.x = 30.0;
@@ -542,7 +542,7 @@ fn flare_force_create(j: &mut Joint, ctx: &mut Ctx) {
         j.scroll = JointScroll::Flare;
         set_logic_light(j, j.light);
     }
-    // Los subtipos 5-7 no tienen cola inicial.
+    // Subtypes 5-7 have no initial tail.
     if !(5..=7).contains(&sub) {
         j.tails = vec![start];
     }
@@ -562,7 +562,7 @@ fn flare_force_step(j: &mut Joint, ctx: &mut Ctx) {
             j.start_position = a.bone_world(bone, Vec3::new(0.0, 20.0, 0.0));
             j.position = j.start_position;
 
-            // NumTails = 0: se rehacen todas las colas cada tick.
+            // NumTails = 0: all tails are rebuilt every tick.
             j.tails.clear();
             let max_tails = (j.max_tails as i32).min(j.weapon as i32).max(0);
             j.max_tails = max_tails as usize;
@@ -615,7 +615,7 @@ fn flare_force_step(j: &mut Joint, ctx: &mut Ctx) {
                 while (i as f32) < j.multi_use {
                     j.follow_tail();
                     j.start_position += rotate(j.angle, Vec3::new(0.0, j.velocity, 0.0));
-                    // (Las dos ramas del original restan lo mismo.)
+                    // (Both branches of the original subtract the same.)
                     j.target_position.y -= 20.0;
                     let angle = Vec3::new(0.0, j.target_position.y, j.angle.z);
                     let off = rotate(angle, Vec3::new(0.0, 0.0, j.target_position.x));
@@ -636,7 +636,7 @@ fn flare_force_step(j: &mut Joint, ctx: &mut Ctx) {
             j.light *= 1.0 / 1.3;
         }
         set_logic_light(j, j.light);
-        // DescribeJoint: (NumTails − 1 − j) / MaxTails · 2 por segmento; media = (N − 1) / MaxTails.
+        // DescribeJoint: (NumTails − 1 − j) / MaxTails · 2 per segment; average = (N − 1) / MaxTails.
         let n = num_tails(j).max(0) as f32;
         let avg = if n > 0.0 { (n - 1.0) / j.max_tails as f32 } else { 0.0 };
         j.light *= avg;
@@ -673,8 +673,8 @@ fn flash_create(j: &mut Joint, ctx: &mut Ctx) {
             j.angle = Vec3::new(90.0, 0.0, 0.0);
         }
         j.head_angle = j.angle;
-        // `m_bCreateTails` en user[0]: el original deja dos colas por tick (una con Angle y otra
-        // con HeadAngle), así que las colas se hacen a mano en el step.
+        // `m_bCreateTails` in user[0]: the original lays two tails per tick (one with Angle and one
+        // with HeadAngle), so tails are built by hand in step.
         j.user[0] = 1.0;
         j.tails = vec![start];
     } else if sub == 4 {
@@ -708,11 +708,11 @@ fn flash_create(j: &mut Joint, ctx: &mut Ctx) {
         j.start_position = j.position;
         j.create_tails = false;
         j.reverse_uv = 3;
-        // Sin cola inicial; CreateTailAxis + NumTails = 0 → una sola cola.
+        // No initial tail; CreateTailAxis + NumTails = 0 → a single tail.
         j.tails.clear();
         create_tail_axis_y(j, angle_matrix(j.angle));
     } else if sub == 7 {
-        // Abre tres rayos del subtipo 6 y muere.
+        // Spawns three subtype 6 bolts and dies.
         j.create_tails = false;
         j.life_time = 0.0;
         for i in 0..3 {
@@ -729,7 +729,7 @@ fn flash_create(j: &mut Joint, ctx: &mut Ctx) {
 fn flash_step(j: &mut Joint, ctx: &mut Ctx) {
     let sub = j.sub_type;
     if sub <= 3 || sub == 5 {
-        // Las colas las hace este step (user[0] = m_bCreateTails).
+        // This step builds the tails (user[0] = m_bCreateTails).
         j.create_tails = false;
         let mut lay = j.user[0] != 0.0;
         if sub == 2 {
@@ -748,8 +748,8 @@ fn flash_step(j: &mut Joint, ctx: &mut Ctx) {
             j.position.z = height;
             if lay && j.pk_key != 1 {
                 if sub < 2 {
-                    // TODO(original): con Target, anima MODEL_SHADOW_BODY con el ángulo del objetivo
-                    // y SpawnMeshEffects(0, MODEL_SKIN_SHELL[, 1]) (cáscaras de piel por la malla).
+                    // TODO(original): with Target, animates MODEL_SHADOW_BODY with the target's angle
+                    // and SpawnMeshEffects(0, MODEL_SKIN_SHELL[, 1]) (skin shells over the mesh).
                 } else {
                     let light = if sub == 5 { Vec3::new(1.0, 0.8, 0.3) } else { Vec3::new(0.3, 0.8, 1.0) };
                     ctx.create_effect(BITMAP_SHOCK_WAVE, j.position, j.angle, light, 4, None, -1, 0, 0, 0.0);
@@ -771,7 +771,7 @@ fn flash_step(j: &mut Joint, ctx: &mut Ctx) {
         } else {
             ctx.create_sprite(BITMAP_SHINY + 2, j.position, 1.6, Vec3::new(0.0, 1.0, 1.0), rot, 0);
         }
-        // FollowTail final de MoveJoint con la última matriz (la de HeadAngle).
+        // Final MoveJoint FollowTail with the last matrix (the HeadAngle one).
         if lay {
             create_tail_m(j, angle_matrix(j.head_angle));
         }
@@ -844,8 +844,8 @@ fn drain_life_create(j: &mut Joint, ctx: &mut Ctx) {
 
 fn drain_life_step(j: &mut Joint, _ctx: &mut Ctx) {
     if j.sub_type == 0 {
-        // TODO(original): el destino es `o->Target->Owner->Position` (con la Z de TargetPosition);
-        // sin el dueño del objetivo se va hacia el TargetPosition con el que se creó.
+        // TODO(original): the destination is `o->Target->Owner->Position` (with TargetPosition's Z);
+        // without the target's owner it heads to the TargetPosition it was created with.
         let target = j.target_position;
         let mut angle = j.angle;
         move_humming(j.position, &mut angle, target, j.velocity);
@@ -882,8 +882,8 @@ fn force_pillar_create(j: &mut Joint, _ctx: &mut Ctx) {
 }
 
 fn force_pillar_step(j: &mut Joint, ctx: &mut Ctx) {
-    // TODO(original): también muere si el objetivo no es MODEL_DOWN_ATTACK_DUMMY_L/_R, y vuelve a
-    // animar su modelo antes de leer el hueso.
+    // TODO(original): also dies if the target is not MODEL_DOWN_ATTACK_DUMMY_L/_R, and re-animates
+    // its model before reading the bone.
     match target_bone(ctx, j.target, 0) {
         Some(p) => j.position = p,
         None => j.live = false,
@@ -916,8 +916,8 @@ fn ground_wind_create(j: &mut Joint, _ctx: &mut Ctx) {
 }
 
 fn ground_wind_step(j: &mut Joint, ctx: &mut Ctx) {
-    // TODO(original): muere si el objetivo no es MODEL_DRAGON_KICK_DUMMY, y anima su modelo en el
-    // fotograma AnimationFrame + SubType · AlphaTarget antes de leer el hueso 2.
+    // TODO(original): dies if the target is not MODEL_DRAGON_KICK_DUMMY, and animates its model at
+    // frame AnimationFrame + SubType · AlphaTarget before reading bone 2.
     match target_bone(ctx, j.target, 2) {
         Some(p) => j.position = p,
         None => {
@@ -936,14 +936,14 @@ fn lava_create(j: &mut Joint, _ctx: &mut Ctx) {
     j.max_tails = 10;
     j.create_tails = true;
     j.light = Vec3::ONE;
-    // TODO(original): Velocity = PlaySpeed de la acción actual del modelo del objetivo (solo se usa
-    // para retrasar el fotograma de la animación; la posición se toma del hueso cada tick).
+    // TODO(original): Velocity = PlaySpeed of the target model's current action (only used to
+    // delay the animation frame; the position is read from the bone each tick).
     j.velocity = 0.0;
 }
 
 fn lava_step(j: &mut Joint, ctx: &mut Ctx) {
-    // TODO(original): anima el modelo del objetivo en AnimationFrame − ((Velocity·10 − (SubType % 7))
-    // · 0.1) antes de leer el hueso (cada subtipo va un poco por detrás).
+    // TODO(original): animates the target model at AnimationFrame − ((Velocity·10 − (SubType % 7))
+    // · 0.1) before reading the bone (each subtype lags slightly behind).
     let bone = if j.sub_type >= 7 { 28 } else { 36 };
     match target_bone(ctx, j.target, bone) {
         Some(p) => j.position = p,

@@ -16,8 +16,8 @@ path = "src/bin/mu-update-server.rs"
 
 [dependencies]
 sha2 = "0.10"
-# HTTP simple, sin TLS. Las descargas se comprueban con la huella SHA-256 de la lista.
+# Plain HTTP, no TLS. Downloads are verified against the SHA-256 hash in the list.
 ureq = { version = "2", default-features = false }
 tiny_http = "0.12"
-# Los archivos se sirven comprimidos (nivel 19, se comprimen una vez al publicarlos).
+# Files are served compressed (level 19, compressed once when published).
 zstd = "0.13"

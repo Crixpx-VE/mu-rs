@@ -1,30 +1,28 @@
-//! Cliente de MU Online en Rust.
+//! MU Online client in Rust.
 //!
-//! Por ahora, sin red: carga un mapa con sus objetos y un personaje que camina con clic.
+//! Usage:
+//!   cargo run -p mu-client -- [options]
 //!
-//! Uso:
-//!   cargo run -p mu-client -- [opciones]
+//!   --data <path>            client Data folder (or the MU_DATA variable)
+//!   --world <N>              map to load (1 = Lorencia, 2 = Dungeon, 3 = Devias, 4 = Noria...)
+//!   --spawn x,y              tile where the character appears
+//!   --walk-to x,y            walk order at startup (for testing without a mouse);
+//!                            with --screenshot it is given 1 s before capturing
+//!   --cam x,y,h,tx,ty,th     free camera at that position, looking at that point (in tiles)
+//!   --screenshot <png>       takes a capture and quits
+//!   --screenshot-delay <s>   seconds to wait before capturing (default 10)
+//!   --zoom <tiles>           initial follow camera distance (10-17, default 13)
+//!   --sin-vsync              no fps cap (for performance measurement)
+//!   --invasion <1|3>         start with the dragon invasion (1 = red, 3 = golden)
+//!   --resolucion <WxH>       window size for this run only (otherwise `resolucion=` from
+//!                            mu-launcher.txt, or 1024x768)
+//!   --fps                    frame counter
+//!   --inventario-prueba      test inventory: items +0 to +15, excellent and one ancient,
+//!                            to view the inventory (V or I) and the glow
+//!   --monstruos-prueba       some of the map's monsters and NPCs next to the character, cycling actions
 //!
-//!   --data <ruta>            carpeta Data del cliente (o variable MU_DATA)
-//!   --world <N>              mapa a cargar (1 = Lorencia, 2 = Dungeon, 3 = Devias, 4 = Noria...)
-//!   --spawn x,y              casilla donde aparece el personaje
-//!   --walk-to x,y            orden de caminar al arrancar (para probar sin ratón);
-//!                            con --screenshot se da 1 s antes de capturar
-//!   --cam x,y,alto,mx,my,ma  cámara libre en esa posición, mirando a ese punto (en casillas)
-//!   --screenshot <png>       hace una captura y se cierra
-//!   --screenshot-delay <s>   segundos de espera antes de capturar (por defecto 10)
-//!   --zoom <casillas>        distancia inicial de la cámara de seguimiento (10-17, por defecto 13)
-//!   --sin-vsync              sin límite de fps (para medir rendimiento)
-//!   --invasion <1|3>         empezar con la invasión de dragones (1 = rojos, 3 = dorados)
-//!   --resolucion <AxB>       tamaño de la ventana solo esta vez (si no, `resolucion=` de
-//!                            mu-launcher.txt, o 1024x768)
-//!   --fps                    contador de fotogramas
-//!   --inventario-prueba      inventario de prueba (sin servidor no hay): objetos de +0 a +15,
-//!                            excelentes y un antiguo, para ver el inventario (V o I) y el brillo
-//!   --monstruos-prueba       unos monstruos y NPC del mapa junto al personaje, cambiando de acción
-//!
-//! Controles, los del original: clic izquierdo = caminar (mantenido, sigue al ratón) · 1-0 = elegir
-//! habilidad · clic derecho = usarla · Esc = menú de sistema · U = menú de ventanas.
+//! Controls, as in the original: left click = walk (held, follows the mouse) · 1-0 = select
+//! skill · right click = use it · Esc = system menu · U = windows menu.
 
 mod account;
 mod boids;
@@ -76,40 +74,40 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 
-/// Opciones de línea de comandos.
+/// Command-line options.
 #[derive(Resource, Clone)]
 pub struct Args {
     pub data: PathBuf,
     pub world: u16,
     pub spawn: Option<[f32; 2]>,
     pub walk_to: Option<[f32; 2]>,
-    /// Si se indica, hace una captura al arrancar y se cierra (útil para probar sin mirar).
+    /// If set, takes a capture at startup and quits (useful for testing unattended).
     pub screenshot: Option<PathBuf>,
-    /// Segundos de espera antes de capturar.
+    /// Seconds to wait before capturing.
     pub screenshot_delay: f32,
-    /// Posición inicial de la cámara: ojo y punto al que mira, en casillas de MU (x, y, altura).
+    /// Initial camera position: eye and look-at point, in MU tiles (x, y, height).
     pub cam: Option<[f32; 6]>,
-    /// Distancia inicial de la cámara de seguimiento (casillas).
+    /// Initial follow camera distance (tiles).
     pub zoom: Option<f32>,
-    /// Sin sincronía vertical: los fps no se limitan a la frecuencia del monitor (para medir).
+    /// No vertical sync: fps are not capped to the monitor refresh rate (for measuring).
     pub no_vsync: bool,
-    /// Empezar con la invasión de dragones activa (1 = rojos, 3 = dorados).
+    /// Start with the dragon invasion active (1 = red, 3 = golden).
     pub invasion: u8,
-    /// Resolución de la ventana solo para esta vez (si no, la guardada o 1024×768).
+    /// Window resolution for this run only (otherwise the saved one or 1024×768).
     pub resolution: Option<(u32, u32)>,
-    /// Lanza todas las habilidades una tras otra (para probar sin teclado).
+    /// Casts every skill one after another (for testing without a keyboard).
     pub skill_test: bool,
-    /// `--world`: entrar directo al juego en ese mapa, sin título ni login.
+    /// `--world`: go straight into the game on that map, without title or login.
     pub direct: bool,
-    /// `--ver-titulo`: la pantalla del título se queda a medias (para comprobarla en una captura).
+    /// `--ver-titulo`: the title screen stays half-way (to check it in a capture).
     pub hold_title: bool,
-    /// `--fps`: contador de fotogramas arriba a la izquierda.
+    /// `--fps`: frame counter at the top left.
     pub show_fps: bool,
-    /// `--salir-tras <s>`: se cierra solo a los `s` segundos (para medir: la traza se escribe entera).
+    /// `--salir-tras <s>`: quits after `s` seconds (for measuring: the trace is written in full).
     pub quit_after: Option<f32>,
-    /// `--inventario-prueba`: el inventario de prueba (inventory.rs).
+    /// `--inventario-prueba`: the test inventory (inventory.rs).
     pub test_inventory: bool,
-    /// `--monstruos-prueba`: unos monstruos del mapa alrededor del héroe, cambiando de acción.
+    /// `--monstruos-prueba`: some of the map's monsters around the hero, cycling actions.
     pub monster_test: bool,
 }
 
@@ -122,7 +120,7 @@ fn parse_floats<const N: usize>(s: Option<String>, what: &str) -> [f32; N] {
     v.try_into().unwrap_or_else(|_| panic!("{what} necesita {N} números"))
 }
 
-/// `Data` junto al ejecutable (versión empaquetada), luego `./Data`, y si no, la de las referencias.
+/// `Data` next to the executable (packaged build), then `./Data`, otherwise the references' one.
 fn default_data_dir() -> PathBuf {
     let next_to_exe = std::env::current_exe().ok().and_then(|exe| Some(exe.parent()?.join("Data")));
     [next_to_exe, Some(PathBuf::from("Data"))]
@@ -191,21 +189,21 @@ impl Args {
     }
 }
 
-/// Color de fondo de cada mapa: bytes / 256. Es el que hay justo antes del `glClear` de cada fotograma
-/// (`RenderScene`, ZzzScene.cpp:2347-2396 del Main 5.2). El verde de Lorencia y el azul de Devias de
-/// `RenderMainScene` (2059-2066) se ponen después del `glClear` y el siguiente fotograma los vuelve a
-/// pisar antes de borrar, así que no se ven nunca: esos mapas tienen fondo negro. (MuMain, con su
-/// `SetWorldClearColor`, los juntó en uno y sí los pinta, pero el cliente S6 no.)
+/// Background color of each map: bytes / 256. It is the one set right before each frame's `glClear`
+/// (`RenderScene`, ZzzScene.cpp:2347-2396 in Main 5.2). Lorencia's green and Devias' blue from
+/// `RenderMainScene` (2059-2066) are set after `glClear` and overwritten by the next frame before
+/// clearing, so they never show: those maps have a black background. (MuMain, with its
+/// `SetWorldClearColor`, merged them and does paint them, but the S6 client does not.)
 pub fn world_clear_color(world: u16) -> Color {
     let rgb8 = |r: u8, g: u8, b: u8| Color::srgb(r as f32 / 256.0, g as f32 / 256.0, b as f32 / 256.0);
-    // `WorldActive` del original: nuestro número de mapa menos uno.
+    // The original's `WorldActive`: our map number minus one.
     match world as i32 - 1 {
-        10 => rgb8(3, 25, 44),                // Heaven: azul
-        24..=29 | 36 => rgb8(30, 40, 40),     // Kalima: turquesa oscuro
-        45..=50 => rgb8(9, 8, 33),            // Cursed Temple: morado oscuro
-        51 => rgb8(178, 178, 178),            // Elbeland: gris
-        65 => rgb8(148, 179, 223),            // Doppelganger: azul claro
-        _ => Color::BLACK,                    // el resto, Lorencia y Devias incluidos: negro
+        10 => rgb8(3, 25, 44),                // Heaven: blue
+        24..=29 | 36 => rgb8(30, 40, 40),     // Kalima: dark teal
+        45..=50 => rgb8(9, 8, 33),            // Cursed Temple: dark purple
+        51 => rgb8(178, 178, 178),            // Elbeland: gray
+        65 => rgb8(148, 179, 223),            // Doppelganger: light blue
+        _ => Color::BLACK,                    // everything else, Lorencia and Devias included: black
     }
 }
 
@@ -218,8 +216,8 @@ fn main() {
     let mut app = App::new();
     app.insert_resource(ClearColor(world_clear_color(args.world)));
     if headless {
-        // Modo captura: sin ventana. La cámara dibuja en una imagen en memoria
-        // (funciona aunque no haya pantalla, p. ej. sesión remota desconectada).
+        // Capture mode: no window. The camera renders to an in-memory image
+        // (works without a display, e.g. a disconnected remote session).
         app.add_plugins(
             DefaultPlugins
                 .set(logfile::plugin())
@@ -236,7 +234,7 @@ fn main() {
             WindowPlugin {
                 primary_window: Some(Window {
                     title,
-                    // Tamaño fijo, como el original: la resolución es de la configuración, no se estira.
+                    // Fixed size, like the original: the resolution comes from the settings, no stretching.
                     resolution: settings::window_resolution(resolution),
                     resizable: false,
                     enabled_buttons: bevy::window::EnabledButtons { maximize: false, ..default() },

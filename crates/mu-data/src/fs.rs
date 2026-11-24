@@ -1,13 +1,13 @@
-//! Acceso a archivos sin distinguir mayúsculas/minúsculas.
+//! Case-insensitive file access.
 //!
-//! Los datos de MU mezclan `.OZJ`, `.ozj`, `World1`, `world55`... En Windows da igual,
-//! pero en Linux/Android/iOS no, así que buscamos el nombre ignorando mayúsculas.
+//! MU data mixes `.OZJ`, `.ozj`, `World1`, `world55`... Windows does not care, but
+//! Linux/Android/iOS do, so names are matched ignoring case.
 
 use std::path::{Path, PathBuf};
 
 use crate::{Error, Result};
 
-/// Devuelve la ruta real de `dir/name` aunque las mayúsculas no coincidan.
+/// Returns the real path of `dir/name` even if the case does not match.
 pub fn find(dir: &Path, name: &str) -> Option<PathBuf> {
     let exact = dir.join(name);
     if exact.exists() {
@@ -21,7 +21,7 @@ pub fn find(dir: &Path, name: &str) -> Option<PathBuf> {
         .map(|e| e.path())
 }
 
-/// Lee `dir/name` completo, ignorando mayúsculas en el nombre.
+/// Reads all of `dir/name`, ignoring case in the name.
 pub fn read(dir: &Path, name: &str) -> Result<Vec<u8>> {
     let path = find(dir, name).ok_or_else(|| Error::NotFound(dir.join(name)))?;
     std::fs::read(&path).map_err(|e| Error::Io(path, e))

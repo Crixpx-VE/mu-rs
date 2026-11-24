@@ -1,21 +1,21 @@
-//! Efectos del DK (2): Rageful Blow (`MODEL_SKILL_FURY_STRIKE` y sus +1..+8: el arma lanzada en
-//! arco, el impacto con ondas, anillos y grietas), `MODEL_WAVE` (flashing.bmd), `MODEL_TAIL`
-//! (tail.bmd) y las piedras que saltan (`MODEL_STONE1`/`MODEL_STONE2`).
+//! DK effects (2): Rageful Blow (`MODEL_SKILL_FURY_STRIKE` and its +1..+8: the weapon thrown in
+//! an arc, the impact with waves, rings and cracks), `MODEL_WAVE` (flashing.bmd), `MODEL_TAIL`
+//! (tail.bmd) and the bouncing stones (`MODEL_STONE1`/`MODEL_STONE2`).
 //!
-//! Traducido de `ZzzEffect.cpp` (`CreateEffect` ≈1490-1566 y ≈2192-2324, `MoveEffect` ≈6261-6466
-//! y la cola común ≈7646-7711, `RenderFuryStrike` ≈7788), `Behaviors/MoveHandlers.cpp`
-//! (`Move_MODEL_SKILL_FURY_STRIKE`, `Move_MODEL_WAVE`, `Move_MODEL_TAIL`, `Move_MODEL_ICE_SMALL`) y
-//! `Data/Effects/EffectTypes.json` (creación de `MODEL_WAVE` y `MODEL_TAIL`).
+//! Ported from `ZzzEffect.cpp` (`CreateEffect` ≈1490-1566 and ≈2192-2324, `MoveEffect` ≈6261-6466
+//! and the common tail ≈7646-7711, `RenderFuryStrike` ≈7788), `Behaviors/MoveHandlers.cpp`
+//! (`Move_MODEL_SKILL_FURY_STRIKE`, `Move_MODEL_WAVE`, `Move_MODEL_TAIL`, `Move_MODEL_ICE_SMALL`) and
+//! `Data/Effects/EffectTypes.json` (creation of `MODEL_WAVE` and `MODEL_TAIL`).
 //!
-//! `FPS_ANIMATION_FACTOR` = 1. Como cada tipo tiene `step`, el núcleo no hace la cola común de
-//! `MoveEffect` (`PlayAnimation` + `MoveParticle(o, true)`): la hace [`move_tail`] donde el original
-//! la hace. `MoveEffect` saca siempre un `rand()` para `Luminosity` al empezar: [`luminosity`].
+//! `FPS_ANIMATION_FACTOR` = 1. Since every type has a `step`, the core does not run the common
+//! `MoveEffect` tail (`PlayAnimation` + `MoveParticle(o, true)`): [`move_tail`] does it where the
+//! original does. `MoveEffect` always draws one `rand()` for `Luminosity` at the start: [`luminosity`].
 
 use bevy::math::Vec3;
 
 use crate::fx::core::*;
 
-/// Atributos de casilla (`_define.h`).
+/// Tile attributes (`_define.h`).
 const TW_NOMOVE: u16 = 0x0004;
 const TW_NOGROUND: u16 = 0x0008;
 const TW_WATER: u16 = 0x0010;
@@ -32,14 +32,14 @@ pub fn register(r: &mut Registry) {
     r.effect(MODEL_STONE2, k(create_stone, step_stone, None));
 }
 
-// --- Utilidades -------------------------------------------------------------------------------------
+// --- Helpers ----------------------------------------------------------------------------------------
 
-/// `rand() % n` como `f32`.
+/// `rand() % n` as `f32`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `Luminosity` del principio de `MoveEffect` (siempre gasta un `rand()`).
+/// `Luminosity` from the start of `MoveEffect` (always consumes one `rand()`).
 fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
     if e.life_time < 5.0 {
@@ -51,18 +51,18 @@ fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     l
 }
 
-/// Cola común de `MoveEffect`: `PlayAnimation` (aprox.: avanzar el fotograma) y `MoveParticle(o, true)`.
+/// Common `MoveEffect` tail: `PlayAnimation` (approx.: advance the frame) and `MoveParticle(o, true)`.
 fn move_tail(e: &mut Effect) {
     e.animation_frame += e.velocity;
     e.position += rotate(e.angle, e.direction);
 }
 
-/// `gMapManager.InHellas()`: Kalima 1-6 (24..=29) y la oculta (36).
+/// `gMapManager.InHellas()`: Kalima 1-6 (24..=29) and the hidden one (36).
 fn in_hellas(world: i32) -> bool {
     (24..=29).contains(&world) || world == 36
 }
 
-/// `SetEarthQuakeAt`: temblor que se apaga con la distancia al héroe (12 casillas).
+/// `SetEarthQuakeAt`: shake that fades with distance to the hero (12 tiles).
 fn set_earthquake_at(ctx: &mut Ctx, pos: Vec3, magnitude: f32) {
     let Some(hero) = ctx.hero_actor().map(|h| h.position) else { return };
     const RADIUS: f32 = 100.0 * 12.0;
@@ -74,7 +74,7 @@ fn set_earthquake_at(ctx: &mut Ctx, pos: Vec3, magnitude: f32) {
     ctx.set_earthquake(magnitude * (1.0 - dist_sq.sqrt() / RADIUS));
 }
 
-/// Luz roja de las grietas (azul si el dueño es `MODEL_WEREWOLF_HERO`).
+/// Red crack light (blue if the owner is `MODEL_WEREWOLF_HERO`).
 fn crack_light(e: &Effect, lum: f32) -> Vec3 {
     if e.owner.is_some() {
         // TODO(original): Owner->Type == MODEL_WEREWOLF_HERO → (0, 0, Luminosity).
@@ -84,7 +84,7 @@ fn crack_light(e: &Effect, lum: f32) -> Vec3 {
     }
 }
 
-/// Piedra que salta desde una grieta (`+2` y `+5`).
+/// Stone bouncing out of a crack (`+2` and `+5`).
 fn spawn_crack_stone(e: &Effect, ctx: &mut Ctx) {
     let p = Vec3::new(0.0, rf(ctx, 150), 0.0);
     let angle = Vec3::new(0.0, 0.0, rf(ctx, 360));
@@ -93,7 +93,7 @@ fn spawn_crack_stone(e: &Effect, ctx: &mut Ctx) {
     ctx.create_effect(ty, pos, e.angle, e.light, 0, None, -1, 0, 0, 0.0);
 }
 
-// --- MODEL_SKILL_FURY_STRIKE: el arma en arco -------------------------------------------------------
+// --- MODEL_SKILL_FURY_STRIKE: the weapon in an arc --------------------------------------------------
 
 fn create_fury(e: &mut Effect, ctx: &mut Ctx) {
     e.head_angle = e.angle;
@@ -104,7 +104,7 @@ fn create_fury(e: &mut Effect, ctx: &mut Ctx) {
     e.head_angle.x += 80.0;
     e.head_angle.z += 180.0;
     e.gravity = 50.0;
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (red).
+    // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network).
 }
 
 fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
@@ -117,7 +117,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
     let hellas = in_hellas(ctx.world_active);
 
     if lt == 11 {
-        // El golpe: explosión, chispas, onda y las grietas.
+        // The hit: explosion, sparks, wave and cracks.
         let light1 = Vec3::ONE;
         if e.kind != 3 {
             if let Some(oa) = owner_angle {
@@ -162,15 +162,15 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
         e.start_position.z -= 27.0;
 
         if e.owner.is_some() {
-            // TODO(original): no se crean si Owner->Type == MODEL_WEREWOLF_HERO.
-            // Dueño = este efecto; la escala va en PKKey (150 → 1.5).
+            // TODO(original): not created if Owner->Type == MODEL_WEREWOLF_HERO.
+            // Owner = this effect; the scale goes in PKKey (150 → 1.5).
             let me = Some(Target::Effect(e.id));
             ctx.create_effect(MODEL_SKILL_FURY_STRIKE + 3, e.start_position, angle, e.light, 0, me, scale, 0, 0, 0.0);
             ctx.create_effect(MODEL_SKILL_FURY_STRIKE + 1, e.start_position, angle, e.light, 0, me, scale, 0, 0, 0.0);
             ctx.create_effect(MODEL_SKILL_FURY_STRIKE + 2, e.start_position, angle, e.light, 0, me, scale, 0, 0, 0.0);
         }
 
-        // Cinco grietas alrededor.
+        // Five cracks around.
         for i in 0..5 {
             let p = Vec3::new(0.0, (ctx.rand() % 150 + 100) as f32, 0.0);
             angle = Vec3::new(0.0, 0.0, e.sub_type as f32 + i as f32 * 72.0);
@@ -190,7 +190,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     } else if lt == 10 {
-        // Grietas que se ramifican en cinco direcciones (4 tramos cada una).
+        // Cracks branching in five directions (4 segments each).
         let mut pos = [e.start_position; 5];
         let mut ang = [0.0f32; 5];
         let mut count: i32 = 0;
@@ -206,7 +206,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
                 pos[i] += rotate(angle, p);
 
                 let wall = ctx.terrain_attribute(pos[i].x, pos[i].y);
-                // (el original usa || aquí: casi siempre se cumple)
+                // (the original uses || here: almost always true)
                 if wall & TW_NOMOVE != TW_NOMOVE || wall & TW_NOGROUND != TW_NOGROUND || wall & TW_WATER != TW_WATER {
                     pos[i].z = ctx.terrain_height(pos[i].x, pos[i].y) + if hellas { 100.0 } else { 3.0 };
                     angle.z += 270.0;
@@ -219,7 +219,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
         e.life_time = 0.0;
         ctx.play_sound("SOUND_FURY_STRIKE3");
     } else {
-        // El arma sube y baja en arco.
+        // The weapon rises and falls in an arc.
         let mut count = e.life_time;
         let mut add_angle = 15.0;
         if e.life_time > 9.0 && e.life_time < 16.0 {
@@ -231,7 +231,7 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
         }
 
         if e.kind == 0 && lt == 13 {
-            // Estelas (`MODEL_TAIL`) detrás del arma.
+            // Trails (`MODEL_TAIL`) behind the weapon.
             angle = Vec3::ZERO;
             let mut p0 = e.position;
             if let Some(oa) = owner_angle {
@@ -263,10 +263,10 @@ fn step_fury(e: &mut Effect, ctx: &mut Ctx) {
         e.position.z += e.gravity;
         e.position.z += 200.0;
     }
-    // Sin cola común (`MODEL_SKILL_FURY_STRIKE` está excluido).
+    // No common tail (`MODEL_SKILL_FURY_STRIKE` is excluded).
 }
 
-/// `RenderFuryStrike`: el arma del dueño mientras `LifeTime > 10`.
+/// `RenderFuryStrike`: the owner's weapon while `LifeTime > 10`.
 fn draw_fury(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if !(e.life_time > 10.0 && e.kind == 0) {
         return;
@@ -274,17 +274,17 @@ fn draw_fury(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let Some(Target::Actor(owner)) = e.owner else { return };
     let Some(actor) = ctx.actors.get(&owner) else { return };
     let Some((model, _level)) = actor.weapon else { return };
-    // ItemObjectAttribute: escala 0.8 (lanzas a bastones 0.7).
+    // ItemObjectAttribute: scale 0.8 (spears through staffs 0.7).
     let scale = if (MODEL_SPEAR..=MODEL_PLATINA_STAFF).contains(&model) { 0.7 } else { 0.8 };
     let mut d = ModelDraw::new(model, e.position, e.angle, scale);
-    // TODO(original): luz = RequestModelTerrainLight + 0.3 (ItemObjectAttribute); brillo por nivel
-    // del arma (RenderPartObject con WeaponLevel).
+    // TODO(original): light = RequestModelTerrainLight + 0.3 (ItemObjectAttribute); glow by weapon
+    // level (RenderPartObject with WeaponLevel).
     d.light = Vec3::ONE;
     d.alpha = e.alpha;
     out.models.push(d);
 }
 
-// --- MODEL_SKILL_FURY_STRIKE+1..+8: anillos, grietas y ondas del impacto -----------------------------
+// --- MODEL_SKILL_FURY_STRIKE+1..+8: impact rings, cracks and waves -----------------------------------
 
 fn create_fury_part(e: &mut Effect, _ctx: &mut Ctx) {
     let n = e.ty - MODEL_SKILL_FURY_STRIKE;
@@ -407,7 +407,7 @@ fn step_fury_part(e: &mut Effect, ctx: &mut Ctx) {
             if e.life_time < 15.0 {
                 e.position.z -= 0.5;
             }
-            // El original calcula una posición y no hace nada con ella (pero gasta el rand).
+            // The original computes a position and discards it (but consumes the rand).
             if e.life_time >= 13.0 {
                 let _ = ctx.rand_fps_check(5);
             }
@@ -422,7 +422,7 @@ fn step_fury_part(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- MODEL_WAVE (flashing.bmd) ------------------------------------------------------------------------
 
-/// Creación desde `EffectTypes.json` ("wave").
+/// Creation from `EffectTypes.json` ("wave").
 fn create_wave(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 15.0;
     e.scale = 0.5;
@@ -444,7 +444,7 @@ fn step_wave(e: &mut Effect, ctx: &mut Ctx) {
         e.position.x -= 1.2;
         e.position.z -= 1.8;
     }
-    // Oscurece el suelo alrededor.
+    // Darkens the ground around it.
     let light = Vec3::splat(-lum * 0.5);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 5.0);
     move_tail(e);
@@ -452,7 +452,7 @@ fn step_wave(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- MODEL_TAIL (tail.bmd) ----------------------------------------------------------------------------
 
-/// Creación desde `EffectTypes.json` ("tail").
+/// Creation from `EffectTypes.json` ("tail").
 fn create_tail(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 6.0;
     e.scale = 1.0;
@@ -470,8 +470,8 @@ fn step_tail(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-/// `BlendMesh <= -2`: todas las mallas sumando con `light · BlendMeshLight` (models.rs solo
-/// compara el índice, así que se dibuja como `bright` con alfa = `BlendMeshLight`).
+/// `BlendMesh <= -2`: all meshes additive with `light · BlendMeshLight` (models.rs only compares
+/// the index, so it is drawn as `bright` with alpha = `BlendMeshLight`).
 fn draw_blend_all(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.bright = true;
@@ -480,7 +480,7 @@ fn draw_blend_all(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     out.models.push(d);
 }
 
-// --- MODEL_STONE1 / MODEL_STONE2: piedras que saltan --------------------------------------------------
+// --- MODEL_STONE1 / MODEL_STONE2: bouncing stones -----------------------------------------------------
 
 fn create_stone(e: &mut Effect, ctx: &mut Ctx) {
     match e.sub_type {
@@ -512,7 +512,7 @@ fn create_stone(e: &mut Effect, ctx: &mut Ctx) {
         13 | 14 => {
             e.direction = Vec3::ZERO;
             e.life_time = (ctx.rand() % 16 + 20) as f32;
-            // `o->Scale *= Scale` (Scale = el argumento; el núcleo ya cambió 0 por 0.9).
+            // `o->Scale *= Scale` (Scale = the argument; the core already turned 0 into 0.9).
             let call_scale = e.scale;
             e.scale = (ctx.rand() % 13 + 3) as f32 * 0.08;
             e.scale *= call_scale;
@@ -523,7 +523,7 @@ fn create_stone(e: &mut Effect, ctx: &mut Ctx) {
             e.head_angle.z += 15.0;
         }
         _ => {
-            // Sigue en el caso de MODEL_ICE_SMALL/METEO.
+            // Falls through to the MODEL_ICE_SMALL/METEO case.
             let p1 = if e.sub_type == 1 { Vec3::ZERO } else { Vec3::new(0.0, (ctx.rand() % 256 + 64) as f32 * 0.1, 0.0) };
             e.life_time = (ctx.rand() % 16 + 32) as f32;
             e.scale = (ctx.rand() % 4 + 8) as f32 * 0.1;
@@ -538,7 +538,7 @@ fn step_stone(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     match e.sub_type {
         5 => {
-            // Pegada al dueño; sin cola común.
+            // Stuck to the owner; no common tail.
             if let Some(p) = ctx.target_position(e.owner) {
                 e.position = p + e.start_position;
             }
@@ -571,7 +571,7 @@ fn step_stone(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-/// `Move_MODEL_ICE_SMALL` (la parte que usan las piedras).
+/// `Move_MODEL_ICE_SMALL` (the part the stones use).
 fn move_ice_small(e: &mut Effect, ctx: &mut Ctx) {
     let sub = e.sub_type;
     if sub == 0 || sub == 10 || sub == 12 {

@@ -1,32 +1,31 @@
-//! Avisos del centro de la pantalla (`CreateNotice`, `MoveNotices` y `RenderNotices`,
-//! ZzzInterface.cpp:480-590): los del servidor de tipo 0 (dorados, parpadean) y 2 (del gremio, en
-//! verde agua), `ReceiveNotice` (WSclient.cpp:1577-1611).
+//! Center-screen notices (`CreateNotice`, `MoveNotices` and `RenderNotices`,
+//! ZzzInterface.cpp:480-590): server notices of type 0 (golden, blinking) and 2 (guild, aqua
+//! green), `ReceiveNotice` (WSclient.cpp:1577-1611).
 //!
-//! - Seis líneas (`MAX_NOTICE`): cada aviso nuevo va a la siguiente y, llenas, suben todas una.
-//! - Cada 300 ticks sin avisos nuevos (`NoticeTime`, 12 s) entra una línea vacía: los viejos van
-//!   subiendo hasta irse.
-//! - Uno de 256 píxeles o más de ancho se parte en dos por el espacio más cercano al centro
+//! - Six lines (`MAX_NOTICE`): each new notice takes the next line and, when full, all scroll up one.
+//! - Every 300 ticks without new notices (`NoticeTime`, 12 s) an empty line is added: old ones
+//!   scroll up until gone.
+//! - One 256 pixels wide or more is split in two at the space closest to the center
 //!   (`CutText` → `GetClosestBlankFromCenter`, MultiLanguage.cpp:159-190).
-//! - Se dibujan centrados en x = 320, desde y = 300 de 13 en 13 (pantalla de 640×480), con
-//!   `g_hFontBold` y fondo negro a 128.
+//! - Drawn centered at x = 320, from y = 300 in steps of 13 (640×480 screen), with
+//!   `g_hFontBold` and a black background at 128.
 
 /// `MAX_NOTICE`.
 pub const MAX_NOTICE: usize = 6;
 /// `NoticeTime = 300` (ticks).
 const NOTICE_TIME: i32 = 300;
-/// `Size.cx < 256` en píxeles de la letra a 1024×768 (como `FONT` de chat.rs), en unidades de la
-/// pantalla de 640×480.
+/// `Size.cx < 256` in font pixels at 1024×768 (like `FONT` in chat.rs), in 640×480 screen units.
 pub const MAX_WIDTH: f32 = 256.0 * 480.0 / 768.0;
-/// `GlobalText[483]` (text_eng.bmd de Main 5.2).
+/// `GlobalText[483]` (Main 5.2 text_eng.bmd).
 pub const TEXT_GUILD_NOTICE: &str = "[Notice for guild members] %s";
 
-/// Color de un aviso (`NOTICE::Color`).
+/// Notice color (`NOTICE::Color`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum NoticeColor {
-    /// 0: dorado (255, 200, 80) que parpadea.
+    /// 0: blinking gold (255, 200, 80).
     #[default]
     Golden,
-    /// 1: verde agua (100, 255, 200).
+    /// 1: aqua green (100, 255, 200).
     Guild,
 }
 
@@ -36,7 +35,7 @@ pub struct Notice {
     pub color: NoticeColor,
 }
 
-/// `Notice[MAX_NOTICE]`, `NoticeCount`, `NoticeTime` y `NoticeInverse`.
+/// `Notice[MAX_NOTICE]`, `NoticeCount`, `NoticeTime` and `NoticeInverse`.
 #[derive(Clone, Debug)]
 pub struct Notices {
     lines: [Notice; MAX_NOTICE],
@@ -52,7 +51,7 @@ impl Default for Notices {
 }
 
 impl Notices {
-    /// `ClearNotice` (al entrar en el juego, WSclient.cpp:662): borra el texto (no `NoticeCount`).
+    /// `ClearNotice` (on entering the game, WSclient.cpp:662): clears the text (not `NoticeCount`).
     pub fn clear(&mut self) {
         self.lines = Default::default();
     }
@@ -67,7 +66,7 @@ impl Notices {
         }
     }
 
-    /// `CreateNotice(Text, Color)`; `width` mide con la letra (unidades de 640).
+    /// `CreateNotice(Text, Color)`; `width` measures with the font (640-screen units).
     pub fn create(&mut self, text: &str, color: NoticeColor, width: &dyn Fn(&str) -> f32) {
         self.scroll();
         self.lines[self.count].color = color;
@@ -86,7 +85,7 @@ impl Notices {
         self.time = NOTICE_TIME;
     }
 
-    /// Un tick (`MoveNotices` y el `NoticeInverse++` de cada dibujo).
+    /// One tick (`MoveNotices` and the per-draw `NoticeInverse++`).
     pub fn tick(&mut self, width: &dyn Fn(&str) -> f32) {
         self.inverse = self.inverse.wrapping_add(1);
         let t = self.time;
@@ -97,12 +96,12 @@ impl Notices {
         }
     }
 
-    /// Las seis líneas, de arriba abajo.
+    /// The six lines, top to bottom.
     pub fn lines(&self) -> &[Notice; MAX_NOTICE] {
         &self.lines
     }
 
-    /// Color del texto (RGBA) de un aviso: el dorado a medio alfa la mitad del tiempo
+    /// Text color (RGBA) of a notice: gold at half alpha half of the time
     /// (`NoticeInverse % 10 < 5`).
     pub fn text_color(&self, color: NoticeColor) -> [u8; 4] {
         match color {
@@ -113,7 +112,7 @@ impl Notices {
     }
 }
 
-/// `CutText` con texto UTF-8: (primera mitad hasta el espacio incluido, el resto).
+/// `CutText` on UTF-8 text: (first half up to and including the space, the rest).
 fn cut_text(text: &str) -> (String, String) {
     let chars: Vec<char> = text.chars().collect();
     let blank = closest_blank_from_center(&chars);
@@ -126,7 +125,7 @@ fn cut_text(text: &str) -> (String, String) {
 fn closest_blank_from_center(chars: &[char]) -> usize {
     let len = chars.len();
     let half = len / 2;
-    // `wstrText2.find_last_of(L" ")` en [0, half) y `wstrText1.find_first_of(L" ", 1)` en [half, len).
+    // `wstrText2.find_last_of(L" ")` in [0, half) and `wstrText1.find_first_of(L" ", 1)` in [half, len).
     let last_first = chars[..half].iter().rposition(|&c| c == ' ');
     let first_second = chars[half..].iter().skip(1).position(|&c| c == ' ').map(|p| p + 1);
     match (last_first, first_second) {
@@ -156,10 +155,10 @@ mod tests {
         for i in 0..10 {
             n.create(&format!("{i}"), NoticeColor::Golden, &width);
         }
-        // Llenas: la última siempre es la más nueva.
+        // Full: the last line is always the newest.
         let texts: Vec<_> = n.lines().iter().map(|l| l.text.as_str()).collect();
         assert_eq!(texts, ["4", "5", "6", "7", "8", "9"]);
-        // 300 ticks sin avisos: entra una vacía y todas suben.
+        // 300 ticks without notices: an empty one comes in and all scroll up.
         for _ in 0..300 {
             n.tick(&width);
         }

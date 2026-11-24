@@ -1,21 +1,21 @@
-//! Cursor del ratón de MU (`RenderCursor`, ZzzInterface.cpp:8718-8829).
+//! MU mouse cursor (`RenderCursor`, ZzzInterface.cpp:8718-8829).
 //!
-//! El original esconde el del sistema (`ShowCursor(FALSE)`, Winmain.cpp:1389) y dibuja el suyo
-//! encima de todo: `Interface/Cursor.tga` de 24×24 unidades de la pantalla de 640×480, con la
-//! punta 2 unidades a la izquierda y arriba del ratón (`MouseX − 2, MouseY − 2`). Con el botón
-//! izquierdo apretado se ve `CursorPush.tga` (la última rama de `RenderCursor`).
+//! The original hides the system cursor (`ShowCursor(FALSE)`, Winmain.cpp:1389) and draws its own
+//! on top of everything: `Interface/Cursor.tga`, 24×24 units of the 640×480 screen, with the tip
+//! 2 units left of and above the mouse (`MouseX − 2, MouseY − 2`). With the left button held it
+//! shows `CursorPush.tga` (the last branch of `RenderCursor`).
 //!
-//! - Sobre un objeto de sentarse (`SelectedOperate`): `CursorSitDown`, o `CursorLeanAgainst` en las
-//!   cajas de pose de Lorencia, Dungeon y Devias y en la fuente de Noria.
-//! - Con el botón apretado, si el último clic en el suelo fue a una casilla sin suelo o de agua
+//! - Over a sitting object (`SelectedOperate`): `CursorSitDown`, or `CursorLeanAgainst` on the
+//!   posing boxes of Lorencia, Dungeon and Devias and on the Noria fountain.
+//! - With the button held, if the last ground click was on a tile without ground or with water
 //!   (`DontMove`): `CursorDontMove`.
 //!
-//! Las ramas de objeto del suelo, NPC, monstruo atacable y reparar llegarán con esas cosas.
-//! El original solo lo dibuja en el login, la selección de personaje y el juego; aquí también en
-//! el título y la carga para que no se quede la pantalla sin cursor.
+//! The ground item, NPC, attackable monster and repair branches will come with those features.
+//! The original only draws it in login, character selection and the game; here also on the
+//! title and loading screens so the screen is never without a cursor.
 //!
-//! Se coloca cada fotograma en `PostUpdate`, antes de la maquetación de la interfaz, con la
-//! posición del ratón de ese mismo fotograma: no va con un fotograma de retraso.
+//! It is placed every frame in `PostUpdate`, before UI layout, using that same frame's mouse
+//! position, so it does not lag one frame behind.
 
 use bevy::prelude::*;
 use bevy::ui::{UiScale, UiSystems};
@@ -36,12 +36,12 @@ impl Plugin for CursorPlugin {
 const SIZE: f32 = 24.0;
 const OFFSET: f32 = 2.0;
 
-/// Texturas del cursor (`ZzzOpenData.cpp:4963-4964`).
+/// Cursor textures (`ZzzOpenData.cpp:4963-4964`).
 #[derive(Resource)]
 struct CursorImages {
     /// `BITMAP_CURSOR`.
     normal: Handle<Image>,
-    /// `BITMAP_CURSOR+1`: con el botón izquierdo apretado.
+    /// `BITMAP_CURSOR+1`: with the left button held.
     push: Handle<Image>,
     /// `BITMAP_CURSOR+6`.
     lean: Handle<Image>,
@@ -68,7 +68,7 @@ fn spawn_cursor(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
             ..default()
         },
         ImageNode::new(normal.clone()),
-        // Por encima de toda la interfaz (el título y la carga van en 100).
+        // Above all UI (title and loading screens use 100).
         GlobalZIndex(i32::MAX),
         Visibility::Hidden,
     ));
@@ -78,7 +78,7 @@ fn spawn_cursor(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     commands.insert_resource(CursorImages { normal, push, lean, sit, dont_move });
 }
 
-/// El del sistema no se ve dentro de la ventana.
+/// The system cursor is hidden inside the window.
 fn hide_system_cursor(mut q: Query<&mut CursorOptions, With<PrimaryWindow>>) {
     for mut c in &mut q {
         if c.visible {
@@ -103,7 +103,7 @@ fn place_cursor(
         return;
     };
     vis.set_if_neq(Visibility::Inherited);
-    // Píxeles de la ventana → unidades de la interfaz (1 unidad = 1 de la pantalla de 480 de alto).
+    // Window pixels → UI units (1 unit = 1 pixel of the 480-high screen).
     let p = c / scale.0.max(1e-3) - Vec2::splat(OFFSET);
     let (left, top) = (Val::Px(p.x), Val::Px(p.y));
     if node.left != left || node.top != top {
@@ -111,8 +111,8 @@ fn place_cursor(
         node.top = top;
     }
     if let Some(images) = images {
-        // Mismo orden que `RenderCursor`: objeto de sentarse; si no, CursorPush (o CursorDontMove)
-        // mientras el botón izquierdo está apretado.
+        // Same order as `RenderCursor`: sitting object; otherwise CursorPush (or CursorDontMove)
+        // while the left button is held.
         let want = match pointer.operate_cursor(&operates) {
             Some(true) => &images.lean,
             Some(false) => &images.sit,

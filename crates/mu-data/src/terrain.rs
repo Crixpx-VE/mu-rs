@@ -1,12 +1,12 @@
-//! Terreno de un mapa (`Data/WorldN/`).
+//! Map terrain (`Data/WorldN/`).
 //!
-//! Un mapa de MU es una rejilla de 256 x 256 casillas. Por cada casilla hay:
-//! - una altura (`TerrainHeight.OZB`)
-//! - un color de luz precalculado (`TerrainLight.OZJ`)
-//! - dos capas de textura y la transparencia de la segunda (`EncTerrainN.map`)
+//! A MU map is a 256 x 256 tile grid. For each tile there is:
+//! - a height (`TerrainHeight.OZB`)
+//! - a baked light color (`TerrainLight.OZJ`)
+//! - two texture layers and the second one's opacity (`EncTerrainN.map`)
 //!
-//! Coordenadas como en el cliente original: X e Y en el plano, Z hacia arriba,
-//! índice de casilla = `y * 256 + x`.
+//! Coordinates as in the original client: X and Y on the plane, Z up,
+//! tile index = `y * 256 + x`.
 
 use std::path::{Path, PathBuf};
 
@@ -16,22 +16,22 @@ use crate::{Error, Result, crypt, fs};
 pub const SIZE: usize = 256;
 const CELLS: usize = SIZE * SIZE;
 
-/// El cliente original multiplica el byte de altura por 1.5.
+/// The original client multiplies the height byte by 1.5.
 pub const HEIGHT_SCALE: f32 = 1.5;
 
-/// En la capa 2, este valor significa "sin textura".
+/// In layer 2, this value means "no texture".
 pub const NO_TEXTURE: u8 = 255;
 
-/// Contenido de `EncTerrainN.map` ya descifrado.
+/// Decrypted contents of `EncTerrainN.map`.
 #[derive(Debug, Clone)]
 pub struct TerrainMapping {
     pub version: u8,
     pub map_number: u8,
-    /// Textura base de cada casilla.
+    /// Base texture of each tile.
     pub layer1: Vec<u8>,
-    /// Textura que se mezcla encima (o `NO_TEXTURE`).
+    /// Texture blended on top (or `NO_TEXTURE`).
     pub layer2: Vec<u8>,
-    /// Opacidad de la capa 2 en cada vértice (0..=255).
+    /// Layer 2 opacity at each vertex (0..=255).
     pub alpha: Vec<u8>,
 }
 
@@ -55,8 +55,8 @@ pub fn read_mapping(buf: &[u8]) -> Result<TerrainMapping> {
     })
 }
 
-/// `TerrainHeight.OZB`: una cabecera BMP de 8 bits y luego 1 byte de altura por casilla.
-/// Nos quedamos con los últimos 256*256 bytes, como hace el cliente original.
+/// `TerrainHeight.OZB`: an 8-bit BMP header followed by 1 height byte per tile.
+/// The last 256*256 bytes are used, as the original client does.
 pub fn read_heights(buf: &[u8]) -> Result<Vec<f32>> {
     let start = buf
         .len()
@@ -65,15 +65,15 @@ pub fn read_heights(buf: &[u8]) -> Result<Vec<f32>> {
     Ok(buf[start..].iter().map(|&h| h as f32 * HEIGHT_SCALE).collect())
 }
 
-/// Banderas de cada casilla en `EncTerrainN.att`.
+/// Per-tile flags in `EncTerrainN.att`.
 pub mod attr {
-    /// Zona segura (no se puede atacar).
+    /// Safe zone (no attacking).
     pub const SAFE_ZONE: u16 = 0x0001;
-    /// Ocupada por un personaje (lo marca el juego en tiempo real, no el archivo).
+    /// Occupied by a character (set by the game at runtime, not by the file).
     pub const CHARACTER: u16 = 0x0002;
-    /// No se puede caminar.
+    /// Not walkable.
     pub const NO_MOVE: u16 = 0x0004;
-    /// Sin suelo (vacío, se cae).
+    /// No ground (void, you fall).
     pub const NO_GROUND: u16 = 0x0008;
     pub const WATER: u16 = 0x0010;
     pub const ACTION: u16 = 0x0020;
@@ -81,8 +81,8 @@ pub mod attr {
     pub const CAMERA_UP: u16 = 0x0080;
 }
 
-/// `EncTerrainN.att`: descifrado de mapa + XOR de 3 bytes, cabecera de 4 bytes
-/// (versión, mapa, 255, 255) y luego 1 o 2 bytes de banderas por casilla.
+/// `EncTerrainN.att`: map decryption + 3-byte XOR, a 4-byte header
+/// (version, map, 255, 255) and then 1 or 2 flag bytes per tile.
 pub fn read_attributes(buf: &[u8]) -> Result<Vec<u16>> {
     if buf.starts_with(b"ATT\x01") {
         return Err(Error::Format("este .att usa el cifrado nuevo (Season 15+), no soportado todavía".into()));
@@ -105,34 +105,34 @@ pub fn read_attributes(buf: &[u8]) -> Result<Vec<u16>> {
         .collect())
 }
 
-/// Archivos de textura del suelo de `world` según su índice en las capas del `.map`
-/// (`CMapManager::LoadWorld`, MapManager.cpp:1439-1583). Con carpeta (relativa a `Data`), la
-/// textura no está en la del mapa. `world` es la carpeta (`WorldActive + 1`).
+/// Ground texture files of `world` by their index in the `.map` layers
+/// (`CMapManager::LoadWorld`, MapManager.cpp:1439-1583). With a folder (relative to `Data`), the
+/// texture is not in the map's own folder. `world` is the folder number (`WorldActive + 1`).
 fn tile_textures(world: u16) -> Vec<(u8, Option<&'static str>, String)> {
     let mut v: Vec<(u8, Option<&'static str>, String)> =
         default_tile_textures().into_iter().map(|(i, n)| (i, None, n)).collect();
     let mut set = |i: usize, dir: Option<&'static str>, name: &str| v[i] = (i as u8, dir, name.to_string());
     match world {
-        // Elbeland (`WD_51HOME_6TH_CHAR`): la 2 es `AlphaTileGround01.Tga` (1445-1454).
+        // Elbeland (`WD_51HOME_6TH_CHAR`): index 2 is `AlphaTileGround01.Tga` (1445-1454).
         52 => set(2, None, "AlphaTileGround01.ozt"),
-        // Kanturu 3 (`WD_39KANTURU_3RD`): la 3 es `AlphaTileGround02.Tga` (1461-1465).
+        // Kanturu 3 (`WD_39KANTURU_3RD`): index 3 is `AlphaTileGround02.Tga` (1461-1465).
         40 => set(3, None, "AlphaTileGround02.ozt"),
-        // Illusion Temple (`IsCursedTemple`): la 4 es `AlphaTileGround03.Tga` (1471-1475).
+        // Illusion Temple (`IsCursedTemple`): index 4 is `AlphaTileGround03.Tga` (1471-1475).
         46..=51 => set(4, None, "AlphaTileGround03.ozt"),
-        // Login / selección (1493-1497) y Empire Guardian (1579-1583): la 10 es `AlphaTile01.Tga`.
+        // Login / selection (1493-1497) and Empire Guardian (1579-1583): index 10 is `AlphaTile01.Tga`.
         70..=75 => set(10, None, "AlphaTile01.ozt"),
-        // Vulcanus (`IsPKField`) y Doppelganger 2: la 11 es la lava `Object64\song_lava1.jpg` (1506-1510).
+        // Vulcanus (`IsPKField`) and Doppelganger 2: index 11 is the lava `Object64\song_lava1.jpg` (1506-1510).
         64 | 67 => set(11, Some("Object64"), "song_lava1.ozj"),
-        // Karutan 1 y 2 (`IsKarutanMap`): la 12 es `AlphaTile01.Tga` (1516-1521).
+        // Karutan 1 and 2 (`IsKarutanMap`): index 12 is `AlphaTile01.Tga` (1516-1521).
         81 | 82 => set(12, None, "AlphaTile01.ozt"),
         _ => {}
     }
     v
 }
 
-/// Índice de textura que el original dibuja con prueba de alfa (`RenderFace`, ZzzLodTerrain.cpp:1330-1393):
-/// la 3 en Kanturu 3, la 4 en Illusion Temple, la 2 en Elbeland, la 10 en los Empire Guardian (70-73),
-/// el login (74) y la selección de personaje (75), y la 12 en Karutan.
+/// Texture index the original draws with alpha test (`RenderFace`, ZzzLodTerrain.cpp:1330-1393):
+/// 3 in Kanturu 3, 4 in Illusion Temple, 2 in Elbeland, 10 in Empire Guardian (70-73),
+/// login (74) and character selection (75), and 12 in Karutan.
 pub fn alpha_tested_tile(world: u16) -> Option<u8> {
     match world {
         40 => Some(3),
@@ -144,7 +144,7 @@ pub fn alpha_tested_tile(world: u16) -> Option<u8> {
     }
 }
 
-/// Archivos de textura del suelo según su índice en las capas del `.map`.
+/// Ground texture files by their index in the `.map` layers.
 fn default_tile_textures() -> Vec<(u8, String)> {
     let mut v: Vec<(u8, String)> = [
         "TileGrass01.ozj",
@@ -166,23 +166,23 @@ fn default_tile_textures() -> Vec<(u8, String)> {
     .enumerate()
     .map(|(i, n)| (i as u8, n.to_string()))
     .collect();
-    // 14..=29: texturas extra que algunos mapas añaden.
+    // 14..=29: extra textures some maps add.
     v.extend((1..=16u8).map(|i| (13 + i, format!("ExtTile{i:02}.ozj"))));
     v
 }
 
-/// Terreno listo para dibujar.
+/// Terrain ready to draw.
 pub struct Terrain {
     pub world: u16,
     pub dir: PathBuf,
-    /// Altura de cada vértice, ya multiplicada por `HEIGHT_SCALE`.
+    /// Height of each vertex, already multiplied by `HEIGHT_SCALE`.
     pub heights: Vec<f32>,
-    /// Luz final de cada vértice (RGB 0..1): mapa de luz × sombreado por la pendiente.
+    /// Final light of each vertex (RGB 0..1): light map × slope shading.
     pub light: Vec<[f32; 3]>,
     pub mapping: TerrainMapping,
-    /// Banderas de cada casilla (ver [`attr`]). Todo 0 si el mapa no trae `.att`.
+    /// Per-tile flags (see [`attr`]). All 0 if the map has no `.att`.
     pub attributes: Vec<u16>,
-    /// Textura de cada índice de capa (`None` si el mapa no la usa o no existe).
+    /// Texture of each layer index (`None` if the map does not use it or it is missing).
     pub textures: Vec<Option<Texture>>,
 }
 
@@ -191,7 +191,7 @@ impl Terrain {
         self.heights[(y.min(SIZE - 1)) * SIZE + x.min(SIZE - 1)]
     }
 
-    /// Altura interpolada en un punto cualquiera (en casillas), como `RequestTerrainHeight`.
+    /// Interpolated height at any point (in tiles), like `RequestTerrainHeight`.
     pub fn height_at(&self, x: f32, y: f32) -> f32 {
         let x = x.clamp(0.0, (SIZE - 1) as f32);
         let y = y.clamp(0.0, (SIZE - 1) as f32);
@@ -218,16 +218,16 @@ impl Terrain {
     }
 }
 
-/// Carpeta de datos (`WorldN` / `ObjectN`) de un mapa (número de carpeta = `WorldActive` + 1):
-/// todos los niveles de Blood Castle usan los del primero, igual que Chaos Castle, Kalima e
-/// Illusion Temple (`iMapWorld` de MapManager.cpp:1132-1149 y 1238-1255).
+/// Data folder (`WorldN` / `ObjectN`) of a map (folder number = `WorldActive` + 1):
+/// all Blood Castle levels use the first one's, as do Chaos Castle, Kalima and
+/// Illusion Temple (`iMapWorld` in MapManager.cpp:1132-1149 and 1238-1255).
 pub fn data_world(world: u16) -> u16 {
     match world {
-        // Blood Castle 1-7 (`WD_11`-`WD_17`) y 8 (`WD_52`).
+        // Blood Castle 1-7 (`WD_11`-`WD_17`) and 8 (`WD_52`).
         12..=18 | 53 => 12,
-        // Chaos Castle 1-6 (`WD_18`-`WD_23`) y 7 (`WD_53`).
+        // Chaos Castle 1-6 (`WD_18`-`WD_23`) and 7 (`WD_53`).
         19..=24 | 54 => 19,
-        // Kalima 1-6 (`WD_24`-`WD_29`) y 7 (`WD_36`).
+        // Kalima 1-6 (`WD_24`-`WD_29`) and 7 (`WD_36`).
         25..=30 | 37 => 25,
         // Illusion Temple 1-6 (`WD_45`-`WD_50`): `WD_45CURSEDTEMPLE_LV1 + 2`.
         46..=51 => 47,
@@ -235,8 +235,8 @@ pub fn data_world(world: u16) -> u16 {
     }
 }
 
-/// Solo las banderas de las casillas (ver [`attr`]) de `World{world}`, sin alturas ni texturas: lo que
-/// necesita el servidor.
+/// Only the tile flags (see [`attr`]) of `World{world}`, without heights or textures: what the
+/// server needs.
 pub fn load_attributes(data_dir: &Path, world: u16) -> Result<Vec<u16>> {
     let folder = data_world(world);
     let dir = fs::find(data_dir, &format!("World{folder}"))
@@ -244,7 +244,7 @@ pub fn load_attributes(data_dir: &Path, world: u16) -> Result<Vec<u16>> {
     read_attributes(&fs::read(&dir, &format!("EncTerrain{folder}.att"))?)
 }
 
-/// Carga el terreno de `data_dir/World{world}` (con la carpeta de [`data_world`]).
+/// Loads the terrain of `data_dir/World{world}` (using the [`data_world`] folder).
 pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
     let folder = data_world(world);
     let dir = fs::find(data_dir, &format!("World{folder}"))
@@ -253,7 +253,7 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
     let heights = read_heights(&fs::read(&dir, "TerrainHeight.OZB")?)?;
     let mapping = read_mapping(&fs::read(&dir, &format!("EncTerrain{folder}.map"))?)?;
 
-    // Si falta el mapa de luz, todo blanco (como el original).
+    // If the light map is missing, everything is white (like the original).
     let base_light: Vec<[f32; 3]> = match texture::load(&dir, "TerrainLight.OZJ") {
         Ok(t) if t.width as usize == SIZE && t.height as usize == SIZE => t
             .rgba
@@ -269,7 +269,7 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
         .map(|(c, s)| [c[0] * s, c[1] * s, c[2] * s])
         .collect();
 
-    // Solo cargamos las texturas que el mapa usa de verdad.
+    // Only load the textures the map actually uses.
     let mut used = [false; 256];
     for &t in mapping.layer1.iter().chain(&mapping.layer2) {
         used[t as usize] = true;
@@ -289,15 +289,15 @@ pub fn load(data_dir: &Path, world: u16) -> Result<Terrain> {
     Ok(Terrain { world, dir, heights, light, mapping, attributes, textures })
 }
 
-/// Sombreado según la pendiente, como `CreateTerrainLight` del original:
-/// `clamp(normal · luz + 0.5, 0, 1)` con la luz en (0.5, -0.5, 0.5).
+/// Slope shading, like the original's `CreateTerrainLight`:
+/// `clamp(normal · light + 0.5, 0, 1)` with the light at (0.5, -0.5, 0.5).
 fn slope_shading(heights: &[f32]) -> Vec<f32> {
     let h = |x: usize, y: usize| heights[(y % SIZE) * SIZE + (x % SIZE)] / HEIGHT_SCALE;
     let light = normalize([0.5, -0.5, 0.5]);
     let mut out = vec![0.0; CELLS];
     for y in 0..SIZE {
         for x in 0..SIZE {
-            // Normal de la casilla a partir de sus dos triángulos (escala 100 por casilla, como el original).
+            // Tile normal from its two triangles (scale 100 per tile, like the original).
             let v1 = [100.0, 0.0, h(x + 1, y)];
             let v2 = [100.0, 100.0, h(x + 1, y + 1)];
             let v3 = [0.0, 100.0, h(x, y + 1)];
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn carpetas_de_datos() {
-        // Blood Castle 3, Chaos Castle 7, Kalima 7 e Illusion Temple 1 van a la carpeta del primero.
+        // Blood Castle 3, Chaos Castle 7, Kalima 7 and Illusion Temple 1 use the first level's folder.
         assert_eq!(data_world(14), 12);
         assert_eq!(data_world(54), 19);
         assert_eq!(data_world(37), 25);
@@ -353,7 +353,7 @@ mod tests {
         assert_eq!(alpha_tested_tile(1), None);
     }
 
-    /// Prueba con los datos reales si están en `referencias/` (si no, se salta).
+    /// Test with the real data if present in `referencias/` (skipped otherwise).
     #[test]
     fn carga_lorencia() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data");
@@ -364,12 +364,12 @@ mod tests {
         let t = load(&data, 1).expect("cargar Lorencia");
         assert_eq!(t.heights.len(), CELLS);
         assert!(t.textures[0].is_some(), "TileGrass01 cargada");
-        // Si el descifrado estuviera mal, saldrían índices de textura aleatorios (casi todos distintos).
+        // Wrong decryption would yield random texture indices (almost all distinct).
         let mut usadas: Vec<u8> = t.mapping.layer1.clone();
         usadas.sort();
         usadas.dedup();
         assert!(usadas.len() <= 30, "índices de capa 1 raros: {usadas:?}");
-        // La plaza de Lorencia (~135,128) es zona segura y caminable; el foso no.
+        // The Lorencia square (~135,128) is a walkable safe zone; the moat is not.
         assert!(t.attribute(135, 128) & attr::SAFE_ZONE != 0, "plaza: {:#06X}", t.attribute(135, 128));
         assert!(t.walkable(135, 128));
         let bloqueadas = t.attributes.iter().filter(|&&a| a & attr::NO_MOVE != 0).count();

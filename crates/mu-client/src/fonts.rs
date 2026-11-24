@@ -1,9 +1,9 @@
-//! Letra de toda la interfaz: Noto Sans (licencia OFL, `Data/Fonts/NotoSansKR-Regular.ttf`), más
-//! moderna y legible que la Gulim del original, con tildes, ñ y coreano.
+//! Font for the whole UI: Noto Sans (OFL license, `Data/Fonts/NotoSansKR-Regular.ttf`), more
+//! modern and legible than the original Gulim, with accents, ñ and Korean.
 //!
-//! Sustituye a la fuente por defecto de Bevy: todos los textos que no piden otra la usan. Se
-//! dibuja suavizada y al tamaño real de la pantalla (no en la pantalla virtual estirada), así que
-//! no se ve pixelada. Si falta el archivo, queda la de Bevy.
+//! Replaces Bevy's default font: every text that does not ask for another uses it. It is drawn
+//! antialiased at the real screen size (not on the stretched virtual screen), so it does not look
+//! pixelated. If the file is missing, Bevy's font stays.
 
 use bevy::asset::AssetId;
 use bevy::prelude::*;
@@ -14,7 +14,7 @@ pub struct FontsPlugin;
 
 impl Plugin for FontsPlugin {
     fn build(&self, app: &mut App) {
-        // Antes del primer fotograma: la fuente por defecto se registra una sola vez.
+        // Before the first frame: the default font is registered only once.
         let Some(dir) = app.world().get_resource::<Args>().map(|a| a.data.join("Fonts")) else { return };
         let Some(bytes) = mu_data::fs::read(&dir, "NotoSansKR-Regular.ttf").ok() else {
             warn!("sin {}: se usa la letra de Bevy", dir.join("NotoSansKR-Regular.ttf").display());

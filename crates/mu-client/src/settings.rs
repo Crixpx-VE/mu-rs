@@ -1,10 +1,10 @@
-//! Resolución de la ventana, como en el MU original: tamaños fijos (4:3 y 5:4), sin estirar
-//! la ventana a mano, para que la interfaz (pensada para 640×480) se vea siempre bien.
+//! Window resolution, as in the original MU: fixed sizes (4:3 and 5:4), no manual window
+//! resizing, so the UI (designed for 640×480) always looks right.
 //!
-//! - Se guarda en `mu-launcher.txt` (junto al ejecutable) como `resolucion=1024x768`. Ese archivo
-//!   es de cada jugador: las actualizaciones no lo tocan.
-//! - `--resolucion 1280x1024` la cambia solo para esa vez.
-//! - Como en el original (que la elige en su configurador), no hay tecla para cambiarla en el juego.
+//! - Saved in `mu-launcher.txt` (next to the executable) as `resolucion=1024x768`. That file
+//!   belongs to each player: updates do not touch it.
+//! - `--resolucion 1280x1024` changes it for that run only.
+//! - Like the original (which picks it in its configurator), there is no in-game key to change it.
 
 use std::path::PathBuf;
 
@@ -26,14 +26,14 @@ fn config_path() -> Option<PathBuf> {
     Some(std::env::current_exe().ok()?.parent()?.join(CONFIG_FILE))
 }
 
-/// Valor de `clave=` en `mu-launcher.txt` (la clave sin el `=`).
+/// Value of `key=` in `mu-launcher.txt` (the key without the `=`).
 pub fn saved_value(key: &str) -> Option<String> {
     let text = std::fs::read_to_string(config_path()?).ok()?;
     let prefix = format!("{key}=");
     text.lines().find_map(|l| l.trim().strip_prefix(&prefix).map(|v| v.trim().to_string()))
 }
 
-/// Guarda `clave=valor` en `mu-launcher.txt`, sin tocar el resto de líneas.
+/// Saves `key=value` in `mu-launcher.txt`, leaving the other lines alone.
 pub fn save_value(key: &str, value: &str) {
     let Some(path) = config_path() else { return };
     let prefix = format!("{key}=");
@@ -52,13 +52,13 @@ pub fn parse_resolution(s: &str) -> Option<(u32, u32)> {
     ((320..=7680).contains(&w) && (240..=4320).contains(&h)).then_some((w, h))
 }
 
-/// La resolución guardada, si la hay.
+/// The saved resolution, if any.
 pub fn saved_resolution() -> Option<(u32, u32)> {
     let text = std::fs::read_to_string(config_path()?).ok()?;
     text.lines().find_map(|l| l.trim().strip_prefix(KEY)).and_then(parse_resolution)
 }
 
-/// Ventana de `w × h` píxeles de verdad (sin el escalado de Windows), de tamaño fijo.
+/// Fixed-size window of `w × h` real pixels (without Windows scaling).
 pub fn window_resolution((w, h): (u32, u32)) -> WindowResolution {
     WindowResolution::new(w, h).with_scale_factor_override(1.0)
 }

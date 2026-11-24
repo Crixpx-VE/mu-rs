@@ -1,13 +1,13 @@
-//! Cámara.
+//! Camera.
 //!
-//! - **Seguir** (la del juego): vista en diagonal desde arriba. La rueda (o Ctrl + rueda, como
-//!   `SetViewPortLevel`, ZzzScene.cpp:493) cambia `g_shCameraLevel` de 0 a 4: distancia de 1000 a 1400,
-//!   con su alcance (`CameraViewFar`) y su recorte del suelo (`CreateFrustrum2D`). La distancia se
-//!   acerca un tercio cada tick (`CameraDistance += (Target - CameraDistance) / 3`). El Main 5.2
-//!   pone el nivel a 0 en cada fotograma, así que en el original no se puede alejar; aquí sí.
-//! - **Libre** (solo para probar, con `--cam`): botón derecho + ratón para mirar, WASD para moverse,
-//!   Q/E bajar/subir, Shift rápido.
-//! Con `--screenshot`, hace una captura al arrancar y cierra la app.
+//! - **Follow** (the game camera): diagonal top-down view. The wheel (or Ctrl + wheel, like
+//!   `SetViewPortLevel`, ZzzScene.cpp:493) changes `g_shCameraLevel` from 0 to 4: distance 1000 to 1400,
+//!   with its view range (`CameraViewFar`) and ground culling (`CreateFrustrum2D`). The distance
+//!   closes a third of the gap each tick (`CameraDistance += (Target - CameraDistance) / 3`). Main 5.2
+//!   resets the level to 0 every frame, so the original cannot zoom out; here it can.
+//! - **Free** (testing only, with `--cam`): right button + mouse to look, WASD to move,
+//!   Q/E down/up, Shift for speed.
+//! With `--screenshot`, takes a capture at startup and quits.
 
 use std::sync::atomic::{AtomicU8, Ordering};
 
@@ -28,7 +28,7 @@ impl Plugin for FlyCameraPlugin {
         app.add_systems(Startup, spawn_camera)
             .add_systems(Update, (fly, auto_screenshot))
             .add_systems(Update, zoom_wheel.run_if(in_state(crate::scene::GameScene::Game)))
-            // Después de mover al personaje (Update), para que la cámara no vaya un fotograma tarde.
+            // After the character moves (Update), so the camera is not one frame late.
             .add_systems(PostUpdate, follow.in_set(CameraMoved).before(TransformSystems::Propagate))
             .add_systems(
                 PostUpdate,
@@ -37,20 +37,20 @@ impl Plugin for FlyCameraPlugin {
     }
 }
 
-/// `battleCastle::InBattleCastle2` (GMBattleCastle.h:11): el castillo del Valle de Loren, en MU.
+/// `battleCastle::InBattleCastle2` (GMBattleCastle.h:11): the Valley of Loren castle, in MU units.
 pub fn in_battle_castle2(p: Vec2) -> bool {
     (16100.0..=19000.0).contains(&p.x) && (18900.0..=21700.0).contains(&p.y)
 }
 
-/// `g_shCameraLevel` (0 a 4) que ha elegido el jugador con la rueda.
+/// `g_shCameraLevel` (0 to 4) chosen by the player with the wheel.
 static CAMERA_LEVEL: AtomicU8 = AtomicU8::new(0);
-/// El `static CameraLevel` del recorte del suelo (ZzzLodTerrain.cpp:2010-2013): solo sigue al nivel
-/// cuando la cámara ya no está más lejos que su objetivo (al acercarse, mantiene el recorte grande
-/// hasta llegar).
+/// The ground-culling `static CameraLevel` (ZzzLodTerrain.cpp:2010-2013): it only follows the level
+/// once the camera is no farther than its target (when zooming in, it keeps the large culling area
+/// until it arrives).
 static CULL_LEVEL: AtomicU8 = AtomicU8::new(0);
 
-/// Nivel de cámara en un mapa: Vulcanus y los Doppelganger 1 y 2 lo fuerzan a 5
-/// (ZzzScene.cpp:1721-1729); en el resto, el de la rueda.
+/// Camera level on a map: Vulcanus and Doppelganger 1 and 2 force it to 5
+/// (ZzzScene.cpp:1721-1729); elsewhere, the wheel level.
 fn level_in(world: u16) -> u8 {
     match world as i32 - 1 {
         63 | 65 | 66 => 5,
@@ -58,7 +58,7 @@ fn level_in(world: u16) -> u8 {
     }
 }
 
-/// Nivel de cámara para el recorte del suelo (terrain.rs).
+/// Camera level for ground culling (terrain.rs).
 pub fn cull_level(world: u16) -> u8 {
     match world as i32 - 1 {
         63 | 65 | 66 => 5,
@@ -66,8 +66,8 @@ pub fn cull_level(world: u16) -> u8 {
     }
 }
 
-/// `CameraDistanceTarget` del nivel, en MU (ZzzScene.cpp:1844-1852). Con nivel 5 el original usa
-/// `g_Direction.m_fCameraViewFar` (de los eventos); sin ellos, 1000.
+/// `CameraDistanceTarget` for the level, in MU units (ZzzScene.cpp:1844-1852). At level 5 the original
+/// uses `g_Direction.m_fCameraViewFar` (from events); without them, 1000.
 fn distance_target(level: u8) -> f32 {
     match level {
         1 => 1100.0,
@@ -78,20 +78,20 @@ fn distance_target(level: u8) -> f32 {
     }
 }
 
-/// `CameraViewFar` del juego en MU (`MoveMainCamera`, ZzzScene.cpp:1652-1698), según el mapa y el
-/// `g_shCameraLevel`. `hero` es la posición del personaje en MU.
+/// Game `CameraViewFar` in MU units (`MoveMainCamera`, ZzzScene.cpp:1652-1698), by map and
+/// `g_shCameraLevel`. `hero` is the character position in MU units.
 ///
-/// La comprobación de `InBattleCastle2` va sin mirar el mapa, como en el original.
+/// The `InBattleCastle2` check ignores the map, as in the original.
 pub fn view_far(world: u16, hero: Vec2) -> f32 {
     match world as i32 - 1 {
         _ if in_battle_castle2(hero) => 3000.0,
-        // Valle de Loren (`InBattleCastle() && MAIN_SCENE`).
+        // Valley of Loren (`InBattleCastle() && MAIN_SCENE`).
         30 => 2500.0,
         // Elbeland (`WD_51HOME_6TH_CHAR`).
         51 => 2800.0 * 1.15,
-        // Vulcanus y Doppelganger 2.
+        // Vulcanus and Doppelganger 2.
         63 | 66 => 3700.0,
-        // Doppelganger 1: nivel 5 → `case 4/5`.
+        // Doppelganger 1: level 5 → `case 4/5`.
         65 => 3200.0,
         _ => match level_in(world) {
             1 => 2500.0,
@@ -103,8 +103,8 @@ pub fn view_far(world: u16, hero: Vec2) -> f32 {
     }
 }
 
-/// `SetViewPortLevel`: la rueda sube o baja el nivel (hacia ti acerca, hacia fuera aleja), fuera de
-/// la interfaz.
+/// `SetViewPortLevel`: the wheel raises or lowers the level (towards you zooms in, away zooms out),
+/// outside the UI.
 fn zoom_wheel(
     scroll: Res<bevy::input::mouse::AccumulatedMouseScroll>,
     over_ui: Res<crate::mainframe::PointerOverUi>,
@@ -114,7 +114,7 @@ fn zoom_wheel(
     if scroll.delta.y == 0.0 || over_ui.0 {
         return;
     }
-    // Sobre una ventana del juego (las opciones, con su barra de volumen) la rueda es de la ventana.
+    // Over a game window (options, with its volume slider) the wheel belongs to the window.
     let on_window =
         windows.single().ok().and_then(crate::mainframe::cursor_virtual).is_some_and(|c| game_ui.blocks(c));
     if on_window {
@@ -125,8 +125,8 @@ fn zoom_wheel(
     CAMERA_LEVEL.store(next.clamp(0, 4) as u8, Ordering::Relaxed);
 }
 
-/// Alcance de la cámara del juego: `gluPerspective(..., CameraViewNear, CameraViewFar · 1.4)`
-/// (`BeginOpengl`, ZzzOpenglUtil.cpp:643). Lo que queda más lejos no se dibuja y se ve el fondo.
+/// Game camera range: `gluPerspective(..., CameraViewNear, CameraViewFar · 1.4)`
+/// (`BeginOpengl`, ZzzOpenglUtil.cpp:643). Anything farther is not drawn and the background shows.
 fn game_far_plane(
     args: Res<Args>,
     players: Query<&Transform, (With<Player>, Without<FollowCamera>)>,
@@ -135,7 +135,7 @@ fn game_far_plane(
     let hero = players.single().map_or(Vec2::ZERO, |p| Vec2::new(p.translation.x, -p.translation.z) * MU_SCALE);
     let far = view_far(args.world, hero) * 1.4 / MU_SCALE;
     for mut proj in &mut cams {
-        // Sin tocarla si ya está bien (cambiarla rehace el frustum).
+        // Leave it alone if already right (changing it rebuilds the frustum).
         if matches!(&*proj, Projection::Perspective(p) if p.far != far)
             && let Projection::Perspective(p) = &mut *proj
         {
@@ -144,7 +144,7 @@ fn game_far_plane(
     }
 }
 
-/// Cuándo queda colocada la cámara en cada fotograma (para lo que se orienta hacia ella).
+/// When the camera is placed each frame (for things that face it).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CameraMoved;
 
@@ -156,7 +156,7 @@ struct FlyCamera {
 
 #[derive(Component)]
 struct FollowCamera {
-    /// Distancia al personaje, en casillas (escalón de zoom del original / 100).
+    /// Distance to the character, in tiles (original zoom step / 100).
     distance: f32,
 }
 
@@ -166,13 +166,13 @@ enum CameraMode {
     Free,
 }
 
-/// Imagen en la que dibuja la cámara en modo captura (sin ventana).
+/// Image the camera renders to in capture mode (no window).
 #[derive(Resource)]
 struct OffscreenTarget(Handle<Image>);
 
 fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets<Image>>) {
     let [ex, ey, eh, tx, ty, th] = args.cam.unwrap_or([135.0, 112.0, 14.0, 135.0, 130.0, 2.0]);
-    // MU (x, y, alto) → Bevy (x, alto, -y)
+    // MU (x, y, height) → Bevy (x, height, -y)
     let eye = Vec3::new(ex, eh, -ey);
     let target = Vec3::new(tx, th, -ty);
     let transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
@@ -181,33 +181,32 @@ fn spawn_camera(mut commands: Commands, args: Res<Args>, mut images: ResMut<Asse
     commands.insert_resource(if args.cam.is_some() { CameraMode::Free } else { CameraMode::Follow });
     let mut cam = commands.spawn((
         Camera3d::default(),
-        // Colores tal cual, como el OpenGL del original: sin el `TonyMcMapface` que Bevy pone por
-        // defecto, que aclara las sombras y quita contraste.
+        // Raw colors, like the original's OpenGL: without Bevy's default `TonyMcMapface`, which
+        // brightens shadows and lowers contrast.
         bevy::core_pipeline::tonemapping::Tonemapping::None,
         bevy::core_pipeline::tonemapping::DebandDither::Disabled,
-        // Sin el antialiasing 4× que Bevy pone por defecto: el original no tiene, y cuesta mucho
-        // en tarjetas modestas.
+        // Without Bevy's default 4× antialiasing: the original has none, and it is expensive
+        // on modest GPUs.
         Msaa::Off,
         Projection::Perspective(PerspectiveProjection {
             fov: mu_fov(),
             near: 0.2,
-            // Fuera del juego (login, selección) cada pantalla pone el suyo; en el juego, `game_far_plane`.
+            // Outside the game (login, selection) each screen sets its own; in game, `game_far_plane`.
             far: 400.0,
             ..default()
         }),
         transform,
         FlyCamera { yaw, pitch },
         FollowCamera { distance: args.zoom.unwrap_or(ZOOM_DEFAULT) },
-        // No usamos luces dinámicas (la luz viene precalculada en el mapa), así que
-        // no hace falta repartir luces por zonas de pantalla ("clustering").
-        // (`None` falla en Bevy 0.20 con una textura de tamaño cero; `Single` es lo mínimo.)
+        // No dynamic lights (lighting is baked into the map), so no light clustering is needed.
+        // (`None` fails in Bevy 0.20 with a zero-size texture; `Single` is the minimum.)
         bevy::light::cluster::ClusterConfig::Single,
-        // La interfaz va en esta cámara aunque haya otras (la vista previa de crear personaje).
+        // The UI goes on this camera even when others exist (the character-creation preview).
         IsDefaultUiCamera,
     ));
 
     if args.screenshot.is_some() {
-        // 4:3 como las resoluciones del juego, y con la interfaz dibujada en la captura.
+        // 4:3 like the game resolutions, with the UI drawn into the capture.
         let image = images.add(Image::new_target_texture(1024, 768, TextureFormat::Rgba8UnormSrgb, None));
         cam.insert(RenderTarget::Image(image.clone().into()));
         commands.insert_resource(bevy::ui::UiScale(768.0 / 480.0));
@@ -227,7 +226,7 @@ fn follow(
         return;
     }
     let (Ok(player), Ok((mut tf, mut cam))) = (players.single(), cams.single_mut()) else { return };
-    // `--zoom` deja la distancia fija; si no, la del nivel, acercándose un tercio por tick (25 Hz).
+    // `--zoom` fixes the distance; otherwise the level's, closing a third of the gap per tick (25 Hz).
     if args.zoom.is_none() {
         let target = distance_target(level_in(args.world)) / MU_SCALE;
         let k = 1.0 - (2.0f32 / 3.0).powf(time.delta_secs() * crate::fx::sim::TICKS_PER_SECOND);
@@ -242,40 +241,40 @@ fn follow(
     *tf = mu_camera(player.translation, cam.distance * MU_SCALE);
 }
 
-/// `CameraDistance` del juego en casillas (1000 unidades de MU, `g_shCameraLevel` 0).
+/// Game `CameraDistance` in tiles (1000 MU units, `g_shCameraLevel` 0).
 pub const ZOOM_DEFAULT: f32 = 10.0;
 
-/// Campo de visión vertical del juego: `CameraFOV = 35` (`MoveMainCamera` del Main 5.2, en
-/// `gluPerspective`). MuMain lo cambió a 40° en horizontal (unos 30.5° en vertical).
+/// Game vertical field of view: `CameraFOV = 35` (Main 5.2 `MoveMainCamera`, in
+/// `gluPerspective`). MuMain changed it to 40° horizontal (about 30.5° vertical).
 pub fn mu_fov() -> f32 {
     35f32.to_radians()
 }
 
-/// Cámara del juego tal como la calcula el original (`DefaultCamera::Update`):
+/// Game camera as the original computes it (`DefaultCamera::Update`):
 ///
-/// 1. Con los ángulos base (0, 0, -45°) se calcula la posición: `héroe + AngleMatrixᵀ·(0, -distancia, 0)`
-///    en horizontal, y en altura `héroe.z + distancia - 150`.
-/// 2. Después `SetCameraAngle` pone la inclinación de -48.5°, que solo afecta a la vista
-///    (`Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL).
+/// 1. With the base angles (0, 0, -45°) the position is computed: `hero + AngleMatrixᵀ·(0, -distance, 0)`
+///    horizontally, and height `hero.z + distance - 150`.
+/// 2. Then `SetCameraAngle` sets the -48.5° pitch, which only affects the view
+///    (`Ry(a1)·Rx(a0)·Rz(a2)` OpenGL-style).
 ///
-/// Resultado: la cámara queda al sureste del personaje mirando al noroeste, inclinada 41.5°
-/// hacia abajo, y el personaje sale justo en el centro de la pantalla.
-/// `hero` va en coordenadas de Bevy; `distance` en unidades de MU.
+/// Result: the camera sits south-east of the character looking north-west, tilted 41.5°
+/// down, with the character exactly in the screen center.
+/// `hero` is in Bevy coordinates; `distance` in MU units.
 fn mu_camera(hero: Vec3, distance: f32) -> Transform {
     let (s0, c0) = (-48.5f32).to_radians().sin_cos();
     let (s2, c2) = (-45f32).to_radians().sin_cos();
-    // En coordenadas de MU (x, y, z arriba):
+    // In MU coordinates (x, y, z up):
     let forward = Vec3::new(-s0 * s2, -s0 * c2, -c0);
     let up = Vec3::new(c0 * s2, c0 * c2, -s0);
-    // Posición con inclinación 0 (paso 1): solo gira el yaw.
+    // Position with zero pitch (step 1): only the yaw rotates.
     let offset = Vec3::new(-s2 * distance, -c2 * distance, distance - 150.0);
-    // MU (x, y, z) → Bevy (x, z, -y), 100 unidades por casilla.
+    // MU (x, y, z) → Bevy (x, z, -y), 100 units per tile.
     let to_bevy = |v: Vec3| Vec3::new(v.x, v.z, -v.y);
     Transform::from_translation(hero + to_bevy(offset) / MU_SCALE).looking_to(to_bevy(forward), to_bevy(up))
 }
 
-/// Vista del original desde `eye` (MU) con inclinación `pitch` y giro `yaw` en grados (los mismos ejes
-/// que [`mu_camera`]: `Ry(a1)·Rx(a0)·Rz(a2)` al estilo OpenGL).
+/// Original view from `eye` (MU) with `pitch` and `yaw` in degrees (same axes as
+/// [`mu_camera`]: `Ry(a1)·Rx(a0)·Rz(a2)` OpenGL-style).
 pub fn mu_view(eye: Vec3, pitch: f32, yaw: f32) -> Transform {
     let (s0, c0) = pitch.to_radians().sin_cos();
     let (s2, c2) = yaw.to_radians().sin_cos();
@@ -318,8 +317,8 @@ fn fly(
     tf.translation += dir.normalize_or_zero() * speed * time.delta_secs();
 }
 
-/// Espera a que todo esté en la GPU (los shaders se compilan en segundo plano y, sin
-/// tarjeta gráfica, tardan), captura y cierra cuando el archivo ya está guardado.
+/// Waits until everything is on the GPU (shaders compile in the background and are slow without
+/// a graphics card), captures, and quits once the file is saved.
 fn auto_screenshot(
     mut commands: Commands,
     args: Res<Args>,

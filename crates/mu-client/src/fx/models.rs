@@ -1,11 +1,11 @@
-//! Modelos `.bmd` de los efectos (`RenderObject` de `Effects[]`): espadas que giran, grietas,
-//! ondas, meteoritos... Cada modelo tiene un grupo de instancias que se reutilizan cada fotograma.
+//! Effect `.bmd` models (`RenderObject` of `Effects[]`): spinning swords, cracks, waves,
+//! meteors... Each model has a pool of instances reused every frame.
 //!
-//! Reglas de cada malla (como `BMD::RenderMesh`):
-//! - `hidden_mesh` = -2 oculta todas; n oculta la malla con textura n.
-//! - `bright` (`RENDER_BRIGHT`): todo el modelo sumando con `light · alpha`.
-//! - la malla cuya textura es `blend_mesh`: sumando con `light · blend_mesh_light` y su UV desplazada.
-//! - el resto: textura con alfa → prueba de alfa; alfa < 1 → mezcla normal; si no, opaca.
+//! Per-mesh rules (like `BMD::RenderMesh`):
+//! - `hidden_mesh` = -2 hides all; n hides the mesh with texture n.
+//! - `bright` (`RENDER_BRIGHT`): the whole model additive with `light · alpha`.
+//! - the mesh whose texture is `blend_mesh`: additive with `light · blend_mesh_light` and offset UVs.
+//! - the rest: texture with alpha → alpha test; alpha < 1 → normal blend; otherwise opaque.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,7 +27,7 @@ use crate::terrain::MU_SCALE;
 
 struct LoadedModel {
     bmd: Arc<Bmd>,
-    /// Por malla: textura y si tiene transparencia.
+    /// Per mesh: texture and whether it has transparency.
     textures: Vec<(Option<Handle<Image>>, bool)>,
 }
 
@@ -62,23 +62,23 @@ impl FxModels {
         }
     }
 
-    /// Carpeta, archivo y carpeta de texturas del modelo `id` (efectos de la tabla generada, o
-    /// ítems: `MODEL_ITEM + grupo·512 + n` → `Item/{Grupo}{n+1:02}.bmd`).
+    /// Folder, file and texture folder of model `id` (effects from the generated table, or
+    /// items: `MODEL_ITEM + group·512 + n` → `Item/{Group}{n+1:02}.bmd`).
     fn locate(&self, id: i32) -> Option<(String, String, String)> {
         if let Some(&(d, f, t)) = self.table.get(&id) {
             return Some((d.to_string(), f.to_string(), t.to_string()));
         }
-        // Los que el original carga en bucles (el generador no los ve).
-        // Modelos de objetos de mapa que usan los efectos (`OpenWorldModels` / `MapManager`).
+        // Models the original loads in loops (the generator does not see them).
+        // Map object models used by effects (`OpenWorldModels` / `MapManager`).
         let fixed = match id {
             MODEL_WARP..=MODEL_WARP3 => Some(("Npc", format!("warp{:02}.bmd", id - MODEL_WARP + 1))),
-            // Raklion (`MapManager.cpp:769-774`): los mismos modelos con otro número.
+            // Raklion (`MapManager.cpp:769-774`): the same models under other numbers.
             MODEL_WARP4..=MODEL_WARP6 => Some(("Npc", format!("warp{:02}.bmd", id - MODEL_WARP4 + 1))),
             MODEL_DUNGEON_STONE01 => Some(("Object2", "DungeonStone01.bmd".into())),
             MODEL_CLOUD => Some(("Object11", "cloud.bmd".into())),
-            // `CreateEffect(9)` de Kalima: el modelo 9 del mapa (`Object25`, igual en las 7 Kalima).
+            // Kalima `CreateEffect(9)`: map model 9 (`Object25`, the same in all 7 Kalimas).
             MODEL_KALIMA_FALLING_STONE => Some(("Object25", "Object10.bmd".into())),
-            // `MapManager.cpp:293-294` (y otros mapas): `Object1\Butterfly01`.
+            // `MapManager.cpp:293-294` (and other maps): `Object1\Butterfly01`.
             MODEL_BUTTERFLY01 => Some(("Object1", "Butterfly01.bmd".into())),
             _ => None,
         };
@@ -129,7 +129,7 @@ impl FxModels {
     }
 }
 
-/// Paso 3: los modelos de los efectos.
+/// Step 3: effect models.
 #[allow(clippy::too_many_arguments)]
 pub fn render_models(
     mut commands: Commands,
@@ -213,7 +213,7 @@ pub fn render_models(
         }
     }
 
-    // Las instancias que sobran este fotograma, ocultas.
+    // Hide instances unused this frame.
     for (id, pool) in &models.pools {
         let n = used.get(id).copied().unwrap_or(0);
         for inst in pool.iter().skip(n) {

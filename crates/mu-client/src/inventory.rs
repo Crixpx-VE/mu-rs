@@ -1,27 +1,26 @@
-//! Inventario (`V` o `I`): `SEASON3B::CNewUIMyInventory` (NewUIMyInventory.cpp) con su rejilla de 8×8
-//! `CNewUIInventoryCtrl` (NewUIInventoryCtrl.cpp).
+//! Inventory (`V` or `I`): `SEASON3B::CNewUIMyInventory` (NewUIMyInventory.cpp) with its 8×8
+//! `CNewUIInventoryCtrl` grid (NewUIInventoryCtrl.cpp).
 //!
-//! - **Abrir y cerrar**: `I` o `V` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:155-163 y 198-204, con
-//!   `SOUND_CLICK01`), el botón de inventario de la barra (NewUIMainFrameWindow.cpp:769-775), el botón de
-//!   cerrar de abajo y Esc (`UpdateKeyEvent`, NewUIMyInventory.cpp:560-570). Al cerrar, lo que va en el
-//!   ratón vuelve a su sitio (`ClosingProcess` → `BackupPickedItem`).
-//! - **Dibujo**: `Create(..., 640 - 190, 0)` (NewUISystem.cpp:172), `RenderFrame`, `RenderInventoryDetails`,
-//!   `RenderSetOption`/`RenderSocketOption`, `RenderButtons`, la rejilla (`CNewUIInventoryCtrl::Render`) y
-//!   los huecos del equipo (`SetEquipmentSlotInfo`, `RenderEquippedItem`). Los objetos, en 3D
-//!   (item_view.rs), encima; los cuadros de información, encima de todo.
-//! - **Ratón**: coger un objeto al soltar el botón encima (`CNewUIInventoryCtrl::UpdateMouseEvent`) y
-//!   dejarlo al soltar en una casilla donde cabe (`InventoryProcess`) o en un hueco del equipo libre donde
-//!   se puede llevar (`EquipmentWindowProcess` + `IsEquipable`). El original pide el cambio al servidor
-//!   (`SendRequestEquipmentItem`) y lo hace al contestar; sin servidor todavía, se hace aquí a la vez. Los
-//!   objetos no se tiran al suelo (eso también lo hace el servidor): con uno en el ratón, un clic en el
-//!   juego no hace nada.
-//! - **Contenido**: sin servidor no hay inventario; `--inventario-prueba` pone uno de prueba (con +0 a +15,
-//!   excelentes y un antiguo). [`Inventory::set_items`] es la entrada del paquete del inventario del S6
-//!   (`F3 10`: hueco y los 12 bytes de cada objeto) para cuando llegue del servidor.
+//! - **Open and close**: `I` or `V` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:155-163 and 198-204,
+//!   with `SOUND_CLICK01`), the bar's inventory button (NewUIMainFrameWindow.cpp:769-775), the bottom
+//!   close button and Esc (`UpdateKeyEvent`, NewUIMyInventory.cpp:560-570). On close, the item held by
+//!   the mouse returns to its place (`ClosingProcess` → `BackupPickedItem`).
+//! - **Drawing**: `Create(..., 640 - 190, 0)` (NewUISystem.cpp:172), `RenderFrame`, `RenderInventoryDetails`,
+//!   `RenderSetOption`/`RenderSocketOption`, `RenderButtons`, the grid (`CNewUIInventoryCtrl::Render`) and
+//!   the equipment slots (`SetEquipmentSlotInfo`, `RenderEquippedItem`). Items are drawn in 3D
+//!   (item_view.rs) on top; tooltips on top of everything.
+//! - **Mouse**: pick up an item on button release over it (`CNewUIInventoryCtrl::UpdateMouseEvent`) and
+//!   drop it on release over a cell where it fits (`InventoryProcess`) or over a free equipment slot
+//!   where it can be worn (`EquipmentWindowProcess` + `IsEquipable`). The original asks the server
+//!   (`SendRequestEquipmentItem`) and applies it on reply; here it is applied immediately. Items are
+//!   not dropped on the ground (the server does that too): with one held, a click in the game does
+//!   nothing.
+//! - **Contents**: `--inventario-prueba` sets up a test inventory (+0 to +15, excellent and one
+//!   ancient). [`Inventory::set_items`] is the entry point for the S6 inventory packet (`F3 10`: slot
+//!   and the 12 bytes of each item) from the server.
 //!
-//! No están: reparar, la tienda personal, los sets antiguos y los zócalos de la ventana, las teclas
-//! rápidas de pociones, juntar objetos (joyas sobre objetos, `IsOverlayItem`) ni los colores de
-//! durabilidad de la rejilla.
+//! Missing: repair, personal store, the window's ancient sets and sockets, potion hotkeys, item
+//! stacking (jewels on items, `IsOverlayItem`) and the grid's durability colors.
 
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontSmoothing, FontWeight, LineHeight};
@@ -54,7 +53,7 @@ impl Plugin for InventoryPlugin {
     }
 }
 
-/// Con la ventana del personaje abierta, a su izquierda (`640-190*2`); si no, en `640-190`.
+/// With the character window open, to its left (`640-190*2`); otherwise at `640-190`.
 fn follow_char_info(char_info: Res<crate::char_info::CharInfoWindow>, mut inv: ResMut<Inventory>) {
     let dx = if char_info.is_open() { -190.0 } else { 0.0 };
     if inv.dx != dx {
@@ -62,16 +61,16 @@ fn follow_char_info(char_info: Res<crate::char_info::CharInfoWindow>, mut inv: R
     }
 }
 
-// --- Medidas (pantalla de 640×480) -------------------------------------------------------------
+// --- Measurements (640×480 screen) -------------------------------------------------------------
 
-/// `g_hFont` (como options.rs).
+/// `g_hFont` (like options.rs).
 const FONT: f32 = crate::chat::FONT;
 /// `m_Pos` (`Create(m_pNewUIMng, m_pNewUI3DRenderMng, 640-190, 0)`).
 const POS: (f32, f32) = (640.0 - 190.0, 0.0);
 /// `INVENTORY_WIDTH` × `INVENTORY_HEIGHT`.
 const W: f32 = 190.0;
 const H: f32 = 429.0;
-/// La rejilla: `Create(..., x+15, y+200, 8, 8)` con casillas de `INVENTORY_SQUARE_WIDTH/HEIGHT` = 20.
+/// The grid: `Create(..., x+15, y+200, 8, 8)` with cells of `INVENTORY_SQUARE_WIDTH/HEIGHT` = 20.
 pub const COLUMNS: usize = 8;
 pub const ROWS: usize = 8;
 const GRID: (f32, f32) = (POS.0 + 15.0, POS.1 + 200.0);
@@ -81,7 +80,7 @@ const EDGE_TOP: f32 = 3.0;
 const EDGE_LEFT: f32 = 4.0;
 const EDGE_BOTTOM: f32 = 8.0;
 const EDGE_RIGHT: f32 = 9.0;
-/// Botones (`SetButtonInfo`): cerrar, reparar y tienda personal, de 36×29.
+/// Buttons (`SetButtonInfo`): close, repair and personal store, 36×29.
 const BTN_EXIT: (f32, f32) = (POS.0 + 13.0, POS.1 + 391.0);
 const BTN_REPAIR: (f32, f32) = (POS.0 + 50.0, POS.1 + 391.0);
 const BTN_SHOP: (f32, f32) = (POS.0 + 87.0, POS.1 + 391.0);
@@ -95,8 +94,8 @@ const TIP_SHOP: &str = "Open personal store(S)";
 const SET_OPTION: &str = "[Set option]";
 const SOCKET_OPTION: &str = "[Socket option]";
 
-/// `SetEquipmentSlotInfo` (NewUIMyInventory.cpp:1062-1135): (x, y, ancho, alto) respecto a `m_Pos` y
-/// su imagen de fondo, por hueco (`EQUIPMENT_*`).
+/// `SetEquipmentSlotInfo` (NewUIMyInventory.cpp:1062-1135): (x, y, width, height) relative to `m_Pos`
+/// and its background image, per slot (`EQUIPMENT_*`).
 const SLOTS: [(f32, f32, f32, f32, Tex); slot::COUNT] = [
     (15.0, 87.0, 46.0, 66.0, Tex::SlotWeaponR),
     (135.0, 87.0, 46.0, 66.0, Tex::SlotWeaponL),
@@ -117,14 +116,14 @@ fn slot_rect(i: usize) -> (f32, f32, f32, f32) {
     (POS.0 + x, POS.1 + y, w, h)
 }
 
-/// `CheckMouseIn(x, y, ancho, alto)`.
+/// `CheckMouseIn(x, y, width, height)`.
 fn inside(m: Vec2, x: f32, y: f32, w: f32, h: f32) -> bool {
     m.x >= x && m.x < x + w && m.y >= y && m.y < y + h
 }
 
-// --- Estado ------------------------------------------------------------------------------------
+// --- State -------------------------------------------------------------------------------------
 
-/// Un objeto de la rejilla, con su casilla de arriba a la izquierda.
+/// A grid item, with its top-left cell.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GridItem {
     pub x: u8,
@@ -132,7 +131,7 @@ pub struct GridItem {
     pub item: Item,
 }
 
-/// De dónde salió lo que va en el ratón (`GetOwnerInventory` o `ex_src_type == ITEM_EX_SRC_EQUIPMENT`).
+/// Where the held item came from (`GetOwnerInventory` or `ex_src_type == ITEM_EX_SRC_EQUIPMENT`).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Source {
     Grid { x: u8, y: u8 },
@@ -146,7 +145,7 @@ pub struct Picked {
     pub from: Source,
 }
 
-/// `m_EventState` de la rejilla.
+/// Grid `m_EventState`.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 enum CtrlEvent {
     #[default]
@@ -155,38 +154,38 @@ enum CtrlEvent {
     Picking,
 }
 
-/// El inventario del personaje y la ventana.
+/// The character's inventory and its window.
 #[derive(Resource, Default)]
 pub struct Inventory {
     pub open: bool,
     pub grid: Vec<GridItem>,
     pub equipment: [Option<Item>; slot::COUNT],
-    /// `CharacterMachine->Gold` (sin servidor; con él, el de `CharacterInformation`).
+    /// `CharacterMachine->Gold` without a server (with one, `CharacterInformation`'s is used).
     pub zen: u32,
     pub picked: Option<Picked>,
-    /// Cambia cada vez que cambia el equipo (para vestir al personaje).
+    /// Bumped whenever the equipment changes (to re-dress the character).
     pub equipment_rev: u32,
     event: CtrlEvent,
-    /// `m_iPointedSquareIndex` y `m_iPointedSlot`.
+    /// `m_iPointedSquareIndex` and `m_iPointedSlot`.
     pointed_square: Option<usize>,
     pointed_slot: Option<usize>,
-    /// `m_pToolTipItem`: índice en `grid`.
+    /// `m_pToolTipItem`: index into `grid`.
     tooltip: Option<usize>,
-    /// El botón de cerrar apretado encima (`BUTTON_STATE_DOWN`).
+    /// The close button is held down over it (`BUTTON_STATE_DOWN`).
     exit_down: bool,
-    /// Desplazamiento en x desde `POS`: con la ventana del personaje abierta el original la pone en
-    /// `640-190*2` (`SetPos`, NewUISystem.cpp:590-609) y al cerrarla vuelve a `640-190` (974).
-    /// Todo se calcula en `POS` y se mueve al leer el ratón y al dibujar.
+    /// X offset from `POS`: with the character window open the original moves it to
+    /// `640-190*2` (`SetPos`, NewUISystem.cpp:590-609) and back to `640-190` on close (974).
+    /// Everything is computed at `POS` and shifted when reading the mouse and drawing.
     pub dx: f32,
 }
 
 impl Inventory {
-    /// `ItemAttribute.Width/Height` (1×1 si no está en la tabla).
+    /// `ItemAttribute.Width/Height` (1×1 if not in the table).
     fn size(data: &ItemData, item: &Item) -> (u8, u8) {
         data.attr(item).map_or((1, 1), |a| (a.width.max(1), a.height.max(1)))
     }
 
-    /// El objeto que ocupa la casilla (`m_pdwItemCheckBox`).
+    /// The item occupying the cell (`m_pdwItemCheckBox`).
     fn owner(&self, data: &ItemData, x: usize, y: usize) -> Option<usize> {
         self.grid.iter().position(|g| {
             let (w, h) = Self::size(data, &g.item);
@@ -194,8 +193,8 @@ impl Inventory {
         })
     }
 
-    /// `CheckSlot`: cabe un objeto de `w`×`h` en (x, y). (El original cuenta casillas seguidas y, si se
-    /// sale por la derecha, mira las de la fila siguiente; el servidor lo rechaza. Aquí, que no se salga.)
+    /// `CheckSlot`: whether a `w`×`h` item fits at (x, y). (The original counts consecutive cells and,
+    /// past the right edge, wraps to the next row; the server rejects that. Here it must stay inside.)
     fn fits(&self, data: &ItemData, x: i32, y: i32, w: u8, h: u8) -> bool {
         if x < 0 || y < 0 || x as usize + w as usize > COLUMNS || y as usize + h as usize > ROWS {
             return false;
@@ -203,7 +202,7 @@ impl Inventory {
         (0..h as usize).all(|dy| (0..w as usize).all(|dx| self.owner(data, x as usize + dx, y as usize + dy).is_none()))
     }
 
-    /// `FindEmptySlot`: la primera casilla (por filas) donde cabe.
+    /// `FindEmptySlot`: the first cell (row by row) where it fits.
     pub fn find_empty(&self, data: &ItemData, item: &Item) -> Option<(u8, u8)> {
         let (w, h) = Self::size(data, item);
         (0..ROWS as i32)
@@ -212,7 +211,7 @@ impl Inventory {
             .map(|(x, y)| (x as u8, y as u8))
     }
 
-    /// Mete el objeto en la primera casilla libre (para el inventario de prueba).
+    /// Puts the item in the first free cell (for the test inventory).
     pub fn add(&mut self, data: &ItemData, item: Item) -> bool {
         match self.find_empty(data, &item) {
             Some((x, y)) => {
@@ -223,8 +222,8 @@ impl Inventory {
         }
     }
 
-    /// El inventario que manda el servidor (`F3 10`): hueco (0-11 equipo, 12-75 rejilla) y los 12 bytes
-    /// del objeto (`Item::from_bytes`).
+    /// The inventory sent by the server (`F3 10`): slot (0-11 equipment, 12-75 grid) and the item's
+    /// 12 bytes (`Item::from_bytes`).
     #[allow(dead_code)]
     pub fn set_items(&mut self, list: &[(u8, [u8; 12])]) {
         self.grid.clear();
@@ -243,7 +242,7 @@ impl Inventory {
         self.equipment_rev += 1;
     }
 
-    /// `BackupPickedItem`: lo que va en el ratón vuelve a su sitio.
+    /// `BackupPickedItem`: the held item returns to its place.
     fn backup_picked(&mut self) {
         let Some(p) = self.picked.take() else { return };
         match p.from {
@@ -273,26 +272,26 @@ impl Inventory {
         }
     }
 
-    /// El ratón (pantalla de 640×480) cae en la ventana (`CheckMouseIn(m_Pos, 190, 429)`), o hay un
-    /// objeto en el ratón (un clic en el juego lo tiraría al suelo): no se camina.
+    /// The mouse (640×480 screen) is over the window (`CheckMouseIn(m_Pos, 190, 429)`), or an item is
+    /// held (a click in the game would drop it): no walking.
     pub fn blocks(&self, c: Vec2) -> bool {
         let l = self.local(c);
         self.open && (inside(l, POS.0, POS.1, W, H) || (self.picked.is_some() && c.y < 429.0))
     }
 
-    /// Del ratón en la pantalla a las coordenadas de la ventana en `POS`.
+    /// From the on-screen mouse to window coordinates at `POS`.
     fn local(&self, c: Vec2) -> Vec2 {
         Vec2::new(c.x - self.dx, c.y)
     }
 }
 
-/// `IsEquipable` (NewUIMyInventory.cpp:199-362) sin las mascotas ni los mapas especiales. Sin los
-/// datos del personaje (sin servidor) no se miran fuerza, agilidad...
+/// `IsEquipable` (NewUIMyInventory.cpp:199-362) without pets or special maps. Without the
+/// character data, strength, agility... are not checked.
 fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: usize, item: &Item) -> bool {
     let Some(attr) = data.attr(item) else { return false };
     let class = hero.class as usize;
     let rc = attr.require_class;
-    // El Magic Gladiator lleva lo de Dark Wizard y Dark Knight a la vez.
+    // The Magic Gladiator wears what both Dark Wizard and Dark Knight can.
     let mut ok = rc[class] != 0 || (class == 3 && rc[0] != 0 && rc[1] != 0);
     if rc[class] > hero.step.max(1) {
         return false;
@@ -303,8 +302,8 @@ fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: u
     let s = slot_index as u8;
     ok = attr.slot == Some(s);
     if attr.slot == Some(slot::WEAPON_RIGHT) && s == slot::WEAPON_LEFT {
-        // Dark Knight, Magic Gladiator y Rage Fighter: armas de una mano en la izquierda; la Summoner,
-        // lo que no sea báculo.
+        // Dark Knight, Magic Gladiator and Rage Fighter: one-handed weapons on the left; the Summoner,
+        // anything but a staff.
         if matches!(class, 1 | 3 | 6) {
             ok = !attr.two_hand;
         } else if class == 5 && item.group != group::STAFF {
@@ -313,7 +312,7 @@ fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: u
     } else if attr.slot == Some(slot::RING_RIGHT) && s == slot::RING_LEFT {
         ok = true;
     }
-    // La Elfa con arco en la izquierda solo lleva flechas de ballesta (`ITEM_BOW+15`) en la derecha.
+    // An Elf with a bow on the left can only hold crossbow bolts (`ITEM_BOW+15`) on the right.
     if class == 2 && s == slot::WEAPON_RIGHT {
         if let Some(l) = inv.equipment[slot::WEAPON_LEFT as usize] {
             if l.group == group::BOW && l.index != 7 && item.kind() != mu_data::items::kind(group::BOW, 15) {
@@ -321,7 +320,7 @@ fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: u
             }
         }
     }
-    // El Rage Fighter no lleva guantes.
+    // The Rage Fighter does not wear gloves.
     if class == 6 && s == slot::GLOVES {
         ok = false;
     }
@@ -345,11 +344,11 @@ fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: u
     true
 }
 
-/// El personaje que mira el inventario (`Hero->Class` y `CharacterAttribute`).
+/// The character viewing the inventory (`Hero->Class` and `CharacterAttribute`).
 fn hero_view(hero: Option<&crate::account::Hero>, info: Option<&crate::account::HeroInfo>) -> HeroView {
     HeroView {
         class: hero.map_or(1, |h| h.class.index() as u8),
-        // La clase aún no se sabe subida: siempre la primera.
+        // Class evolution is not known yet: always the first step.
         step: 1,
         level: hero.map_or(1, |h| h.level),
         stats: info.map(|i| {
@@ -359,14 +358,14 @@ fn hero_view(hero: Option<&crate::account::Hero>, info: Option<&crate::account::
     }
 }
 
-/// `--inventario-prueba`: un inventario para mirar los objetos y su brillo.
+/// `--inventario-prueba`: an inventory for inspecting items and their glow.
 fn fill_test_inventory(args: Res<Args>, data: Res<ItemData>, mut inv: ResMut<Inventory>) {
     if !args.test_inventory || !inv.grid.is_empty() || inv.equipment.iter().any(|e| e.is_some()) {
         return;
     }
     let it = |g: u8, i: u16, level: u8| Item { level, durability: 255, ..Item::new(g, i) };
-    // Equipo de Dark Knight: espada +9 con suerte y habilidad, escudo +7, set de dragón +11 a +15
-    // (la armadura, excelente), alas de Satán, anillo y colgante.
+    // Dark Knight gear: +9 sword with luck and skill, +7 shield, +11 to +15 dragon set
+    // (excellent armor), Satan wings, ring and pendant.
     let mut equip = [None; slot::COUNT];
     equip[slot::WEAPON_RIGHT as usize] = Some(Item { skill: true, luck: true, option: 3, ..it(group::SWORD, 5, 9) });
     equip[slot::WEAPON_LEFT as usize] = Some(it(group::SHIELD, 4, 7));
@@ -389,7 +388,7 @@ fn fill_test_inventory(args: Res<Args>, data: Res<ItemData>, mut inv: ResMut<Inv
         it(group::SPEAR, 4, 11),
         Item { excellent: 0b11_0000, luck: true, ..it(group::BOW, 10, 13) },
         Item { excellent: 0b00_1001, ..it(group::STAFF, 2, 15) },
-        // Antiguo (`ExtOption % 4` = 1).
+        // Ancient (`ExtOption % 4` = 1).
         Item { ancient: 5, ..it(group::ARMOR, 5, 0) },
         it(group::HELM, 0, 13),
         it(group::SHIELD, 2, 15),
@@ -405,15 +404,15 @@ fn fill_test_inventory(args: Res<Args>, data: Res<ItemData>, mut inv: ResMut<Inv
         }
     }
     inv.zen = 2_500_000;
-    // Se abre solo, para verlo enseguida.
+    // Opens by itself so it is visible right away.
     inv.open = true;
     info!("inventario de prueba: {} objetos en la rejilla", inv.grid.len());
 }
 
-// --- Teclado y ratón ---------------------------------------------------------------------------
+// --- Keyboard and mouse ------------------------------------------------------------------------
 
-/// `I`/`V` abren o cierran (`CNewUIHotKey`, con las cajas de mensajes no llegan); Esc cierra (antes de
-/// que el menú de sistema lo vea: la ventana está por encima en el orden de teclas del original).
+/// `I`/`V` open or close (`CNewUIHotKey`; blocked while message boxes are up); Esc closes (before the
+/// system menu sees it: the window comes first in the original's key order).
 fn keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     game_ui: Res<crate::options::GameUi>,
@@ -439,7 +438,7 @@ fn keys(
     }
 }
 
-/// `CNewUIMyInventory::Update` + `UpdateMouseEvent` (NewUIMyInventory.cpp:447-558 y 653-675).
+/// `CNewUIMyInventory::Update` + `UpdateMouseEvent` (NewUIMyInventory.cpp:447-558 and 653-675).
 #[allow(clippy::too_many_arguments)]
 fn update_mouse(
     windows: Query<&Window>,
@@ -457,13 +456,13 @@ fn update_mouse(
     let Some(m) = windows.single().ok().and_then(crate::mainframe::cursor_virtual).filter(|_| !game_ui.modal()) else {
         return;
     };
-    // `MouseX`, `MouseY`: enteros de la pantalla de 640×480.
+    // `MouseX`, `MouseY`: integers on the 640×480 screen.
     let m = inv.local(m.floor());
     let hero = hero_view(hero.as_deref(), info.as_deref());
     let (pressed, released) = (mouse.pressed(MouseButton::Left), mouse.just_released(MouseButton::Left));
     let inv = &mut *inv;
 
-    // `Update`: el hueco del equipo bajo el ratón (`CheckMouseIn(x + 1, y, w - 4, h - 4)`).
+    // `Update`: the equipment slot under the mouse (`CheckMouseIn(x + 1, y, w - 4, h - 4)`).
     inv.pointed_slot = (0..slot::COUNT).find(|&i| {
         let (x, y, w, h) = slot_rect(i);
         inside(m, x + 1.0, y, w - 4.0, h - 4.0)
@@ -502,9 +501,9 @@ fn update_mouse(
             Some(p) => {
                 if inv.equipment[s].is_none() && is_equipable(inv, &data, &hero, s, &p.item) {
                     match p.from {
-                        // Del mismo hueco: vuelve (`BackupPickedItem`).
+                        // Same slot: put it back (`BackupPickedItem`).
                         Source::Equipment(from) if from as usize == s => inv.backup_picked(),
-                        // `SendRequestEquipmentItem`: lo que haría el servidor al contestar.
+                        // `SendRequestEquipmentItem`: what the server reply would do.
                         _ => {
                             inv.equipment[s] = Some(p.item);
                             inv.picked = None;
@@ -525,13 +524,13 @@ fn update_mouse(
         return;
     }
 
-    // `InventoryProcess`: soltar en la rejilla.
+    // `InventoryProcess`: drop onto the grid.
     if inside(m, POS.0, POS.1, W, H)
         && released
         && let Some(p) = inv.picked
     {
         let (w, h) = Inventory::size(&data, &p.item);
-        // `GetTargetPos`: el ratón menos media pieza (`(Width - 1) · 20 / 2`).
+        // `GetTargetPos`: the mouse minus half the item (`(Width - 1) · 20 / 2`).
         let tx = m.x - ((w as i32 - 1) * SQUARE as i32 / 2) as f32;
         let ty = m.y - ((h as i32 - 1) * SQUARE as i32 / 2) as f32;
         if let Some(t) = square_at(Vec2::new(tx, ty)) {
@@ -550,7 +549,7 @@ fn update_mouse(
         }
     }
 
-    // `BtnProcess`: el botón de cerrar (se suelta encima) y la equis de arriba (`m_Pos + (169, 7)`, 13×12).
+    // `BtnProcess`: the close button (released over it) and the top X (`m_Pos + (169, 7)`, 13×12).
     let over_exit = inside(m, BTN_EXIT.0, BTN_EXIT.1, BTN_W, BTN_H);
     if mouse.just_pressed(MouseButton::Left) && inside(m, POS.0 + 169.0, POS.1 + 7.0, 13.0, 12.0) {
         inv.close();
@@ -578,9 +577,9 @@ fn square_at(p: Vec2) -> Option<usize> {
     Some(y * COLUMNS + x)
 }
 
-/// Lo que dibuja la cámara de los objetos: `CNewUIMyInventory::Render3D` (el equipo, con la armadura 10
-/// más arriba), `CNewUIInventoryCtrl::Render3D` (la rejilla) y `CNewUIPickedItem::Render3D` (el del
-/// ratón, centrado en él).
+/// What the item camera draws: `CNewUIMyInventory::Render3D` (equipment, armor 10 higher),
+/// `CNewUIInventoryCtrl::Render3D` (the grid) and `CNewUIPickedItem::Render3D` (the held item,
+/// centered on the mouse).
 fn request_views(
     windows: Query<&Window>,
     data: Res<ItemData>,
@@ -609,11 +608,11 @@ fn request_views(
         if let (Some(p), Some(m)) = (inv.picked, m) {
             let (w, h) = Inventory::size(&data, &p.item);
             let (sw, sh) = (w as f32 * SQUARE, h as f32 * SQUARE);
-            // `m_Pos = Mouse - m_Size / 2` (enteros).
+            // `m_Pos = Mouse - m_Size / 2` (integers).
             let rect = [m.x - (sw / 2.0).floor(), m.y - (sh / 2.0).floor(), sw, sh];
             out.push(ItemView { key: 999, item: p.item, rect, picked: true, hovered: hovered(rect) });
         }
-        // De la ventana en `POS` a la pantalla.
+        // From the window at `POS` to the screen.
         for v in &mut out {
             v.rect[0] += inv.dx;
         }
@@ -626,7 +625,7 @@ fn request_views(
     }
 }
 
-// --- Dibujo ------------------------------------------------------------------------------------
+// --- Drawing -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Tex {
@@ -694,9 +693,9 @@ impl Tex {
         Tex::TableRight,
     ];
 
-    /// `CNewUIMyInventory::LoadImages` (NewUIMyInventory.cpp:1153-1177) y
-    /// `CNewUIInventoryCtrl::LoadImages` (NewUIInventoryCtrl.cpp:192-209). El fondo de arriba que se
-    /// dibuja es `newui_item_back04` (`IMAGE_INVENTORY_BACK_TOP2`).
+    /// `CNewUIMyInventory::LoadImages` (NewUIMyInventory.cpp:1153-1177) and
+    /// `CNewUIInventoryCtrl::LoadImages` (NewUIInventoryCtrl.cpp:192-209). The top background drawn
+    /// is `newui_item_back04` (`IMAGE_INVENTORY_BACK_TOP2`).
     fn file(self) -> &'static str {
         match self {
             Tex::Back => "newui_msgbox_back.jpg",
@@ -708,7 +707,7 @@ impl Tex {
             Tex::SlotHelm => "newui_item_cap.tga",
             Tex::SlotFairy => "newui_item_fairy.tga",
             Tex::SlotWing => "newui_item_wing.tga",
-            // `IMAGE_INVENTORY_ITEM_RIGHT` es "weapon(L)" y `_LEFT` "weapon(R)".
+            // `IMAGE_INVENTORY_ITEM_RIGHT` is "weapon(L)" and `_LEFT` is "weapon(R)".
             Tex::SlotWeaponR => "newui_item_weapon(L).tga",
             Tex::SlotWeaponL => "newui_item_weapon(R).tga",
             Tex::SlotArmor => "newui_item_upper.tga",
@@ -736,18 +735,18 @@ impl Tex {
 #[derive(Resource)]
 struct InventoryTextures(std::collections::HashMap<Tex, Handle<Image>>);
 
-/// Una pieza en la pantalla de 640×480.
+/// A piece on the 640×480 screen.
 #[derive(Clone, PartialEq, Debug)]
 enum Piece {
-    /// `RenderImage`: el trozo `src` de la textura en (x, y, ancho, alto) (estirado si no miden igual).
+    /// `RenderImage`: the `src` part of the texture at (x, y, width, height) (stretched if sizes differ).
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, src: [f32; 4] },
-    /// `RenderColor` con `glColor4f`.
+    /// `RenderColor` with `glColor4f`.
     Color { x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4] },
-    /// Texto con la esquina de arriba a la izquierda en (x, y); con ancho, centrado en él.
+    /// Text with its top-left corner at (x, y); with a width, centered in it.
     Text { x: f32, y: f32, w: Option<f32>, text: String, color: [f32; 3], bold: bool, bg: Option<[f32; 4]> },
 }
 
-/// `RenderImage(tex, x, y, w, h, 0, sv)`: sin estirar desde (0, sv).
+/// `RenderImage(tex, x, y, w, h, 0, sv)`: unstretched from (0, sv).
 fn img(tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32) -> Piece {
     Piece::Image { tex, x, y, w, h, src: [0.0, sv, w, h] }
 }
@@ -760,7 +759,7 @@ fn text(x: f32, y: f32, w: Option<f32>, s: &str, color: [f32; 3], bold: bool) ->
     Piece::Text { x, y, w, text: s.to_string(), color, bold, bg: None }
 }
 
-/// `ConvertGold`: miles con comas.
+/// `ConvertGold`: thousands separated by commas.
 pub fn convert_gold(zen: u32) -> String {
     let s = zen.to_string();
     let mut out = String::new();
@@ -773,8 +772,8 @@ pub fn convert_gold(zen: u32) -> String {
     out
 }
 
-/// `getGoldColor` (ZzzInventory.cpp:1041-1057; ABGR): rojo desde 10 000 000, naranja desde 1 000 000,
-/// verde desde 100 000 y amarillo claro el resto.
+/// `getGoldColor` (ZzzInventory.cpp:1041-1057; ABGR): red from 10 000 000, orange from 1 000 000,
+/// green from 100 000 and light yellow otherwise.
 fn gold_color(zen: u32) -> [f32; 3] {
     let c = |r: u8, g: u8, b: u8| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
     if zen >= 10_000_000 {
@@ -788,11 +787,11 @@ fn gold_color(zen: u32) -> [f32; 3] {
     }
 }
 
-/// Alto de una línea del cuadro (`TextSize.cy` de `g_hFont` en la pantalla de 480).
+/// Tooltip line height (`TextSize.cy` of `g_hFont` on the 480 screen).
 const TIP_LINE: f32 = FONT;
 
-/// `RenderTipTextList(sx, sy, ...)` (ZzzInventory.cpp:285-453) con la colocación de `RenderItemInfo`
-/// (`sy += INVENTORY_SCALE` y que no pase de 420, ZzzInventory.cpp ≈5600-5620).
+/// `RenderTipTextList(sx, sy, ...)` (ZzzInventory.cpp:285-453) with the `RenderItemInfo` placement
+/// (`sy += INVENTORY_SCALE` and not past 420, ZzzInventory.cpp ≈5600-5620).
 fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metrics: &crate::chat::TextMetrics) {
     if lines.is_empty() {
         return;
@@ -803,7 +802,7 @@ fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metri
     if sy + height > 420.0 {
         sy = 420.0 - height;
     }
-    // La negrita mide algo más que la normal con la que se mide.
+    // Bold text is slightly wider than the regular font it is measured with.
     let width = lines
         .iter()
         .filter(|l| !l.is_gap())
@@ -833,7 +832,7 @@ fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metri
     }
 }
 
-/// `CNewUIButton::Render` del texto de ayuda: debajo del botón, centrado, en un fondo negro de 180.
+/// `CNewUIButton::Render` of the help text: below the button, centered, on a black background of alpha 180.
 fn push_button_tip(out: &mut Vec<Piece>, s: &str, bx: f32, by: f32, metrics: &crate::chat::TextMetrics) {
     let tw = metrics.width(s).ceil();
     let mut x = (bx + BTN_W / 2.0 - tw / 2.0).floor();
@@ -845,7 +844,7 @@ fn push_button_tip(out: &mut Vec<Piece>, s: &str, bx: f32, by: f32, metrics: &cr
 }
 
 impl Inventory {
-    /// `CNewUIMyInventory::Render` (lo de detrás de los objetos).
+    /// `CNewUIMyInventory::Render` (everything behind the items).
     fn back_pieces(&self, data: &ItemData, hero: &HeroView, zen: u32, m: Option<Vec2>, metrics: &crate::chat::TextMetrics) -> Vec<Piece> {
         let mut out = Vec::new();
         let (x, y) = POS;
@@ -855,15 +854,15 @@ impl Inventory {
         out.push(img(Tex::Left, x, y + 64.0, 21.0, 320.0, 0.0));
         out.push(img(Tex::Right, x + W - 21.0, y + 64.0, 21.0, 320.0, 0.0));
         out.push(img(Tex::Bottom, x, y + H - 45.0, W, 45.0, 0.0));
-        // `RenderInventoryDetails`: el título y el zen en negrita.
+        // `RenderInventoryDetails`: title and zen in bold.
         out.push(text(x, y + 12.0, Some(W), TITLE, [1.0; 3], true));
         out.push(img(Tex::Money, x + 11.0, y + 364.0, 170.0, 26.0, 0.0));
         out.push(text(x + 50.0, y + 371.0, None, &convert_gold(zen), gold_color(zen), true));
-        // `RenderSetOption` y `RenderSocketOption`: en gris sin sets ni zócalos.
+        // `RenderSetOption` and `RenderSocketOption`: gray without sets or sockets.
         let gray = [100.0 / 255.0; 3];
         out.push(text(x + W * 0.2, y + 25.0, Some(W * 0.3), SET_OPTION, gray, true));
         out.push(text(x + W * 0.5, y + 25.0, Some(W * 0.3), SOCKET_OPTION, gray, true));
-        // `RenderButtons`: reparar desde el nivel 50 y la tienda desde el 6 (`OpenningProcess`).
+        // `RenderButtons`: repair from level 50 and the store from level 6 (`OpenningProcess`).
         let over = |bx: f32, by: f32| m.is_some_and(|m| inside(m, bx, by, BTN_W, BTN_H));
         let mut tips = Vec::new();
         if hero.level >= 50 {
@@ -909,7 +908,7 @@ impl Inventory {
         out.push(img(Tex::TableTopRight, gx + sw - EDGE_RIGHT, gy - EDGE_TOP, 14.0, 14.0, 0.0));
         out.push(img(Tex::TableBottomLeft, gx - EDGE_LEFT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
         out.push(img(Tex::TableBottomRight, gx + sw - EDGE_RIGHT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
-        // Los bordes de un píxel, uno al lado de otro: el trozo de 1 estirado.
+        // One-pixel borders side by side: the 1-pixel strip stretched.
         let (x0, x1) = (gx - EDGE_LEFT + 14.0, gx + sw - EDGE_RIGHT);
         let (y0, y1) = (gy - EDGE_TOP + 14.0, gy + sh - EDGE_BOTTOM);
         let strip = |tex, x, y, w, h, src: [f32; 4]| Piece::Image { tex, x, y, w, h, src };
@@ -918,7 +917,7 @@ impl Inventory {
         out.push(strip(Tex::TableLeft, gx - EDGE_LEFT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
         out.push(strip(Tex::TableRight, gx + sw - EDGE_RIGHT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
 
-        // Lo que va en el ratón sobre la rejilla: dónde caería, en azul, o en rojo si no cabe.
+        // Held item over the grid: where it would land, in blue, or red if it does not fit.
         let (Some(p), Some(m)) = (self.picked, m) else { return };
         let (w, h) = Self::size(data, &p.item);
         let (pw, ph) = (w as f32 * SQUARE, h as f32 * SQUARE);
@@ -929,7 +928,7 @@ impl Inventory {
         }
         let ix = m.x as i32 - (w as i32 - 1) * SQUARE as i32 / 2;
         let iy = m.y as i32 - (h as i32 - 1) * SQUARE as i32 / 2;
-        // Fuera de la rejilla, la casilla (negativa o pasada) contando desde su esquina.
+        // Outside the grid, the cell index (negative or past the end) counted from its corner.
         let cell = |v: i32, origin: f32| {
             let d = v - origin as i32;
             if d < 0 { d / SQUARE as i32 - 1 } else { d / SQUARE as i32 }
@@ -963,7 +962,7 @@ impl Inventory {
                 for dx in 0..nw {
                     let (sx, sy) = (cx + dx, cy + dy);
                     let busy = self.owner(data, sx as usize, sy as usize).is_some();
-                    // `m_afColorStateWarning` (1, 0.2, 0.2) / `m_afColorStateNormal` (0.1, 0.4, 0.8), a 0.4.
+                    // `m_afColorStateWarning` (1, 0.2, 0.2) / `m_afColorStateNormal` (0.1, 0.4, 0.8), at 0.4.
                     let c = if busy { [1.0, 0.2, 0.2, 0.4] } else { [0.1, 0.4, 0.8, 0.4] };
                     out.push(color(gx + sx as f32 * SQUARE, gy + sy as f32 * SQUARE, SQUARE, SQUARE, c));
                 }
@@ -974,7 +973,7 @@ impl Inventory {
     /// `RenderEquippedItem` (NewUIMyInventory.cpp:1214-1299).
     fn push_equipment(&self, out: &mut Vec<Piece>, data: &ItemData, hero: &HeroView) {
         for i in 0..slot::COUNT {
-            // El Magic Gladiator no lleva casco y el Rage Fighter no lleva guantes.
+            // The Magic Gladiator wears no helm and the Rage Fighter no gloves.
             if (i == slot::HELM as usize && hero.class == 3) || (i == slot::GLOVES as usize && hero.class == 6) {
                 continue;
             }
@@ -1001,7 +1000,7 @@ impl Inventory {
                 out.push(color(x + 1.0, y, w - 4.0, h - 4.0, c));
             }
         }
-        // Con un objeto en el ratón sobre un hueco ocupado o que no le va, en rojo.
+        // Holding an item over an occupied or unsuitable slot: red.
         if let (Some(p), Some(s)) = (self.picked, self.pointed_slot) {
             if self.equipment[s].is_some() || !is_equipable(self, data, hero, s, &p.item) {
                 let (x, y, w, h) = slot_rect(s);
@@ -1010,12 +1009,12 @@ impl Inventory {
         }
     }
 
-    /// Los cuadros de información (`RenderItemToolTip` de la rejilla y del equipo).
+    /// Tooltips (`RenderItemToolTip` of the grid and the equipment).
     fn front_pieces(&self, data: &ItemData, hero: &HeroView, metrics: &crate::chat::TextMetrics) -> Vec<Piece> {
         let mut out = Vec::new();
         let mana = |s: u16| data.skill_mana.as_ref().and_then(|m| m.get(s as usize)).map(|&m| m as u32);
-        // `CNewUIInventoryCtrl::RenderItemToolTip`: centrado sobre el objeto, desde su fila de arriba
-        // (media casilla más abajo los de una de alto).
+        // `CNewUIInventoryCtrl::RenderItemToolTip`: centered over the item, from its top row
+        // (half a cell lower for one-high items).
         if let (Some(i), None) = (self.tooltip, self.picked)
             && let Some(g) = self.grid.get(i)
             && let Some(attr) = data.attr(&g.item)
@@ -1027,7 +1026,7 @@ impl Inventory {
             }
             push_tooltip(&mut out, &item_info(attr, &g.item, hero, &mana), sx.floor(), sy, metrics);
         }
-        // `CNewUIMyInventory::RenderItemToolTip`: el del hueco, desde su centro.
+        // `CNewUIMyInventory::RenderItemToolTip`: the slot's, from its center.
         if let Some(s) = self.pointed_slot
             && let Some(item) = self.equipment[s]
             && let Some(attr) = data.attr(&item)
@@ -1042,7 +1041,7 @@ impl Inventory {
 #[derive(Component)]
 struct InventoryRoot;
 
-/// Las tres capas de la ventana: lo de detrás, los objetos en 3D y los cuadros de información.
+/// The window's three layers: background, 3D items and tooltips.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Layer {
     Back,
@@ -1067,7 +1066,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         .filter_map(|&t| crate::scene::interface_image(&args, &mut images, t.file()).map(|(h, _)| (t, h)))
         .collect();
     commands.insert_resource(InventoryTextures(textures));
-    // La pantalla de 640×480 centrada y pegada abajo, como la barra (options.rs).
+    // The 640×480 screen centered and bottom-aligned, like the bar (options.rs).
     commands
         .spawn((
             Name::new("Inventario"),
@@ -1086,7 +1085,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         ))
         .with_children(|p| {
             p.spawn((full_screen(), Layer::Back));
-            // Transparente hasta que exista la imagen de la cámara de los objetos.
+            // Transparent until the item camera's image exists.
             p.spawn((full_screen(), Layer::Items, ImageNode { color: Color::NONE, ..default() }));
             p.spawn((full_screen(), Layer::Front));
         });
@@ -1142,7 +1141,7 @@ fn spawn_pieces(p: &mut ChildSpawnerCommands, pieces: &[Piece], textures: &Inven
     }
 }
 
-/// Rehace las capas cuando cambia lo que se dibuja.
+/// Rebuilds the layers when what is drawn changes.
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
@@ -1172,10 +1171,10 @@ fn draw(
     let zen = info.as_ref().map_or(inv.zen, |i| i.0.money);
     let back = inv.back_pieces(&data, &hero, zen, m, &metrics);
     let front = inv.front_pieces(&data, &hero, &metrics);
-    // Las capas se crean una vez (`spawn_root`); la primera vez se dibujan aunque no cambie nada.
+    // Layers are created once (`spawn_root`); the first time they are drawn even if nothing changed.
     let fresh = !last.2;
     for (e, layer, image, mut node) in &mut layers {
-        // El fondo y lo de encima van con la ventana; la imagen de los objetos ya viene movida.
+        // Background and foreground move with the window; the items image is already shifted.
         let left = Val::Px(if *layer == Layer::Items { 0.0 } else { inv.dx });
         if node.left != left {
             node.left = left;
@@ -1227,29 +1226,29 @@ mod tests {
             return;
         }
         let mut inv = Inventory::default();
-        // Una armadura de 2×3 en la primera casilla, y una espada de 1×3 ya no cabe en (1, 0).
+        // A 2×3 armor in the first cell, so a 1×3 sword no longer fits at (1, 0).
         assert!(inv.add(&data, Item::new(group::ARMOR, 1)));
         assert_eq!(inv.grid[0].x, 0);
         assert!(!inv.fits(&data, 1, 0, 1, 3));
         assert!(inv.fits(&data, 2, 0, 1, 3));
-        // No se sale por la derecha ni por abajo.
+        // Nothing sticks out to the right or the bottom.
         assert!(!inv.fits(&data, 7, 0, 2, 2));
         assert!(!inv.fits(&data, 0, 6, 1, 3));
         assert_eq!(inv.owner(&data, 1, 2), Some(0));
         assert_eq!(inv.owner(&data, 2, 2), None);
-        // Equipar: la espada en la mano derecha del Dark Knight, no en el casco; el escudo a la izquierda.
+        // Equipping: the sword in the Dark Knight's right hand, not the helm slot; the shield on the left.
         let knight = HeroView { class: 1, step: 1, level: 400, stats: None };
         let sword = Item::new(group::SWORD, 1);
         assert!(is_equipable(&inv, &data, &knight, slot::WEAPON_RIGHT as usize, &sword));
         assert!(is_equipable(&inv, &data, &knight, slot::WEAPON_LEFT as usize, &sword));
         assert!(!is_equipable(&inv, &data, &knight, slot::HELM as usize, &sword));
-        // Un Dark Wizard no lleva el casco de bronce; un anillo va en los dos huecos de anillo.
+        // A Dark Wizard cannot wear the bronze helm; a ring fits both ring slots.
         let wizard = HeroView { class: 0, ..knight };
         assert!(!is_equipable(&inv, &data, &wizard, slot::HELM as usize, &Item::new(group::HELM, 0)));
         let ring = Item::new(group::HELPER, 8);
         assert!(is_equipable(&inv, &data, &wizard, slot::RING_LEFT as usize, &ring));
         assert!(is_equipable(&inv, &data, &wizard, slot::RING_RIGHT as usize, &ring));
-        // Fuerza que falta (con los datos del servidor).
+        // Missing strength (with server data).
         let weak = HeroView { stats: Some([10, 10, 10, 10, 0]), ..knight };
         assert!(!is_equipable(&inv, &data, &weak, slot::WEAPON_RIGHT as usize, &sword));
     }

@@ -22,3 +22,6 @@ id_ed25519*
 *-github.pub
 
 __pycache__/
+
+# Local AI tooling state (worktrees, settings).
+/.claude/

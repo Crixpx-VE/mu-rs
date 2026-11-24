@@ -1,4 +1,4 @@
-//! Mapa de atributos de una zona (depuración): `.` se puede andar, `#` no, `~` sin suelo.
+//! Attribute map of an area (debugging): `.` walkable, `#` not, `~` no ground.
 //!
 //!   cargo run -p mu-data --example attrmap -- <world> x0 y0 x1 y1 [data]
 
@@ -13,7 +13,7 @@ fn main() {
     let (x0, y0, x1, y1) = (n(1), n(2), n(3), n(4));
     let data = PathBuf::from(a.get(5).map(String::as_str).unwrap_or("../referencias/MuMain/src/bin/Data"));
     let t = terrain::load(&data, world).unwrap();
-    // De arriba (y grande) a abajo, como se vería un plano.
+    // From top (large y) to bottom, as a map would be read.
     for y in (y0..=y1).rev() {
         let row: String = (x0..=x1)
             .map(|x| {

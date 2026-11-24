@@ -1,7 +1,7 @@
-//! Partículas traducidas de `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles`,
-//! `DescribeParticle`): humos (`BITMAP_SMOKE+1..+4`, `BITMAP_SMOKELINE1..3`), rayos
-//! (`BITMAP_LIGHTNING_MEGA1..3`), fuegos (`BITMAP_FIRE_HIK1/3` y sus `_MONO`), `BITMAP_LIGHT+1`
-//! y chispas (`BITMAP_SPARK`, `BITMAP_SPARK+1`).
+//! Particles ported from `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles`,
+//! `DescribeParticle`): smokes (`BITMAP_SMOKE+1..+4`, `BITMAP_SMOKELINE1..3`), lightning
+//! (`BITMAP_LIGHTNING_MEGA1..3`), fires (`BITMAP_FIRE_HIK1/3` and their `_MONO`), `BITMAP_LIGHT+1`
+//! and sparks (`BITMAP_SPARK`, `BITMAP_SPARK+1`).
 
 use bevy::math::Vec3;
 
@@ -10,8 +10,8 @@ use crate::fx::core::*;
 /// `WD_63PK_FIELD` (`MapManager.h`).
 const WD_63PK_FIELD: i32 = 63;
 
-/// `Bitmaps[BITMAP_SMOKE+1].Height` y `Bitmaps[BITMAP_SMOKE+4].Height` (smoke02/smoke05.tga: 64×64).
-/// TODO(núcleo): el `Ctx` de la simulación no da el tamaño de las texturas.
+/// `Bitmaps[BITMAP_SMOKE+1].Height` and `Bitmaps[BITMAP_SMOKE+4].Height` (smoke02/smoke05.tga: 64×64).
+/// TODO(core): the simulation `Ctx` does not expose texture sizes.
 const SMOKE_TEX_HEIGHT: f32 = 64.0;
 
 const PI: f32 = std::f32::consts::PI;
@@ -45,14 +45,14 @@ pub fn register(r: &mut Registry) {
     r.particle(BITMAP_SPARK + 1, ParticleKind { create: Some(create_spark1), step: Some(step_spark1), draw: None });
 }
 
-// --- Utilidades ---------------------------------------------------------------------------------
+// --- Helpers ------------------------------------------------------------------------------------
 
 /// `(float)(rand() % m)`.
 fn rf(ctx: &mut Ctx, m: i32) -> f32 {
     (ctx.rand() % m) as f32
 }
 
-/// `o->Target->Live`: el personaje sigue en el mundo y vivo (o el efecto sigue existiendo).
+/// `o->Target->Live`: the character is still in the world and alive (or the effect still exists).
 fn target_live(ctx: &Ctx, t: Option<Target>) -> bool {
     match t {
         Some(Target::Actor(_)) => ctx.actor(t).is_some_and(|a| a.live),
@@ -62,7 +62,7 @@ fn target_live(ctx: &Ctx, t: Option<Target>) -> bool {
 }
 
 /// `Position -= StartPosition; StartPosition = Target->Position; Position += StartPosition`:
-/// la partícula se arrastra con lo que sigue.
+/// the particle is dragged along with what it follows.
 fn follow_target(p: &mut Particle, ctx: &Ctx) {
     if let Some(t) = ctx.target_position(p.target) {
         p.position = p.position - p.start_position + t;
@@ -70,7 +70,7 @@ fn follow_target(p: &mut Particle, ctx: &Ctx) {
     }
 }
 
-/// Aparece y se desvanece con `Alpha` (patrón común de humos y fuegos) y `Light = TurningForce·Alpha`.
+/// Fades in and out with `Alpha` (common smoke/fire pattern) and `Light = TurningForce·Alpha`.
 fn fade(p: &mut Particle, ctx: &mut Ctx, below: f32, dec: f32, max: f32, rmod: i32, radd: i32) {
     if p.life_time < below {
         p.alpha -= dec;
@@ -94,8 +94,8 @@ fn shrink(p: &mut Particle, ctx: &mut Ctx, rmod: i32, radd: i32) {
     }
 }
 
-/// Sprite de `DescribeParticle` (`Sprite(TexType, Position, W, H, Light, Rotation)`) con la mezcla
-/// de `RenderParticles` (JPG suma, TGA prueba de alfa) o la que fije el caso.
+/// `DescribeParticle` sprite (`Sprite(TexType, Position, W, H, Light, Rotation)`) with the
+/// `RenderParticles` blend (JPG additive, TGA alpha test) or the one the case sets.
 fn draw_with(p: &Particle, ctx: &DrawCtx, out: &mut DrawList, blend: Option<Blend>) {
     let Some(t) = ctx.tex(p.tex_type) else { return };
     out.sprites.push(SpriteDraw {
@@ -118,7 +118,7 @@ fn create_smoke1(p: &mut Particle, ctx: &mut Ctx) {
     p.life_time = 32.0;
     p.position.x += (ctx.rand() % 16 - 8) as f32;
     p.position.y += (ctx.rand() % 16 - 8) as f32;
-    // (+4 y +1 calculan lo mismo, solo cambia el orden de las operaciones)
+    // (+4 and +1 compute the same; only the order of operations differs)
     p.scale = (ctx.rand() % 32 + 32) as f32 * 0.01 * scale;
 
     p.velocity = if p.sub_type == 0 {
@@ -163,7 +163,7 @@ fn create_smoke2(p: &mut Particle, ctx: &mut Ctx) {
     p.angle = Vec3::new(0.0, 0.0, rf(ctx, 360));
     let y = rf(ctx, 64);
     let z = (ctx.rand() % 16 + 16) as f32;
-    // StartPosition = desplazamiento respecto al objetivo.
+    // StartPosition = offset from the target.
     p.start_position = rotate(p.angle, Vec3::new(0.0, y, z));
     p.angle = Vec3::ZERO;
 }
@@ -224,7 +224,7 @@ fn step_smoke3(p: &mut Particle, _ctx: &mut Ctx) {
             if p.turning_force.x > 0.1 {
                 p.turning_force.x -= 0.015;
             }
-            // (sic) el original resta a [0] aunque compruebe [1].
+            // (sic) the original subtracts from [0] even though it checks [1].
             if p.turning_force.y > 0.1 {
                 p.turning_force.x -= 0.005;
             }
@@ -401,7 +401,7 @@ fn step_lightning_mega(p: &mut Particle, _ctx: &mut Ctx) {
 
 // --- BITMAP_FIRE_HIK1 / BITMAP_FIRE_HIK1_MONO -----------------------------------------------------
 
-/// Parte común de los fuegos: rotación al azar, empieza invisible y guarda el color en `TurningForce`.
+/// Common fire part: random rotation, starts invisible and stores the color in `TurningForce`.
 fn fire_common(p: &mut Particle, light: Vec3) {
     p.alpha = 0.0;
     p.turning_force = light;
@@ -463,7 +463,7 @@ fn create_fire_hik1(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Avance hacia −Y local 8 unidades por tick arrastrado con el objetivo (HIK1 sub 4, HIK3 sub 5).
+/// Moves 8 units per tick towards local −Y, dragged with the target (HIK1 sub 4, HIK3 sub 5).
 fn fire_burst_step(p: &mut Particle, ctx: &mut Ctx, below: f32) {
     fade(p, ctx, below, 0.1, 1.0, 2, 2);
     p.scale += (ctx.rand() % 3 + 8) as f32 * 0.01;
@@ -653,7 +653,7 @@ fn step_light1(p: &mut Particle, _ctx: &mut Ctx) {
             p.light *= 0.9;
         }
         5 => {
-            // Se mantiene viva mientras exista (el original la renueva cada tick).
+            // Stays alive while it exists (the original renews it every tick).
             p.life_time = 5.0;
             p.light *= 0.7;
         }
@@ -742,7 +742,7 @@ fn create_spark(p: &mut Particle, ctx: &mut Ctx) {
             } else {
                 p.life_time = (ctx.rand() % 8 + 8) as f32;
             }
-            // (el `if SubType == 7` del original aquí es inalcanzable: el 7 va arriba)
+            // (the original's `if SubType == 7` is unreachable here: 7 is handled above)
         }
     }
 }
@@ -795,7 +795,7 @@ fn draw_spark(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
 
 // --- BITMAP_SPARK+1 -------------------------------------------------------------------------------
 
-/// `vSpeed` al azar en [-8, 8)³, normalizado y escalado (subtipos 21, 22, 27).
+/// Random `vSpeed` in [-8, 8)³, normalized and scaled (subtypes 21, 22, 27).
 fn random_speed(ctx: &mut Ctx, len: f32) -> Vec3 {
     let x = -8.0 + rf(ctx, 16);
     let y = -8.0 + rf(ctx, 16);
@@ -803,7 +803,7 @@ fn random_speed(ctx: &mut Ctx, len: f32) -> Vec3 {
     Vec3::new(x, y, z).normalize_or_zero() * len
 }
 
-/// `Vector((rand()%40-20)*0.1f, (rand()%40-20)*0.1f, 0) * 2.5` girado con `Angle`.
+/// `Vector((rand()%40-20)*0.1f, (rand()%40-20)*0.1f, 0) * 2.5` rotated by `Angle`.
 fn random_planar_velocity(p: &mut Particle, ctx: &mut Ctx) {
     let x = (ctx.rand() % 40 - 20) as f32 * 0.1;
     let y = (ctx.rand() % 40 - 20) as f32 * 0.1;
@@ -933,7 +933,7 @@ fn create_spark1(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = 200.0;
             p.scale += rf(ctx, 3) * 0.1;
             p.gravity = rf(ctx, 5) * 0.3 + 2.0;
-            // Rotation se usa como frecuencia del vaivén (no se dibuja girada: es casi 0).
+            // Rotation is used as the sway frequency (not drawn rotated: it is nearly 0).
             p.rotation = rf(ctx, 20) * 0.0001 + 0.002;
             p.alpha = rf(ctx, 10) * 0.1 + 0.5;
             p.start_position = p.position;
@@ -943,7 +943,7 @@ fn create_spark1(p: &mut Particle, ctx: &mut Ctx) {
             p.gravity = 1.0 + rf(ctx, 20) * 0.1;
             p.position.z = ctx.terrain_height(p.position.x, p.position.y) - 5.0;
             p.scale = rf(ctx, 10) * 0.08 + 0.8;
-            // (VectorCopy(Light, o->Light): ya lo tiene)
+            // (VectorCopy(Light, o->Light): already set)
         }
         20 => {
             p.scale = scale + rf(ctx, 10) * 0.02;
@@ -958,7 +958,7 @@ fn create_spark1(p: &mut Particle, ctx: &mut Ctx) {
             p.scale = rf(ctx, 20) / 20.0 + 1.0;
         }
         22 => {
-            // (sic) la velocidad al azar se pisa luego con la del giro.
+            // (sic) the random velocity is later overwritten by the rotation one.
             p.velocity = random_speed(ctx, 14.0);
             p.scale = rf(ctx, 20) / 20.0 + 1.0;
             p.life_time = (ctx.rand() % 10 + 20) as f32;
@@ -1015,7 +1015,7 @@ fn create_spark1(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Rebote contra el suelo de los subtipos 20, 22, 28 y 29 de `BITMAP_SPARK+1`.
+/// Ground bounce for `BITMAP_SPARK+1` subtypes 20, 22, 28 and 29.
 fn spark1_bounce(p: &mut Particle, ctx: &mut Ctx) {
     p.position.z += p.gravity * 0.5;
     p.gravity -= 1.5;
@@ -1053,8 +1053,8 @@ fn step_spark1(p: &mut Particle, ctx: &mut Ctx) {
             p.position = p.start_position + p.velocity;
             p.start_position = p.position;
             if p.sub_type == 4 {
-                // TODO(original): Position += Target->Position - Target->StartPosition (cuánto se ha
-                // movido el efecto que la lanza); el Ctx no da la posición inicial de los efectos.
+                // TODO(original): Position += Target->Position - Target->StartPosition (how far the
+                // emitting effect has moved); the Ctx does not expose effects' start positions.
             }
         }
         3 => p.scale *= 0.8,
