@@ -21,6 +21,9 @@
 //!   it; the engine only keeps `e.scale` (where an argument ≤ 0 already became 0.9). Every caller
 //!   in Main 5.2 passes a positive scale, so `e.scale` is used as the argument.
 //! - Function arguments that call `rand()` are evaluated left to right (like the other kind files).
+//! - `rand()` inside `RenderEffectShadows` runs once per rendered frame, outside `MoveEffect`; drawing
+//!   it from the logic generator would add a call to the move that the original does not have and
+//!   shift every later `rand()` of the tick, so [`draw_rand`] gives a per-frame value instead.
 
 use bevy::math::Vec3;
 
@@ -29,6 +32,8 @@ use crate::fx::core::*;
 
 /// `WD_39KANTURU_3RD` (`MapManager.h:33`).
 const WD_39KANTURU_3RD: i32 = 39;
+/// `MONSTER01_SHOCK` (`_define.h:488`).
+const MONSTER01_SHOCK: usize = 5;
 /// `MONSTER01_DIE` (`_define.h:489`).
 const MONSTER01_DIE: usize = 6;
 
@@ -126,19 +131,42 @@ fn life(e: &Effect) -> i32 {
     e.life_time as i32
 }
 
-/// `user[0]` of the Kanturu types: 1 while `WorldActive == WD_39KANTURU_3RD` (the draw functions
-/// cannot see the map).
-fn set_kanturu3(e: &mut Effect, ctx: &Ctx) {
-    e.user[0] = if ctx.world_active == WD_39KANTURU_3RD { 1.0 } else { 0.0 };
-}
-
-fn in_kanturu3(e: &Effect) -> bool {
-    e.user[0] > 0.5
+/// `M39Kanturu3rd::IsInKanturu3rd()` (GM_Kanturu_3rd.cpp:35): `WorldActive == WD_39KANTURU_3RD`.
+fn in_kanturu3(ctx: &DrawCtx) -> bool {
+    ctx.world_active == WD_39KANTURU_3RD
 }
 
 /// `(int)WorldTime % 2000 * 0.001f` with the leading minus (`-(int)WorldTime%2000*0.001f`).
 fn world_scroll(ctx: &DrawCtx) -> f32 {
     (-(ctx.world_time as i32) % 2000) as f32 * 0.001
+}
+
+/// One `b->RenderMesh(mesh, flags, o->Alpha, o->BlendMesh, ...)` call with the effect's state.
+/// `RenderMesh` ignores `HiddenMesh` (only `RenderBody` reads it, ZzzBMD.cpp:1871).
+fn mesh_draw(e: &Effect, mesh: i32, flags: u32) -> ModelDraw {
+    let mut d = ModelDraw::of_effect(e);
+    d.mesh = mesh;
+    d.render_flags = flags;
+    d.hidden_mesh = -1;
+    d
+}
+
+/// `b->RenderBody(flags, o->Alpha, o->BlendMesh, ..., o->HiddenMesh)` with the effect's state.
+fn body_draw(e: &Effect, flags: u32) -> ModelDraw {
+    let mut d = ModelDraw::of_effect(e);
+    d.render_flags = flags;
+    d
+}
+
+/// `rand()` inside `RenderEffectShadows`: fixed per 40 ms frame, effect and salt, without touching
+/// the logic `rand()` (see the module notes).
+fn draw_rand(ctx: &DrawCtx, e: &Effect, salt: u32) -> i32 {
+    let frame = (ctx.world_time / 40.0) as u64;
+    let mut x = frame ^ ((salt as u64) << 32) ^ (e.id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    x = (x ^ (x >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    x = (x ^ (x >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    x ^= x >> 31;
+    (x & 0x7fff) as i32
 }
 
 // --- MODEL_RAKLION_BOSS_CRACKEFFECT -------------------------------------------------------------------
@@ -165,7 +193,7 @@ fn raklion_crack_step(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- MODEL_RAKLION_BOSS_MAGIC -----------------------------------------------------------------------
 
-/// ZzzEffect.cpp:1260. `user[0]`: the `Luminosity` of `RenderEffectShadows`.
+/// ZzzEffect.cpp:1260.
 fn raklion_magic_create(e: &mut Effect, _ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.life_time = 35.0;
@@ -180,17 +208,15 @@ fn raklion_magic_step(e: &mut Effect, ctx: &mut Ctx) {
         e.alpha -= 0.03;
     }
     move_tail(e, ctx);
-    // `RenderEffectShadows` (ZzzEffect.cpp:19268) draws `Luminosity = (rand()%4+8)*0.1f` every
-    // frame; draw functions cannot call rand(), so it is drawn here once per tick.
-    e.user[0] = (ctx.rand() % 4 + 8) as f32 * 0.1;
 }
 
 /// `RenderObject` (ZzzEffect.cpp:18722) and the ground light of `RenderEffectShadows`
-/// (ZzzEffect.cpp:19455, `EnableAlphaBlend`).
+/// (ZzzEffect.cpp:19455, `EnableAlphaBlend`), whose `Luminosity = (rand()%4+8)*0.1f`
+/// (ZzzEffect.cpp:19268) is drawn every frame ([`draw_rand`]).
 fn raklion_magic_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     common::draw_object(e, ctx, out);
     if e.sub_type == 0 {
-        let lum = e.user[0];
+        let lum = (draw_rand(ctx, e, 1) % 4 + 8) as f32 * 0.1;
         let light = Vec3::new(lum * 0.4, lum * 0.4, lum * 1.0);
         common::terrain_bitmap(out, BITMAP_LIGHT, e.position.x, e.position.y, 15.0, 15.0, light, -e.angle.z, 1.0, 5.0, Blend::Glow);
         let light = Vec3::new(lum * 1.0, lum * 1.0, lum * 1.0);
@@ -211,13 +237,11 @@ fn storm3_create(e: &mut Effect, ctx: &mut Ctx) {
     if let Some(p) = ctx.hero_actor().map(|h| h.position) {
         e.start_position = p;
     }
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10739.
 fn storm3_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     if life(e) <= 30 {
         e.light /= 1.1;
     }
@@ -241,34 +265,31 @@ fn storm3_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// `RenderEffects` only sets `m_bRenderAfterCharacter` (ZzzEffect.cpp:18322); `RenderAfterEffects`
 /// (ZzzEffect.cpp:19239, only while `IsMayaScene()`) → `RenderKanturu3rdAfterObjectMesh`
-/// (GM_Kanturu_3rd.cpp:641): `BodyLight = o->Light`, mesh 0 is the blend mesh (`BlendMesh = 0`,
-/// additive with `BlendMeshLight`), meshes 1 and 2 `RENDER_BRIGHT`: the whole (3-mesh) model
-/// additive.
+/// (GM_Kanturu_3rd.cpp:641-648, only `IsInKanturu3rd()`): `BodyLight = o->Light`, mesh 0
+/// `RENDER_TEXTURE` (it is the `BlendMesh` 0: additive with `BlendMeshLight`), meshes 1 and 2
+/// `RENDER_TEXTURE|RENDER_BRIGHT`.
 /// TODO(original): `IsMayaScene()` is also false during the Kanturu states NIGHTMARE_BATTLE, TOWER
 /// and END (`CKANTURUDirection.cpp:44`); the event state does not exist in mu-rs.
-fn storm3_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    if !in_kanturu3(e) {
+fn storm3_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    if !in_kanturu3(ctx) {
         return;
     }
-    let mut d = ModelDraw::of_effect(e);
-    d.bright = true;
-    d.blend_mesh = -1;
-    out.models.push(d);
+    out.models.push(mesh_draw(e, 0, RENDER_TEXTURE));
+    out.models.push(mesh_draw(e, 1, RENDER_TEXTURE | RENDER_BRIGHT));
+    out.models.push(mesh_draw(e, 2, RENDER_TEXTURE | RENDER_BRIGHT));
 }
 
 // --- MODEL_MAYASTAR (arrowsre05.bmd) ----------------------------------------------------------------
 
 /// ZzzEffect.cpp:2292.
-fn mayastar_create(e: &mut Effect, ctx: &mut Ctx) {
+fn mayastar_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 50.0;
     e.scale = 50.0;
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10770.
 fn mayastar_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     if life(e) <= 20 {
         e.light /= 1.2;
     }
@@ -281,16 +302,14 @@ fn mayastar_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// `RenderObject` (ZzzEffect.cpp:18328). In Kanturu 3rd it goes to `RenderKanturu3rdObjectMesh`
-/// (GM_Kanturu_3rd.cpp:531): `BodyLight = o->Light`, mesh 0 `RENDER_TEXTURE|RENDER_BRIGHT` (the
-/// model has one mesh). Elsewhere the plain `RenderBody`.
+/// (GM_Kanturu_3rd.cpp:531-536): `BodyLight = o->Light`, then only mesh 0 with
+/// `RENDER_TEXTURE|RENDER_BRIGHT`. Elsewhere the plain `RenderBody`.
 fn mayastar_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    if !in_kanturu3(e) {
+    if !in_kanturu3(ctx) {
         common::draw_object(e, ctx, out);
         return;
     }
-    let mut d = ModelDraw::of_effect(e);
-    d.bright = true;
-    out.models.push(d);
+    out.models.push(mesh_draw(e, 0, RENDER_TEXTURE | RENDER_BRIGHT));
 }
 
 // --- MODEL_MAYASTONE1..3 (falling stones) -------------------------------------------------------------
@@ -302,13 +321,11 @@ fn mayastone_create(e: &mut Effect, ctx: &mut Ctx) {
     e.direction = Vec3::new(0.0, 0.0, -60.0);
     e.head_angle = Vec3::new(0.0, 30.0, 0.0);
     ctx.create_joint(BITMAP_SMOKE, e.position, e.position, e.head_angle, 2, me(e), 100.0);
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10783.
 fn mayastone_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     e.angle = e.head_angle;
     let height = ctx.terrain_height(e.position.x, e.position.y);
     if e.position.z < height {
@@ -343,21 +360,15 @@ fn mayastone_step(e: &mut Effect, ctx: &mut Ctx) {
 /// `RenderKanturu3rdObjectMesh` (GM_Kanturu_3rd.cpp:538-550): `MODEL_MAYASTONE1` draws mesh 1
 /// with `RENDER_TEXTURE`, then (all of them) mesh 0 with `RENDER_TEXTURE|RENDER_BRIGHT`; no other
 /// mesh is drawn (`MODEL_MAYASTONE4` has a second one). Elsewhere the plain `RenderBody`.
-/// The meshes are selected with `hidden_mesh`, assuming mesh n uses texture n.
 fn mayastone_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    if !in_kanturu3(e) {
+    if !in_kanturu3(ctx) {
         common::draw_object(e, ctx, out);
         return;
     }
     if e.ty == MODEL_MAYASTONE1 {
-        let mut d = ModelDraw::of_effect(e);
-        d.hidden_mesh = 0;
-        out.models.push(d);
+        out.models.push(mesh_draw(e, 1, RENDER_TEXTURE));
     }
-    let mut d = ModelDraw::of_effect(e);
-    d.bright = true;
-    d.hidden_mesh = 1;
-    out.models.push(d);
+    out.models.push(mesh_draw(e, 0, RENDER_TEXTURE | RENDER_BRIGHT));
 }
 
 // --- MODEL_MAYASTONE4/5 (stone chips) ----------------------------------------------------------------
@@ -370,13 +381,11 @@ fn mayastone45_create(e: &mut Effect, ctx: &mut Ctx) {
     e.angle.z = rf(ctx, 360);
     e.direction = rotate(e.angle, p1);
     e.gravity = (ctx.rand() % 16 + 8) as f32;
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10828.
 fn mayastone45_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     e.position += e.direction;
     e.direction *= 0.9;
     e.position.z += e.gravity;
@@ -399,7 +408,7 @@ fn mayastone45_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_MAYASTONEFIRE (blue fire around a falling stone) -------------------------------------------
 
 /// ZzzEffect.cpp:2320. The subtype is the stone type it goes with (GM_Kanturu_3rd.cpp:1565).
-fn mayastonefire_create(e: &mut Effect, ctx: &mut Ctx) {
+fn mayastonefire_create(e: &mut Effect, _ctx: &mut Ctx) {
     // `o->Scale = Scale * k` (Scale = the argument, which `e.scale` holds).
     if e.sub_type == MODEL_MAYASTONE1 {
         e.scale *= 0.8;
@@ -411,13 +420,11 @@ fn mayastonefire_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 40.0;
     e.direction = Vec3::new(0.0, 0.0, -60.0);
     e.head_angle = Vec3::new(0.0, 30.0, 0.0);
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10850.
 fn mayastonefire_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     e.angle = e.head_angle;
     let height = ctx.terrain_height(e.position.x, e.position.y);
     if e.position.z < height {
@@ -429,18 +436,16 @@ fn mayastonefire_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_MAYAHANDSKILL (hendlight02.bmd) -------------------------------------------------------------
 
 /// ZzzEffect.cpp:2333. `StartPosition` keeps the creation light (the smoke's color).
-fn mayahand_create(e: &mut Effect, ctx: &mut Ctx) {
+fn mayahand_create(e: &mut Effect, _ctx: &mut Ctx) {
     if e.sub_type == 0 || e.sub_type == 1 {
         e.life_time = 20.0;
         e.start_position = e.light;
     }
-    set_kanturu3(e, ctx);
 }
 
 /// ZzzEffect.cpp:10859.
 fn mayahand_step(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
-    set_kanturu3(e, ctx);
     if e.sub_type == 0 {
         e.light /= 1.17;
         let mut pos = e.position;
@@ -465,29 +470,25 @@ fn mayahand_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// `RenderEffects` only sets `m_bRenderAfterCharacter` (ZzzEffect.cpp:18323); `RenderAfterEffects`
 /// (ZzzEffect.cpp:19241, only while `IsMayaScene()`) → `RenderKanturu3rdAfterObjectMesh`
-/// (GM_Kanturu_3rd.cpp:650): `BodyLight = o->Light`; mesh 0 additive as blend mesh 0 with V
-/// scrolling, mesh 1 additive as blend mesh 1 with U scrolling. Each mesh is a separate draw
-/// (the other one hidden, assuming mesh n uses texture n).
+/// (GM_Kanturu_3rd.cpp:650-655, only `IsInKanturu3rd()`): `BodyLight = o->Light`; mesh 0
+/// `RENDER_TEXTURE|RENDER_BRIGHT` as `BlendMesh` 0 with V scrolling, mesh 1 the same as `BlendMesh`
+/// 1 with U scrolling.
 /// TODO(original): `IsMayaScene()` is also false during the Kanturu states NIGHTMARE_BATTLE, TOWER
 /// and END (`CKANTURUDirection.cpp:44`); the event state does not exist in mu-rs.
 fn mayahand_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    if !in_kanturu3(e) {
+    if !in_kanturu3(ctx) {
         return;
     }
     let scroll = world_scroll(ctx);
 
-    let mut d = ModelDraw::of_effect(e);
-    d.hidden_mesh = 1;
+    let mut d = mesh_draw(e, 0, RENDER_TEXTURE | RENDER_BRIGHT);
     d.blend_mesh = 0;
-    d.blend_mesh_tex_coord.x = e.blend_mesh_tex_coord.x;
     d.blend_mesh_tex_coord.y = scroll;
     out.models.push(d);
 
-    let mut d = ModelDraw::of_effect(e);
-    d.hidden_mesh = 0;
+    let mut d = mesh_draw(e, 1, RENDER_TEXTURE | RENDER_BRIGHT);
     d.blend_mesh = 1;
     d.blend_mesh_tex_coord.x = scroll;
-    d.blend_mesh_tex_coord.y = e.blend_mesh_tex_coord.y;
     out.models.push(d);
 }
 
@@ -628,30 +629,56 @@ fn cundun_sink(e: &mut Effect, ctx: &mut Ctx) {
 
 /// `RenderObject` (ZzzEffect.cpp:18627-18635), which for these types goes through
 /// `RenderHellasMonsterObjectMesh` (GMHellas.cpp:2000, on every map):
-/// - `MODEL_CUNDUN_PART1..5`, `PART8` (GMHellas.cpp:2110): `RenderBody(RENDER_TEXTURE)`.
-///   TODO(original): plus a second `RenderBody(RENDER_CHROME|RENDER_BRIGHT)` pass with
-///   `BodyLight = (0.4, 0.4, 0.3)` (no chrome mapping in the effect model renderer).
+/// - `MODEL_CUNDUN_PART1..5`, `PART8` (GMHellas.cpp:2110-2116): `RenderBody(RENDER_TEXTURE)`, then
+///   `BodyLight = (0.4, 0.4, 0.3)` and `RenderBody(RENDER_CHROME|RENDER_BRIGHT)`.
 /// - `MODEL_CUNDUN_PART6/7`: the plain `RenderBody`.
-/// - `MODEL_MONSTER01+64` (GMHellas.cpp:2016): its `MONSTER01_DIE` branches never run for an
-///   effect (`CurrentAction` is 0); otherwise, while `LifeTime >= 90`, `o->Alpha = 1` and the body
-///   is drawn, and nothing at all below 90.
-///   TODO(original): plus meshes 1-6 with `RENDER_CHROME|RENDER_BRIGHT` and `BodyLight =
-///   (0.4, 0.4, 0.3)`. The `o->Alpha = 1` write only matters for this draw (nothing is drawn after
-///   LifeTime < 90), so it is applied to the draw copy.
+/// - `MODEL_MONSTER01+64` (GMHellas.cpp:2016-2106): its `MONSTER01_DIE` branches create effects
+///   and rewrite `LifeTime` from the draw, and never run for an effect (`CurrentAction` is 0, and
+///   nothing in Main 5.2 creates this type as an effect). Otherwise, while `LifeTime >= 90`:
+///   `o->Alpha = 1`, `RenderBody(RENDER_TEXTURE)`, `BodyLight = (0.4, 0.4, 0.3)`, meshes 1-6 with
+///   `RENDER_CHROME|RENDER_BRIGHT` and, in `MONSTER01_SHOCK` between frames 3.5-6 and 8-11, meshes
+///   1, 2, 3 and 5 again with `RENDER_TEXTURE|RENDER_BRIGHT`; nothing at all below 90. Those
+///   `RenderMesh` calls pass `o->HiddenMesh` as their `MeshTexture` argument (verbatim). The
+///   `o->Alpha = 1` write only matters for this draw (nothing is drawn after LifeTime < 90), so it
+///   is applied to the draw copies.
 fn cundun_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let chrome_light = Vec3::new(0.4, 0.4, 0.3);
     if e.ty == MODEL_MONSTER01 + 64 {
         if e.current_action == MONSTER01_DIE {
             // Never reached by an effect (see above).
             return;
         }
         if e.life_time >= 90.0 {
-            let mut d = ModelDraw::of_effect(e);
+            let mut d = body_draw(e, RENDER_TEXTURE);
             d.alpha = 1.0;
             out.models.push(d);
+            let part = |mesh: i32, flags: u32| {
+                let mut d = mesh_draw(e, mesh, flags);
+                d.alpha = 1.0;
+                d.light = chrome_light;
+                d.texture = e.hidden_mesh;
+                d
+            };
+            for mesh in 1..=6 {
+                out.models.push(part(mesh, RENDER_CHROME | RENDER_BRIGHT));
+            }
+            let f = e.animation_frame;
+            if e.current_action == MONSTER01_SHOCK && ((f > 3.5 && f < 6.0) || (f > 8.0 && f < 11.0)) {
+                for mesh in [1, 2, 3, 5] {
+                    out.models.push(part(mesh, RENDER_TEXTURE | RENDER_BRIGHT));
+                }
+            }
         }
         return;
     }
-    common::draw_object(e, ctx, out);
+    if e.ty == MODEL_CUNDUN_PART6 || e.ty == MODEL_CUNDUN_PART7 {
+        common::draw_object(e, ctx, out);
+        return;
+    }
+    out.models.push(body_draw(e, RENDER_TEXTURE));
+    let mut d = body_draw(e, RENDER_CHROME | RENDER_BRIGHT);
+    d.light = chrome_light;
+    out.models.push(d);
 }
 
 // --- Body part debris: totem golem, Condra/Narcondra, shadow pawn/knight/rook, ice giant -------------
