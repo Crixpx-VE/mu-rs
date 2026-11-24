@@ -915,7 +915,7 @@ struct Shell {
 
 /// A character's shells (created the first time it is hovered, then hidden).
 #[derive(Component)]
-struct EdgeShells(Vec<Shell>);
+pub(crate) struct EdgeShells(Vec<Shell>);
 
 /// Marker for shell entities.
 #[derive(Component)]

@@ -117,6 +117,108 @@ pub fn stop_action(class: crate::account::Class, sword_in_hand: bool) -> usize {
     }
 }
 
+/// What changes a player's stand and walk animations: its weapons (`Weapon[0]`, `Weapon[1]`),
+/// whether `Weapon[0]` is two-handed (`ItemAttribute[].TwoHand`) and whether it wears wings
+/// (`Wing.Type != -1`, also the Cape of Lord). TODO: the pets and mounts (`Helper`: Dinorant,
+/// Uniria, Dark Horse, Fenrir) come first in `SetPlayerStop` / `SetPlayerWalk`; they are not drawn
+/// yet, so their animations are not used either.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gear {
+    pub weapons: [Option<mu_data::items::Item>; 2],
+    pub two_hand: bool,
+    pub wings: bool,
+}
+
+impl Gear {
+    /// `GetEquipedBowType(c)` (CharacterManager.cpp:281-292): a bow in the left hand (not the
+    /// arrows) or a crossbow in the right one (not the bolts).
+    fn bow(&self) -> Option<bool> {
+        use mu_data::items::group::BOW;
+        match self.weapons {
+            [_, Some(l)] if l.group == BOW && l.index != 7 => Some(false),
+            [Some(r), _] if r.group == BOW && r.index >= 8 && r.index != 15 => Some(true),
+            _ => None,
+        }
+    }
+
+    /// Flying: wings outside a safe zone (`Fly`, ZzzCharacter.cpp:235-238 and 580-587).
+    /// TODO: Atlans, Hellas and Doppelganger 3 make everyone fly / swim outside a safe zone
+    /// (ZzzCharacter.cpp:240-243 and 588-594); not ported yet.
+    fn flies(&self, safe_zone: bool) -> bool {
+        self.wings && !safe_zone
+    }
+
+    fn armed(&self, safe_zone: bool) -> bool {
+        !safe_zone && self.weapons.iter().any(Option::is_some)
+    }
+}
+
+/// `SetPlayerStop` (ZzzCharacter.cpp:233-361) for a player without a mount.
+pub fn stand_action(class: crate::account::Class, gear: &Gear, safe_zone: bool) -> usize {
+    use crate::fx::tables::ids;
+    use mu_data::items::group::*;
+    if gear.flies(safe_zone) {
+        let a = if gear.bow() == Some(true) { ids::PLAYER_STOP_FLY_CROSSBOW } else { ids::PLAYER_STOP_FLY };
+        return a as usize;
+    }
+    if !gear.armed(safe_zone) {
+        return stop_action(class, false);
+    }
+    let one_or_two = if gear.two_hand { ids::PLAYER_STOP_SCYTHE } else { ids::PLAYER_STOP_SWORD };
+    let a = match gear.weapons[0].map(|w| (w.group, w.index)) {
+        Some((SWORD..=MACE, _)) if !gear.two_hand => ids::PLAYER_STOP_SWORD,
+        Some((SWORD, 21 | 23 | 25 | 31)) => ids::PLAYER_STOP_TWO_HAND_SWORD_TWO,
+        Some((SWORD..=MACE, _)) => ids::PLAYER_STOP_TWO_HAND_SWORD,
+        Some((SPEAR, 1 | 2)) => ids::PLAYER_STOP_SPEAR,
+        Some((SPEAR, _)) => one_or_two,
+        Some((STAFF, 14..=20)) => ids::PLAYER_STOP_WAND,
+        Some((STAFF, _)) => one_or_two,
+        _ => match gear.bow() {
+            Some(false) => ids::PLAYER_STOP_BOW,
+            Some(true) => ids::PLAYER_STOP_CROSSBOW,
+            None => return stop_action(class, false),
+        },
+    };
+    a as usize
+}
+
+/// `SetPlayerWalk` (ZzzCharacter.cpp:576-662) for a player without a mount, walking (`Run` < 40).
+/// TODO: running (`c->Run` >= 40, `PLAYER_RUN*`, ZzzCharacter.cpp:418-440 and 663-718) is not ported.
+pub fn walk_action_with(class: crate::account::Class, gear: &Gear, safe_zone: bool) -> usize {
+    use crate::fx::tables::ids;
+    use mu_data::items::group::*;
+    if gear.flies(safe_zone) {
+        let a = if gear.bow() == Some(true) { ids::PLAYER_FLY_CROSSBOW } else { ids::PLAYER_FLY };
+        return a as usize;
+    }
+    if !gear.armed(safe_zone) {
+        return walk_action(class);
+    }
+    let a = match gear.weapons[0].map(|w| (w.group, w.index)) {
+        Some((SWORD..=MACE, _)) if !gear.two_hand => ids::PLAYER_WALK_SWORD,
+        Some((SWORD, 21 | 23 | 25 | 31)) => ids::PLAYER_WALK_TWO_HAND_SWORD_TWO,
+        Some((SWORD..=MACE, _)) => ids::PLAYER_WALK_TWO_HAND_SWORD,
+        Some((STAFF, 14..=20)) => ids::PLAYER_WALK_WAND,
+        Some((STAFF, _)) if !gear.two_hand => ids::PLAYER_WALK_SWORD,
+        Some((STAFF, _)) => ids::PLAYER_WALK_SCYTHE,
+        // `MODEL_SPEAR+2+MAX_ITEM_INDEX` (ZzzCharacter.cpp:641) is `MODEL_BOW+2`, not the second spear.
+        Some((SPEAR, 1) | (BOW, 2)) => ids::PLAYER_WALK_SPEAR,
+        Some((SPEAR, _)) => ids::PLAYER_WALK_SCYTHE,
+        _ => match gear.bow() {
+            Some(false) => ids::PLAYER_WALK_BOW,
+            Some(true) => ids::PLAYER_WALK_CROSSBOW,
+            None => return walk_action(class),
+        },
+    };
+    a as usize
+}
+
+/// `PLAYER_FLY` / `PLAYER_FLY_CROSSBOW`: the wings beat faster (ZzzCharacter.cpp:14798-14812) and
+/// there are no footsteps (`PlayWalkSound`, ZzzCharacter.cpp:5214-5216).
+pub fn flying(a: usize) -> bool {
+    use crate::fx::tables::ids;
+    a == ids::PLAYER_FLY as usize || a == ids::PLAYER_FLY_CROSSBOW as usize
+}
 /// `SetPlayerWalk` without a weapon: `WALK_FEMALE` for women and `WALK_MALE` for the rest.
 pub fn walk_action(class: crate::account::Class) -> usize {
     if class.female() { crate::fx::tables::ids::PLAYER_WALK_FEMALE as usize } else { action::WALK_MALE }
@@ -129,8 +231,17 @@ pub fn play_speed(a: usize) -> f32 {
     let a = a as i32;
     if a == ids::PLAYER_STOP_SWORD {
         0.26
-    } else if a == ids::PLAYER_STOP_SUMMONER {
+    } else if a == ids::PLAYER_STOP_SUMMONER
+        || a == ids::PLAYER_STOP_TWO_HAND_SWORD
+        || a == ids::PLAYER_STOP_SPEAR
+        // ZzzOpenData.cpp:372.
+        || a == ids::PLAYER_STOP_TWO_HAND_SWORD_TWO
+    {
         0.24
+    } else if a == ids::PLAYER_STOP_BOW || a == ids::PLAYER_STOP_CROSSBOW {
+        0.22
+    } else if a == ids::PLAYER_STOP_WAND {
+        0.30
     } else if a == ids::PLAYER_STOP_RAGEFIGHTER {
         // MuMain ZzzOpenData.cpp:243.
         0.16
@@ -138,6 +249,12 @@ pub fn play_speed(a: usize) -> f32 {
         0.28
     } else if (ids::PLAYER_WALK_MALE..=ids::PLAYER_WALK_CROSSBOW).contains(&a) {
         0.33
+    } else if a == ids::PLAYER_WALK_WAND {
+        // `SetPlayerWalk` (ZzzCharacter.cpp:490).
+        0.44
+    } else if a == ids::PLAYER_FLY || a == ids::PLAYER_FLY_CROSSBOW || a == ids::PLAYER_WALK_TWO_HAND_SWORD_TWO {
+        // `PLAYER_WALK_MALE..=PLAYER_RUN_RIDE_WEAPON` at 0.3 (ZzzOpenData.cpp:340-341, 373).
+        0.3
     } else if a == ids::PLAYER_HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 {
         0.2
     } else if a == ids::PLAYER_SEE1 || a == ids::PLAYER_SEE_FEMALE1 {
@@ -195,9 +312,12 @@ pub struct Player {
     /// `MOVEMENT_TALK` with `TargetNpc`: heading to the NPC with this scope key (npc.rs).
     pub talk: Option<u16>,
     pub class: crate::account::Class,
-    /// Stand and walk animations of its class.
+    /// Stand and walk animations: of its class and gear where it stands (`SetPlayerStop` /
+    /// `SetPlayerWalk`, updated every frame by `walk`).
     pub stop: usize,
     pub walk: usize,
+    /// What it wears that changes those animations (hero_dress.rs fills it from the inventory).
+    pub gear: Gear,
 }
 
 /// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
@@ -360,18 +480,46 @@ pub struct Skinned {
     /// (piece model, mesh index, Bevy mesh being updated)
     parts: Vec<(usize, usize, Handle<Mesh>)>,
     models: Vec<Bmd>,
-    /// The right-hand weapon and its meshes.
-    weapon: Option<(Bmd, Vec<(usize, Handle<Mesh>)>)>,
+    /// The weapons (`Weapon[0]` right hand, `Weapon[1]` left hand or shield) and their meshes.
+    weapons: Vec<Linked>,
+    /// The wings (`Wing`), with their own animation.
+    wing: Option<Linked>,
+}
+
+/// A model drawn on a bone of the character (`RenderLinkObject`, ZzzCharacter.cpp:6401-6790): a
+/// weapon or the wings.
+struct Linked {
+    model: Bmd,
+    meshes: Vec<(usize, Handle<Mesh>)>,
+    item: mu_data::items::Item,
+    /// `Weapon[hand]`: 0 right, 1 left (the wings: 0).
+    hand: usize,
+    /// The wings' `AnimationFrame`, advanced by their `PlaySpeed` every tick: (last `time`, frame).
+    clock: std::sync::Mutex<Option<(f32, f32)>>,
+}
+
+/// What decides where the linked models go in a frame.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LinkState {
+    /// `bBindBack` of `RenderCharacterBackItem` (ZzzCharacter.cpp:14636-14662): the weapons go on
+    /// the back (in a safe zone or during the greeting..salute emotes).
+    pub weapons_on_back: bool,
+    /// `c->SafeZone` (the Wings of Darkness fold, ZzzCharacter.cpp:6761-6764).
+    pub safe_zone: bool,
+    /// Seconds of play, for the wings' own animation.
+    pub time: f32,
+    /// The character's action (the wings beat faster when flying).
+    pub action: usize,
 }
 
 impl Skinned {
-    /// Places the pieces and the weapon (in hand or on the back) in pose `action`/`frame` and adds
-    /// their vertices to the shadow. Returns the bones of that pose.
+    /// Places the pieces, the weapons (in hand or on the back) and the wings in pose
+    /// `action`/`frame` and adds their vertices to the shadow. Returns the bones of that pose.
     pub fn pose(
         &self,
         action: usize,
         frame: f32,
-        weapon_on_back: bool,
+        links: LinkState,
         meshes: &mut Assets<Mesh>,
         sh: &mut crate::shadow::Builder,
     ) -> Vec<bmd::Mat34> {
@@ -384,10 +532,12 @@ impl Skinned {
                 m.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
             }
         }
-        if let Some((w, handles)) = &self.weapon {
-            let wbones = weapon_bones(w, &bones, weapon_on_back);
-            for (i, handle) in handles {
-                let posed = w.pose_with(*i, &wbones);
+        let links = LinkState { action, ..links };
+        let linked = self.weapons.iter().map(|w| (w, weapon_bones(w, &bones, links.weapons_on_back)));
+        let wing = self.wing.as_ref().map(|w| (w, wing_bones(w, &bones, links)));
+        for (l, lbones) in linked.chain(wing) {
+            for (i, handle) in &l.meshes {
+                let posed = l.model.pose_with(*i, &lbones);
                 sh.add(&posed.positions);
                 if let Some(mut m) = meshes.get_mut(handle) {
                     m.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
@@ -396,6 +546,11 @@ impl Skinned {
             }
         }
         bones
+    }
+
+    /// Carries a weapon (for the sword trail).
+    pub fn has_weapon(&self) -> bool {
+        !self.weapons.is_empty()
     }
 
     /// Frames of animation `action` of `player.bmd` (0 if missing).
@@ -426,16 +581,26 @@ pub struct CharacterModel {
     pub glow: Vec<(Handle<crate::model_light::ModelMaterial>, mu_data::items::glow::GlowLight)>,
 }
 
-/// Worn equipment replacing the class pieces (`BodyPart[].Type` and `Weapon[0].Type` with the item
-/// model): model path inside `Data` and the item (for its glow). Filled by hero_dress.rs.
+/// Worn equipment replacing the class pieces (`BodyPart[].Type`, `Weapon[].Type` and `Wing.Type`
+/// with the item model): model path inside `Data` and the item (for its glow). Filled by
+/// hero_dress.rs (from the inventory or from an appearance).
 #[derive(Default, Clone)]
 pub struct Dress {
     /// Helm, armor, pants, gloves and boots (in [`BODY_PARTS`] order).
     pub parts: [Option<(std::path::PathBuf, mu_data::items::Item)>; 5],
-    /// The right-hand weapon.
-    pub weapon: Option<(std::path::PathBuf, mu_data::items::Item)>,
+    /// `Weapon[0]` (right hand) and `Weapon[1]` (left hand or shield).
+    pub weapons: [Option<(std::path::PathBuf, mu_data::items::Item)>; 2],
+    /// `Wing`.
+    pub wing: Option<(std::path::PathBuf, mu_data::items::Item)>,
     /// `g_pOption->GetRenderLevel()`.
     pub render_level: u8,
+}
+
+impl Dress {
+    /// Something is worn.
+    pub fn any(&self) -> bool {
+        self.parts.iter().chain(&self.weapons).any(|p| p.is_some()) || self.wing.is_some()
+    }
 }
 
 /// Loads `player.bmd` and the class's unequipped pieces (`{Helm,Armor,Pant,Glove,Boot}ClassNN`),
@@ -516,25 +681,54 @@ pub fn load_character_dressed(
         models.push(model);
     }
 
-    // Right-hand weapon (like `RenderLinkObject` with `Link` = true): the equipped one or, without
-    // equipment, the Dark Knight short sword.
+    // Weapons and wings (`RenderLinkObject`): the equipped ones or, without equipment, the Dark
+    // Knight short sword in the right hand.
     let item_dir = args.data.join("Item");
     let knight = class == crate::account::Class::Knight;
-    let dressed_weapon = dress.and_then(|d| d.weapon.as_ref()).and_then(|(path, item)| {
-        let (wdir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
-        Some((fs::read(&wdir, file).and_then(|b| bmd::read(&b)).ok()?, wdir, *item))
+    let read = |path: &std::path::Path| -> Option<(Bmd, std::path::PathBuf)> {
+        let (dir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
+        Some((fs::read(&dir, file).and_then(|b| bmd::read(&b)).ok()?, dir))
+    };
+    let mut wanted: Vec<(Bmd, std::path::PathBuf, mu_data::items::Item, usize, bool)> = Vec::new();
+    match dress {
+        Some(d) => {
+            for (hand, w) in d.weapons.iter().enumerate() {
+                let Some((path, item)) = w.as_ref().filter(|(_, item)| drawn_weapon(item)) else { continue };
+                match read(path) {
+                    Some((m, dir)) => wanted.push((m, dir, *item, hand, true)),
+                    None => warn!("falta el arma {}", path.display()),
+                }
+            }
+        }
+        None if knight => match fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)) {
+            Ok(m) => wanted.push((m, item_dir.clone(), mu_data::items::Item::new(0, 1), 0, false)),
+            Err(_) => warn!("falta el arma Item/{WEAPON_FILE}"),
+        },
+        None => {}
+    }
+    let wing = dress.and_then(|d| d.wing.as_ref()).filter(|(_, item)| drawn_wing(item)).and_then(|(path, item)| {
+        let r = read(path);
+        if r.is_none() {
+            warn!("faltan las alas {}", path.display());
+        }
+        r.map(|(m, dir)| (m, dir, *item, 0, true))
     });
-    let default_weapon = (knight && dress.is_none())
-        .then(|| fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)).ok())
-        .flatten()
-        .map(|w| (w, item_dir.clone(), None));
-    let weapon_item = dressed_weapon.as_ref().map(|w| w.2);
-    let weapon_dir = dressed_weapon.as_ref().map_or(item_dir.clone(), |w| w.1.clone());
-    let weapon = dressed_weapon.map(|(w, d, i)| (w, d, Some(i))).or(default_weapon).map(|(w, _, _)| {
-        let wbones = weapon_bones(&w, &bones, false);
+    let mut link = |(model, _model_dir, item, hand, glows): (Bmd, std::path::PathBuf, mu_data::items::Item, usize, bool)| {
+        let dir = linked_texture_dir(&args.data, &item);
+        // `RenderPartObjectEffect(..., Level << 3, Option1, false, ...)` (ZzzCharacter.cpp:6789): no
+        // `ExtOption` (no ancient glow) for linked models, and the wings' `Option1` is never set
+        // (`SetCharacterClass`, ZzzCharacter.cpp:11834-11861; `ChangeCharacterExt` clears it).
+        let wing_part = item.group == mu_data::items::group::WING || item.group == mu_data::items::group::HELPER;
+        let glow_item = mu_data::items::Item { ancient: 0, excellent: if wing_part { 0 } else { item.excellent }, ..item };
+        let linked = Linked { model, meshes: vec![], item, hand, clock: Default::default() };
+        let lbones = if wing_part {
+            wing_bones(&linked, &bones, LinkState::default())
+        } else {
+            weapon_bones(&linked, &bones, false)
+        };
         let mut handles = vec![];
-        for i in 0..w.meshes.len() {
-            let posed = w.pose_with(i, &wbones);
+        for i in 0..linked.model.meshes.len() {
+            let posed = linked.model.pose_with(i, &lbones);
             if posed.positions.is_empty() {
                 continue;
             }
@@ -544,26 +738,56 @@ pub fn load_character_dressed(
                     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
-            let material = materials.add(part_material(&weapon_dir, &w.meshes[i].texture, images));
+            let material = materials.add(part_material(&dir, &linked.model.meshes[i].texture, images));
             body_materials.push(material.clone());
             children.push((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
-            if let (Some(item), Some(d)) = (weapon_item, dress) {
-                children.extend(glow.passes(&args.data, &mesh, &w.meshes[i], &item, d.render_level, &material, materials, images));
+            if let (true, Some(d)) = (glows, dress) {
+                children.extend(glow.passes(&args.data, &mesh, &linked.model.meshes[i], &glow_item, d.render_level, &material, materials, images));
             }
             handles.push((i, mesh));
         }
-        (w, handles)
-    });
-    if knight && dress.is_none() && weapon.is_none() {
-        warn!("falta el arma Item/{WEAPON_FILE}");
-    }
+        Linked { meshes: handles, ..linked }
+    };
+    let weapons: Vec<Linked> = wanted.into_iter().map(&mut link).collect();
+    let wing = wing.map(&mut link);
     Some(CharacterModel {
-        skinned: Skinned { skeleton, parts, models, weapon },
+        skinned: Skinned { skeleton, parts, models, weapons, wing },
         children,
         materials: body_materials,
         bones,
         glow: glow.animated,
     })
+}
+
+/// Folder of the textures of a weapon or wings: `Item\` even when the model lives elsewhere
+/// (`OpenTexture(MODEL_SWORD+i ... MODEL_WING+i, "Item\\")`, ZzzOpenData.cpp:1318-1330 and
+/// 1390-1403), but the small wings, whose textures are in `Item\Ingameshop\`
+/// (ZzzOpenData.cpp:1758-1761).
+fn linked_texture_dir(data: &std::path::Path, item: &mu_data::items::Item) -> std::path::PathBuf {
+    let item_dir = fs::find(data, "Item").unwrap_or_else(|| data.join("Item"));
+    if item.group == mu_data::items::group::WING && (131..=134).contains(&item.index) {
+        fs::find(&item_dir, "Ingameshop").unwrap_or_else(|| item_dir.join("Ingameshop"))
+    } else {
+        item_dir
+    }
+}
+
+/// Weapons `RenderLinkObject` draws: not the Summoner's books (`MODEL_STAFF+21..29`, ZzzCharacter.cpp:
+/// 6429-6432) nor the Dark Raven (`MODEL_HELPER+5`, a pet: never drawn in hand, ZzzCharacter.cpp:9740).
+/// TODO: the Rage Fighter's swordform gloves (`MODEL_SWORD+32..34`) have their own drawing
+/// (`CMonkSystem::RenderSwordformGloves`, MonkSystem.cpp:74-96) that is not ported yet.
+fn drawn_weapon(item: &mu_data::items::Item) -> bool {
+    use mu_data::items::group::*;
+    !matches!((item.group, item.index), (STAFF, 21..=29) | (HELPER, 5) | (SWORD, 32..=34))
+}
+
+/// Wings `RenderLinkObject` draws: the capes made of cloth (`MODEL_HELPER+30`, `MODEL_WING+49`,
+/// `MODEL_WING+135` and `MODEL_WING+130`, ZzzCharacter.cpp:6418-6427) return at once; they are drawn
+/// by `RenderCloth` (ZzzCharacter.cpp:9340-9470). TODO: the cloth capes are not ported yet (nor the
+/// cloth part of the Cape of Emperor and the Cloak of Overrule).
+fn drawn_wing(item: &mu_data::items::Item) -> bool {
+    use mu_data::items::group::*;
+    !matches!((item.group, item.index), (HELPER, 30) | (WING, 49 | 130 | 135))
 }
 
 /// Unequipped body pieces (`BodyPart[BODYPART_HELM..BOOTS]`).
@@ -628,6 +852,7 @@ fn spawn_player(
         class,
         stop,
         walk,
+        gear: Gear::default(),
     };
     let actor = actor_state(&player, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
@@ -653,27 +878,118 @@ const WEAPON_MODEL: i32 = crate::fx::core::MODEL_SWORD + 1;
 /// `Weapon[0].LinkBone`: the right hand of `player.bmd`.
 pub const RIGHT_HAND_BONE: usize = 33;
 
-/// Bones of the weapon in hand: a weapon in hand is placed with `Link = false` (`PlanAttachments`,
-/// ZzzCharacter.cpp ≈14257), i.e. directly with the hand bone matrix. (The
-/// (70°, 0, 90°) rotation offset by (-20, 5, 40) of `PlaceLinkedPart` is for weapons on the back.)
+/// `Weapon[1].LinkBone`: the left hand of `player.bmd` (ZzzCharacter.cpp:11673-11674).
+const LEFT_HAND_BONE: usize = 42;
+
+/// Bones of a weapon (`RenderCharacterBackItem` and the hand loop of `RenderCharacter`,
+/// ZzzCharacter.cpp:14669-14763 and 9722-9810), in its first frame (TODO: the few animated weapons,
+/// `MODEL_MACE+2/+5/+16/+17`, `MODEL_STAFF+6/+34` and `MODEL_BOW+23`, stay still).
 ///
-/// In a safe zone the original carries it on the back (`AreWeaponsOnBack`): bone 47 with `Link`
-/// (`PlaceLinkedPart`: `AngleMatrix(70°, 0, 90°)` offset by (-20, 5, 40) for swords).
-fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec<bmd::Mat34> {
-    let local = weapon.bone_matrices(0, 0);
-    let parent = if on_back {
+/// - In hand: `RenderLinkObject(0, 0, 0, ..., Link = false)`, i.e. directly on the bone of its hand
+///   (`RotationPosition` leaves it in `ParentMatrix`, ZzzBMD.cpp:393-405).
+/// - On the back (`on_back`, and the arrows and bolts always): `Link = true` on bone 47 with the
+///   matrix of [`back_matrix`]. With the books and the Dark Raven out (see `drawn_weapon`), every
+///   weapon left is an `IsBackItem` (ZzzCharacter.cpp:14618-14632), so all of them go there.
+fn weapon_bones(w: &Linked, player_bones: &[bmd::Mat34], on_back: bool) -> Vec<bmd::Mat34> {
+    use mu_data::items::group::BOW;
+    let local = w.model.bone_matrices(0, 0);
+    let arrows = matches!((w.item.group, w.item.index), (BOW, 7) | (BOW, 15));
+    let parent = if on_back || arrows {
         let Some(back) = player_bones.get(BACK_BONE) else { return local };
-        let mut m = bmd::angle_matrix([70f32.to_radians(), 0.0, 90f32.to_radians()]);
-        m[0][3] = -20.0;
-        m[1][3] = 5.0;
-        m[2][3] = 40.0;
-        bmd::concat(back, &m)
+        bmd::concat(back, &back_matrix(&w.item, w.hand == 0))
     } else {
-        let Some(hand) = player_bones.get(RIGHT_HAND_BONE) else { return local };
+        let bone = if w.hand == 0 { RIGHT_HAND_BONE } else { LEFT_HAND_BONE };
+        let Some(hand) = player_bones.get(bone) else { return local };
         *hand
     };
     local.iter().map(|b| bmd::concat(&parent, b)).collect()
 }
+
+/// `AngleMatrix` in degrees with a translation.
+fn link_matrix(angle: [f32; 3], t: [f32; 3]) -> bmd::Mat34 {
+    let mut m = bmd::angle_matrix(angle.map(f32::to_radians));
+    for k in 0..3 {
+        m[k][3] = t[k];
+    }
+    m
+}
+
+/// The `Link = true` matrix of `RenderLinkObject` for a player (ZzzCharacter.cpp:6470-6731), before
+/// `R_ConcatTransforms(BoneTransform[LinkBone], Matrix, ParentMatrix)`. `right_hand` is
+/// `bRightHandItem`: the wings and the left-hand weapons (but shields and `MODEL_BOW+20`) are turned
+/// once more. TODO: the Rage Fighter's offset and scale for its common weapons
+/// (`IsRagefighterCommonWeapon`, ZzzCharacter.cpp:6701-6720) are not applied.
+fn back_matrix(item: &mu_data::items::Item, right_hand: bool) -> bmd::Mat34 {
+    use mu_data::items::group::*;
+    let (g, i) = (item.group, item.index);
+    let base = if (g, i) == (STAFF, 9) { [110.0, 180.0, 90.0] } else { [70.0, 0.0, 90.0] };
+    let mut m = match (g, i) {
+        (WING, 50) => link_matrix([0.0, 90.0, 0.0], [10.0, -15.0, 0.0]),
+        // `Type >= MODEL_WING + 40`: only the Cape of Emperor gets here with `Link`.
+        (WING, 40..) => link_matrix([0.0, 90.0, 0.0], [-47.0, -7.0, 0.0]),
+        (BOW, 8..=14 | 16 | 18 | 19) => link_matrix([0.0, 20.0, 180.0], [-10.0, 8.0, 40.0]),
+        (BOW, 20) => link_matrix([-60.0, 0.0, -80.0], [-5.0, 20.0, 0.0]),
+        (BOW, 23) => link_matrix([-60.0, 0.0, -80.0], [-5.0, 20.0, -5.0]),
+        (BOW, 24) => link_matrix([90.0, 0.0, -80.0], [10.0, 20.0, -5.0]),
+        (BOW, _) => link_matrix(base, [-10.0, 5.0, 10.0]),
+        (STAFF, 9) => link_matrix(base, [-10.0, 5.0, -10.0]),
+        (STAFF, 8) => link_matrix(base, [-10.0, 5.0, 10.0]),
+        (SHIELD, 16) => link_matrix([30.0, 0.0, 90.0], [-20.0, 0.0, -20.0]),
+        (SHIELD, 14 | 15) => link_matrix([50.0, 0.0, 90.0], [-28.0, 0.0, -25.0]),
+        (SHIELD, 6) => link_matrix([30.0, 0.0, 90.0], [-15.0, 0.0, -25.0]),
+        (SHIELD, _) => link_matrix(base, [-10.0, 0.0, 0.0]),
+        _ => link_matrix(base, [-20.0, 5.0, 40.0]),
+    };
+    if !right_hand && g != SHIELD && (g, i) != (BOW, 20) {
+        m = bmd::concat(&m, &link_matrix([145.0, 0.0, 275.0], [0.0, 10.0, -30.0]));
+    }
+    m
+}
+
+/// `PlaySpeed` of the wings: 1 when flying (0.5 for `MODEL_WING+36`), 0.25 otherwise
+/// (ZzzCharacter.cpp:14798-14812); `RenderLinkObject` then sets 0.15 for `MODEL_WING+39`
+/// (ZzzCharacter.cpp:6452-6457).
+fn wing_play_speed(item: &mu_data::items::Item, action: usize) -> f32 {
+    use mu_data::items::group::WING;
+    match (item.group, item.index) {
+        (WING, 39) => 0.15,
+        (WING, 36) if flying(action) => 0.5,
+        _ if flying(action) => 1.0,
+        _ => 0.25,
+    }
+}
+
+/// Bones of the wings (ZzzCharacter.cpp:14792-14827): bone 47, `RenderLinkObject(0, 0, 15, ...,
+/// Link = false)`: their root goes at the bone with the offset (0, 0, 15) turned by it
+/// (`RotationPosition`, ZzzBMD.cpp:393-405), and they play their action 0 (1 for the Wings of
+/// Darkness in a safe zone, ZzzCharacter.cpp:6761-6764) on their own. The Cape of Emperor (and the
+/// Cloak of Overrule) go with `Link = true` on bone 19.
+fn wing_bones(w: &Linked, player_bones: &[bmd::Mat34], links: LinkState) -> Vec<bmd::Mat34> {
+    use mu_data::items::group::WING;
+    let action = if (w.item.group, w.item.index) == (WING, 6) && links.safe_zone { 1 } else { 0 };
+    let frame = {
+        let mut clock = w.clock.lock().unwrap_or_else(|e| e.into_inner());
+        let (last, frame) = clock.unwrap_or((links.time, 0.0));
+        let dt = (links.time - last).max(0.0);
+        let frame = frame + dt * crate::fx::sim::TICKS_PER_SECOND * wing_play_speed(&w.item, links.action);
+        let keys = w.model.actions.get(action).map_or(1, |a| a.frames.max(1)) as f32;
+        let frame = frame.rem_euclid(keys);
+        *clock = Some((links.time, frame));
+        frame
+    };
+    let local = w.model.bone_matrices_at(action, frame);
+    let parent = if matches!((w.item.group, w.item.index), (WING, 40 | 50)) {
+        let Some(bone) = player_bones.get(CAPE_BONE) else { return local };
+        bmd::concat(bone, &back_matrix(&w.item, false))
+    } else {
+        let Some(back) = player_bones.get(BACK_BONE) else { return local };
+        bmd::concat(back, &link_matrix([0.0; 3], [0.0, 0.0, 15.0]))
+    };
+    local.iter().map(|b| bmd::concat(&parent, b)).collect()
+}
+
+/// `w->LinkBone = 19` of the Cape of Emperor and the Cloak of Overrule (ZzzCharacter.cpp:14816-14822).
+const CAPE_BONE: usize = 19;
 
 /// `CreateWeaponBlur` for the Dark Knight with a sword: in sword skills (SWORD1-5) from
 /// frame 3 on, the trail goes from (0, -20, 0) to (0, -120, 0) of the weapon bone
@@ -681,7 +997,7 @@ fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec
 /// recomputed 10 times along the last stretch of animation (`PlaySpeed`) so the trail is continuous.
 fn weapon_blur(entity: Entity, p: &Player, s: &Skinned, terrain: Option<&LoadedTerrain>, world: &mut crate::fx::FxWorld, frame: u64) {
     use crate::fx::core::PLAYER_ATTACK_SKILL_SWORD1;
-    let (Some(fps), Some(_)) = (p.casting, &s.weapon) else { return };
+    let (Some(fps), true) = (p.casting, s.has_weapon()) else { return };
     let sword = PLAYER_ATTACK_SKILL_SWORD1 as usize;
     if !(sword..sword + 5).contains(&p.action) || p.frame < 3.0 {
         return;
@@ -710,11 +1026,18 @@ const BACK_BONE: usize = 47;
 /// Does the weapon go on the back? In a safe zone, except while casting a skill (the original
 /// does not allow them in a safe zone; here it is allowed so they can be tested in town).
 fn weapon_on_back(p: &Player, terrain: Option<&LoadedTerrain>) -> bool {
-    let safe = terrain.is_some_and(|t| {
-        let (x, y) = (p.pos.x as usize, p.pos.y as usize);
+    use crate::fx::tables::ids;
+    // `RenderCharacterBackItem` (ZzzCharacter.cpp:14642-14645): also during the greeting..salute emotes.
+    let greeting = (ids::PLAYER_GREETING1 as usize..=ids::PLAYER_SALUTE1 as usize).contains(&p.action);
+    (in_safe_zone(p.pos, terrain) && p.casting.is_none()) || greeting
+}
+
+/// c->SafeZone: the tile (TW_SAFEZONE, ZzzCharacter.cpp:5468-5473) is a safe zone.
+pub fn in_safe_zone(pos: Vec2, terrain: Option<&LoadedTerrain>) -> bool {
+    terrain.is_some_and(|t| {
+        let (x, y) = (pos.x.max(0.0) as usize, pos.y.max(0.0) as usize);
         t.0.attribute(x.min(255), y.min(255)) & mu_data::terrain::attr::SAFE_ZONE != 0
-    });
-    safe && p.casting.is_none()
+    })
 }
 
 /// Character snapshot for the effects engine (MU position, rotation, bones, weapon).
@@ -1088,6 +1411,8 @@ fn walk(
                 budget = 0.0;
             }
         }
+        let safe = in_safe_zone(p.pos, terrain.as_deref());
+        (p.stop, p.walk) = (stand_action(p.class, &p.gear, safe), walk_action_with(p.class, &p.gear, safe));
         // Sitting or leaning stays until walking again; an emote, until it ends (`animate`).
         let action = if !p.path.is_empty() {
             p.walk
@@ -1145,13 +1470,16 @@ fn animate(
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
         // `SetPlayerWalk`: the Rage Fighter walks at 0.32 instead of 0.33.
-        let fps = if p.class == crate::account::Class::Fighter && p.action == p.walk {
+        // `SetPlayerWalk` (ZzzCharacter.cpp:444-451): only `PLAYER_WALK_MALE..=PLAYER_WALK_CROSSBOW`.
+        use crate::fx::tables::ids;
+        let walking = (ids::PLAYER_WALK_MALE as usize..=ids::PLAYER_WALK_CROSSBOW as usize).contains(&p.action);
+        let fps = if p.class == crate::account::Class::Fighter && p.action == p.walk && walking {
             0.32 * crate::fx::sim::TICKS_PER_SECOND
         } else {
             action_fps(p.action)
         };
         p.frame += p.casting.unwrap_or(fps) * time.delta_secs();
-        if p.action == p.walk {
+        if p.action == p.walk && !flying(p.action) {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }
         // The skill ends when its animation ends: back to standing. So does an emote
@@ -1171,7 +1499,13 @@ fn animate(
             Quat::from_rotation_z(p.facing),
             p.class.game_scale(),
         );
-        let bones = s.pose(p.action, p.frame, weapon_on_back(&p, terrain.as_deref()), &mut meshes, &mut sh);
+        let links = LinkState {
+            weapons_on_back: weapon_on_back(&p, terrain.as_deref()),
+            safe_zone: in_safe_zone(p.pos, terrain.as_deref()),
+            time: time.elapsed_secs(),
+            ..default()
+        };
+        let bones = s.pose(p.action, p.frame, links, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         *actor = actor_state(&p, &bones, terrain.as_deref());
     }
@@ -1226,6 +1560,68 @@ fn nearest_walkable(t: &mu_data::terrain::Terrain, p: Vec2) -> Option<Vec2> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `SetPlayerStop` with weapons (ZzzCharacter.cpp:300-361).
+    #[test]
+    fn stand_with_weapons() {
+        use crate::account::Class;
+        use crate::fx::tables::ids;
+        use mu_data::items::Item;
+        let two_handed = |w: &Item| matches!((w.group, w.index), (0, 21) | (0, 18) | (3, 5) | (5, 10));
+        let gear = |r: Option<(u8, u16)>, l: Option<(u8, u16)>| {
+            let weapons = [r.map(|(g, i)| Item::new(g, i)), l.map(|(g, i)| Item::new(g, i))];
+            Gear { weapons, two_hand: weapons[0].is_some_and(|w| two_handed(&w)), wings: false }
+        };
+        let stand = |class, r, l| stand_action(class, &gear(r, l), false) as i32;
+        assert_eq!(stand(Class::Knight, None, None), ids::PLAYER_STOP_MALE);
+        assert_eq!(stand(Class::Elf, None, None), ids::PLAYER_STOP_FEMALE);
+        assert_eq!(stand(Class::Knight, Some((0, 1)), Some((6, 2))), ids::PLAYER_STOP_SWORD);
+        assert_eq!(stand(Class::Knight, Some((0, 21)), None), ids::PLAYER_STOP_TWO_HAND_SWORD_TWO);
+        assert_eq!(stand(Class::Knight, Some((0, 18)), None), ids::PLAYER_STOP_TWO_HAND_SWORD);
+        assert_eq!(stand(Class::Knight, Some((3, 2)), None), ids::PLAYER_STOP_SPEAR);
+        assert_eq!(stand(Class::Knight, Some((3, 5)), None), ids::PLAYER_STOP_SCYTHE);
+        assert_eq!(stand(Class::Summoner, Some((5, 14)), None), ids::PLAYER_STOP_WAND);
+        assert_eq!(stand(Class::Wizard, Some((5, 10)), None), ids::PLAYER_STOP_SCYTHE);
+        // Bow in the left hand with or without arrows; crossbow in the right one.
+        assert_eq!(stand(Class::Elf, Some((4, 15)), Some((4, 3))), ids::PLAYER_STOP_BOW);
+        assert_eq!(stand(Class::Elf, None, Some((4, 3))), ids::PLAYER_STOP_BOW);
+        assert_eq!(stand(Class::Elf, Some((4, 9)), Some((4, 7))), ids::PLAYER_STOP_CROSSBOW);
+        // Only the arrows: unarmed. A shield alone too.
+        assert_eq!(stand(Class::Elf, None, Some((4, 7))), ids::PLAYER_STOP_FEMALE);
+        assert_eq!(stand(Class::Knight, None, Some((6, 0))), ids::PLAYER_STOP_MALE);
+        // In a safe zone, unarmed whatever it carries.
+        assert_eq!(stand_action(Class::Knight, &gear(Some((0, 1)), None), true), ids::PLAYER_STOP_MALE as usize);
+
+        // SetPlayerWalk (ZzzCharacter.cpp:576-662).
+        let walk = |class, r, l| walk_action_with(class, &gear(r, l), false) as i32;
+        assert_eq!(walk(Class::Knight, None, None), ids::PLAYER_WALK_MALE);
+        assert_eq!(walk(Class::Knight, Some((0, 1)), None), ids::PLAYER_WALK_SWORD);
+        assert_eq!(walk(Class::Knight, Some((0, 21)), None), ids::PLAYER_WALK_TWO_HAND_SWORD_TWO);
+        assert_eq!(walk(Class::Summoner, Some((5, 14)), None), ids::PLAYER_WALK_WAND);
+        assert_eq!(walk(Class::Knight, Some((3, 2)), None), ids::PLAYER_WALK_SCYTHE);
+        assert_eq!(walk(Class::Elf, None, Some((4, 3))), ids::PLAYER_WALK_BOW);
+
+        // Wings: flying outside a safe zone, with the crossbow its own animation (ZzzCharacter.cpp:235-269, 580-587).
+        let winged = |r| Gear { wings: true, ..gear(r, None) };
+        assert_eq!(stand_action(Class::Knight, &winged(Some((0, 1))), false), ids::PLAYER_STOP_FLY as usize);
+        assert_eq!(walk_action_with(Class::Knight, &winged(None), false), ids::PLAYER_FLY as usize);
+        assert_eq!(walk_action_with(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_FLY_CROSSBOW as usize);
+        assert_eq!(stand_action(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_STOP_FLY_CROSSBOW as usize);
+        assert_eq!(walk_action_with(Class::Knight, &winged(None), true), ids::PLAYER_WALK_MALE as usize);
+    }
+
+    /// The back matrix of a left-hand sword is turned once more; a shield's is not.
+    #[test]
+    fn back_matrices() {
+        use mu_data::items::Item;
+        let sword = back_matrix(&Item::new(0, 1), true);
+        assert!((sword[0][3] + 20.0).abs() < 1e-4 && (sword[1][3] - 5.0).abs() < 1e-4 && (sword[2][3] - 40.0).abs() < 1e-4);
+        let left = back_matrix(&Item::new(0, 1), false);
+        assert_ne!(left, sword);
+        assert_eq!(back_matrix(&Item::new(6, 2), false), back_matrix(&Item::new(6, 2), true));
+        assert!(!drawn_weapon(&Item::new(5, 21)) && drawn_weapon(&Item::new(5, 20)));
+        assert!(!drawn_wing(&Item::new(13, 30)) && drawn_wing(&Item::new(12, 5)));
+    }
 
     /// `PushingCharacter`: 20% of the remaining distance per tick, over after 16 ticks.
     #[test]

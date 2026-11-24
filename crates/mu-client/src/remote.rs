@@ -1,5 +1,8 @@
 //! The other players on the map, as the server sends them:
-//! - `AddCharactersToScope`: they appear (their class, unequipped) on their tile;
+//! - `AddCharactersToScope`: they appear on their tile, dressed from their appearance
+//!   (`ChangeCharacterExt`, WSclient.cpp:2247; hero_dress.rs);
+//! - `AppearanceChanged` (`ReceiveChangePlayer`, WSclient.cpp:1871-2088): one piece changes and they
+//!   are dressed again;
 //! - `ObjectWalked`: they walk the steps taken (or, if none come, to the destination tile);
 //! - `MapObjectOutOfScope`: they disappear;
 //! - `ObjectAnimation` (`ReceiveAction`, WSclient.cpp:3120-3353): they face their direction, stop on
@@ -7,6 +10,11 @@
 //!   emotes...). Sitting, leaning or healing lasts until they walk; an emote, until it ends
 //!   (`PlayerStopAnimationSetting`). On appearing, they take the posture carried in their
 //!   appearance (`Class & 0x07`, WSclient.cpp:2167-2191).
+//!
+//! Standing and walking, they use `SetPlayerStop` / `SetPlayerWalk` (ZzzCharacter.cpp:233-361 and
+//! 576-662, character.rs): outside a safe zone they fly with wings or take the stand and walk of their
+//! weapons; inside, the unarmed ones, with the weapons on the back (`RenderCharacterBackItem`,
+//! ZzzCharacter.cpp:14636-14662).
 //!
 //! Messages sometimes arrive while the map is loading: they are queued until the game is ready.
 //! Those about ourselves (the id from `GameServerEntered`, `HeroKey`; OpenMU sends us in
@@ -16,10 +24,12 @@ use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
+use mu_protocol::appearance::Appearance;
 use mu_protocol::game::{self, ServerMessage};
 
 use crate::Args;
 use crate::account::Class;
+use crate::item_view::ItemData;
 use crate::model_light::ModelMaterial;
 use crate::scene::GameScene;
 use crate::terrain::{LoadedTerrain, MU_SCALE};
@@ -56,6 +66,7 @@ fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<In
                 | ServerMessage::MapObjectOutOfScope(_)
                 | ServerMessage::ObjectAnimation { .. }
                 | ServerMessage::ObjectMoved { .. }
+                | ServerMessage::AppearanceChanged { .. }
         ) {
             inbox.0.push(m.0.clone());
         }
@@ -76,10 +87,12 @@ pub struct RemotePlayer {
     facing: f32,
     action: usize,
     frame: f32,
-    stop: usize,
-    walk: usize,
+    /// Its weapons and wings, for `SetPlayerStop` / `SetPlayerWalk`.
+    gear: crate::character::Gear,
     materials: Vec<Handle<ModelMaterial>>,
     light: Vec3,
+    /// What it shows (`ChangeCharacterExt` / `ReceiveChangePlayer`).
+    look: Appearance,
 }
 
 impl RemotePlayer {
@@ -87,6 +100,23 @@ impl RemotePlayer {
     pub fn pose_state(&self) -> (usize, f32) {
         (self.action, self.frame)
     }
+
+    /// `SetPlayerStop`: unarmed in a safe zone; outside, flying with wings or by its weapons.
+    fn stop_for(&self, safe_zone: bool) -> usize {
+        crate::character::stand_action(self.class, &self.gear, safe_zone)
+    }
+
+    /// `SetPlayerWalk`, the same way.
+    fn walk_for(&self, safe_zone: bool) -> usize {
+        crate::character::walk_action_with(self.class, &self.gear, safe_zone)
+    }
+}
+
+/// Whether the weapons go on the back: in a safe zone or during the greeting..salute emotes
+/// (`RenderCharacterBackItem`, ZzzCharacter.cpp:14638-14645).
+fn weapons_on_back(action: usize, safe_zone: bool) -> bool {
+    use crate::fx::tables::ids;
+    safe_zone || (ids::PLAYER_GREETING1 as usize..=ids::PLAYER_SALUTE1 as usize).contains(&action)
 }
 
 /// Tiles per second when walking (same as the player).
@@ -99,11 +129,14 @@ fn apply(
     terrain: Option<Res<LoadedTerrain>>,
     mut inbox: ResMut<Inbox>,
     hero: Res<HeroKey>,
-    mut remotes: Query<(Entity, &mut RemotePlayer, &crate::shadow::Shadow)>,
+    mut remotes: Query<(Entity, &mut RemotePlayer, &crate::shadow::Shadow, Option<&Children>)>,
+    mesh_children: Query<(), With<Mesh3d>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
+    data: Res<ItemData>,
+    opts: Res<crate::options::GameOptions>,
 ) {
     // Until the map is loaded.
     let Some(terrain) = terrain else { return };
@@ -117,28 +150,32 @@ fn apply(
                         continue;
                     }
                     // If already present (listed again), it is placed again.
-                    if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == c.id) {
+                    if let Some((_, mut r, _, _)) = remotes.iter_mut().find(|(_, r, _, _)| r.id == c.id) {
                         r.pos = Vec2::new(c.x as f32 + 0.5, c.y as f32 + 0.5);
                         r.path.clear();
                         r.target = (c.x, c.y);
                         continue;
                     }
-                    let class = Class::from_index(game::base_class_index(c.class));
-                    let (stop, walk) = (crate::character::stop_action(class, false), crate::character::walk_action(class));
-                    let Some(model) = crate::character::load_character(&args, class, stop, &mut meshes, &mut materials, &mut images)
+                    let look = c.appearance;
+                    let class = Class::from_index(game::base_class_index(look.class));
+                    let gear = crate::hero_dress::gear_from_appearance(&look, &data);
+                    let safe = crate::character::in_safe_zone(Vec2::new(c.x as f32, c.y as f32), Some(&terrain));
+                    let stand = crate::character::stand_action(class, &gear, safe);
+                    let dress = crate::hero_dress::dress_from_appearance(&look, &data, opts.render_level);
+                    let Some(model) = crate::character::load_character_dressed(&args, class, stand, Some(&dress), &mut meshes, &mut materials, &mut images)
                     else {
                         continue;
                     };
                     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
                     // `Class & 0x07`: 2 sitting, 3 leaning, 4 healing (1, appearing with
                     // `CreateTeleportEnd`, not drawn yet).
-                    let pose = match c.pose {
+                    let pose = match look.pose {
                         2 => Some(game::action::SIT1),
                         3 => Some(game::action::POSE1),
                         4 => Some(game::action::HEALING1),
                         _ => None,
                     };
-                    let action = pose.and_then(|at| crate::character::action::for_at(at, class.female()).flatten()).unwrap_or(stop);
+                    let action = pose.and_then(|at| crate::character::action::for_at(at, class.female()).flatten()).unwrap_or(stand);
                     let r = RemotePlayer {
                         id: c.id,
                         name: c.name.clone(),
@@ -149,10 +186,10 @@ fn apply(
                         facing: rotation_facing(c.rotation),
                         action,
                         frame: 0.0,
-                        stop,
-                        walk,
+                        gear,
                         materials: model.materials,
                         light: Vec3::splat(-1.0),
+                        look,
                     };
                     info!("aparece {} ({})", r.name, class.name());
                     let transform = remote_transform(&r, &terrain);
@@ -162,6 +199,7 @@ fn apply(
                         transform,
                         Visibility::default(),
                         model.skinned,
+                        crate::hero_dress::EquipmentGlow(model.glow),
                         shadow,
                         r,
                         crate::names::Selectable::player(c.name.clone(), c.hero_state),
@@ -183,7 +221,7 @@ fn apply(
             }
             ServerMessage::ObjectWalked { id, target_x, target_y, rotation, directions } => {
                 let id = id & game::OBJECT_ID_MASK;
-                let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
+                let Some((_, mut r, _, _)) = remotes.iter_mut().find(|(_, r, _, _)| r.id == id) else { continue };
                 let from = (r.pos.x as usize, r.pos.y as usize);
                 let mut path = VecDeque::new();
                 if directions.is_empty() {
@@ -208,7 +246,7 @@ fn apply(
             }
             ServerMessage::ObjectAnimation { id, direction, action, .. } => {
                 let id = id & game::OBJECT_ID_MASK;
-                let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
+                let Some((_, mut r, _, _)) = remotes.iter_mut().find(|(_, r, _, _)| r.id == id) else { continue };
                 // `Angle[2] = (Angle - 1) * 45`, `Movement = false` and to its `TargetX/Y`.
                 r.facing = rotation_facing(direction);
                 r.path.clear();
@@ -216,7 +254,7 @@ fn apply(
                 match crate::character::action::for_at(action, r.class.female()) {
                     Some(a) => {
                         // `SetAction` does not restart the current action.
-                        let a = a.unwrap_or(r.stop);
+                        let a = a.unwrap_or(r.stop_for(crate::character::in_safe_zone(r.pos, Some(&terrain))));
                         if a != r.action {
                             r.action = a;
                             r.frame = 0.0;
@@ -228,15 +266,48 @@ fn apply(
             // `ReceiveMovePosition`: tile and target at once, then the body glides (`JumpTime`).
             ServerMessage::ObjectMoved { id, x, y } => {
                 let id = id & game::OBJECT_ID_MASK;
-                let Some((e, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
+                let Some((e, mut r, _, _)) = remotes.iter_mut().find(|(_, r, _, _)| r.id == id) else { continue };
                 let tile = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
                 commands.entity(e).insert(crate::character::Jump::new(r.pos - tile));
                 r.pos = tile;
                 r.target = (x, y);
                 r.path.clear();
             }
+            ServerMessage::AppearanceChanged { id, slot, item } => {
+                let id = id & game::OBJECT_ID_MASK;
+                let Some((e, mut r, _, children)) = remotes.iter_mut().find(|(_, r, _, _)| r.id == id) else { continue };
+                let before = r.look;
+                r.look.apply_change(slot as usize, item);
+                if r.look == before {
+                    continue;
+                }
+                // Dressed again: new pieces, the same pose.
+                let dress = crate::hero_dress::dress_from_appearance(&r.look, &data, opts.render_level);
+                let Some(model) =
+                    crate::character::load_character_dressed(&args, r.class, r.action, Some(&dress), &mut meshes, &mut materials, &mut images)
+                else {
+                    continue;
+                };
+                for c in children.into_iter().flatten() {
+                    if mesh_children.contains(*c) {
+                        commands.entity(*c).despawn();
+                    }
+                }
+                // Standing, it takes the stand of its new gear (`SetPlayerStop` runs every tick).
+                r.gear = crate::hero_dress::gear_from_appearance(&r.look, &data);
+                if crate::character::action::standing(r.action) {
+                    r.action = r.stop_for(crate::character::in_safe_zone(r.pos, Some(&terrain)));
+                }
+                r.materials = model.materials;
+                r.light = Vec3::splat(-1.0);
+                // The highlight shells (names.rs) were children too: they are made again.
+                commands.entity(e).remove::<crate::names::EdgeShells>().insert((model.skinned, crate::hero_dress::EquipmentGlow(model.glow)));
+                for child in model.children {
+                    commands.entity(e).with_child(child);
+                }
+            }
             ServerMessage::MapObjectOutOfScope(ids) => {
-                for (e, r, shadow) in &remotes {
+                for (e, r, shadow, _) in &remotes {
                     if ids.contains(&r.id) {
                         info!("desaparece {}", r.name);
                         commands.entity(e).despawn();
@@ -306,12 +377,13 @@ fn walk(
         }
         // Sitting, leaning or emoting continues while not walking (like the hero).
         let keep = crate::character::action::resting(r.action) || crate::character::action::emote(r.action);
+        let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
         let action = if !r.path.is_empty() {
-            r.walk
+            r.walk_for(safe)
         } else if keep {
             r.action
         } else {
-            r.stop
+            r.stop_for(safe)
         };
         if action != r.action {
             r.action = action;
@@ -335,9 +407,10 @@ pub(crate) fn animate(
         r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         // An emote ends: standing (`PlayerStopAnimationSetting`). Same for an action `player.bmd`
         // lacks (any number from the server).
+        let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
         let frames = skinned.action_frames(r.action) as f32;
         if frames == 0.0 || (crate::character::action::emote(r.action) && r.frame >= frames - 1.0) {
-            r.action = r.stop;
+            r.action = r.stop_for(safe);
             r.frame = 0.0;
         }
         let ground = terrain.0.height_at(r.pos.x, r.pos.y);
@@ -347,7 +420,13 @@ pub(crate) fn animate(
             Quat::from_rotation_z(r.facing),
             r.class.game_scale(),
         );
-        skinned.pose(r.action, r.frame, false, &mut meshes, &mut sh);
+        let links = crate::character::LinkState {
+            weapons_on_back: weapons_on_back(r.action, safe),
+            safe_zone: safe,
+            time: time.elapsed_secs(),
+            ..default()
+        };
+        skinned.pose(r.action, r.frame, links, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         // `BodyLight`: the terrain light on its tile plus `o->Light` (`VectorAdd(Light, o->Light,
         // c->Light)`, ZzzCharacter.cpp:8909; set by `SelectCharacter`, see `names.rs`).

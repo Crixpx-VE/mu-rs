@@ -1,8 +1,10 @@
-//! Inventory equipment worn by the character, with its glow.
+//! Equipment worn by the characters, with its glow: the hero's from the inventory, the others'
+//! (character select, other players) from their appearance ([`dress_from_appearance`]).
 //!
 //! - **Pieces**: equipped helm, armor, pants, gloves and boots replace the class piece
 //!   with the item's model (`BodyPart[BODYPART_*].Type = MODEL_HELM + index`...), posed with the
-//!   same skeleton; the right-hand weapon uses the item's (`Weapon[0]`). The skin meshes of
+//!   same skeleton; the weapons (`Weapon[0]`, `Weapon[1]`) and the wings (`Wing`) use the item's,
+//!   linked to a bone (character.rs). The skin meshes of
 //!   those pieces (`BITMAP_SKIN`, the helm's face...) get the class skin (`BITMAP_SKIN + Skin`,
 //!   ZzzBMD.cpp:949-953), i.e. the skin texture of the class piece; `hid*` meshes are not drawn.
 //! - **Glow**: the `RenderPartObjectEffect` passes ([`item_passes`]) with the hero's light
@@ -11,8 +13,8 @@
 //! - **When**: when the equipment changes (`Inventory::equipment_rev`) or the effects limit does; also
 //!   when the character appears on a map.
 //!
-//! Not included: the left-hand weapon or shield, wings and pets (they attach to
-//! bones with their own animations), nor the +15 ornaments (`NextGradeObjectRender`).
+//! Not included: pets and mounts, the cloth capes, the wings' particles, nor the +15 ornaments
+//! (`NextGradeObjectRender`).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -22,8 +24,9 @@ use mu_data::bmd::{self, Bmd};
 use mu_data::items::glow::{GlowLight, item_passes};
 use mu_data::items::{Item, slot};
 use mu_data::objects::render::{self, Bitmap, LookColor, MeshInfo, ObjectDraw, Pass, Saw};
+use mu_protocol::appearance::{Appearance, VisibleItem, slot as look_slot};
 
-use crate::character::{BodyMaterials, Dress, Player, load_character_dressed};
+use crate::character::{BodyMaterials, Dress, Gear, Player, load_character_dressed};
 use crate::inventory::Inventory;
 use crate::item_view::ItemData;
 use crate::model_light::ModelMaterial;
@@ -33,13 +36,15 @@ pub struct HeroDressPlugin;
 
 impl Plugin for HeroDressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (redress, animate_glow).chain().run_if(in_state(GameScene::Game)));
+        app.add_systems(Update, (redress, animate_glow).chain().run_if(in_state(GameScene::Game)))
+            .add_systems(Update, animate_glow.run_if(in_state(GameScene::CharacterSelect)));
     }
 }
 
-/// Equipment glow materials whose color changes over time.
+/// Equipment glow materials whose color changes over time (the hero, other players and the
+/// characters in character select).
 #[derive(Component)]
-pub struct HeroGlow(Vec<(Handle<ModelMaterial>, GlowLight)>);
+pub struct EquipmentGlow(pub Vec<(Handle<ModelMaterial>, GlowLight)>);
 
 /// The texture of one mesh of a piece: its own, the class skin for skin meshes of equipment
 /// pieces, or none (`hid*`, `BITMAP_HIDE`). Class pieces are left as they are.
@@ -123,10 +128,48 @@ fn dress_from(inv: &Inventory, data: &ItemData, render_level: u8) -> Option<Dres
     let piece = |s: u8| inv.equipment[s as usize].and_then(|item| Some((data.model_path(&item)?, item)));
     let dress = Dress {
         parts: [piece(slot::HELM), piece(slot::ARMOR), piece(slot::PANTS), piece(slot::GLOVES), piece(slot::BOOTS)],
-        weapon: piece(slot::WEAPON_RIGHT),
+        weapons: [piece(slot::WEAPON_RIGHT), piece(slot::WEAPON_LEFT)],
+        wing: piece(slot::WING),
         render_level,
     };
-    (dress.parts.iter().any(|p| p.is_some()) || dress.weapon.is_some()).then_some(dress)
+    dress.any().then_some(dress)
+}
+
+/// The item a visible piece of an appearance stands for: `Type`, `Level` (already `LevelConvert`ed),
+/// `Option1` (excellent) and `ExtOption` (ancient), as `RenderPartObjectEffect` gets them.
+pub fn appearance_item(v: &VisibleItem) -> Item {
+    Item { group: v.group, index: v.index, level: v.level, excellent: v.excellent, ancient: v.ancient, ..Item::default() }
+}
+
+/// What another character (character select, other players) shows, from its appearance
+/// (`ChangeCharacterExt` / `ReceiveChangePlayer`). TODO: pets and mounts (`Helper`, `CreateBug`)
+/// are not drawn yet.
+pub fn dress_from_appearance(look: &Appearance, data: &ItemData, render_level: u8) -> Dress {
+    let piece = |s: usize| look.equipment[s].map(|v| appearance_item(&v)).and_then(|item| Some((data.model_path(&item)?, item)));
+    Dress {
+        parts: [piece(look_slot::HELM), piece(look_slot::ARMOR), piece(look_slot::PANTS), piece(look_slot::GLOVES), piece(look_slot::BOOTS)],
+        weapons: [piece(look_slot::WEAPON_RIGHT), piece(look_slot::WEAPON_LEFT)],
+        wing: piece(look_slot::WING),
+        render_level,
+    }
+}
+
+/// What changes the stand and walk animations of a character dressed from its appearance.
+pub fn gear_from_appearance(look: &Appearance, data: &ItemData) -> Gear {
+    let weapons = [look_slot::WEAPON_RIGHT, look_slot::WEAPON_LEFT].map(|s| look.equipment[s].map(|v| appearance_item(&v)));
+    gear(weapons, look.equipment[look_slot::WING].is_some(), data)
+}
+
+/// The same for the hero, from its inventory (`SetCharacterClass`, ZzzCharacter.cpp:11814-11841).
+fn gear_from_inventory(inv: &Inventory, data: &ItemData) -> Gear {
+    let weapons = [slot::WEAPON_RIGHT, slot::WEAPON_LEFT].map(|s| inv.equipment[s as usize]);
+    gear(weapons, inv.equipment[slot::WING as usize].is_some(), data)
+}
+
+/// `ItemAttribute[Weapon[0].Type].TwoHand` is the only attribute `SetPlayerStop` / `SetPlayerWalk` read.
+fn gear(weapons: [Option<Item>; 2], wings: bool, data: &ItemData) -> Gear {
+    let two_hand = weapons[0].and_then(|w| data.attr(&w)).is_some_and(|a| a.two_hand);
+    Gear { weapons, two_hand, wings }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -136,14 +179,14 @@ fn redress(
     inv: Res<Inventory>,
     data: Res<ItemData>,
     opts: Res<crate::options::GameOptions>,
-    players: Query<(Entity, &Player, Option<&Children>)>,
+    mut players: Query<(Entity, &mut Player, Option<&Children>)>,
     mesh_children: Query<(), With<Mesh3d>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     mut last: Local<Option<(u32, u8)>>,
 ) {
-    let Ok((e, p, children)) = players.single() else {
+    let Ok((e, mut p, children)) = players.single_mut() else {
         // No character (loading another map): it gets dressed again when it reappears.
         *last = None;
         return;
@@ -154,6 +197,7 @@ fn redress(
     }
     let first = last.is_none();
     *last = Some(key);
+    p.gear = gear_from_inventory(&inv, &data);
     let dress = dress_from(&inv, &data, opts.render_level);
     // Just spawned with nothing worn: already as `spawn_player` loaded it.
     if first && dress.is_none() {
@@ -167,14 +211,14 @@ fn redress(
             commands.entity(*c).despawn();
         }
     }
-    commands.entity(e).insert((model.skinned, BodyMaterials(model.materials), HeroGlow(model.glow)));
+    commands.entity(e).insert((model.skinned, BodyMaterials(model.materials), EquipmentGlow(model.glow)));
     for child in model.children {
         commands.entity(e).with_child(child);
     }
 }
 
 /// Color of the pulsing passes (excellent, +3 to +6, ancient).
-fn animate_glow(time: Res<Time<Real>>, glows: Query<&HeroGlow>, mut materials: ResMut<Assets<ModelMaterial>>) {
+fn animate_glow(time: Res<Time<Real>>, glows: Query<&EquipmentGlow>, mut materials: ResMut<Assets<ModelMaterial>>) {
     let t = time.elapsed_secs() * 1000.0;
     for g in &glows {
         for (h, light) in &g.0 {

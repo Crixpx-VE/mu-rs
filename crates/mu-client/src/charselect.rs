@@ -10,9 +10,11 @@
 //!   ZzzScene.cpp:1064): here the camera covers the whole window with a wider field of view so that
 //!   strip sees the same 35°, and two black bands cover the rest.
 //! - **Characters** (`ReceiveCharacterList`, WSclient.cpp:497-502): slot, position and rotation; fixed
-//!   height 169.5 (ZzzScene.cpp:1104-1105), scale 1.2 (ZzzCharacter.cpp:11736-11747). Standing with
-//!   the sword in hand (`SetPlayerStop`: outside a safe zone with a one-handed weapon →
-//!   `PLAYER_STOP_SWORD`, ZzzCharacter.cpp:300-305), at 0.26 frames per tick (ZzzOpenData.cpp:332).
+//!   height 169.5 (ZzzScene.cpp:1104-1105), scale 1.2 (ZzzCharacter.cpp:11736-11747). Dressed from
+//!   their appearance (`ChangeCharacterExt`, WSclient.cpp:521; hero_dress.rs): armor, weapons in
+//!   hand, wings and the glow of their level. Standing as `SetPlayerStop` puts them outside a safe
+//!   zone, by their wings (`PLAYER_STOP_FLY`) or weapons (ZzzCharacter.cpp:233-361; e.g.
+//!   `PLAYER_STOP_SWORD` at 0.26 frames per tick, ZzzOpenData.cpp:332).
 //!   Fixed light 0.4 (0.5 for slot 0, which is `Hero`) plus 1 for the selected one (ZzzScene.cpp:1071-1085,
 //!   ZzzCharacter.cpp:8900-8909 and 8986-8990).
 //! - **Selected** (ZzzScene.cpp:1077-1150): white light on the ground, two `gmmzine` marks spinning
@@ -30,6 +32,7 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontSource};
 use bevy::ui::UiScale;
+use mu_protocol::appearance::Appearance;
 
 use crate::Args;
 use crate::account::{Class, StoredCharacter};
@@ -192,6 +195,8 @@ fn net_messages(
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
+    data: Res<crate::item_view::ItemData>,
+    opts: Res<crate::options::GameOptions>,
 ) {
     use mu_protocol::game::{self, ServerMessage};
     for m in from.read() {
@@ -202,15 +207,17 @@ fn net_messages(
                     commands.entity(shadow.1).despawn();
                 }
                 for c in characters {
+                    let look = c.appearance;
                     let c = StoredCharacter {
                         slot: c.slot as usize,
                         name: c.name.clone(),
-                        class: Class::from_index(game::base_class_index(c.class)),
+                        class: Class::from_index(game::base_class_index(look.class)),
                         level: c.level as u32,
                         guild_status: c.guild_position,
                     };
                     if c.slot < SLOTS.len() {
-                        spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, &c);
+                        let dress = (&look, &*data, opts.render_level);
+                        spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, &c, dress);
                     }
                 }
             }
@@ -228,7 +235,9 @@ fn net_messages(
     }
 }
 
-/// An account character in its slot (`CreateCharacterPointer` from `ReceiveCharacterList`).
+/// An account character in its slot (`CreateCharacterPointer` from `ReceiveCharacterList`),
+/// dressed from its appearance (`ChangeCharacterExt`) with the items' data and the render level.
+#[allow(clippy::too_many_arguments)]
 fn spawn_slot_character(
     commands: &mut Commands,
     args: &Args,
@@ -237,10 +246,13 @@ fn spawn_slot_character(
     images: &mut Assets<Image>,
     shadow_material: &crate::shadow::ShadowMaterial,
     c: &StoredCharacter,
+    (look, data, render_level): (&Appearance, &crate::item_view::ItemData, u8),
 ) -> Option<Entity> {
-    // Selection is not a safe zone: the Dark Knight holds the sword in hand.
-    let action = crate::character::stop_action(c.class, c.class == Class::Knight);
-    let model = crate::character::load_character(args, c.class, action, meshes, materials, images)?;
+    // Selection is not a safe zone: weapons in hand, and the stand of its weapons or wings.
+    let dress = crate::hero_dress::dress_from_appearance(look, data, render_level);
+    let gear = crate::hero_dress::gear_from_appearance(look, data);
+    let action = crate::character::stand_action(c.class, &gear, false);
+    let model = crate::character::load_character_dressed(args, c.class, action, Some(&dress), meshes, materials, images)?;
     let (x, y, angle) = SLOTS[c.slot];
     let transform = Transform {
         translation: Vec3::new(x, CHARACTER_Z, -y) / MU_SCALE,
@@ -265,6 +277,7 @@ fn spawn_slot_character(
             light: -1.0,
         },
         model.skinned,
+        crate::hero_dress::EquipmentGlow(model.glow),
         shadow,
     ));
     for child in model.children {
@@ -289,8 +302,9 @@ fn animate(
             Quat::from_rotation_z(c.angle().to_radians()),
             c.class.select_scale(),
         );
-        // Outside a safe zone: sword in hand.
-        skinned.pose(c.action, c.frame, false, &mut meshes, &mut sh);
+        // Outside a safe zone: weapons in hand.
+        let links = crate::character::LinkState { weapons_on_back: false, safe_zone: false, time: time.elapsed_secs(), ..default() };
+        skinned.pose(c.action, c.frame, links, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
     }
 }
@@ -1106,12 +1120,17 @@ fn scene_events(
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
+    data: Res<crate::item_view::ItemData>,
+    opts: Res<crate::options::GameOptions>,
 ) {
     let (Some(mut link), Some(mut sel)) = (link, sel) else { return };
     for ev in std::mem::take(&mut link.to_scene) {
         match ev {
             SceneEvent::Created(c) => {
-                spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, &c);
+                // `CharacterCreationSuccessful` carries no equipment: it appears as it is created.
+                let look = Appearance::new(mu_protocol::game::class_number(c.class.index() as u8));
+                let dress = (&look, &*data, opts.render_level);
+                spawn_slot_character(&mut commands, &args, &mut meshes, &mut materials, &mut images, &shadow_material, &c, dress);
                 sel.selected = Some(c.slot);
             }
             SceneEvent::Deleted(name) => {
