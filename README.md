@@ -46,7 +46,7 @@ percentage measures what is listed, not the whole original game.
   - [x] Ambient sounds and music of every map
   - [x] Fixed 25 Hz game logic with interpolation (smooth at any frame rate)
   - [x] Effects engine (particles, trails, sprites, effect models)
-  - [ ] All effect types of the original (many are translated, not all)
+  - [ ] All effect types of the original (all 576 registered; some still partial, see `fx/kinds/mod.rs`)
   - [x] Dragon invasion event (visual)
 - **Login and characters**
   - [x] Title and loading screens
