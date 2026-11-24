@@ -8,8 +8,8 @@ formulas, timings and numbers are taken from the original client logic, not gues
 
 > **Built with AI.** This project is developed with the help of artificial intelligence
 > ([Claude Code](https://claude.com/claude-code)). The repository ships the tooling that makes
-> that workflow possible, so anyone can keep developing it the same way: [`CLAUDE.md`](CLAUDE.md)
-> (project rules any AI assistant reads on its own), table generators in [`tools/`](tools) and
+> that workflow possible, so anyone can keep developing it the same way: [`AGENTS.md`](AGENTS.md)
+> (project rules AI agents read on their own; [`CLAUDE.md`](CLAUDE.md) imports it), table generators in [`tools/`](tools) and
 > test bots that log in and play against a server.
 
 ## Status
@@ -102,7 +102,7 @@ Louis agree on (`tools/gen_spawns.py`).
 
 ## Contributing
 
-Issues and pull requests are welcome, made by hand or with AI. Read [`CLAUDE.md`](CLAUDE.md) first:
+Issues and pull requests are welcome, made by hand or with AI. Read [`AGENTS.md`](AGENTS.md) first:
 it has the project rules (stay faithful to the original, cite the source of every number, never
 commit game data or secrets). Code comments and commit messages are in Spanish.
 
@@ -124,7 +124,7 @@ las fórmulas, tiempos y números salen de la lógica del cliente original, no s
 > **Hecho con IA.** El proyecto se desarrolla con ayuda de inteligencia artificial
 > ([Claude Code](https://claude.com/claude-code)). El repositorio incluye las herramientas que hacen
 > posible esa forma de trabajar, para que cualquiera pueda seguir desarrollándolo igual:
-> [`CLAUDE.md`](CLAUDE.md) (las reglas del proyecto, que cualquier asistente de IA lee solo),
+> [`AGENTS.md`](AGENTS.md) (las reglas del proyecto, que los agentes de IA leen solos; [`CLAUDE.md`](CLAUDE.md) lo importa),
 > generadores de tablas en [`tools/`](tools) y bots de prueba que entran y juegan contra un servidor.
 
 ### Estado
@@ -196,7 +196,7 @@ clientes xulek/muonline y muonlinejs como inspiración.
 
 ### Contribuir
 
-Se aceptan issues y pull requests, hechos a mano o con IA. Lee antes [`CLAUDE.md`](CLAUDE.md): tiene
+Se aceptan issues y pull requests, hechos a mano o con IA. Lee antes [`AGENTS.md`](AGENTS.md): tiene
 las reglas del proyecto (fidelidad al original, citar de dónde sale cada número, no subir nunca
 datos del juego ni secretos). Los comentarios del código y los commits están en español.
 
