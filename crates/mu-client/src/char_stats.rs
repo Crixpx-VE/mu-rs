@@ -1,25 +1,25 @@
-//! Las cuentas que hace el cliente con las estadísticas del personaje (`CHARACTER_MACHINE`,
-//! ZzzInfomation.cpp del Main 5.2): daño, daño mágico y de maldición, ataque, velocidad, defensa y
-//! sus versiones contra jugadores. El servidor solo manda los puntos (`CharacterInformation`); lo
-//! demás lo calcula el cliente con `CalculateAll` (ZzzInfomation.cpp:3958-4046).
+//! The client-side character stat formulas (`CHARACTER_MACHINE`, ZzzInfomation.cpp of
+//! Main 5.2): damage, magic and curse damage, attack rate, speed, defense and their PvP
+//! versions. The server only sends the points (`CharacterInformation`); the client computes the
+//! rest with `CalculateAll` (ZzzInfomation.cpp:3958-4046).
 //!
-//! Los campos son `WORD` en el original (`CHARACTER_ATTRIBUTE`, _struct.h:346-406): aquí `u16`,
-//! y las sumas dan la vuelta igual que allí.
+//! The fields are `WORD` in the original (`CHARACTER_ATTRIBUTE`, _struct.h:346-406): here `u16`,
+//! and sums wrap around the same way.
 //!
-//! **Equipo:** todavía no hay objetos. Lo que sumen las armas, alas, anillos, conjuntos, joyas de
-//! armonía, opciones 380, zócalos, etc. entra por [`EquipBonus`] ya calculado (por mano y por
-//! campo, en el punto de la cuenta del original donde se suma); por defecto, sin equipo, todo es
-//! cero y se usa el daño de la mano izquierda (`r->Type == -1`, ZzzInventory.cpp:5980-5984).
+//! **Equipment:** there are no items yet. What weapons, wings, rings, sets, jewels of harmony,
+//! 380 options, sockets, etc. add comes in through [`EquipBonus`] already computed (per hand and
+//! per field, at the point of the original formula where it is added); by default, unequipped,
+//! everything is zero and the left hand damage is used (`r->Type == -1`, ZzzInventory.cpp:5980-5984).
 //!
-//! **Sin buffs:** los pergaminos, pociones, `ABILITY_PLUS_DAMAGE`, etc. no existen todavía; el
-//! original los suma en los mismos puntos.
+//! **No buffs:** scrolls, potions, `ABILITY_PLUS_DAMAGE`, etc. don't exist yet; the original
+//! adds them at the same points.
 //!
-//! El Rage Fighter va dentro de `#ifdef PBG_ADD_NEWCHAR_MONK` en el Main 5.2 (apagado allí, como en
-//! account.rs): sus fórmulas son las de esos bloques.
+//! The Rage Fighter is inside `#ifdef PBG_ADD_NEWCHAR_MONK` in Main 5.2 (disabled there, as in
+//! account.rs): its formulas are the ones in those blocks.
 
 use crate::account::Class;
 
-/// Los puntos del personaje (`Character.Strength`...), tal como los manda el servidor.
+/// The character's points (`Character.Strength`...), as the server sends them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Points {
     pub level: u16,
@@ -28,87 +28,87 @@ pub struct Points {
     pub agility: u16,
     pub vitality: u16,
     pub energy: u16,
-    /// `Charisma` (mando del Dark Lord).
+    /// `Charisma` (Dark Lord command).
     pub command: u16,
 }
 
-/// Qué daño de mano enseña `GetAttackDamage` (ZzzInventory.cpp:5950-6040).
+/// Which hand's damage `GetAttackDamage` shows (ZzzInventory.cpp:5950-6040).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
-#[allow(dead_code)] // Sin equipo todavía solo sale `Left`.
+#[allow(dead_code)] // Without equipment only `Left` occurs yet.
 pub enum AttackHand {
-    /// Sin arma a la derecha, un bastón a la derecha o un arco: el de la izquierda.
+    /// No weapon on the right, a staff on the right or a bow: the left one.
     #[default]
     Left,
-    /// Un arma a la derecha o una ballesta: el de la derecha.
+    /// A weapon on the right or a crossbow: the right one.
     Right,
-    /// Dos armas: Dark Knight y Magic Gladiator el 55 % de cada una, Rage Fighter el 60 % y 65 %
-    /// de la suma (5997-6026). Se enseña en azul (`Alpha`).
+    /// Two weapons: Dark Knight and Magic Gladiator 55 % of each, Rage Fighter 60 % and 65 %
+    /// of the sum (5997-6026). Shown in blue (`Alpha`).
     TwoWeapons,
-    /// Arco y flechas con el +1 o más que suma daño (6006-6016): solo cambia el color.
+    /// Bow and arrows with +1 or more, which add damage (6006-6016): only the color changes.
     BowWithAmmo,
 }
 
-/// Lo que suma el equipo a cada cuenta. Por defecto, sin equipo.
+/// What equipment adds to each formula. Defaults to no equipment.
 #[derive(Clone, PartialEq, Debug, Default)]
 pub struct EquipBonus {
     /// `Character.AddStrength`, `AddDexterity`, `AddVitality`, `AddEnergy`, `AddCharisma`
-    /// (opciones de conjunto, zócalos, alas del Dark Lord...: `CalculateAll`, 3958-4000).
+    /// (set options, sockets, Dark Lord wings...: `CalculateAll`, 3958-4000).
     pub add_strength: u16,
     pub add_agility: u16,
     pub add_vitality: u16,
     pub add_energy: u16,
     pub add_command: u16,
-    /// Arco a la izquierda o ballesta a la derecha con durabilidad: la fórmula de los arcos
+    /// Bow on the left or crossbow on the right with durability: the bow formula
     /// (`CalculateDamage`, 2683-2689).
     pub bow: bool,
-    /// Daño (mínimo, máximo) que suman alas, armas, colgante, anillos, conjunto y zócalos a la mano
-    /// derecha y a la izquierda (2761-2943).
+    /// Damage (min, max) that wings, weapons, pendant, rings, set and sockets add to the right
+    /// and left hand (2761-2943).
     pub damage_right: (u16, u16),
     pub damage_left: (u16, u16),
     pub hand: AttackHand,
-    /// `CalculateMagicDamage` (2997-3175) y `CalculateCurseDamage` (3187-3235).
+    /// `CalculateMagicDamage` (2997-3175) and `CalculateCurseDamage` (3187-3235).
     pub magic_damage: (u16, u16),
     pub curse_damage: (u16, u16),
-    /// `CalculateAttackRating`: conjunto y zócalos (3258-3260).
+    /// `CalculateAttackRating`: set and sockets (3258-3260).
     pub attack_rating: u16,
-    /// `CalculateAttackSpeed`: armas, guantes, anillos, mascotas, opciones (3340-3564).
+    /// `CalculateAttackSpeed`: weapons, gloves, rings, pets, options (3340-3564).
     pub attack_speed: u16,
     pub magic_speed: u16,
-    /// `CalculateSuccessfulBlocking`: escudo y opciones (3631-3656).
+    /// `CalculateSuccessfulBlocking`: shield and options (3631-3656).
     pub blocking: u16,
-    /// `m_fDefenceRateBonus` de los zócalos (3658); 1 sin zócalos.
+    /// Socket `m_fDefenceRateBonus` (3658); 1 without sockets.
     pub blocking_factor: Option<f32>,
-    /// `CalculateDefense`: lo de cada pieza, conjunto, alas... (3697-3797).
+    /// `CalculateDefense`: each piece, set, wings... (3697-3797).
     pub defense: u16,
-    /// Conjunto completo y en buen estado (`bDexSuccess`, NewUICharacterInfoWindow.cpp:861-940): la
-    /// defensa enseña el 10 % de bonificación.
+    /// Full set in good condition (`bDexSuccess`, NewUICharacterInfoWindow.cpp:861-940): the
+    /// defense shows the 10 % bonus.
     pub full_set: bool,
-    /// Lo que suma la ventana encima de `GetAttackDamage`: anillos de transformación, mascotas y
-    /// armonía (`iMinIndex`/`iMaxIndex`, NewUICharacterInfoWindow.cpp:585-768).
+    /// What the window adds on top of `GetAttackDamage`: transformation rings, pets and
+    /// harmony (`iMinIndex`/`iMaxIndex`, NewUICharacterInfoWindow.cpp:585-768).
     pub window_damage: (i32, i32),
-    /// Armonía y opción 380 del ataque y la defensa contra jugadores (los `(+%d)` de 2109 y 2110).
+    /// Harmony and 380 option of PvP attack rate and defense (the `(+%d)` of 2109 and 2110).
     pub pvp_attack_bonus: i32,
     pub pvp_defense_bonus: i32,
-    /// Armonía de la defensa (`maxdefense`, 964-980) y lo que suben el anillo de transformación y
-    /// las mascotas (`iChangeRingAddDefense`, 982-995).
+    /// Defense harmony (`maxdefense`, 964-980) plus what the transformation ring and pets add
+    /// (`iChangeRingAddDefense`, 982-995).
     pub harmony_defense: i32,
     pub ring_defense: i32,
-    /// Lo que suman al daño mágico anillos y mascotas (1329-1399) y la armonía (`maxMg`, 1311-1327).
+    /// What rings and pets (1329-1399) and harmony (`maxMg`, 1311-1327) add to magic damage.
     pub window_magic: (i32, i32),
     pub harmony_magic: i32,
-    /// Lo que suman a la maldición anillos y mascotas (1467-1515).
+    /// What rings and pets add to curse damage (1467-1515).
     pub window_curse: (i32, i32),
-    /// Un bastón (o espada mágica) a la derecha: su `MagicPower` ya descontado el desgaste, en
-    /// tanto por uno (el `(+%d)` de `GlobalText[215]`, 1409-1425).
+    /// A staff (or magic sword) on the right: its `MagicPower` after wear, as a fraction
+    /// (the `(+%d)` of `GlobalText[215]`, 1409-1425).
     pub staff_magic: Option<f32>,
-    /// Un libro de invocación a la izquierda (el `(+%d)` de `GlobalText[1693]`, 1517-1530).
+    /// A summoning book on the left (the `(+%d)` of `GlobalText[1693]`, 1517-1530).
     pub book_curse: Option<f32>,
 }
 
-/// Lo que guarda `CalculateAll` en `Character`.
+/// What `CalculateAll` stores in `Character`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub struct Derived {
-    /// Fuerza, agilidad, vitalidad, energía y mando con lo del equipo (`Strength + AddStrength`).
+    /// Strength, agility, vitality, energy and command including equipment (`Strength + AddStrength`).
     pub strength: u16,
     pub agility: u16,
     pub vitality: u16,
@@ -131,12 +131,12 @@ pub struct Derived {
     pub defense: u16,
 }
 
-/// `(WORD)tmpf` de las cuentas con decimales (`float` del original).
+/// `(WORD)tmpf` of the formulas with decimals (`float` in the original).
 fn word(f: f32) -> u16 {
     f as i64 as u16
 }
 
-/// `CalculateAll` sin buffs (ZzzInfomation.cpp:3958-4014).
+/// `CalculateAll` without buffs (ZzzInfomation.cpp:3958-4014).
 pub fn calculate(class: Class, p: &Points, eq: &EquipBonus) -> Derived {
     let s = p.strength.wrapping_add(eq.add_strength);
     let d = p.agility.wrapping_add(eq.add_agility);
@@ -167,7 +167,7 @@ pub fn calculate(class: Class, p: &Points, eq: &EquipBonus) -> Derived {
     out.damage_min_left = (min as u16).wrapping_add(eq.damage_left.0);
     out.damage_max_left = (max as u16).wrapping_add(eq.damage_left.1);
 
-    // `CalculateMagicDamage` (2980-2985) y `CalculateCurseDamage` (3178-3185, solo la Summoner).
+    // `CalculateMagicDamage` (2980-2985) and `CalculateCurseDamage` (3178-3185, Summoner only).
     out.magic_min = ((e32 / 9) as u16).wrapping_add(eq.magic_damage.0);
     out.magic_max = ((e32 / 4) as u16).wrapping_add(eq.magic_damage.1);
     if class == Class::Summoner {
@@ -219,7 +219,7 @@ pub fn calculate(class: Class, p: &Points, eq: &EquipBonus) -> Derived {
     };
     out.defense = (defense as u16).wrapping_add(eq.defense);
 
-    // `CalculateSuccessfulBlockingPK` (3568-3602) y `CalculateAttackRatingPK` (3263-3296), en `float`.
+    // `CalculateSuccessfulBlockingPK` (3568-3602) and `CalculateAttackRatingPK` (3263-3296), in `float`.
     let df = d as f32;
     out.blocking_pk = word(match class {
         Class::Knight | Class::Lord | Class::Summoner => level * 2.0 + df * 0.5,
@@ -237,7 +237,7 @@ pub fn calculate(class: Class, p: &Points, eq: &EquipBonus) -> Derived {
     out
 }
 
-/// `GetAttackDamage` (ZzzInventory.cpp:5950-6040): el daño que se enseña y si va en azul.
+/// `GetAttackDamage` (ZzzInventory.cpp:5950-6040): the displayed damage and whether it is blue.
 pub fn attack_damage(class: Class, d: &Derived, hand: AttackHand) -> (i32, i32, bool) {
     let (rmin, rmax, lmin, lmax) =
         (d.damage_min_right as i32, d.damage_max_right as i32, d.damage_min_left as i32, d.damage_max_left as i32);
@@ -330,11 +330,11 @@ mod tests {
 
     #[test]
     fn sumas_en_word() {
-        // `& 0xFFFF` del ataque del Dark Lord con mucha agilidad.
+        // `& 0xFFFF` of the Dark Lord's attack rate with high agility.
         let d = calc(Class::Lord, pts(400, 32767, 32767, 100, 100, 100));
         let full = 400 * 5 + 32767 * 5 / 2 + 32767 / 6 + 100 / 10;
         assert_eq!(d.attack_rating as u32, full & 0xFFFF);
-        // Los puntos del equipo se suman a los del servidor.
+        // Equipment points are added to the server's.
         let eq = EquipBonus { add_strength: 12, damage_right: (10, 20), hand: AttackHand::Right, ..Default::default() };
         let d = calculate(Class::Knight, &pts(1, 28, 20, 25, 10, 0), &eq);
         assert_eq!(d.strength, 40);

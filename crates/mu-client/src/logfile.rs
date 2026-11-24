@@ -1,9 +1,9 @@
-//! Registro del juego en `mu-client.log` (o el nombre de `MU_LOG`), junto al ejecutable (se
-//! reescribe en cada arranque).
+//! Game log in `mu-client.log` (or the name in `MU_LOG`), next to the executable (overwritten
+//! on every start).
 //!
-//! Guarda todo lo que sale por consola (avisos, errores de la tarjeta gráfica, shaders...),
-//! los fallos que cierran el juego (con dónde pasaron) y, cada 30 s, los fps y dónde está el
-//! personaje. Sirve para que los jugadores manden el archivo cuando algo va mal.
+//! Stores everything printed to the console (warnings, graphics card errors, shaders...),
+//! crashes that close the game (with where they happened) and, every 30 s, the fps and the
+//! character's position. Lets players send the file when something goes wrong.
 
 use std::fs::File;
 use std::io::Write;
@@ -15,8 +15,8 @@ use bevy::log::tracing_subscriber::{Layer, fmt};
 use bevy::log::{BoxedLayer, LogPlugin};
 use bevy::prelude::*;
 
-/// Ruta del registro: junto al ejecutable (o en la carpeta actual si no se sabe). El lanzador
-/// dice el nombre en `MU_LOG`, distinto para cada juego abierto a la vez.
+/// Log path: next to the executable (or in the current folder if unknown). The launcher
+/// passes the name in `MU_LOG`, different for each game instance open at once.
 pub fn path() -> PathBuf {
     let name = std::env::var("MU_LOG")
         .ok()
@@ -28,7 +28,7 @@ pub fn path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(&name))
 }
 
-/// Escritor compartido por los mensajes y el gancho de fallos.
+/// Writer shared by the messages and the panic hook.
 #[derive(Clone)]
 struct LogFile(Arc<Mutex<File>>);
 
@@ -51,19 +51,19 @@ fn file() -> Option<LogFile> {
     FILE.get_or_init(|| File::create(path()).ok().map(|f| LogFile(Arc::new(Mutex::new(f))))).clone()
 }
 
-/// Capa de `tracing` que copia los mensajes al archivo (para `LogPlugin::custom_layer`).
+/// `tracing` layer that copies messages to the file (for `LogPlugin::custom_layer`).
 fn layer(_app: &mut App) -> Option<BoxedLayer> {
     let f = file()?;
     Some(fmt::layer().with_ansi(false).with_writer(move || f.clone()).boxed())
 }
 
-/// `LogPlugin` con el archivo de registro y el gancho de fallos.
+/// `LogPlugin` with the log file and the panic hook.
 pub fn plugin() -> LogPlugin {
     install_panic_hook();
     LogPlugin { custom_layer: layer, ..default() }
 }
 
-/// Los fallos (`panic`) se apuntan con su sitio y la pila antes de cerrar.
+/// Panics are logged with their location and backtrace before exiting.
 fn install_panic_hook() {
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -97,7 +97,7 @@ fn log_start(args: Res<crate::Args>) {
     info!("registro en {}", path().display());
 }
 
-/// Cada 30 s: fps (media) y casilla del personaje.
+/// Every 30 s: fps (average) and the character's tile.
 fn log_status(
     time: Res<Time<Real>>,
     diagnostics: Res<DiagnosticsStore>,

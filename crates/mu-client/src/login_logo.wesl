@@ -1,6 +1,6 @@
-// Logo MU de la pantalla de login (`NewRenderLogInScene` de ZzzScene.cpp): textura × color.
-// El brillo se suma (`EnableAlphaBlend`, ONE/ONE: la mezcla la pone `LogoMaterial::specialize`);
-// el logo se mezcla por alfa y descarta lo que no pasa de 0.25 (`EnableAlphaTest`, `glAlphaFunc`).
+// MU logo of the login screen (`NewRenderLogInScene` of ZzzScene.cpp): texture × color.
+// The glow is additive (`EnableAlphaBlend`, ONE/ONE: the blend is set by `LogoMaterial::specialize`);
+// the logo is alpha-blended and discards what does not exceed 0.25 (`EnableAlphaTest`, `glAlphaFunc`).
 
 import bevy_ui_render::ui_vertex_output::UiVertexOutput;
 

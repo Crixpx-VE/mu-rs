@@ -1,38 +1,38 @@
-//! Objetos del mapa con efectos: Aida (`WD_33AIDA`), Crywolf (`WD_34CRYWOLF_1ST`), Kanturu 1-3
-//! (`WD_37KANTURU_1ST` .. `WD_39KANTURU_3RD`) y el mapa de los GM (`WD_40AREA_FOR_GM`, que usa el
-//! código de Kanturu 1: `M40GMArea::IsGmArea`, `GM_kanturu_1st.cpp:23-26`).
+//! Map objects with effects: Aida (`WD_33AIDA`), Crywolf (`WD_34CRYWOLF_1ST`), Kanturu 1-3
+//! (`WD_37KANTURU_1ST` .. `WD_39KANTURU_3RD`) and the GM map (`WD_40AREA_FOR_GM`, which uses the
+//! Kanturu 1 code: `M40GMArea::IsGmArea`, `GM_kanturu_1st.cpp:23-26`).
 //!
-//! Traducido de `GMAida.cpp`, `GMCrywolf1st.cpp`, `GM_kanturu_1st.cpp`, `GM_Kanturu_2nd.cpp` y
-//! `GM_Kanturu_3rd.cpp` (Main 5.2): lo de `MoveObject`, `RenderObjectVisual`, `RenderObjectMesh` y
-//! `RenderAfterObjectMesh` que crea partículas, sprites, estelas, efectos, luces del suelo y sonidos.
-//! Las mallas ocultas, pasadas, desplazamientos de UV y velocidades están en
+//! Translated from `GMAida.cpp`, `GMCrywolf1st.cpp`, `GM_kanturu_1st.cpp`, `GM_Kanturu_2nd.cpp` and
+//! `GM_Kanturu_3rd.cpp` (Main 5.2): the parts of `MoveObject`, `RenderObjectVisual`, `RenderObjectMesh`
+//! and `RenderAfterObjectMesh` that create particles, sprites, trails, effects, terrain lights and sounds.
+//! Hidden meshes, passes, UV scrolling and speeds live in
 //! `mu_data::objects::rules_kanturu`.
 //!
-//! `MoveObject` va para todos los objetos que se ven y en Aida, Kanturu 1, 2 y 3 todos piden el sonido
-//! de ambiente del mapa (`PlayBuffer`, que no vuelve a empezar mientras suena): por eso se registran
-//! todos los tipos de esos mapas. En Crywolf también, para hacer una vez por tick las gotas del agua del
-//! suelo (`BITMAP_SPOT_WATER`, `FaceTexture`, `ZzzLodTerrain.cpp:1478-1487`).
+//! `MoveObject` runs for every visible object, and in Aida and Kanturu 1, 2 and 3 all of them request
+//! the map's ambient sound (`PlayBuffer`, which does not restart while playing): that is why every
+//! type of those maps is registered. Crywolf too, to spawn the ground water drops once per tick
+//! (`BITMAP_SPOT_WATER`, `FaceTexture`, `ZzzLodTerrain.cpp:1478-1487`).
 //!
-//! La niebla que se crea "si `HiddenMesh != -2`" (Aida 59/62/63, Kanturu 1 62/107/108, Kanturu 2
-//! 45-47/49, Kanturu 3 1/11/46/49/50): `MoveObject` pone `HiddenMesh = -2` en cada tick, pero solo
-//! mueve los objetos que se vieron en el fotograma anterior (`MoveObjects`, `ZzzObject.cpp:4516`), así
-//! que las nubes salen el primer fotograma en que el objeto vuelve a verse (y siguen al objeto
-//! mientras se vea). Como en Heaven (`objects_2.rs`): una marca [`FX_MAP_ANCHOR`] hace de `o->Target`
-//! y se vuelven a crear cuando el objeto vuelve a moverse tras un hueco.
+//! The fog created "if `HiddenMesh != -2`" (Aida 59/62/63, Kanturu 1 62/107/108, Kanturu 2
+//! 45-47/49, Kanturu 3 1/11/46/49/50): `MoveObject` sets `HiddenMesh = -2` every tick, but it only
+//! moves objects that were visible in the previous frame (`MoveObjects`, `ZzzObject.cpp:4516`), so
+//! the clouds appear on the first frame the object becomes visible again (and follow the object
+//! while it stays visible). As in Heaven (`objects_2.rs`): an [`FX_MAP_ANCHOR`] marker acts as
+//! `o->Target` and they are recreated when the object moves again after a gap.
 //!
-//! También van aquí los efectos que solo usan estos mapas y no existían en el motor: `MODEL_GHOST`,
-//! `MODEL_FENRIR_THUNDER` (subtipos 1 y 2) y `BITMAP_MAGIC` (subtipos 2, 3 y 7); se registran solo si
-//! nadie lo ha hecho. Las mariposas (`MODEL_BUTTERFLY01`) son las de `objects_kalima.rs` y el agua
-//! `BITMAP_TWINTAIL_WATER` la de `particles_2.rs`.
+//! Also here are the effects only these maps use, which the engine did not have: `MODEL_GHOST`,
+//! `MODEL_FENRIR_THUNDER` (subtypes 1 and 2) and `BITMAP_MAGIC` (subtypes 2, 3 and 7); they are only
+//! registered if nobody else did. The butterflies (`MODEL_BUTTERFLY01`) are those of
+//! `objects_kalima.rs` and the `BITMAP_TWINTAIL_WATER` water the one of `particles_2.rs`.
 //!
-//! Sonidos: los de Kanturu 1 y 2 (`SOUND_KANTURU_1ST_*`, `SOUND_KANTURU_2ND_*`) no están en
-//! `Data/Audio/SoundFiles.json` y no suenan; en el mapa de los GM el original no los carga
-//! (`MapManager.cpp` solo los carga en `WD_37KANTURU_1ST`): no se piden.
+//! Sounds: those of Kanturu 1 and 2 (`SOUND_KANTURU_1ST_*`, `SOUND_KANTURU_2ND_*`) are not in
+//! `Data/Audio/SoundFiles.json` and do not play; on the GM map the original does not load them
+//! (`MapManager.cpp` only loads them in `WD_37KANTURU_1ST`): they are not requested.
 //!
-//! TODO(original): lo que depende del estado del servidor se deja en el de sin evento: Crywolf en paz
-//! (`m_OccupationState = CRYWOLF_OCCUPATION_STATE_PEACE`: sin el humo de 74/84 ocupados ni la estatua
-//! 81 en guerra) y Kanturu 3 sin batalla (Maya bajo el suelo, 74 y 73 sin conquistar). El cambio de
-//! tiempo de Crywolf (`Change_weather`/`weather`, `GMCrywolf1st.cpp:381-389`, 506-511) es del tiempo.
+//! TODO(original): what depends on server state is left in its no-event state: Crywolf at peace
+//! (`m_OccupationState = CRYWOLF_OCCUPATION_STATE_PEACE`: no smoke of the occupied 74/84 and no
+//! statue 81 at war) and Kanturu 3 with no battle (Maya underground, 74 and 73 not conquered). The
+//! Crywolf weather change (`Change_weather`/`weather`, `GMCrywolf1st.cpp:381-389`, 506-511) belongs to the weather.
 
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
@@ -51,11 +51,11 @@ const WD_38KANTURU_2ND: i32 = 38;
 const WD_39KANTURU_3RD: i32 = 39;
 const WD_40AREA_FOR_GM: i32 = 40;
 
-/// Carpeta de Crywolf (`WorldActive + 1`), para el trapecio del suelo que se ve.
+/// Crywolf folder (`WorldActive + 1`), for the visible ground trapezoid.
 const CRYWOLF_FOLDER: u16 = 35;
 
 pub fn register(r: &mut Registry) {
-    // Todos los tipos de cada mapa (ver arriba).
+    // Every type of each map (see above).
     for ty in 0..=78 {
         r.object(WD_33AIDA, ty, aida);
     }
@@ -81,28 +81,28 @@ pub fn register(r: &mut Registry) {
     effect(BITMAP_MAGIC, EffectKind { create: Some(magic_create), step: Some(magic_step), draw: None });
 }
 
-// --- Común ---------------------------------------------------------------------------------------
+// --- Common --------------------------------------------------------------------------------------
 
-/// `rand() % n` en coma flotante.
+/// `rand() % n` as float.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `PlayBuffer(id)` desde `MoveObject`: todos los objetos lo piden en cada tick, pero el sonido no
-/// vuelve a empezar mientras suena; basta con pedirlo una vez por tick.
+/// `PlayBuffer(id)` from `MoveObject`: every object requests it each tick, but the sound does
+/// not restart while playing; requesting it once per tick is enough.
 fn play_once_per_tick(ctx: &mut Ctx, id: &'static str) {
     if !ctx.sounds.contains(&id) {
         ctx.play_sound(id);
     }
 }
 
-/// `timeGetTime()`: milisegundos del reloj de verdad (no del tick), como el original.
+/// `timeGetTime()`: real clock milliseconds (not tick time), like the original.
 fn time_get_time() -> u32 {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed().as_millis() as u32
 }
 
-/// Si es la primera vez que se llama en este tick (se distingue el tick por `world_time`).
+/// Whether this is the first call in this tick (the tick is identified by `world_time`).
 fn first_in_tick(slot: &Mutex<f32>, world_time: f32) -> bool {
     let mut last = slot.lock().unwrap_or_else(|e| e.into_inner());
     if *last == world_time {
@@ -112,7 +112,7 @@ fn first_in_tick(slot: &Mutex<f32>, world_time: f32) -> bool {
     true
 }
 
-/// `AddTerrainLight(..., int Range, ...)`: el radio se trunca a entero.
+/// `AddTerrainLight(..., int Range, ...)`: the radius is truncated to an integer.
 fn light_range(range: f32) -> f32 {
     range as i32 as f32
 }
@@ -123,8 +123,8 @@ fn bone_sprite(o: &MapObject, ctx: &mut Ctx, bone: usize, p: Vec3, ty: i32, scal
     ctx.create_sprite(ty, pos, scale, light, 0.0, 0);
 }
 
-/// `for i < count: CreateParticle(BITMAP_CLOUD, Position, Angle, Light, sub, Scale, o)` cuando el
-/// objeto vuelve a verse (ver la nota del principio). `o.user[0]` guarda el último tick en que se movió.
+/// `for i < count: CreateParticle(BITMAP_CLOUD, Position, Angle, Light, sub, Scale, o)` when the
+/// object becomes visible again (see the module note). `o.user[0]` stores the last tick it moved.
 fn clouds_on_visible(o: &mut MapObject, ctx: &mut Ctx, count: usize, sub: i32, light: Vec3) {
     let gap = ctx.world_time - o.user[0];
     o.user[0] = ctx.world_time;
@@ -138,8 +138,8 @@ fn clouds_on_visible(o: &mut MapObject, ctx: &mut Ctx, count: usize, sub: i32, l
 }
 
 /// `int time = timeGetTime() % 1024; if (time >= 0 && time < 10) CreateEffect(MODEL_BUTTERFLY01, ..., 3, o)`
-/// y `HiddenMesh = -2` (Aida 60, Kanturu 1 37). El efecto (`objects_kalima.rs`) recibe la escala del
-/// dueño en `Scale` (`Direction = (0, -5·Owner->Scale, 0)`).
+/// and `HiddenMesh = -2` (Aida 60, Kanturu 1 37). The effect (`objects_kalima.rs`) gets the owner's
+/// scale in `Scale` (`Direction = (0, -5·Owner->Scale, 0)`).
 fn butterfly_point(o: &mut MapObject, ctx: &mut Ctx) {
     let time = time_get_time() % 1024;
     if time < 10 {
@@ -148,7 +148,7 @@ fn butterfly_point(o: &mut MapObject, ctx: &mut Ctx) {
     o.hidden_mesh = -2;
 }
 
-/// Kanturu 1 105 y Kanturu 2 8: bola de energía en el hueso 4 con chispazos (`sub` de la estela).
+/// Kanturu 1 105 and Kanturu 2 8: energy ball on bone 4 with sparks (`sub` of the trail).
 fn energy_ball(o: &MapObject, ctx: &mut Ctx, sub: i32) {
     let lumi = ((ctx.world_time * 0.001).sin() + 1.0) * 0.5;
     let light = Vec3::splat(lumi);
@@ -168,7 +168,7 @@ fn energy_ball(o: &MapObject, ctx: &mut Ctx, sub: i32) {
     }
 }
 
-/// Cristales (Kanturu 1 95, Kanturu 2 76, `RenderAfterObjectMesh`): un destello en los huesos 0-9.
+/// Crystals (Kanturu 1 95, Kanturu 2 76, `RenderAfterObjectMesh`): a flare on bones 0-9.
 fn crystal_sparks(o: &MapObject, ctx: &mut Ctx) {
     let light = Vec3::new(0.1, 0.1, 0.3);
     for bone in 0..10 {
@@ -176,7 +176,7 @@ fn crystal_sparks(o: &MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Luz azulada de Kanturu 2 4 y Kanturu 3 5: hueso 1 con `(-1, 0, 0)` y `fLumi = (sin(WT·0.002) + 2)·0.5`.
+/// Bluish light of Kanturu 2 4 and Kanturu 3 5: bone 1 with `(-1, 0, 0)` and `fLumi = (sin(WT·0.002) + 2)·0.5`.
 fn blue_light(ctx: &Ctx) -> (f32, Vec3) {
     let lumi = ((ctx.world_time * 0.002).sin() + 2.0) * 0.5;
     (lumi, Vec3::new(lumi * 0.3, lumi * 0.5, lumi * 1.0))
@@ -184,8 +184,8 @@ fn blue_light(ctx: &Ctx) -> (f32, Vec3) {
 
 // --- Aida (`GMAida.cpp`) --------------------------------------------------------------------------
 
-/// Huesos, desplazamiento y escala del primer sprite de las flores 30 y 71 (`RenderAidaObjectVisual`
-/// 108-153 y 257-301).
+/// Bones, offset and scale of the first sprite of flowers 30 and 71 (`RenderAidaObjectVisual`
+/// 108-153 and 257-301).
 const FLOWER_SPOTS: [(usize, [f32; 3]); 6] = [
     (6, [0.0, -3.0, 1.0]),
     (7, [0.0, -3.0, 0.0]),
@@ -222,7 +222,7 @@ fn aida(o: &mut MapObject, ctx: &mut Ctx) {
                 ([6.0, 5.5, 5.0, 5.5, 5.0, 5.0], Vec3::new(0.25, 0.0, 0.0), Vec3::new(0.15, 0.0, 0.0))
             };
             for (k, &(bone, p)) in FLOWER_SPOTS.iter().enumerate() {
-                // 71: el primero es (0.5, 0, 0); el resto (0.25, 0, 0).
+                // 71: the first one is (0.5, 0, 0); the rest (0.25, 0, 0).
                 let light = if o.ty == 71 && k == 0 { Vec3::new(0.5, 0.0, 0.0) } else { light1 };
                 let pos = o.bone_world(bone, Vec3::from_array(p));
                 ctx.create_sprite(BITMAP_SPARK + 1, pos, scales[k], light, 0.0, 0);
@@ -251,14 +251,14 @@ fn aida(o: &mut MapObject, ctx: &mut Ctx) {
         70 => {
             let time = time_get_time() % 1024;
             if ctx.rand() % 5 == 1 && time < 30 {
-                // `CreateEffect(MODEL_GHOST, ..., 0, o, -1, 0, o->Scale)`: la escala cae en `Skill`
-                // (WORD), que es el `Kind`; la del efecto queda la de por defecto.
+                // `CreateEffect(MODEL_GHOST, ..., 0, o, -1, 0, o->Scale)`: the scale lands in `Skill`
+                // (WORD), which is the `Kind`; the effect keeps the default scale.
                 let kind = (o.scale as i32) & 0xFFFF;
                 ctx.create_effect(MODEL_GHOST, o.position, o.angle, Vec3::splat(0.1), 0, None, -1, kind, 0, 0.0);
             }
         }
         75 => {
-            // `fLumi` se calcula y se pisa con (1, 1, 1).
+            // `fLumi` is computed and then overwritten with (1, 1, 1).
             let pos = o.bone_world(4, Vec3::ZERO);
             ctx.create_sprite(BITMAP_FLARE, pos, 3.0, Vec3::ONE, ctx.world_time / 10.0, 0);
         }
@@ -269,10 +269,10 @@ fn aida(o: &mut MapObject, ctx: &mut Ctx) {
 // --- Crywolf (`GMCrywolf1st.cpp`) -----------------------------------------------------------------
 
 static CRYWOLF_TICK: Mutex<f32> = Mutex::new(f32::NAN);
-/// `static float Ro` de `RenderCryWolf1stObjectVisual` (396-399): lo comparten todos los 41.
+/// `static float Ro` of `RenderCryWolf1stObjectVisual` (396-399): shared by all the 41s.
 static CRYWOLF_RO: Mutex<f32> = Mutex::new(0.0);
 
-/// `Time_Effect` de `RenderObjects` (`ZzzObject.cpp:3292-3294`): sube 1 cada fotograma de 1 a 41.
+/// `Time_Effect` of `RenderObjects` (`ZzzObject.cpp:3292-3294`): goes up 1 each frame from 1 to 41.
 fn time_effect(world_time: f32) -> i32 {
     let tick = (world_time / 40.0).round() as i64;
     (tick.rem_euclid(41) + 1) as i32
@@ -283,7 +283,7 @@ fn crywolf(o: &mut MapObject, ctx: &mut Ctx) {
         spot_water(ctx);
     }
 
-    // `MoveCryWolf1stObject` (329-371). TODO(original): 81 `Alpha = 0.2` (solo se dibuja en guerra).
+    // `MoveCryWolf1stObject` (329-371). TODO(original): 81 `Alpha = 0.2` (only drawn at war).
     match o.ty {
         41 => ctx.add_terrain_light(o.position.x, o.position.y, Vec3::new(0.2, 0.7, 0.5), 2.0),
         57 | 71 => {
@@ -295,12 +295,12 @@ fn crywolf(o: &mut MapObject, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // `RenderCryWolf1stObjectMesh` (430-572), en paz (`CRYWOLF_OCCUPATION_STATE_PEACE`).
+    // `RenderCryWolf1stObjectMesh` (430-572), at peace (`CRYWOLF_OCCUPATION_STATE_PEACE`).
     match o.ty {
         56 => {
             let color = (ctx.rand() % 10000) as f32 * 0.0001;
             if ctx.rand() % 3 == 0 {
-                // `CreateEffect(BITMAP_MAGIC, ..., Light, 3, o, 4.0f)`: el 4 cae en `PKKey`.
+                // `CreateEffect(BITMAP_MAGIC, ..., Light, 3, o, 4.0f)`: the 4 lands in `PKKey`.
                 ctx.create_effect(BITMAP_MAGIC, o.position, o.angle, Vec3::splat(color), 3, None, 4, 0, 0, 0.0);
             }
         }
@@ -332,7 +332,7 @@ fn crywolf(o: &mut MapObject, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // `RenderCryWolf1stObjectVisual` (373-429): dos destellos que suben y bajan sobre la columna 41.
+    // `RenderCryWolf1stObjectVisual` (373-429): two flares rising and falling over column 41.
     if o.ty == 41 {
         let ro = {
             let mut ro = CRYWOLF_RO.lock().unwrap_or_else(|e| e.into_inner());
@@ -350,24 +350,24 @@ fn crywolf(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Cuántas veces mira `FaceTexture` (con `Water`) una casilla de Crywolf para soltar gotas
-/// (`RenderTerrainFace`, `ZzzLodTerrain.cpp:1514-1565`): `alpha` son las cuatro esquinas
-/// (`TerrainMappingAlpha` en 0-255).
+/// How many times `FaceTexture` (with `Water`) checks a Crywolf tile to drop water
+/// (`RenderTerrainFace`, `ZzzLodTerrain.cpp:1514-1565`): `alpha` are the four corners
+/// (`TerrainMappingAlpha` in 0-255).
 fn water_rolls(layer1: u8, layer2: u8, alpha: [u8; 4]) -> u32 {
-    // Con las cuatro esquinas del todo en la capa 2 se pinta la capa 2 sin agua.
+    // With all four corners fully on layer 2, layer 2 is painted without water.
     if alpha.iter().all(|&a| a == 255) || layer1 != 5 {
         return 0;
     }
-    // La capa 2 encima con `Water` si también es la 5 (y hay algo de alfa).
+    // Layer 2 on top with `Water` if it is also 5 (and there is some alpha).
     1 + u32::from(alpha.iter().any(|&a| a > 0) && layer2 == 5)
 }
 
-/// Gotas en el agua de Crywolf (`FaceTexture`, `ZzzLodTerrain.cpp:1478-1487`): en cada casilla de agua
-/// que se dibuja, 1 de cada 50 veces una `BITMAP_SPOT_WATER` a la altura del personaje.
-/// Las casillas que se dibujan son las del trapecio del original (`TestFrustrum2D` por bloques y por
-/// casilla, `RenderTerrainBlock` 2485-2506), sin las `TW_NOGROUND` (`RenderTerrainTile` 1665).
-/// La caja de bloques de la pirámide de la cámara (`FrustrumBoundMin/Max`) no se mira: queda fuera
-/// del trapecio.
+/// Drops on the Crywolf water (`FaceTexture`, `ZzzLodTerrain.cpp:1478-1487`): on each drawn water
+/// tile, 1 in 50 times a `BITMAP_SPOT_WATER` at the character's height.
+/// The drawn tiles are those of the original's trapezoid (`TestFrustrum2D` per block and per
+/// tile, `RenderTerrainBlock` 2485-2506), without the `TW_NOGROUND` ones (`RenderTerrainTile` 1665).
+/// The block box of the camera frustum (`FrustrumBoundMin/Max`) is not checked: it lies outside
+/// the trapezoid.
 fn spot_water(ctx: &mut Ctx) {
     let Some((hero, hero_angle)) = ctx.hero_actor().map(|a| (a.position, a.angle)) else { return };
     let Some(t) = ctx.terrain else { return };
@@ -382,7 +382,7 @@ fn spot_water(ctx: &mut Ctx) {
             if !shape.tile_visible(x, y) || t.attribute(x, y) & attr::NO_GROUND != 0 {
                 continue;
             }
-            // `TERRAIN_INDEX(xi, yi)` y las otras tres esquinas.
+            // `TERRAIN_INDEX(xi, yi)` and the other three corners.
             let i = y * SIZE + x;
             let corners = [alpha(i), alpha(i + 1), alpha(i + SIZE + 1), alpha(i + SIZE)];
             for _ in 0..water_rolls(t.mapping.layer1[i], t.mapping.layer2[i], corners) {
@@ -397,10 +397,10 @@ fn spot_water(ctx: &mut Ctx) {
     }
 }
 
-// --- Kanturu 1 y mapa de los GM (`GM_kanturu_1st.cpp`) ------------------------------------------
+// --- Kanturu 1 and the GM map (`GM_kanturu_1st.cpp`) --------------------------------------------
 
-/// `::PlayBuffer(id)` de `MoveKanturu1stObject`: esos sonidos solo los carga `WD_37KANTURU_1ST`
-/// (`MapManager.cpp:382-430`); en el mapa de los GM no suenan.
+/// `::PlayBuffer(id)` of `MoveKanturu1stObject`: those sounds are only loaded by `WD_37KANTURU_1ST`
+/// (`MapManager.cpp:382-430`); they do not play on the GM map.
 fn sound(ctx: &mut Ctx, id: &'static str) {
     if ctx.world_active == WD_37KANTURU_1ST {
         play_once_per_tick(ctx, id);
@@ -501,7 +501,7 @@ fn kanturu1(o: &mut MapObject, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // `RenderKanturu1stAfterObjectMesh` (343-402): los destellos del cristal 95.
+    // `RenderKanturu1stAfterObjectMesh` (343-402): the flares of crystal 95.
     if o.ty == 95 {
         crystal_sparks(o, ctx);
     }
@@ -510,7 +510,7 @@ fn kanturu1(o: &mut MapObject, ctx: &mut Ctx) {
 // --- Kanturu 2 (`GM_Kanturu_2nd.cpp`) -------------------------------------------------------------
 
 fn kanturu2(o: &mut MapObject, ctx: &mut Ctx) {
-    // `Sound_Kanturu2nd_Object` (198-214), desde `Move_Kanturu2nd_Object`.
+    // `Sound_Kanturu2nd_Object` (198-214), from `Move_Kanturu2nd_Object`.
     play_once_per_tick(ctx, "SOUND_KANTURU_2ND_MAPSOUND_GLOBAL");
     match o.ty {
         9 => play_once_per_tick(ctx, "SOUND_KANTURU_2ND_MAPSOUND_GEAR"),
@@ -583,7 +583,7 @@ fn kanturu2(o: &mut MapObject, ctx: &mut Ctx) {
         }
         55 => {
             if ctx.rand() % 5 == 0 {
-                // `CreateEffect(MODEL_FENRIR_THUNDER, ..., 1, o)`: el subtipo 1 no usa al dueño.
+                // `CreateEffect(MODEL_FENRIR_THUNDER, ..., 1, o)`: subtype 1 does not use the owner.
                 let light = Vec3::new(0.8, 0.8, 1.0);
                 ctx.create_effect(MODEL_FENRIR_THUNDER, o.position, o.angle, light, 1, None, -1, 0, 0, 0.0);
             }
@@ -591,7 +591,7 @@ fn kanturu2(o: &mut MapObject, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // `Render_Kanturu2nd_AfterObjectMesh` (657-677): los destellos del cristal 76.
+    // `Render_Kanturu2nd_AfterObjectMesh` (657-677): the flares of crystal 76.
     if o.ty == 76 {
         crystal_sparks(o, ctx);
     }
@@ -632,7 +632,7 @@ fn kanturu3(o: &mut MapObject, ctx: &mut Ctx) {
     }
     play_once_per_tick(ctx, "SOUND_KANTURU_3RD_AMBIENT");
 
-    // `RenderKanturu3rdObjectVisual` (200-395). TODO(original): 0 (Maya): ver `rules_kanturu.rs`.
+    // `RenderKanturu3rdObjectVisual` (200-395). TODO(original): 0 (Maya): see `rules_kanturu.rs`.
     match o.ty {
         1 => {
             clouds_on_visible(o, ctx, 10, 1, Vec3::new(0.0, 0.03, 0.04));
@@ -659,7 +659,7 @@ fn kanturu3(o: &mut MapObject, ctx: &mut Ctx) {
             clouds_on_visible(o, ctx, 20, 7, Vec3::splat(0.25));
             o.hidden_mesh = -2;
         }
-        // 74: sin la torre conquistada (`KanturuSuccessMap`, estado del servidor).
+        // 74: without the conquered tower (`KanturuSuccessMap`, server state).
         47 | 74 => {
             if ctx.rand() % 5 == 0 {
                 ctx.create_joint(BITMAP_JOINT_THUNDER + 1, o.position, o.position, o.angle, 11, None, o.scale * 15.0);
@@ -700,9 +700,9 @@ fn kanturu3(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-// --- Efectos: común -------------------------------------------------------------------------------
+// --- Effects: common ------------------------------------------------------------------------------
 
-/// `Luminosity` del principio de `MoveEffect` (`ZzzEffect.cpp:6923-6928`; gasta un `rand()` siempre).
+/// `Luminosity` at the start of `MoveEffect` (`ZzzEffect.cpp:6923-6928`; always consumes a `rand()`).
 fn effect_luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
     if e.life_time < 5.0 {
@@ -714,7 +714,7 @@ fn effect_luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     l
 }
 
-/// Cola común de `MoveEffect` (`ZzzEffect.cpp:18072-18123`): `PlayAnimation` (solo modelos) y
+/// Common tail of `MoveEffect` (`ZzzEffect.cpp:18072-18123`): `PlayAnimation` (models only) and
 /// `MoveParticle(o, true)`.
 fn move_tail(e: &mut Effect) {
     if e.ty >= MODEL_BIRD01 && e.ty < MODEL_SKILL_END {
@@ -725,8 +725,8 @@ fn move_tail(e: &mut Effect) {
 
 // --- MODEL_GHOST ------------------------------------------------------------------------------------
 
-/// `CreateEffect` (`ZzzEffect.cpp:687-704`). El Main 5.2 no carga ningún modelo para `MODEL_GHOST`
-/// (`RenderObject` no dibuja nada): solo se ve su `BITMAP_LIGHT`.
+/// `CreateEffect` (`ZzzEffect.cpp:687-704`). Main 5.2 loads no model for `MODEL_GHOST`
+/// (`RenderObject` draws nothing): only its `BITMAP_LIGHT` is visible.
 fn ghost_create(e: &mut Effect, ctx: &mut Ctx) {
     e.kind = 0;
     e.blend_mesh_light = 1.0;
@@ -771,11 +771,11 @@ fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- MODEL_FENRIR_THUNDER ---------------------------------------------------------------------------
 
-/// `m_iAnimation` (0 = aparece, 1 = se apaga).
+/// `m_iAnimation` (0 = appearing, 1 = fading out).
 const SLOT_ANIMATION: usize = 0;
 
-/// `CreateEffect` (`ZzzEffect.cpp:4555-4600`): subtipos 1 y 2, que no usan al dueño.
-/// TODO(original): 0 y 3 (los rayos del Fenrir, en los huesos de su dueño).
+/// `CreateEffect` (`ZzzEffect.cpp:4555-4600`): subtypes 1 and 2, which do not use the owner.
+/// TODO(original): 0 and 3 (the Fenrir's lightning, on its owner's bones).
 fn fenrir_thunder_create(e: &mut Effect, ctx: &mut Ctx) {
     match e.sub_type {
         1 | 2 => {
@@ -797,8 +797,8 @@ fn fenrir_thunder_create(e: &mut Effect, ctx: &mut Ctx) {
     }
 }
 
-/// `MoveEffect` (`ZzzEffect.cpp:14277-14342`): aparece (+0.3 de alfa por tick) y se apaga (-0.3).
-/// Se dibuja con `RenderBody(RENDER_TEXTURE)` y `BodyLight = o->Light` (`ZzzObject.cpp:1701-1713`).
+/// `MoveEffect` (`ZzzEffect.cpp:14277-14342`): appears (+0.3 alpha per tick) and fades out (-0.3).
+/// Drawn with `RenderBody(RENDER_TEXTURE)` and `BodyLight = o->Light` (`ZzzObject.cpp:1701-1713`).
 fn fenrir_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = effect_luminosity(e, ctx);
     if e.sub_type == 1 && e.live {
@@ -823,7 +823,7 @@ fn fenrir_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-// --- BITMAP_MAGIC (efecto) --------------------------------------------------------------------------
+// --- BITMAP_MAGIC (effect) --------------------------------------------------------------------------
 
 /// `CreateEffect` (`ZzzEffect.cpp:1296-1339`).
 fn magic_create(e: &mut Effect, _ctx: &mut Ctx) {
@@ -851,16 +851,16 @@ fn magic_create(e: &mut Effect, _ctx: &mut Ctx) {
             e.scale = 0.8;
             e.head_angle = Vec3::ZERO;
         }
-        // `Scale · 0.1` con el argumento `Scale` (0.9 si no se pasó).
+        // `Scale · 0.1` with the `Scale` argument (0.9 if not passed).
         12 => e.scale = scale * 0.1,
         _ => {}
     }
-    // Los subtipos 2, 3, 4 y 7 no se dibujan (`RenderEffects`, `ZzzEffect.cpp:19274-19332`).
+    // Subtypes 2, 3, 4 and 7 are not drawn (`RenderEffects`, `ZzzEffect.cpp:19274-19332`).
     e.visible = false;
 }
 
-/// `MoveEffect` (`ZzzEffect.cpp:8244-8266`): subtipos 2, 3 y 7 (destellos que suben).
-/// TODO(original): el resto de subtipos (y las marcas en el suelo de 1 y 8-12) no los usa nadie aún.
+/// `MoveEffect` (`ZzzEffect.cpp:8244-8266`): subtypes 2, 3 and 7 (rising flares).
+/// TODO(original): the other subtypes (and the ground marks of 1 and 8-12) are not used by anything yet.
 fn magic_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = effect_luminosity(e, ctx);
     if matches!(e.sub_type, 2 | 3 | 7) && e.life_time > 5.0 && e.life_time < 10.0 {
@@ -876,14 +876,14 @@ mod tests {
 
     #[test]
     fn agua_de_crywolf() {
-        // Capa 1 de agua con alguna esquina sin la capa 2 del todo: una tirada.
+        // Water on layer 1 with some corner not fully on layer 2: one roll.
         assert_eq!(water_rolls(5, 3, [0, 0, 0, 0]), 1);
-        // También la capa 2 es agua y hay mezcla: dos.
+        // Layer 2 is water too and they blend: two.
         assert_eq!(water_rolls(5, 5, [0, 128, 0, 0]), 2);
         assert_eq!(water_rolls(5, 5, [0, 0, 0, 0]), 1);
-        // Las cuatro esquinas del todo en la capa 2: se pinta la 2 sin agua.
+        // All four corners fully on layer 2: layer 2 is painted without water.
         assert_eq!(water_rolls(5, 5, [255; 4]), 0);
-        // La capa 1 no es agua.
+        // Layer 1 is not water.
         assert_eq!(water_rolls(3, 5, [0, 128, 0, 0]), 0);
     }
 

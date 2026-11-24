@@ -1,19 +1,19 @@
-//! Capas que corren por toda la pantalla: la arena de Tarkan y Karutan y el humo de Crywolf, el
-//! Pantano de la Calma, Raklion, Doppelganger 1 y la niebla/tormenta de Empire Guardian
-//! (`RenderOutSides`, ZzzInterface.cpp:8302-8348, y las funciones de cada mapa).
+//! Full-screen layers: the sand of Tarkan and Karutan and the smoke of Crywolf, the
+//! Swamp of Calmness, Raklion, Doppelganger 1 and the fog/storm of Empire Guardian
+//! (`RenderOutSides`, ZzzInterface.cpp:8302-8348, and each map's functions).
 //!
-//! El original las pinta con `RenderBitmapUV` (ZzzOpenglUtil.cpp:1513-1541) en la pantalla virtual
-//! de 640×480, en (0, 0, 640, 480 − 45), después de toda la escena 3D y antes de la interfaz
-//! (`RenderInterface` va justo antes de `g_pNewUISystem->Render`, ZzzScene.cpp:2219-2230). Aquí cada
-//! capa es un rectángulo pegado a la cámara, delante de todo (lo último de la pasada transparente) y
-//! debajo de la interfaz de Bevy, que se dibuja después.
+//! The original paints them with `RenderBitmapUV` (ZzzOpenglUtil.cpp:1513-1541) on the virtual
+//! 640×480 screen, at (0, 0, 640, 480 − 45), after the whole 3D scene and before the UI
+//! (`RenderInterface` comes right before `g_pNewUISystem->Render`, ZzzScene.cpp:2219-2230). Here each
+//! layer is a quad attached to the camera, in front of everything (last in the transparent pass) and
+//! under the Bevy UI, which is drawn afterwards.
 //!
-//! `RenderBitmapUV` deforma las UV en trapecio: a la izquierda solo va de `v + 0.25·alto` a
-//! `v + 0.75·alto` y a la derecha de `v` a `v + alto`, con los dos triángulos de `GL_TRIANGLE_FAN`.
-//! El desplazamiento es `(WorldTime % 100000) · velocidad`, con `WorldTime` en milisegundos.
+//! `RenderBitmapUV` distorts the UVs into a trapezoid: on the left it only spans `v + 0.25·height` to
+//! `v + 0.75·height` and on the right `v` to `v + height`, with the two `GL_TRIANGLE_FAN` triangles.
+//! The offset is `(WorldTime % 100000) · speed`, with `WorldTime` in milliseconds.
 //!
-//! El Valle de Loren solo tiene humo durante el asedio (`battleCastle::RenderBaseSmoke` mira
-//! `IsBattleCastleStart`), que no tenemos; el Loren Market no pinta nada (`RenderFrontSideVisual` vacío).
+//! Valley of Loren only has smoke during the siege (`battleCastle::RenderBaseSmoke` checks
+//! `IsBattleCastleStart`), which we lack; Loren Market paints nothing (empty `RenderFrontSideVisual`).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -39,7 +39,7 @@ impl Plugin for OverlayPlugin {
     }
 }
 
-/// Las texturas `BITMAP_CHROME+2` / `+3` que carga cada mapa (MapManager.cpp).
+/// The `BITMAP_CHROME+2` / `+3` textures each map loads (MapManager.cpp).
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum Tex {
     /// `Object9\sand01.jpg`.
@@ -63,29 +63,29 @@ impl Tex {
     }
 }
 
-/// Una llamada a `RenderBitmapUV`.
+/// One `RenderBitmapUV` call.
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Layer {
     tex: Tex,
-    /// `EnableAlphaBlend` (suma) o `EnableAlphaTest` (mezcla con alfa y prueba de alfa).
+    /// `EnableAlphaBlend` (additive) or `EnableAlphaTest` (alpha blending and alpha test).
     blend: Blend,
     /// `glColor3f`.
     color: [f32; 3],
-    /// UV que avanza por milisegundo (`WindX`, `WindY`).
+    /// UV advance per millisecond (`WindX`, `WindY`).
     speed: [f32; 2],
     /// `uWidth`, `vHeight`.
     size: [f32; 2],
 }
 
-/// Cuándo se ven las capas de un mapa.
+/// When a map's layers are visible.
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum When {
     Always,
-    /// Crywolf: solo cuando se ha dibujado el objeto 73 con `weather == 0` (`ashies`).
+    /// Crywolf: only when object 73 was drawn with `weather == 0` (`ashies`).
     Ashes,
-    /// Empire Guardian con niebla.
+    /// Empire Guardian with fog.
     Fog,
-    /// Empire Guardian con tormenta: un fotograma de cada 20 al azar (`rand() % 20 == 0`).
+    /// Empire Guardian with storm: one random frame in 20 (`rand() % 20 == 0`).
     Storm,
 }
 
@@ -93,7 +93,7 @@ const fn layer(tex: Tex, blend: Blend, color: [f32; 3], speed: [f32; 2], size: [
     Layer { tex, blend, color, speed, size }
 }
 
-/// Capas de `world` (nuestro número de mapa), en el orden en que se pintan.
+/// Layers of `world` (our map number), in paint order.
 fn world_layers(world: u16) -> Vec<(When, Layer)> {
     use Blend::{AlphaTest, Glow};
     const SAND: [f32; 3] = [0.3, 0.3, 0.25];
@@ -107,7 +107,7 @@ fn world_layers(world: u16) -> Vec<(When, Layer)> {
         ]
     };
     match world as i32 - 1 {
-        // Tarkan (ZzzInterface.cpp:8304-8314): las dos sumadas con el mismo color.
+        // Tarkan (ZzzInterface.cpp:8304-8314): both additive with the same color.
         8 => vec![
             (When::Always, layer(Tex::Sand01, Glow, SAND, [0.0002, 0.0], [0.3, 0.3])),
             (When::Always, layer(Tex::Sand02, Glow, SAND, [0.001, 0.0], [3.0, 2.0])),
@@ -116,8 +116,8 @@ fn world_layers(world: u16) -> Vec<(When, Layer)> {
         80 | 81 => vec![(When::Always, layer(Tex::Sand02, Glow, SAND, [0.004, 0.0], [3.0, 2.0]))],
         34 => smoke_base(When::Ashes),
         56 => smoke_base(When::Always),
-        // Raklion y Doppelganger 1 (`IsIceCity`, `CGM_Raklion::RenderBaseSmoke`, GM_Raklion.cpp:2266-2275):
-        // su `BITMAP_CHROME+3` es `sand02.jpg` (MapManager.cpp:749-758).
+        // Raklion and Doppelganger 1 (`IsIceCity`, `CGM_Raklion::RenderBaseSmoke`, GM_Raklion.cpp:2266-2275):
+        // its `BITMAP_CHROME+3` is `sand02.jpg` (MapManager.cpp:749-758).
         57 | 58 | 65 => vec![
             (When::Always, layer(Tex::Sand02, Glow, SMOKE, [0.0006, -0.0006], [3.0, 2.0])),
             (When::Always, layer(Tex::Smoke1, Glow, SMOKE, [0.0001, 0.0], [0.3, 0.3])),
@@ -137,8 +137,8 @@ fn world_layers(world: u16) -> Vec<(When, Layer)> {
     }
 }
 
-/// Tiempo de Empire Guardian (`m_iWeather`), que manda el servidor al entrar
-/// (`ReceiveEnterEmpireGuardianEvent`). Empieza en sol (`WEATHER_SUN`), sin nada en pantalla.
+/// Empire Guardian weather (`m_iWeather`), sent by the server on entry
+/// (`ReceiveEnterEmpireGuardianEvent`). Starts sunny (`WEATHER_SUN`), with nothing on screen.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq, Debug)]
 #[allow(dead_code)]
 pub enum EmpireGuardianWeather {
@@ -149,17 +149,17 @@ pub enum EmpireGuardianWeather {
     Storm,
 }
 
-/// Lo que decide si se ve el humo de Crywolf.
+/// What decides whether the Crywolf smoke is visible.
 #[derive(Resource)]
 pub struct CrywolfAshes {
-    /// `weather` (Winmain.cpp:84): `rand() % 3` al arrancar. Con la semilla por defecto del CRT el
-    /// primer `rand()` es 41, así que empieza en 2.
+    /// `weather` (Winmain.cpp:84): `rand() % 3` at startup. With the CRT default seed the
+    /// first `rand()` is 41, so it starts at 2.
     weather: u32,
-    /// `Change_weather`: llamadas a `RenderCryWolf1stObjectVisual`; a las 70000, `weather` cambia.
+    /// `Change_weather`: calls to `RenderCryWolf1stObjectVisual`; at 70000, `weather` changes.
     calls: u32,
-    /// `ashies`: se ha dibujado el objeto 73 con `weather == 0` en este fotograma.
+    /// `ashies`: object 73 was drawn with `weather == 0` this frame.
     ashes: bool,
-    /// Objetos del mapa (tipo, posición en casillas), solo en Crywolf.
+    /// Map objects (type, tile position), Crywolf only.
     objects: Vec<(i16, Vec2)>,
     rng: u32,
 }
@@ -172,20 +172,20 @@ impl Default for CrywolfAshes {
 }
 
 impl CrywolfAshes {
-    /// `rand()` del CRT de Microsoft.
+    /// Microsoft CRT `rand()`.
     fn rand(&mut self) -> u32 {
         self.rng = self.rng.wrapping_mul(214013).wrapping_add(2531011);
         (self.rng >> 16) & 0x7fff
     }
 }
 
-/// Una capa en pantalla.
+/// A layer on screen.
 #[derive(Component)]
 struct Overlay {
     when: When,
     layer: Layer,
     mesh: Handle<Mesh>,
-    /// Distancia a la cámara (en Bevy): las primeras capas, un poco más lejos, para que se pinten antes.
+    /// Distance to the camera (in Bevy): the first layers slightly farther, so they are painted first.
     depth: f32,
 }
 
@@ -218,14 +218,14 @@ fn spawn_overlays(
             }
         };
         let mut m = FxMaterial::new(Some(images.add(fx_image(&tex, true))), l.blend);
-        // El color del original se multiplica en sRGB: en lineal, elevado a 2.2.
+        // The original color is multiplied in sRGB: in linear, raised to 2.2.
         m.params.tint = Vec4::new(l.color[0].powf(2.2), l.color[1].powf(2.2), l.color[2].powf(2.2), 1.0);
         let mesh = meshes.add(
             Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
                 .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vec![[0.0f32; 3]; 4])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, vec![[0.0f32, 0.0, 1.0]; 4])
                 .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0f32; 2]; 4])
-                // `GL_TRIANGLE_FAN` de 0 (arriba izq.), 1 (abajo izq.), 2 (abajo der.), 3 (arriba der.).
+                // `GL_TRIANGLE_FAN` of 0 (top left), 1 (bottom left), 2 (bottom right), 3 (top right).
                 .with_inserted_indices(Indices::U32(vec![0, 1, 2, 0, 2, 3])),
         );
         let depth = 0.4 - i as f32 * 0.05;
@@ -245,8 +245,8 @@ fn spawn_overlays(
     }
 }
 
-/// `ashies` de Crywolf: el objeto 73 se dibuja (`RenderCryWolf1stObjectVisual`, GMCrywolf1st.cpp:373-389
-/// y 506-511). Se cuenta como dibujado lo que cae dentro del trapecio del suelo.
+/// Crywolf `ashies`: object 73 is drawn (`RenderCryWolf1stObjectVisual`, GMCrywolf1st.cpp:373-389
+/// and 506-511). Whatever falls inside the ground trapezoid counts as drawn.
 fn crywolf_ashes(mut ashes: ResMut<CrywolfAshes>, cull: Res<crate::terrain::TerrainCull>) {
     ashes.ashes = false;
     if ashes.objects.is_empty() {
@@ -261,7 +261,7 @@ fn crywolf_ashes(mut ashes: ResMut<CrywolfAshes>, cull: Res<crate::terrain::Terr
             seen_73 |= kind == 73;
         }
     }
-    // `Change_weather++` en cada llamada; pasado de 70000, `weather = rand() % 3`.
+    // `Change_weather++` on each call; past 70000, `weather = rand() % 3`.
     ashes.calls += drawn;
     if ashes.calls > 70000 {
         ashes.calls = 0;
@@ -270,12 +270,12 @@ fn crywolf_ashes(mut ashes: ResMut<CrywolfAshes>, cull: Res<crate::terrain::Terr
     ashes.ashes = seen_73 && ashes.weather == 0;
 }
 
-/// UV de `RenderBitmapUV` (arriba izq., abajo izq., abajo der., arriba der.).
+/// `RenderBitmapUV` UVs (top left, bottom left, bottom right, top right).
 fn bitmap_uv(u: f32, v: f32, uw: f32, vh: f32) -> [[f32; 2]; 4] {
     [[u, v + vh * 0.25], [u, v + vh - vh * 0.25], [u + uw, v + vh], [u + uw, v]]
 }
 
-/// Coloca cada capa delante de la cámara y mueve sus UV.
+/// Places each layer in front of the camera and scrolls its UVs.
 #[allow(clippy::too_many_arguments)]
 fn update_overlays(
     time: Res<Time>,
@@ -288,7 +288,7 @@ fn update_overlays(
 ) {
     let Ok(Projection::Perspective(p)) = cameras.single() else { return };
     let in_game = *state.get() == crate::scene::GameScene::Game;
-    // Tormenta: `rand() % 20 == 0` una vez por fotograma para las dos capas.
+    // Storm: `rand() % 20 == 0` once per frame for both layers.
     let storm_flash = *weather == EmpireGuardianWeather::Storm && ashes.rand() % 20 == 0;
     let t = (crate::terrain::world_ms(&time) % 100000) as f32;
     for (o, mut vis) in &mut overlays {
@@ -303,7 +303,7 @@ fn update_overlays(
         if !show {
             continue;
         }
-        // Pantalla virtual (0, 0)-(640, 435) → coordenadas de la vista a `depth` de la cámara.
+        // Virtual screen (0, 0)-(640, 435) → view coordinates at `depth` from the camera.
         let half_h = o.depth * (p.fov * 0.5).tan();
         let half_w = half_h * p.aspect_ratio;
         let at = |x: f32, y: f32| [(x / 320.0 - 1.0) * half_w, (1.0 - y / 240.0) * half_h, 0.0];

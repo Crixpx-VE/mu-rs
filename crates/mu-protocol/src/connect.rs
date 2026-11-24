@@ -1,35 +1,35 @@
-//! Paquetes del Connect Server (puerto 44405 por defecto).
+//! Connect Server packets (port 44405 by default).
 //!
-//! Es lo primero que contacta el cliente: pide la lista de servidores y luego
-//! la IP/puerto del Game Server elegido. Va sin cifrar.
+//! It is the first thing the client contacts: it asks for the server list and then
+//! the IP/port of the chosen Game Server. Unencrypted.
 //!
 //! ```text
-//! servidor → cliente   Hello                C1 04 00 01
-//! cliente  → servidor  ServerListRequest    C1 04 F4 06
-//! servidor → cliente   ServerListResponse   C2 LL LL F4 06 <n u16 BE> [id u16 LE, carga u8, 0]...
-//! cliente  → servidor  ConnectionInfoReq    C1 06 F4 03 <id u16 LE>
-//! servidor → cliente   ConnectionInfo       C1 16 F4 03 <ip 16 bytes> <puerto u16 LE>
+//! server → client   Hello                C1 04 00 01
+//! client → server   ServerListRequest    C1 04 F4 06
+//! server → client   ServerListResponse   C2 LL LL F4 06 <n u16 BE> [id u16 LE, load u8, 0]...
+//! client → server   ConnectionInfoReq    C1 06 F4 03 <id u16 LE>
+//! server → client   ConnectionInfo       C1 16 F4 03 <ip 16 bytes> <port u16 LE>
 //! ```
 
 use crate::packet::{Packet, c1, c2};
 
-/// Un Game Server en la lista, con su carga (0-100 %).
+/// A Game Server in the list, with its load (0-100 %).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ServerLoad {
     pub id: u16,
     pub load: u8,
 }
 
-/// Lo que el cliente manda al Connect Server.
+/// What the client sends to the Connect Server.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMessage {
     ServerListRequest,
     ConnectionInfoRequest { server_id: u16 },
-    /// Comprobación de versión que hacen los launchers.
+    /// Version check done by launchers.
     PatchCheckRequest { major: u8, minor: u8, patch: u8 },
 }
 
-/// Lo que el Connect Server manda al cliente.
+/// What the Connect Server sends to the client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
     Hello,
@@ -56,7 +56,7 @@ impl ClientMessage {
         match (p.code(), p.sub_code()) {
             (0xF4, Some(0x06)) => Some(Self::ServerListRequest),
             (0xF4, Some(0x03)) => {
-                // Clientes 0.75 mandan el id en 1 byte; los modernos en 2.
+                // 0.75 clients send the id in 1 byte; modern ones in 2.
                 let server_id = match b.len() {
                     3 => b[2] as u16,
                     _ => u16::from_le_bytes([b[2], *b.get(3)?]),
@@ -161,7 +161,7 @@ mod tests {
         ] {
             assert_eq!(ClientMessage::decode(&m.encode()), Some(m));
         }
-        // Formato antiguo (0.75): id de 1 byte.
+        // Old format (0.75): 1-byte id.
         assert_eq!(
             ClientMessage::decode(&[0xC1, 0x05, 0xF4, 0x03, 0x07]),
             Some(ClientMessage::ConnectionInfoRequest { server_id: 7 })

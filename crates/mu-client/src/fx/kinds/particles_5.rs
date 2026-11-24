@@ -1,6 +1,6 @@
-//! Partículas (familia 5): antorcha, nubes fantasma, `BITMAP_LIGHT`, bola de golpe, humo,
-//! fuego verdadero, agujero, cascadas, cruz y onda de choque.
-//! Traducido de `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles`, `DescribeParticle`).
+//! Particles (family 5): torch, ghost clouds, `BITMAP_LIGHT`, pounding ball, smoke,
+//! true fire, hole, waterfalls, cross and shock wave.
+//! Translated from `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles`, `DescribeParticle`).
 
 use std::sync::Mutex;
 
@@ -18,11 +18,11 @@ fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-// --- Viento de partículas -------------------------------------------------------------------------
+// --- Particle wind --------------------------------------------------------------------------------
 
-/// `g_vParticleWind` / `g_vParticleWindVelo`: en el original se actualizan una vez al principio de
-/// `MoveParticles`. Solo lo usa `BITMAP_LIGHT`, así que se guarda aquí y se actualiza la primera vez
-/// que se pide en cada tick (se detecta el tick por `world_time`).
+/// `g_vParticleWind` / `g_vParticleWindVelo`: the original updates them once at the start of
+/// `MoveParticles`. Only `BITMAP_LIGHT` uses them, so they live here and are updated the first time
+/// they are requested in each tick (the tick is detected by `world_time`).
 struct Wind {
     time: f32,
     velo: [f32; 2],
@@ -47,9 +47,9 @@ fn particle_wind(ctx: &mut Ctx) -> Vec3 {
     Vec3::new(w.wind[0], w.wind[1], 0.0)
 }
 
-// --- Dibujo -------------------------------------------------------------------------------------
+// --- Drawing ------------------------------------------------------------------------------------
 
-/// `RenderSprite` con la mezcla de `RenderParticles` (o la que fije el caso).
+/// `RenderSprite` with the blend of `RenderParticles` (or the one the case sets).
 #[allow(clippy::too_many_arguments)]
 fn sprite(out: &mut DrawList, ctx: &DrawCtx, tex: i32, pos: Vec3, w: f32, h: f32, light: Vec3, rot: f32, blend: Option<Blend>) {
     let Some(t) = ctx.tex(tex) else { return };
@@ -65,7 +65,7 @@ fn sprite(out: &mut DrawList, ctx: &DrawCtx, tex: i32, pos: Vec3, w: f32, h: f32
     });
 }
 
-/// Width/Height de `RenderParticles`: tamaño de la textura `TexType` × `Scale`.
+/// Width/Height of `RenderParticles`: size of the `TexType` texture × `Scale`.
 fn size(p: &Particle, ctx: &DrawCtx) -> Option<(f32, f32)> {
     ctx.tex(p.tex_type).map(|t| (t.width * p.scale, t.height * p.scale))
 }
@@ -101,7 +101,7 @@ fn torch_fire_step(p: &mut Particle, _ctx: &mut Ctx) {
     }
 }
 
-/// Tres sprites apilados, cada uno 10 unidades más abajo.
+/// Three stacked sprites, each 10 units lower.
 fn torch_fire_draw(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some((w, h)) = size(p, ctx) else { return };
     let mut pos = p.position;
@@ -125,7 +125,7 @@ fn ghost_cloud_create(p: &mut Particle, ctx: &mut Ctx) {
         let f = (r(ctx, 10) + 5) as f32 * 0.08;
         p.velocity = Vec3::new(f, f, 0.0);
 
-        // TurningForce guarda el color final; empieza apagada.
+        // TurningForce stores the final color; starts dark.
         p.turning_force = p.light;
         p.light = Vec3::ZERO;
     }
@@ -178,7 +178,7 @@ fn light_create(p: &mut Particle, ctx: &mut Ctx) {
             p.gravity = rf(ctx, 10) + 10.0;
             p.scale = (rf(ctx, 15) + 30.0) / 100.0 * scale;
         }
-        // (el original tiene después otro `SubType == 6` con LifeTime = 2 que nunca se alcanza)
+        // (the original later has another `SubType == 6` with LifeTime = 2 that is never reached)
         6 => {
             p.life_time = (r(ctx, 10) + 10) as f32;
             p.gravity = rf(ctx, 10) + 10.0;
@@ -194,7 +194,7 @@ fn light_create(p: &mut Particle, ctx: &mut Ctx) {
         4 => {
             p.life_time = 10.0;
             p.gravity = 0.0;
-            // Rotation guarda el número de hueso del personaje (se pasa en Scale).
+            // Rotation stores the character's bone number (passed in Scale).
             p.rotation = scale;
             p.scale = 2.0;
         }
@@ -294,8 +294,8 @@ fn light_step(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = -1.0;
             p.live = false;
         }
-        // TODO(original): RenderParticles activa la prueba de profundidad al dibujar este subtipo
-        // (y se queda activa para las siguientes partículas).
+        // TODO(original): RenderParticles enables the depth test when drawing this subtype
+        // (and it stays enabled for the following particles).
     } else if st == 1 || st == 5 {
         p.light *= 0.9;
         p.scale *= 0.95;
@@ -312,8 +312,8 @@ fn light_step(p: &mut Particle, ctx: &mut Ctx) {
         p.position.y -= 2.0;
         p.position.z += p.gravity;
     } else if st == 4 {
-        // TODO(original): además exige Target->Type == MODEL_PLAYER && Kind == KIND_PLAYER.
-        // Angle es el desplazamiento en ejes del hueso y Rotation el número de hueso.
+        // TODO(original): it also requires Target->Type == MODEL_PLAYER && Kind == KIND_PLAYER.
+        // Angle is the offset along the bone axes and Rotation the bone number.
         match ctx.actor(p.target) {
             Some(a) => p.position = a.bone_world(p.rotation.max(0.0) as usize, p.angle),
             None => p.live = false,
@@ -426,7 +426,7 @@ fn pounding_ball_create(p: &mut Particle, ctx: &mut Ctx) {
 
 #[allow(clippy::nonminimal_bool, clippy::overly_complex_bool_expr)]
 fn pounding_ball_step(p: &mut Particle, ctx: &mut Ctx) {
-    // Condición imposible en el original (SubType == 0 && SubType == 1): se conserva tal cual.
+    // Impossible condition in the original (SubType == 0 && SubType == 1): kept as is.
     if p.sub_type == 0 && p.sub_type == 1 {
         p.gravity += 0.004;
         p.scale -= 0.02;
@@ -539,8 +539,8 @@ fn adv_smoke1_create(p: &mut Particle, ctx: &mut Ctx) {
     p.velocity.x = (r(ctx, 10) + 5) as f32 * 0.4;
     p.velocity.y = 0.0;
     p.velocity.z = (r(ctx, 10) + 5) as f32 * 0.2;
-    // En el original no hay `break`: sigue con el código de BITMAP_TRUE_FIRE (que vuelve a poner
-    // LifeTime y Velocity).
+    // The original has no `break`: it falls through into the BITMAP_TRUE_FIRE code (which sets
+    // LifeTime and Velocity again).
     true_fire_create_body(p, ctx, scale);
 }
 
@@ -561,11 +561,11 @@ fn adv_smoke1_step(p: &mut Particle, ctx: &mut Ctx) {
     p.rotation += 1.0 + rf(ctx, 2);
 }
 
-/// `Blend3`; el subtipo 2 además suma la textura al color.
+/// `Blend3`; subtype 2 also adds the texture to the color.
 fn adv_smoke1_draw(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some((w, h)) = size(p, ctx) else { return };
-    // TODO(original): subtipo 2 con `additiveTexture` (GL_ADD: textura + color del vértice);
-    // el material aún no lo tiene, se dibuja como el resto con Blend3.
+    // TODO(original): subtype 2 with `additiveTexture` (GL_ADD: texture + vertex color);
+    // the material does not support it yet, so it is drawn like the rest with Blend3.
     sprite(out, ctx, p.tex_type, p.position, w, h, p.light, p.rotation, Some(Blend::Blend3));
 }
 
@@ -576,7 +576,7 @@ fn true_fire_create(p: &mut Particle, ctx: &mut Ctx) {
     true_fire_create_body(p, ctx, scale);
 }
 
-/// `scale` es el argumento `Scale` de `CreateParticle`.
+/// `scale` is the `Scale` argument of `CreateParticle`.
 fn true_fire_create_body(p: &mut Particle, ctx: &mut Ctx, scale: f32) {
     match p.sub_type {
         7 => {
@@ -617,11 +617,11 @@ fn true_fire_step(p: &mut Particle, ctx: &mut Ctx) {
 
     if p.sub_type >= 3 && p.sub_type < 5 && p.target.is_some() {
         // TODO(original): BoneManager::GetBonePosition(Target, "Monster82_LHand"/"Monster82_RHand"):
-        // con la distancia d a ese hueso, Scale -= d·0.003 y Light -= d·0.08.
+        // with the distance d to that bone, Scale -= d·0.003 and Light -= d·0.08.
     }
 
     if p.sub_type == 8 {
-        // (si no hay Target el original usa vPos sin iniciar; aquí no se mueve)
+        // (without a Target the original uses an uninitialized vPos; here it does not move)
         if let Some(a) = ctx.actor(p.target) {
             let v = a.bone_world(20, Vec3::new(6.0, 6.0, 0.0));
             p.position.x = v.x;
@@ -643,7 +643,7 @@ fn true_fire_step(p: &mut Particle, ctx: &mut Ctx) {
     p.velocity.x *= 0.95;
     p.velocity.y *= 0.95;
 
-    // (en el original se compara `Type == 6`, que nunca se cumple)
+    // (the original compares `Type == 6`, which is never true)
     if p.ty == 6 {
         p.position.z += 2.0;
     } else {
@@ -815,7 +815,7 @@ fn waterfall5_step(p: &mut Particle, ctx: &mut Ctx) {
             p.velocity.z += 0.1;
         }
         4 => {
-            // (cos/sin de los grados tal cual, como el original)
+            // (cos/sin of the degrees as is, like the original)
             p.position.x += p.angle.z.cos() * 20.0;
             p.position.y += p.angle.z.sin() * 20.0;
             p.position.z += p.gravity;
@@ -847,7 +847,7 @@ fn waterfall5_step(p: &mut Particle, ctx: &mut Ctx) {
 
 fn plus_create(p: &mut Particle, ctx: &mut Ctx) {
     p.life_time = 20.0;
-    // (o->Scale = Scale: ya lo es)
+    // (o->Scale = Scale: already is)
     p.position.x += rf(ctx, 30) - 15.0;
     p.position.y += rf(ctx, 30) - 15.0;
     p.position.z += 240.0;
@@ -885,7 +885,7 @@ fn waterfall2_create(p: &mut Particle, ctx: &mut Ctx) {
 
     p.velocity.z = -((r(ctx, 3) + 3) as f32);
 
-    // TODO(original): en la pantalla de selección de personaje (SceneFlag == CHARACTER_SCENE) la luz es 0.25.
+    // TODO(original): on the character select screen (SceneFlag == CHARACTER_SCENE) the light is 0.25.
     p.light = Vec3::splat(0.4);
 
     p.position.x += rf(ctx, 20) - 10.0;
@@ -981,7 +981,7 @@ fn waterfall2_step(p: &mut Particle, ctx: &mut Ctx) {
         p.light.y *= 0.77;
         p.light.z *= 0.77;
 
-        // (el original pisa enseguida la posición calculada arriba)
+        // (the original immediately overwrites the position computed above)
         p.position = p.start_position;
         p.start_position.z = p.start_position.z + rf(ctx, 5) + 10.0;
         p.position.z = p.start_position.z + p.gravity;
@@ -1181,7 +1181,7 @@ fn waterfall3_step(p: &mut Particle, ctx: &mut Ctx) {
             return;
         }
         14 => {
-            // (sin `break` en el original: sigue con el código común de abajo)
+            // (no `break` in the original: falls through into the common code below)
             p.scale += 0.05;
             p.velocity.z -= 0.6;
             p.light *= 1.0 / 1.1;
@@ -1214,7 +1214,7 @@ fn waterfall3_step(p: &mut Particle, ctx: &mut Ctx) {
 // --- BITMAP_SHOCK_WAVE --------------------------------------------------------------------------------------
 
 fn shock_wave_create(p: &mut Particle, _ctx: &mut Ctx) {
-    // (Scale y Light ya son los argumentos de CreateParticle)
+    // (Scale and Light are already the CreateParticle arguments)
     if p.sub_type == 3 || p.sub_type == 0 {
         p.life_time = 7.0;
     }
@@ -1246,7 +1246,7 @@ fn shock_wave_step(p: &mut Particle, _ctx: &mut Ctx) {
     }
 }
 
-// --- Registro -------------------------------------------------------------------------------------------------
+// --- Registration ---------------------------------------------------------------------------------------------
 
 pub fn register(r: &mut Registry) {
     let k = |create: ParticleCreate, step: ParticleStep| ParticleKind { create: Some(create), step: Some(step), draw: None };

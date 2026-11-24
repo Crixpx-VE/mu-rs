@@ -1,5 +1,5 @@
-//! Información en pantalla para probar: el contador de fps (arriba a la izquierda), solo con
-//! `--fps` (el original no tiene ninguno).
+//! On-screen info for testing: the fps counter (top left), only with
+//! `--fps` (the original has none).
 
 use bevy::diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::prelude::*;
@@ -21,7 +21,7 @@ fn spawn_fps(mut commands: Commands) {
     commands.spawn((
         FpsText,
         Text::new("FPS --"),
-        // La interfaz va escalada a 480 de alto (ver mainframe.rs): 8 aquí son ~18 px a 1080p.
+        // The UI is scaled to 480 high (see mainframe.rs): 8 here is ~18 px at 1080p.
         TextFont { font_size: bevy::text::FontSize::Px(8.0), ..default() },
         TextColor(Color::srgb(1.0, 0.95, 0.6)),
         TextShadow { offset: Vec2::splat(0.6), color: Color::BLACK },
@@ -29,7 +29,7 @@ fn spawn_fps(mut commands: Commands) {
     ));
 }
 
-/// Se refresca 4 veces por segundo con la media de los últimos fotogramas, para que se pueda leer.
+/// Refreshed 4 times per second with the average of the last frames, so it is readable.
 fn update_fps(
     diagnostics: Res<DiagnosticsStore>,
     time: Res<Time>,

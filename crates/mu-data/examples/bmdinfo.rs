@@ -1,6 +1,6 @@
-//! Huesos, animaciones y caja (en bruto y posada) de un `.bmd` (depuración).
+//! Bones, animations and bounding box (raw and posed) of a `.bmd` (debugging).
 //!
-//!   cargo run -p mu-data --example bmdinfo -- <carpeta> <archivo.bmd>
+//!   cargo run -p mu-data --example bmdinfo -- <folder> <file.bmd>
 
 use std::path::PathBuf;
 

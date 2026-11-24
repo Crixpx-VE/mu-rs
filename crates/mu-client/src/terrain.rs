@@ -1,22 +1,22 @@
-//! Convierte el terreno de `mu-data` en mallas de Bevy.
+//! Converts the `mu-data` terrain into Bevy meshes.
 //!
-//! Igual que el cliente original (`RenderTerrainFace`, ZzzLodTerrain.cpp:1514-1565), cada casilla
-//! se dibuja en dos pasadas:
-//! 1. Base: si las cuatro esquinas tienen la capa 2 entera (alfa 1), la textura de la capa 2;
-//!    si no, la de la capa 1 (opaca, o con prueba de alfa en las texturas de `RenderFace`).
-//! 2. Encima, si alguna esquina tiene algo de capa 2: en Atlans (y Doppelganger 3) donde la capa 2
-//!    es agua, las cáusticas animadas `Object8\wtNN` sumadas; en el resto, si la casilla no era
-//!    entera, la capa 2 con la transparencia de cada vértice (`RenderFaceAlpha`: mezcla + prueba de alfa).
+//! Like the original client (`RenderTerrainFace`, ZzzLodTerrain.cpp:1514-1565), each tile
+//! is drawn in two passes:
+//! 1. Base: if all four corners are fully on layer 2 (alpha 1), the layer 2 texture;
+//!    otherwise layer 1 (opaque, or alpha tested for the `RenderFace` textures).
+//! 2. On top, if any corner has some layer 2: in Atlans (and Doppelganger 3), where layer 2
+//!    is water, the animated `Object8\wtNN` caustics, additive; elsewhere, if the tile was not
+//!    full, layer 2 with per-vertex transparency (`RenderFaceAlpha`: blend + alpha test).
 //!
-//! El agua (`TileWater01`, y la lava de Vulcanus) avanza en U (`WaterMove`) y se ondula en V con el
-//! viento de la hierba (`FaceTexture`, 1474-1508). Solo se dibujan las casillas que caen dentro del
-//! trapecio del suelo del original (`CreateFrustrum2D` / `TestFrustrum2D` en los bloques de 4×4 y
-//! en cada casilla, dentro de los límites de `CreateFrustrum`): ver [`TerrainCull`].
+//! Water (`TileWater01`, and the Vulcanus lava) scrolls in U (`WaterMove`) and waves in V with the
+//! grass wind (`FaceTexture`, 1474-1508). Only tiles inside the original's ground trapezoid are
+//! drawn (`CreateFrustrum2D` / `TestFrustrum2D` on the 4×4 blocks and on each tile, within the
+//! `CreateFrustrum` bounds): see [`TerrainCull`].
 //!
-//! Se agrupan las casillas por pasada y textura en trozos de 16×16.
+//! Tiles are grouped by pass and texture in 16×16 chunks.
 //!
-//! Ejes: MU usa Z hacia arriba y Bevy usa Y hacia arriba, así que
-//! MU (x, y, z) → Bevy (x, z, -y). Una casilla mide 1 unidad (100 en MU).
+//! Axes: MU uses Z up and Bevy uses Y up, so
+//! MU (x, y, z) → Bevy (x, z, -y). A tile is 1 unit (100 in MU).
 
 use std::collections::HashMap;
 
@@ -37,10 +37,10 @@ use mu_data::texture::Texture;
 use crate::Args;
 use crate::fx::material::FxParams;
 
-/// Unidades de MU por unidad de Bevy (una casilla = 100 en MU).
+/// MU units per Bevy unit (one tile = 100 in MU).
 pub const MU_SCALE: f32 = 100.0;
 
-/// El terreno cargado, para que otros sistemas (cámara, personajes) consulten alturas.
+/// The loaded terrain, so other systems (camera, characters) can query heights.
 #[derive(Resource)]
 pub struct LoadedTerrain(pub Terrain);
 
@@ -48,20 +48,20 @@ pub struct TerrainPlugin;
 
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
-        // El sombreador de los efectos, registrado ya aquí: este plugin va antes que el de los efectos y
-        // el material lo pide al crearse (registrarlo dos veces no pasa nada).
+        // The effects shader, registered here already: this plugin runs before the effects one and
+        // the material requests it on creation (registering it twice is harmless).
         bevy::asset::embedded_asset!(app, "fx/fx.wesl");
         app.add_plugins(MaterialPlugin::<LayerMaterial>::default())
             .init_resource::<TerrainLights>()
             .init_resource::<TerrainCull>()
             .init_resource::<Caustics>()
             .add_systems(Update, spawn_terrain.run_if(crate::scene::load_step(crate::scene::Step::Terrain)))
-            // Las luces se vacían al empezar cada tick; los emisores las rellenan después.
+            // Lights are cleared at the start of each tick; emitters refill them afterwards.
             .add_systems(FixedFirst, clear_lights)
-            // `WaterTextureNumber++` en cada vuelta de la lógica (ZzzScene.cpp:2315-2316).
+            // `WaterTextureNumber++` on each logic loop (ZzzScene.cpp:2315-2316).
             .add_systems(FixedUpdate, |mut c: ResMut<Caustics>| c.frame = (c.frame + 1) % CAUSTIC_FRAMES)
             .add_systems(Update, (apply_lights, show_caustics))
-            // Con la cámara ya colocada en este fotograma y antes de decidir qué se ve.
+            // With the camera already placed this frame and before deciding what is visible.
             .add_systems(
                 PostUpdate,
                 (update_cull, cull_chunks, move_water)
@@ -73,41 +73,41 @@ impl Plugin for TerrainPlugin {
     }
 }
 
-/// Cuándo queda decidido qué casillas del suelo se dibujan en este fotograma (la hierba va después).
+/// When the drawn ground tiles of this frame are decided (the grass comes after).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct TerrainCulled;
 
-/// Textura del terreno que es agua en todos los mapas (`TileWater01`).
+/// Terrain texture that is water on every map (`TileWater01`).
 const WATER_TEXTURE: u8 = 5;
-/// La lava de Vulcanus y Doppelganger 2 (`Object64\song_lava1.jpg`), que corre como el agua.
+/// The lava of Vulcanus and Doppelganger 2 (`Object64\song_lava1.jpg`), which flows like water.
 const LAVA_TEXTURE: u8 = 11;
-/// `BITMAP_WATER`: 32 texturas `Object8\wt00-31.jpg`.
+/// `BITMAP_WATER`: 32 textures `Object8\wt00-31.jpg`.
 const CAUSTIC_FRAMES: u32 = 32;
 
-/// `WorldActive` del original: nuestro número de mapa menos uno.
+/// The original's `WorldActive`: our map number minus one.
 fn active(world: u16) -> i32 {
     world as i32 - 1
 }
 
-/// Vulcanus (`IsPKField`) o Doppelganger 2 (`IsDoppelGanger2`).
+/// Vulcanus (`IsPKField`) or Doppelganger 2 (`IsDoppelGanger2`).
 pub fn pk_field(world: u16) -> bool {
     matches!(active(world), 63 | 66)
 }
 
-/// Mapas con cáusticas sobre el agua de la capa 2: Atlans y Doppelganger 3 (ZzzLodTerrain.cpp:1547).
+/// Maps with caustics over layer 2 water: Atlans and Doppelganger 3 (ZzzLodTerrain.cpp:1547).
 fn caustic_world(world: u16) -> bool {
     matches!(active(world), 7 | 67)
 }
 
-/// Icarus y Kalima: el original no dibuja el suelo (`RenderTerrain` no se llama, ZzzScene.cpp:2108-2116).
-/// En Kalima (`IsWaterTerrain`) va en su lugar el mar de [`crate::water_terrain`].
+/// Icarus and Kalima: the original does not draw the ground (`RenderTerrain` is not called, ZzzScene.cpp:2108-2116).
+/// In Kalima (`IsWaterTerrain`) the sea of [`crate::water_terrain`] goes in its place.
 pub fn hidden_terrain(world: u16) -> bool {
     active(world) == 10 || crate::water_terrain::is_water_world(world)
 }
 
-/// `WaterMove` (`RenderTerrain`, ZzzLodTerrain.cpp:2589-2602): fracción de textura que ha avanzado el
-/// agua a los `ms` milisegundos. Tarkan da la vuelta en 40 s, Barracas de Balgass (`WD_42`) en 50 s y
-/// el resto en 20 s.
+/// `WaterMove` (`RenderTerrain`, ZzzLodTerrain.cpp:2589-2602): fraction of the texture the water
+/// has advanced after `ms` milliseconds. Tarkan wraps around in 40 s, Balgass Barracks (`WD_42`) in
+/// 50 s and the rest in 20 s.
 pub fn water_move(world: u16, ms: i64) -> f32 {
     match active(world) {
         8 => (ms % 40000) as f32 * 0.000025,
@@ -116,18 +116,18 @@ pub fn water_move(world: u16, ms: i64) -> f32 {
     }
 }
 
-/// Milisegundos como `WorldTime` (`timeGetTime`).
+/// Milliseconds like `WorldTime` (`timeGetTime`).
 pub fn world_ms(time: &Time) -> i64 {
     (time.elapsed_secs_f64() * 1000.0) as i64
 }
 
-// --- Material de las capas de encima --------------------------------------------------------------
+// --- Overlay layer material -----------------------------------------------------------------------
 
-/// Material de lo que va encima del suelo base: la capa 2 (`EnableAlphaTest`: mezcla con alfa y prueba
-/// de alfa > 0.25, escribe profundidad) o algo sumado (`EnableAlphaBlend`: ONE, ONE, sin escribir
-/// profundidad), como las cáusticas o la hierba de Vulcanus. Reutiliza el sombreador de los efectos
-/// (textura × color del vértice × tinte). Va en la pasada de recorte de Bevy, justo después del suelo
-/// opaco y antes de todo lo transparente, que es el orden del original (el terreno va lo primero).
+/// Material for what goes over the base ground: layer 2 (`EnableAlphaTest`: alpha blend and alpha
+/// test > 0.25, writes depth) or something additive (`EnableAlphaBlend`: ONE, ONE, no depth
+/// write), like the caustics or the Vulcanus grass. Reuses the effects shader
+/// (texture × vertex color × tint). Goes in Bevy's alpha-mask pass, right after the opaque
+/// ground and before everything transparent, which is the original's order (terrain first).
 #[derive(Asset, TypePath, AsBindGroup, Debug, Clone)]
 #[bind_group_data(LayerKey)]
 pub struct LayerMaterial {
@@ -185,7 +185,7 @@ impl Material for LayerMaterial {
         descriptor.primitive.cull_mode = None;
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(!additive);
-            // Misma geometría que la casilla de debajo: un poco hacia la cámara para que no parpadee.
+            // Same geometry as the tile below: nudged towards the camera to avoid z-fighting.
             depth.bias.constant = 1;
         }
         let (src, dst) = if additive { (One, One) } else { (SrcAlpha, OneMinusSrcAlpha) };
@@ -204,9 +204,9 @@ impl Material for LayerMaterial {
     }
 }
 
-// --- Cáusticas de Atlans -------------------------------------------------------------------------
+// --- Atlans caustics -----------------------------------------------------------------------------
 
-/// Cáusticas del mapa cargado: el material y sus 32 fotogramas. `frame` es `WaterTextureNumber`.
+/// Caustics of the loaded map: the material and its 32 frames. `frame` is `WaterTextureNumber`.
 #[derive(Resource, Default)]
 pub struct Caustics {
     material: Option<Handle<LayerMaterial>>,
@@ -215,7 +215,7 @@ pub struct Caustics {
     shown: Option<u32>,
 }
 
-/// Pone el fotograma del tick en el material de las cáusticas.
+/// Sets the tick's frame on the caustics material.
 fn show_caustics(mut c: ResMut<Caustics>, mut materials: ResMut<Assets<LayerMaterial>>) {
     let Some(h) = c.material.clone() else { return };
     if c.shown == Some(c.frame) || c.frames.is_empty() {
@@ -228,47 +228,47 @@ fn show_caustics(mut c: ResMut<Caustics>, mut materials: ResMut<Assets<LayerMate
     }
 }
 
-// --- Construcción ---------------------------------------------------------------------------------
+// --- Building -------------------------------------------------------------------------------------
 
-/// Qué pasada dibuja un trozo.
+/// Which pass draws a chunk.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Pass {
-    /// `RenderFace`: la textura base de la casilla.
+    /// `RenderFace`: the tile's base texture.
     Base,
-    /// `RenderFaceAlpha`: la capa 2 con su transparencia.
+    /// `RenderFaceAlpha`: layer 2 with its transparency.
     Alpha,
-    /// `RenderFaceBlend` de Atlans: las cáusticas sumadas, con el alfa como color.
+    /// Atlans `RenderFaceBlend`: additive caustics, with the alpha as color.
     Caustic,
 }
 
-/// Lo que dibuja cada casilla, decidido como `RenderTerrainFace` (ZzzLodTerrain.cpp:1514-1565).
+/// What each tile draws, decided like `RenderTerrainFace` (ZzzLodTerrain.cpp:1514-1565).
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct TileDraw {
-    /// Textura de la pasada base y si es agua (se mueve).
+    /// Texture of the base pass and whether it is water (scrolls).
     base: Option<(u8, bool)>,
-    /// La pasada de encima: cáusticas, o la capa 2 con si es agua.
+    /// The overlay pass: caustics, or layer 2 with whether it is water.
     over: Option<(Pass, u8, bool)>,
 }
 
-/// Decide qué dibuja la casilla (x, y): `alpha` son las cuatro esquinas (0..1) en el orden del original.
+/// Decides what tile (x, y) draws: `alpha` are the four corners (0..1) in the original's order.
 fn tile_draw(world: u16, layer1: u8, layer2: u8, alpha: [f32; 4]) -> TileDraw {
     let full = alpha.iter().all(|&a| a >= 1.0);
     let any = alpha.iter().any(|&a| a > 0.0);
-    // Casilla entera: la textura de la capa 2, sin agua. Si no, la de la capa 1 (agua: la 5, y la lava
-    // en Vulcanus / Doppelganger 2).
+    // Full tile: the layer 2 texture, no water. Otherwise layer 1 (water: 5, and lava
+    // in Vulcanus / Doppelganger 2).
     let (base, water) = if full && layer2 != NO_TEXTURE {
         (layer2, false)
     } else {
         (layer1, layer1 == WATER_TEXTURE || (layer1 == LAVA_TEXTURE && pk_field(world)))
     };
-    // Kanturu 3: la 100 no se dibuja en la pasada normal (`RenderFace`, 1336-1337).
+    // Kanturu 3: 100 is not drawn in the normal pass (`RenderFace`, 1336-1337).
     let base = (!(active(world) == 39 && base == 100)).then_some((base, water));
     let over = if !any {
         None
     } else if caustic_world(world) && layer2 == WATER_TEXTURE {
         Some((Pass::Caustic, layer2, false))
     } else if !full && layer2 != NO_TEXTURE {
-        // La capa 2 solo es agua si la base también lo era.
+        // Layer 2 is only water if the base was too.
         Some((Pass::Alpha, layer2, water && layer2 == WATER_TEXTURE))
     } else {
         None
@@ -294,12 +294,12 @@ fn spawn_terrain(
     };
     info!("World{} cargado desde {}", args.world, t.dir.display());
     if hidden_terrain(args.world) {
-        // Las alturas siguen haciendo falta (personajes, efectos), pero el suelo no se ve.
+        // Heights are still needed (characters, effects), but the ground is not visible.
         commands.insert_resource(LoadedTerrain(t));
         return;
     }
 
-    // Imagen y escala de UV (`64 / ancho`, `FaceTexture`) de cada textura usada.
+    // Image and UV scale (`64 / width`, `FaceTexture`) of each used texture.
     let mut tex: HashMap<u8, (Handle<Image>, Vec2)> = HashMap::new();
     for (index, texture) in t.textures.iter().enumerate() {
         let Some(texture) = texture else { continue };
@@ -307,7 +307,7 @@ fn spawn_terrain(
         tex.insert(index as u8, (images.add(to_bevy_image(texture)), uv));
     }
 
-    // Cáusticas: `Object8\wtNN.jpg` (MapManager.cpp:132-147), UV de `16 / ancho` (`FaceTexture` con `Scale`).
+    // Caustics: `Object8\wtNN.jpg` (MapManager.cpp:132-147), UV of `16 / width` (`FaceTexture` with `Scale`).
     let mut caustic_uv = Vec2::ONE;
     if caustic_world(args.world) {
         let dir = mu_data::fs::find(&args.data, "Object8").unwrap_or_else(|| args.data.join("Object8"));
@@ -349,7 +349,7 @@ fn spawn_terrain(
                                 base_color_texture: Some(image.clone()),
                                 unlit: true,
                                 cull_mode: None,
-                                // `RenderFace`: esta textura va con prueba de alfa (rejas, huecos).
+                                // `RenderFace`: this texture is alpha tested (fences, holes).
                                 alpha_mode: if alpha_tested == Some(texture) {
                                     AlphaMode::Mask(crate::objects::ALPHA_REF)
                                 } else {
@@ -393,7 +393,7 @@ enum MaterialChoice {
     Layer(Handle<LayerMaterial>),
 }
 
-/// Casillas de `area` agrupadas por (pasada, textura, agua), en orden.
+/// Tiles of `area` grouped by (pass, texture, water), in order.
 fn chunk_groups(t: &Terrain, world: u16, area: [usize; 4]) -> Vec<((Pass, u8, bool), Vec<[usize; 2]>)> {
     let m = &t.mapping;
     let mut groups: Vec<((Pass, u8, bool), Vec<[usize; 2]>)> = Vec::new();
@@ -403,7 +403,7 @@ fn chunk_groups(t: &Terrain, world: u16, area: [usize; 4]) -> Vec<((Pass, u8, bo
     };
     for y in area[1]..area[3] {
         for x in area[0]..area[2] {
-            // `RenderTerrainTile`: las casillas `TW_NOGROUND` no se dibujan.
+            // `RenderTerrainTile`: `TW_NOGROUND` tiles are not drawn.
             if t.attribute(x, y) & terrain::attr::NO_GROUND != 0 {
                 continue;
             }
@@ -420,7 +420,7 @@ fn chunk_groups(t: &Terrain, world: u16, area: [usize; 4]) -> Vec<((Pass, u8, bo
     groups
 }
 
-/// Esquinas de la casilla en el orden del original (`TerrainIndex1..4`): (x, y), (x+1, y), (x+1, y+1), (x, y+1).
+/// Tile corners in the original's order (`TerrainIndex1..4`): (x, y), (x+1, y), (x+1, y+1), (x, y+1).
 fn corners(x: usize, y: usize) -> [(usize, usize); 4] {
     [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)]
 }
@@ -429,29 +429,29 @@ fn corner_alpha(t: &Terrain, x: usize, y: usize) -> [f32; 4] {
     corners(x, y).map(|(cx, cy)| t.mapping.alpha[cy * SIZE + cx] as f32 / 255.0)
 }
 
-/// Lado de los trozos del terreno, en casillas.
+/// Terrain chunk side, in tiles.
 const CHUNK: usize = 16;
 
-/// Un trozo del terreno, con lo necesario para recalcular su luz, su agua y qué casillas se ven.
+/// A terrain chunk, with what is needed to recompute its light, its water and which tiles are visible.
 #[derive(Component)]
 pub struct TerrainChunk {
     mesh: Handle<Mesh>,
     pass: Pass,
-    /// Esquina (x, y) de cada vértice (4 por casilla, en orden).
+    /// Corner (x, y) of each vertex (4 per tile, in order).
     corners: Vec<[u8; 2]>,
-    /// Transparencia de cada vértice (capa 2).
+    /// Per-vertex transparency (layer 2).
     alpha: Vec<f32>,
-    /// Casillas que cubre: [x0, y0, x1, y1].
+    /// Tiles covered: [x0, y0, x1, y1].
     area: [usize; 4],
-    /// Tenía luces dinámicas en la última actualización (hay que devolverlo a su luz normal).
+    /// Had dynamic lights in the last update (must be restored to its normal light).
     lit: bool,
-    /// UV sin mover, si es agua (`FaceTexture` con `Water`).
+    /// Unscrolled UVs, if water (`FaceTexture` with `Water`).
     water_uv: Option<Vec<[f32; 2]>>,
-    /// Si es agua de `TileWater01` (en el Valle de Loren corre al revés; la lava no).
+    /// Whether it is `TileWater01` water (in Valley of Loren it flows backwards; lava does not).
     water_tile: bool,
-    /// Casillas que se dibujan ahora mismo (una por cada cuatro vértices).
+    /// Tiles drawn right now (one per four vertices).
     shown: Vec<bool>,
-    /// Generación de [`TerrainCull`] ya aplicada.
+    /// [`TerrainCull`] generation already applied.
     cull_generation: u64,
 }
 
@@ -475,7 +475,7 @@ fn build_mesh(
             uv.push([cx as f32 * uv_scale.x, cy as f32 * uv_scale.y]);
             let a = if pass == Pass::Base { 1.0 } else { alpha[k] };
             color.push(match pass {
-                // `VertexBlend`: el color es el alfa, sin luz.
+                // `VertexBlend`: the color is the alpha, unlit.
                 Pass::Caustic => vertex_color([a; 3], 1.0),
                 _ => vertex_color(t.light[cy * SIZE + cx], a),
             });
@@ -507,12 +507,12 @@ fn build_mesh(
     (mesh, chunk)
 }
 
-/// Los dos triángulos de la casilla que empieza en el vértice `base` (`GL_TRIANGLE_FAN` 0-1-2-3).
+/// The two triangles of the tile starting at vertex `base` (`GL_TRIANGLE_FAN` 0-1-2-3).
 pub fn quad_indices(base: u32) -> [u32; 6] {
     [base, base + 1, base + 2, base, base + 2, base + 3]
 }
 
-/// Al cambiar de mapa: nada del anterior.
+/// On map change: nothing from the previous one.
 pub fn reset(mut lights: ResMut<TerrainLights>, mut caustics: ResMut<Caustics>, mut cull: ResMut<TerrainCull>) {
     lights.lights.clear();
     *caustics = Caustics::default();
@@ -520,9 +520,9 @@ pub fn reset(mut lights: ResMut<TerrainLights>, mut caustics: ResMut<Caustics>, 
     cull.generation += 1;
 }
 
-// --- Agua -----------------------------------------------------------------------------------------
+// --- Water ----------------------------------------------------------------------------------------
 
-/// Mueve el agua: `u ± WaterMove` y `v + TerrainGrassWind · 0.002` en cada vértice (`FaceTexture`).
+/// Scrolls the water: `u ± WaterMove` and `v + TerrainGrassWind · 0.002` on each vertex (`FaceTexture`).
 fn move_water(
     time: Res<Time>,
     args: Res<Args>,
@@ -538,7 +538,7 @@ fn move_water(
         if *vis == Visibility::Hidden {
             continue;
         }
-        // El Valle de Loren (`WD_30BATTLECASTLE`) corre al revés, solo en la textura 5 (1489-1492).
+        // Valley of Loren (`WD_30BATTLECASTLE`) flows backwards, only on texture 5 (1489-1492).
         let du = if active(args.world) == 30 && c.water_tile { -shift } else { shift };
         let uv: Vec<[f32; 2]> = base
             .iter()
@@ -551,35 +551,35 @@ fn move_water(
     }
 }
 
-// --- Qué casillas se ven ----------------------------------------------------------------------------
+// --- Which tiles are visible ------------------------------------------------------------------------
 
-/// El trapecio del suelo del original para este fotograma (`None` = sin recortar: fuera del juego).
+/// The original's ground trapezoid for this frame (`None` = no culling: outside the game).
 #[derive(Resource, Default)]
 pub struct TerrainCull {
     pub shape: Option<CullShape>,
-    /// Cambia cada vez que cambia `shape`.
+    /// Changes every time `shape` changes.
     pub generation: u64,
 }
 
 impl TerrainCull {
-    /// Si la casilla (x, y) se dibuja (`RenderTerrainFrustrum` + `RenderTerrainBlock`).
+    /// Whether tile (x, y) is drawn (`RenderTerrainFrustrum` + `RenderTerrainBlock`).
     pub fn tile_visible(&self, x: usize, y: usize) -> bool {
         self.shape.as_ref().is_none_or(|s| s.tile_visible(x, y))
     }
 
-    /// Si algo de `area` ([x0, y0, x1, y1), en casillas) puede verse.
+    /// Whether something of `area` ([x0, y0, x1, y1), in tiles) can be visible.
     pub fn area_may_be_visible(&self, area: [usize; 4]) -> bool {
         self.shape.as_ref().is_none_or(|s| s.overlaps(area))
     }
 }
 
-/// `CreateFrustrum2D` (en casillas) y los límites de bloques de `CreateFrustrum`.
+/// `CreateFrustrum2D` (in tiles) and the block bounds of `CreateFrustrum`.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct CullShape {
-    /// `FrustrumX` / `FrustrumY`: las cuatro esquinas del trapecio, en casillas.
+    /// `FrustrumX` / `FrustrumY`: the four trapezoid corners, in tiles.
     pub fx: [f32; 4],
     pub fy: [f32; 4],
-    /// `FrustrumBoundMinX`, `MinY`, `MaxX`, `MaxY`: primer y último bloque de 4×4 que se recorre.
+    /// `FrustrumBoundMinX`, `MinY`, `MaxX`, `MaxY`: first and last 4×4 block traversed.
     pub bound: [i32; 4],
 }
 
@@ -597,9 +597,9 @@ impl CullShape {
         true
     }
 
-    /// `RenderTerrainFrustrum`: bloques de 4×4 desde `FrustrumBoundMin` hasta `Max` con
-    /// `TestFrustrum2D(centro, -40)` (`g_fFrustumRange`), y en cada bloque las casillas con
-    /// `TestFrustrum2D(centro, 0)` (`RenderTerrainBlock`, 2485-2540).
+    /// `RenderTerrainFrustrum`: 4×4 blocks from `FrustrumBoundMin` to `Max` with
+    /// `TestFrustrum2D(center, -40)` (`g_fFrustumRange`), and in each block the tiles with
+    /// `TestFrustrum2D(center, 0)` (`RenderTerrainBlock`, 2485-2540).
     pub fn tile_visible(&self, x: usize, y: usize) -> bool {
         let [min_x, min_y, max_x, max_y] = self.bound;
         let (x, y) = (x as i32, y as i32);
@@ -614,7 +614,7 @@ impl CullShape {
             && self.test(x as f32 + 0.5, y as f32 + 0.5, 0.0)
     }
 
-    /// Descarte rápido de un trozo entero.
+    /// Quick rejection of a whole chunk.
     fn overlaps(&self, [x0, y0, x1, y1]: [usize; 4]) -> bool {
         let [min_x, min_y, max_x, max_y] = self.bound;
         let min = |v: [f32; 4]| v.iter().cloned().fold(f32::MAX, f32::min);
@@ -630,13 +630,13 @@ impl CullShape {
     }
 }
 
-/// Medidas del trapecio de `CreateFrustrum2D` en MU: (far, near, target, ancho lejos, ancho cerca).
-/// `hero` es la posición del personaje en MU. Con `g_shCameraLevel` como lo deja `MoveMainCamera`
-/// (5 en Vulcanus y los Doppelganger 1 y 2, 0 en el resto) y `GetScreenWidth() = 640`.
+/// `CreateFrustrum2D` trapezoid measurements in MU: (far, near, target, far width, near width).
+/// `hero` is the character's MU position. With `g_shCameraLevel` as `MoveMainCamera` leaves it
+/// (5 in Vulcanus and Doppelganger 1 and 2, 0 elsewhere) and `GetScreenWidth() = 640`.
 pub fn frustum2d_params(world: u16, hero: Vec2) -> [f32; 5] {
     let ratio = |far: f32| [far, far * 0.19, far * 0.47];
     match active(world) {
-        // Valle de Loren (`InBattleCastle`, 1968-1987).
+        // Valley of Loren (`InBattleCastle`, 1968-1987).
         30 => {
             if crate::camera::in_battle_castle2(hero) && (hero.x < 17100.0 || hero.x > 18300.0) {
                 let [f, n, t] = ratio(5100.0);
@@ -646,21 +646,21 @@ pub fn frustum2d_params(world: u16, hero: Vec2) -> [f32; 5] {
                 [f, n, t, 1300.0, 580.0]
             }
         }
-        // Santa Town (1988-1997): near y target salen de 2400 y el far se cambia luego a 2650.
+        // Santa Town (1988-1997): near and target come from 2400 and far is later changed to 2650.
         62 => {
             let [_, n, t] = ratio(2400.0);
             [2650.0, n, t, 1250.0, 540.0]
         }
-        // Vulcanus y Doppelganger 2 (1998-2007).
+        // Vulcanus and Doppelganger 2 (1998-2007).
         63 | 66 => [3300.0, 55.0, 830.0, 1900.0, 600.0],
-        // Doppelganger 1: `g_shCameraLevel = 5` (ZzzScene.cpp:1725-1728) → caso 4/5 (2091-2099).
+        // Doppelganger 1: `g_shCameraLevel = 5` (ZzzScene.cpp:1725-1728) → case 4/5 (2091-2099).
         65 => {
             let width = 1.0 + 0.1;
             let [f, n, t] = ratio(3400.0);
             [f, n, t, 1600.0 * width, 660.0 * width]
         }
-        // Según el `CameraLevel` del recorte (2010-2099). Nivel 0: Kanturu 3 con 2000 · 10 · 0.115, el
-        // resto 2400; los demás llevan `Width = 1 + 0.1`.
+        // By the culling `CameraLevel` (2010-2099). Level 0: Kanturu 3 with 2000 · 10 · 0.115, the
+        // rest 2400; the others use `Width = 1 + 0.1`.
         a => {
             let wide = 1.0 + 0.1;
             match crate::camera::cull_level(world) {
@@ -690,7 +690,7 @@ pub fn frustum2d_params(world: u16, hero: Vec2) -> [f32; 5] {
     }
 }
 
-/// Esquinas del trapecio en casillas alrededor de `hero` (MU), giradas 45° (`Vector(0, 0, 45)`).
+/// Trapezoid corners in tiles around `hero` (MU), rotated 45° (`Vector(0, 0, 45)`).
 pub fn trapezoid(world: u16, hero: Vec2) -> ([f32; 4], [f32; 4]) {
     let [far, near, target, wf, wn] = frustum2d_params(world, hero);
     let p = [[-wf, far - target], [wf, far - target], [wn, near - target], [-wn, near - target]];
@@ -698,15 +698,15 @@ pub fn trapezoid(world: u16, hero: Vec2) -> ([f32; 4], [f32; 4]) {
     let mut fx = [0.0; 4];
     let mut fy = [0.0; 4];
     for (i, [x, y]) in p.into_iter().enumerate() {
-        // `AngleMatrix` solo con giro en Z + `VectorRotate`.
+        // `AngleMatrix` with only Z rotation + `VectorRotate`.
         fx[i] = (x * c - y * s + hero.x) * 0.01;
         fy[i] = (x * s + y * c + hero.y) * 0.01;
     }
     (fx, fy)
 }
 
-/// `FrustrumBoundMin/Max` de `CreateFrustrum` (ZzzLodTerrain.cpp:2159-2201): la caja de la pirámide de
-/// la cámara hasta `CameraViewFar · 0.9`, en bloques de 4 casillas con uno de margen.
+/// `FrustrumBoundMin/Max` of `CreateFrustrum` (ZzzLodTerrain.cpp:2159-2201): the box of the camera
+/// frustum up to `CameraViewFar · 0.9`, in blocks of 4 tiles with one of margin.
 pub fn frustum_bounds(camera: &Transform, view_far: f32) -> [i32; 4] {
     let distance = view_far * 0.9;
     let width = (crate::camera::mu_fov() * 0.5).tan() * distance + 100.0;
@@ -720,7 +720,7 @@ pub fn frustum_bounds(camera: &Transform, view_far: f32) -> [i32; 4] {
     ];
     let (mut min, mut max) = (Vec2::splat((SIZE as f32) * MU_SCALE), Vec2::ZERO);
     for p in points {
-        // Vista (x derecha, y arriba, -z delante) → Bevy → MU (x, -z).
+        // View (x right, y up, -z forward) → Bevy → MU (x, -z).
         let w = camera.translation + camera.rotation * (p / MU_SCALE);
         let mu = Vec2::new(w.x, -w.z) * MU_SCALE;
         min = min.min(mu);
@@ -733,7 +733,7 @@ pub fn frustum_bounds(camera: &Transform, view_far: f32) -> [i32; 4] {
     [lo(min.x), lo(min.y), hi(max.x), hi(max.y)]
 }
 
-/// Calcula el trapecio de este fotograma (solo en el juego, con personaje y fuera de Icarus).
+/// Computes this frame's trapezoid (only in game, with a character and outside Icarus).
 fn update_cull(
     args: Res<Args>,
     state: Res<State<crate::scene::GameScene>>,
@@ -756,7 +756,7 @@ fn update_cull(
     }
 }
 
-/// Deja en cada trozo solo las casillas que se dibujan.
+/// Leaves in each chunk only the tiles that are drawn.
 fn cull_chunks(cull: Res<TerrainCull>, mut chunks: Query<(&mut TerrainChunk, &mut Visibility)>, mut meshes: ResMut<Assets<Mesh>>) {
     for (mut c, mut vis) in &mut chunks {
         if c.cull_generation == cull.generation {
@@ -785,24 +785,24 @@ fn cull_chunks(cull: Res<TerrainCull>, mut chunks: Query<(&mut TerrainChunk, &mu
     }
 }
 
-// --- Luces dinámicas ------------------------------------------------------------------------------
+// --- Dynamic lights -------------------------------------------------------------------------------
 
-/// Una luz que se suma al terreno durante una actualización (`AddTerrainLight`).
+/// A light added to the terrain during one update (`AddTerrainLight`).
 #[derive(Clone, Copy)]
 pub struct DynamicLight {
-    /// Posición en casillas.
+    /// Position in tiles.
     pub pos: Vec2,
     pub color: [f32; 3],
-    /// Radio en casillas.
+    /// Radius in tiles.
     pub range: f32,
 }
 
-/// Luces dinámicas de la actualización actual. Las rellenan los sistemas de `FixedUpdate`
-/// (fuegos, eventos...) después de que [`clear_lights`] la vacíe al empezar el tick.
+/// Dynamic lights of the current update. Filled by the `FixedUpdate` systems
+/// (fires, events...) after [`clear_lights`] empties it at the start of the tick.
 #[derive(Resource, Default)]
 pub struct TerrainLights {
     pub lights: Vec<DynamicLight>,
-    /// Cambia en cada tick, para saber si hay que recalcular.
+    /// Changes every tick, to know whether to recompute.
     generation: u64,
     applied: u64,
 }
@@ -813,13 +813,13 @@ impl TerrainLights {
     }
 }
 
-/// Al empezar cada tick, las luces del anterior desaparecen (como `InitTerrainLight`).
+/// At the start of each tick, the previous tick's lights go away (like `InitTerrainLight`).
 pub fn clear_lights(mut lights: ResMut<TerrainLights>) {
     lights.lights.clear();
     lights.generation += 1;
 }
 
-/// Recalcula el color de los trozos que tocan las luces de este tick (o que las tenían antes).
+/// Recomputes the color of the chunks touched by this tick's lights (or that had them before).
 fn apply_lights(
     terrain: Option<Res<LoadedTerrain>>,
     mut lights: ResMut<TerrainLights>,
@@ -832,7 +832,7 @@ fn apply_lights(
     }
     lights.applied = lights.generation;
     for mut c in &mut chunks {
-        // Las cáusticas no llevan luz (`VertexBlend`).
+        // Caustics are unlit (`VertexBlend`).
         if c.pass == Pass::Caustic {
             continue;
         }
@@ -875,14 +875,14 @@ fn apply_lights(
     }
 }
 
-/// El original multiplica la luz en espacio sRGB; en lineal equivale a elevarla a 2.2.
+/// The original multiplies the light in sRGB space; in linear that means raising it to 2.2.
 fn vertex_color(l: [f32; 3], alpha: f32) -> [f32; 4] {
     let c = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
     [c(l[0]), c(l[1]), c(l[2]), alpha]
 }
 
-/// Textura de `mu-data` → imagen de Bevy que se repite, con mipmaps
-/// (sin mipmaps el suelo lejano "parpadea").
+/// `mu-data` texture → repeating Bevy image, with mipmaps
+/// (without mipmaps the distant ground flickers).
 pub fn to_bevy_image(tex: &Texture) -> Image {
     let (data, levels) = build_mipmaps(tex);
     let mut image = Image::new(
@@ -892,7 +892,7 @@ pub fn to_bevy_image(tex: &Texture) -> Image {
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::default(),
     );
-    // `Image::new` solo acepta el nivel 0; los mipmaps van todos seguidos detrás.
+    // `Image::new` only accepts level 0; the mipmaps all follow right after.
     image.data = Some(data);
     image.texture_descriptor.mip_level_count = levels;
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -907,7 +907,7 @@ pub fn to_bevy_image(tex: &Texture) -> Image {
     image
 }
 
-/// Todos los niveles de mipmap seguidos, reduciendo a la mitad con media de 2x2.
+/// All mipmap levels back to back, halving with a 2x2 average.
 fn build_mipmaps(tex: &Texture) -> (Vec<u8>, u32) {
     let mut data = tex.rgba.clone();
     let (mut w, mut h) = (tex.width as usize, tex.height as usize);
@@ -939,28 +939,28 @@ mod tests {
 
     #[test]
     fn casillas_como_render_terrain_face() {
-        // Mezcla parcial: base capa 1, encima capa 2.
+        // Partial blend: base layer 1, layer 2 on top.
         let d = tile_draw(1, 0, 2, [0.0, 0.5, 1.0, 0.0]);
         assert_eq!(d.base, Some((0, false)));
         assert_eq!(d.over, Some((Pass::Alpha, 2, false)));
-        // Entera: solo la capa 2, opaca y sin agua aunque sea la 5.
+        // Full: only layer 2, opaque and without water even if it is 5.
         let d = tile_draw(1, 0, WATER_TEXTURE, [1.0; 4]);
         assert_eq!(d.base, Some((WATER_TEXTURE, false)));
         assert_eq!(d.over, None);
-        // Agua de capa 2 sobre agua: se mueve; sobre otra cosa, no.
+        // Layer 2 water over water: scrolls; over something else, it does not.
         assert_eq!(tile_draw(1, 5, 5, [0.5; 4]).over, Some((Pass::Alpha, 5, true)));
         assert_eq!(tile_draw(1, 0, 5, [0.5; 4]).over, Some((Pass::Alpha, 5, false)));
-        // Atlans: cáusticas donde la capa 2 es agua (también si es entera), sin la capa 2 encima.
+        // Atlans: caustics where layer 2 is water (also if full), without layer 2 on top.
         let d = tile_draw(8, 0, 5, [0.3; 4]);
         assert_eq!(d.base, Some((0, false)));
         assert_eq!(d.over, Some((Pass::Caustic, 5, false)));
         assert_eq!(tile_draw(8, 0, 5, [1.0; 4]).over, Some((Pass::Caustic, 5, false)));
-        // Sin capa 2: nada encima.
+        // No layer 2: nothing on top.
         assert_eq!(tile_draw(1, 3, NO_TEXTURE, [0.0; 4]).over, None);
-        // Lava de Vulcanus.
+        // Vulcanus lava.
         assert_eq!(tile_draw(64, 11, NO_TEXTURE, [0.0; 4]).base, Some((11, true)));
         assert_eq!(tile_draw(1, 11, NO_TEXTURE, [0.0; 4]).base, Some((11, false)));
-        // Kanturu 3: la 100 no va en la pasada normal.
+        // Kanturu 3: 100 is not in the normal pass.
         assert_eq!(tile_draw(40, 100, NO_TEXTURE, [0.0; 4]).base, None);
     }
 
@@ -977,15 +977,15 @@ mod tests {
         let hero = Vec2::new(13000.0, 13000.0);
         let (fx, fy) = trapezoid(1, hero);
         let s = CullShape { fx, fy, bound: [0, 0, 251, 251] };
-        // El personaje y lo que tiene delante (hacia -x, +y) se ven; lo de muy lejos, no.
+        // The character and what is in front (towards -x, +y) are visible; very far things are not.
         assert!(s.test(130.5, 130.5, 0.0));
         assert!(s.test(130.0 - 8.0, 130.0 + 8.0, 0.0));
         assert!(!s.test(130.0 - 12.0, 130.0 + 12.0, 0.0));
-        // Detrás solo hasta 672 unidades.
+        // Behind only up to 672 units.
         assert!(s.test(130.0 + 4.0, 130.0 - 4.0, 0.0));
         assert!(!s.test(130.0 + 5.5, 130.0 - 5.5, 0.0));
         assert!(s.tile_visible(130, 130));
-        // Fuera de los límites de bloques de `CreateFrustrum`, nada.
+        // Outside the `CreateFrustrum` block bounds, nothing.
         let s = CullShape { fx, fy, bound: [128, 128, 132, 132] };
         assert!(!s.tile_visible(120, 138));
     }

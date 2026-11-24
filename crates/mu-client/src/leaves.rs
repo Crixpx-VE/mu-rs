@@ -1,40 +1,40 @@
-//! Hojas, lluvia, nieve y pavesas que caen alrededor del personaje: el `Leaves[MAX_LEAVES]` del
-//! original (ZzzEffectFireLeave.cpp:118-559: `MoveLeaves`, `RenderLeaves` y sus `Create*` /
-//! `Move*`), que `MainScene` mueve en ZzzScene.cpp:1963-1986 y dibuja en ZzzScene.cpp:2143/2169.
+//! Leaves, rain, snow and embers falling around the character: the original's `Leaves[MAX_LEAVES]`
+//! (ZzzEffectFireLeave.cpp:118-559: `MoveLeaves`, `RenderLeaves` and their `Create*` /
+//! `Move*`), which `MainScene` moves in ZzzScene.cpp:1963-1986 and draws in ZzzScene.cpp:2143/2169.
 //!
-//! Lo que hace cada mapa (`WorldActive`, nuestra carpeta es +1):
+//! What each map does (`WorldActive`; our folder is +1):
 //!
-//! | mapa | casillas | qué cae | dibujo |
+//! | map | slots | what falls | drawing |
 //! |------|----------|---------|--------|
-//! | 0 Lorencia (no en `HeroTile` 4) | 80 | hojas (`CreateLorenciaLeaf`, se mueven con `MoveHeavenRain`) | plano 3×3, prueba de alfa |
-//! | 2 Devias (no en `HeroTile` 3 o ≥ 10) | 80 | nieve (`CreateDeviasSnow`), `leaf01` ×5 / 1 de 10 `leaf02` ×10 | sprite, suma; dentro de casa ni se mueve ni se dibuja |
-//! | 3 Noria, 7 Atlans | 80 | hojas (`CreateAtlanseLeaf`, `MoveEtcLeaf`) | plano 3×3; Noria prueba de alfa, Atlans suma |
-//! | 9 Devil Square | 200 | lluvia con salpicaduras (`CreateDevilSquareRain`) | plano 1×20, prueba de alfa |
-//! | 10 Icarus | 80 | lluvia que crece hasta `RainCurrent` = 100, sin salpicadura (`CreateHeavenRain`) | plano 1×20, suma |
-//! | 18-23, 53 Chaos Castle | 80 | lluvia (`CreateChaosCastleRain`), salpica salvo en `TW_NOGROUND` | plano `TurningForce`, prueba de alfa |
-//! | 30 Valley of Loren | 40 | pavesas solo en asedio (`battleCastle::CreateFireSnuff`) | suma |
-//! | 31 Land of Trials | 80 | niebla `BITMAP_CLOUD` en la zona 2 (`M31HuntingGround::CreateMist`) | la dibuja el motor de efectos |
-//! | 34 Crywolf | 60 / 50 / 80 | `weather` 1: lluvia (`rain011`) con salpicaduras; 2: niebla; 0: nada | prueba de alfa |
-//! | 42 Balgass Refuge | 80 | pavesas (`CGM3rdChangeUp::CreateFireSnuff`) | plano escala×2 × escala×4, suma |
-//! | 57, 58 Raklion, 65 Doppelganger 1 | 80 | nieve (`CGM_Raklion::CreateSnow`; `IsIceCity` incluye el 65) | sprite, suma |
-//! | 62 Santa Town | 80 | nieve (`CGMSantaTown::CreateSnow`) | sprite, suma |
-//! | 63 Vulcanus, 66 Doppelganger 2 | 80 | pavesas (`CreateFireSpark`) | suma |
-//! | 69-74 Imperial Guardian | 80 | lluvia solo con tiempo de lluvia/tormenta (lo manda el servidor al entrar) | 69-71 suma, 72-74 prueba de alfa |
-//! | 79 Loren Market | 80 | lluvia con salpicaduras de subtipo 2 (`GMUnitedMarketPlace`) | suma |
+//! | 0 Lorencia (not on `HeroTile` 4) | 80 | leaves (`CreateLorenciaLeaf`, moved by `MoveHeavenRain`) | 3×3 plane, alpha test |
+//! | 2 Devias (not on `HeroTile` 3 or ≥ 10) | 80 | snow (`CreateDeviasSnow`), `leaf01` ×5 / 1 in 10 `leaf02` ×10 | sprite, additive; indoors neither moved nor drawn |
+//! | 3 Noria, 7 Atlans | 80 | leaves (`CreateAtlanseLeaf`, `MoveEtcLeaf`) | 3×3 plane; Noria alpha test, Atlans additive |
+//! | 9 Devil Square | 200 | rain with splashes (`CreateDevilSquareRain`) | 1×20 plane, alpha test |
+//! | 10 Icarus | 80 | rain growing up to `RainCurrent` = 100, no splash (`CreateHeavenRain`) | 1×20 plane, additive |
+//! | 18-23, 53 Chaos Castle | 80 | rain (`CreateChaosCastleRain`), splashes except on `TW_NOGROUND` | `TurningForce` plane, alpha test |
+//! | 30 Valley of Loren | 40 | embers only during siege (`battleCastle::CreateFireSnuff`) | additive |
+//! | 31 Land of Trials | 80 | `BITMAP_CLOUD` fog in zone 2 (`M31HuntingGround::CreateMist`) | drawn by the effects engine |
+//! | 34 Crywolf | 60 / 50 / 80 | `weather` 1: rain (`rain011`) with splashes; 2: fog; 0: nothing | alpha test |
+//! | 42 Balgass Refuge | 80 | embers (`CGM3rdChangeUp::CreateFireSnuff`) | scale×2 × scale×4 plane, additive |
+//! | 57, 58 Raklion, 65 Doppelganger 1 | 80 | snow (`CGM_Raklion::CreateSnow`; `IsIceCity` includes 65) | sprite, additive |
+//! | 62 Santa Town | 80 | snow (`CGMSantaTown::CreateSnow`) | sprite, additive |
+//! | 63 Vulcanus, 66 Doppelganger 2 | 80 | embers (`CreateFireSpark`) | additive |
+//! | 69-74 Imperial Guardian | 80 | rain only in rain/storm weather (sent by the server on entry) | 69-71 additive, 72-74 alpha test |
+//! | 79 Loren Market | 80 | rain with subtype 2 splashes (`GMUnitedMarketPlace`) | additive |
 //!
-//! Detalles del original que se copian tal cual:
-//! - Las casillas son siempre las mismas y solo se marca `Live = false` al cambiar de mapa
-//!   (MapManager.cpp:1633): lo demás (tipo, ángulo, posición) se queda de antes. Si ninguna
-//!   función `Create*` se queda una casilla libre, esta queda "viva" con lo que tenía y la mueve
-//!   `MoveEtcLeaf` hasta que toca el suelo (pasa en Aida, Land of Trials, Crywolf con niebla...).
-//! - `RainSpeed`/`RainAngle` usan `(int)sinf(...)`, que casi siempre es 0.
-//! - Los planos se dibujan con `glColor3f(1,1,1)`: la luz de la casilla solo cuenta en los sprites.
-//! - `RenderLeaves` de ZzzScene.cpp:2143 (planos) y el de 2169 (sprites, dentro de `BeginSprite`):
-//!   cada clase solo se ve en uno de los dos (en el otro la matriz está mal y cae fuera de la vista).
+//! Original details copied as is:
+//! - The slots are always the same and only get `Live = false` on map change
+//!   (MapManager.cpp:1633): the rest (type, angle, position) stays from before. If no `Create*`
+//!   function takes a free slot, it stays "alive" with what it had and `MoveEtcLeaf` moves it
+//!   until it hits the ground (happens in Aida, Land of Trials, Crywolf with fog...).
+//! - `RainSpeed`/`RainAngle` use `(int)sinf(...)`, which is almost always 0.
+//! - Planes are drawn with `glColor3f(1,1,1)`: the slot's light only counts for sprites.
+//! - `RenderLeaves` of ZzzScene.cpp:2143 (planes) and the one of 2169 (sprites, inside `BeginSprite`):
+//!   each kind only shows in one of the two (in the other the matrix is wrong and it falls out of view).
 //!
-//! `InChaosCastle()` / `InBattleCastle()` sin argumento devuelven siempre falso en Main 5.2
-//! (MapManager.cpp:1647, `if (iMap == -1) return false`); aquí van como en MuMain
-//! (MapManager.cpp:1410, que usa `WorldActive`), que es lo que hace el cliente de verdad.
+//! `InChaosCastle()` / `InBattleCastle()` without argument always return false in Main 5.2
+//! (MapManager.cpp:1647, `if (iMap == -1) return false`); here they work as in MuMain
+//! (MapManager.cpp:1410, which uses `WorldActive`), which is what the real client does.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -55,7 +55,7 @@ use crate::terrain::{LoadedTerrain, MU_SCALE};
 /// `MAX_LEAVES` (_define.h:430).
 pub const MAX_LEAVES: usize = 200;
 
-// `WorldActive` de los mapas que tienen algo aquí (MapManager.h).
+// `WorldActive` of the maps that have something here (MapManager.h).
 const WD_0LORENCIA: i32 = 0;
 const WD_2DEVIAS: i32 = 2;
 const WD_3NORIA: i32 = 3;
@@ -73,22 +73,22 @@ const WD_63PK_FIELD: i32 = 63;
 const WD_66DOPPLEGANGER2: i32 = 66;
 const WD_79UNITEDMARKETPLACE: i32 = 79;
 
-/// `WEATHER_TYPE` de GMEmpireGuardian1.h:45.
+/// `WEATHER_TYPE` of GMEmpireGuardian1.h:45.
 const WEATHER_SUN: i32 = 0;
 const WEATHER_RAIN: i32 = 1;
 const WEATHER_STORM: i32 = 3;
 
-/// `InChaosCastle()` (con el arreglo de MuMain, ver arriba): `WD_18CHAOS_CASTLE`..`+5` y el 53.
+/// `InChaosCastle()` (with the MuMain fix, see above): `WD_18CHAOS_CASTLE`..`+5` and 53.
 fn in_chaos_castle(w: i32) -> bool {
     (18..=23).contains(&w) || w == 53
 }
 
-/// `IsIceCity()` (GM_Raklion.cpp:2277): Raklion, su jefe y Doppelganger 1.
+/// `IsIceCity()` (GM_Raklion.cpp:2277): Raklion, its boss map and Doppelganger 1.
 fn is_ice_city(w: i32) -> bool {
     matches!(w, 57 | 58 | 65)
 }
 
-/// `IsEmpireGuardian1..4()` (MapManager.cpp:1700-1722; el 4 incluye los mapas 73 y 74).
+/// `IsEmpireGuardian1..4()` (MapManager.cpp:1700-1722; 4 includes maps 73 and 74).
 fn is_empire_guardian(w: i32) -> bool {
     (69..=74).contains(&w)
 }
@@ -98,8 +98,8 @@ fn in_hunting_ground_section2(p: Vec3) -> bool {
     p.x > 5449.0 && p.x < 17822.0 && p.y > 6784.0 && p.y < 22419.0
 }
 
-/// La condición de ZzzScene.cpp:1963-1985 para llamar a `MoveLeaves` (`HeroTile` = capa 1 del
-/// terreno bajo el personaje, ZzzInterface.cpp:7643).
+/// The condition of ZzzScene.cpp:1963-1985 to call `MoveLeaves` (`HeroTile` = terrain layer 1
+/// under the character, ZzzInterface.cpp:7643).
 pub fn leaves_move(w: i32, hero_tile: u8) -> bool {
     match w {
         WD_0LORENCIA => hero_tile != 4,
@@ -111,7 +111,7 @@ pub fn leaves_move(w: i32, hero_tile: u8) -> bool {
     }
 }
 
-/// Mezcla de `RenderLeaves` (ZzzEffectFireLeave.cpp:480-500): `EnableAlphaBlend` (suma) o
+/// Blend of `RenderLeaves` (ZzzEffectFireLeave.cpp:480-500): `EnableAlphaBlend` (additive) or
 /// `EnableAlphaTest`.
 fn render_blend(w: i32) -> Blend {
     let glow = matches!(w, WD_2DEVIAS | WD_7ATLANSE | WD_10HEAVEN | WD_62SANTA_TOWN | WD_63PK_FIELD | WD_66DOPPLEGANGER2 | 69 | 70 | 71 | WD_79UNITEDMARKETPLACE)
@@ -127,34 +127,34 @@ fn render_blend(w: i32) -> Blend {
     }
 }
 
-/// Mapas cuyas casillas son sprites (`RenderSprite`, ZzzEffectFireLeave.cpp:522) en vez de planos.
+/// Maps whose slots are sprites (`RenderSprite`, ZzzEffectFireLeave.cpp:522) instead of planes.
 fn sprite_world(w: i32) -> bool {
     w == WD_2DEVIAS || is_ice_city(w) || w == WD_62SANTA_TOWN
 }
 
-/// Los sprites solo se ven en el `RenderLeaves` de ZzzScene.cpp:2169, que en Devias exige estar
-/// fuera de casa (`HeroTile != 3 && HeroTile < 10`). Los planos, en el de 2143, siempre.
+/// Sprites only show in the `RenderLeaves` of ZzzScene.cpp:2169, which in Devias requires being
+/// outdoors (`HeroTile != 3 && HeroTile < 10`). Planes, in the one of 2143, always.
 fn leaves_visible(w: i32, hero_tile: u8) -> bool {
     !sprite_world(w) || w != WD_2DEVIAS || (hero_tile != 3 && hero_tile < 10)
 }
 
-/// `o->Type` de una casilla: la textura que usa.
+/// `o->Type` of a slot: the texture it uses.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
 pub enum LeafType {
-    /// Nunca se le ha dado tipo (el `Leaves[]` global empieza a cero): no se dibuja.
+    /// Never given a type (the global `Leaves[]` starts zeroed): not drawn.
     #[default]
     None,
     /// `BITMAP_LEAF1`: `WorldN\leaf01`.
     Leaf1,
     /// `BITMAP_LEAF2`: `WorldN\leaf02.jpg`.
     Leaf2,
-    /// `BITMAP_RAIN`: `World1\rain01.tga` (`rain011.tga` en Crywolf).
+    /// `BITMAP_RAIN`: `World1\rain01.tga` (`rain011.tga` in Crywolf).
     Rain,
     /// `BITMAP_FIRE_SNUFF`: `Effect\FireSnuff.jpg`.
     FireSnuff,
 }
 
-/// Una casilla de `Leaves[]` (los campos de `PARTICLE` que usa este código).
+/// A slot of `Leaves[]` (the `PARTICLE` fields this code uses).
 #[derive(Clone, Default)]
 pub struct Leaf {
     pub live: bool,
@@ -166,20 +166,20 @@ pub struct Leaf {
     pub turning_force: Vec3,
     pub light: Vec3,
     pub scale: f32,
-    /// Estado del tick anterior, para interpolar al dibujar.
+    /// Previous tick state, for interpolation when drawing.
     prev_position: Vec3,
     prev_angle: Vec3,
 }
 
-/// Lo que mira `MoveLeaves` del resto del juego en este tick.
+/// What `MoveLeaves` reads from the rest of the game this tick.
 pub struct Env<'a> {
     /// `gMapManager.WorldActive`.
     pub world: i32,
-    /// `Hero->Object.Position` (unidades de MU).
+    /// `Hero->Object.Position` (MU units).
     pub hero: Vec3,
-    /// `Hero->Object.Angle[2]` en grados.
+    /// `Hero->Object.Angle[2]` in degrees.
     pub hero_angle: f32,
-    /// `CharacterMoveSpeed(Hero)` mientras anda (`Hero->Movement`), 0 si está parado.
+    /// `CharacterMoveSpeed(Hero)` while walking (`Hero->Movement`), 0 when standing.
     pub hero_speed: f32,
     /// `CameraPosition[1]`.
     pub camera_y: f32,
@@ -191,26 +191,26 @@ pub struct Env<'a> {
     pub no_ground: &'a dyn Fn(f32, f32) -> bool,
 }
 
-/// `Leaves[]` y las variables globales de la lluvia (ZzzEffectFireLeave.cpp:28-33).
+/// `Leaves[]` and the rain globals (ZzzEffectFireLeave.cpp:28-33).
 #[derive(Resource)]
 pub struct Leaves {
     pub slots: Vec<Leaf>,
-    /// `RainTarget`: el servidor lo pone en Lorencia (`ReceiveWeather`, WSclient.cpp:6353; aún sin
-    /// red), Icarus y Chaos Castle lo fijan en 100. No se borra al cambiar de mapa.
+    /// `RainTarget`: the server sets it in Lorencia (`ReceiveWeather`, WSclient.cpp:6353; no
+    /// network yet), Icarus and Chaos Castle fix it at 100. Not cleared on map change.
     pub rain_target: i32,
-    /// `RainCurrent`: va hacia `RainTarget` de uno en uno por tick.
+    /// `RainCurrent`: moves towards `RainTarget` one step per tick.
     pub rain_current: i32,
     rain_speed: i32,
     rain_angle: i32,
     rain_position: i32,
-    /// `weather` de Crywolf (Winmain.cpp:84, `rand() % 3` en un inicializador global: antes de
-    /// `srand`, el primer `rand()` de MSVC da 41 → 2, niebla). Cambia en
-    /// `RenderCryWolf1stObjectVisual` (GMCrywolf1st.cpp:381-389), ver [`crywolf_weather_clock`].
+    /// Crywolf `weather` (Winmain.cpp:84, `rand() % 3` in a global initializer: before
+    /// `srand`, MSVC's first `rand()` gives 41 → 2, fog). Changes in
+    /// `RenderCryWolf1stObjectVisual` (GMCrywolf1st.cpp:381-389), see [`crywolf_weather_clock`].
     pub weather: i32,
-    /// `GMEmpireGuardian1::m_iWeather` (GMEmpireGuardian1.cpp:30): sol hasta que el servidor mande
-    /// otro al entrar (WSclient.cpp:11982).
+    /// `GMEmpireGuardian1::m_iWeather` (GMEmpireGuardian1.cpp:30): sun until the server sends
+    /// another one on entry (WSclient.cpp:11982).
     eg_weather: i32,
-    /// `IsBattleCastleStart() && InBattleCastle3(héroe)`: solo durante el asedio (sin servidor, nunca).
+    /// `IsBattleCastleStart() && InBattleCastle3(hero)`: only during the siege (without a server, never).
     siege_fire: bool,
     /// `Change_weather` (GMCrywolf1st.cpp:381).
     change_weather: u32,
@@ -235,7 +235,7 @@ impl Default for Leaves {
     }
 }
 
-/// Un tick de `MoveLeaves` con sus `Create*` y `Move*`.
+/// One `MoveLeaves` tick with its `Create*` and `Move*`.
 struct Sim<'a, 'b> {
     rng: &'a mut Rng,
     env: &'a Env<'b>,
@@ -259,7 +259,7 @@ impl Sim<'_, '_> {
         (self.rand() % n) as f32
     }
 
-    /// `Hero->Object.Position + (rand()%nx + ox, rand()%ny + oy, rand()%nz + oz)` (en este orden).
+    /// `Hero->Object.Position + (rand()%nx + ox, rand()%ny + oy, rand()%nz + oz)` (in this order).
     fn around_hero(&mut self, (nx, ox): (i32, i32), (ny, oy): (i32, i32), (nz, oz): (i32, i32)) -> Vec3 {
         let x = self.rf(nx) + ox as f32;
         let y = self.rf(ny) + oy as f32;
@@ -276,20 +276,20 @@ impl Sim<'_, '_> {
         self.spawns.push(Spawn::Particle(Particle::new(ty, o.position, o.angle, o.light, sub_type, 1.0, None)));
     }
 
-    /// La salpicadura de la lluvia: 1 de cada 4 `BITMAP_RAIN_CIRCLE`, si no `BITMAP_RAIN_CIRCLE + 1`.
+    /// The rain splash: 1 in 4 `BITMAP_RAIN_CIRCLE`, otherwise `BITMAP_RAIN_CIRCLE + 1`.
     fn splash(&mut self, o: &Leaf, sub_type: i32) {
         let ty = if self.rand() % 4 == 0 { BITMAP_RAIN_CIRCLE } else { BITMAP_RAIN_CIRCLE + 1 };
         self.particle(ty, o, sub_type);
     }
 
-    /// Ángulo y velocidad de una gota: `AngleMatrix(Angle)` + `VectorRotate((0, 0, -speed))`.
+    /// Angle and velocity of a drop: `AngleMatrix(Angle)` + `VectorRotate((0, 0, -speed))`.
     fn fall(o: &mut Leaf, angle_x: f32, speed: f32) {
         o.angle = Vec3::new(angle_x, 0.0, 0.0);
         o.velocity = rotate(o.angle, Vec3::new(0.0, 0.0, -speed));
     }
 
-    /// Lo común de `CreateDevilSquareRain` (ZzzEffectFireLeave.cpp:118) y `CreateChaosCastleRain`
-    /// (:164); `extra` es el +20 de la velocidad de Chaos Castle.
+    /// Shared part of `CreateDevilSquareRain` (ZzzEffectFireLeave.cpp:118) and `CreateChaosCastleRain`
+    /// (:164); `extra` is the Chaos Castle +20 speed.
     fn create_square_rain(&mut self, o: &mut Leaf, index: usize, extra: i32) {
         o.ty = LeafType::Rain;
         o.position = if index < 300 {
@@ -309,9 +309,9 @@ impl Sim<'_, '_> {
         Self::fall(o, angle, speed);
     }
 
-    /// `CreateLorenciaLeaf` (:205) / `CreateAtlanseLeaf` (:272) y las pavesas (`CreateFireSnuff`,
-    /// `CreateFireSpark`): sale de cerca del personaje y se va hacia −X (o +X si está delante de la
-    /// cámara) con un giro al azar. `flip` es el 3.2 (hojas, asedio) o 2.2 (pavesas).
+    /// `CreateLorenciaLeaf` (:205) / `CreateAtlanseLeaf` (:272) and the embers (`CreateFireSnuff`,
+    /// `CreateFireSpark`): spawns near the character and drifts towards −X (or +X if in front of the
+    /// camera) with a random spin. `flip` is 3.2 (leaves, siege) or 2.2 (embers).
     fn create_drift(&mut self, o: &mut Leaf, z: (i32, i32), flip: f32) {
         let position = self.around_hero((1600, -800), (1400, -500), z);
         o.position = position;
@@ -327,17 +327,17 @@ impl Sim<'_, '_> {
         o.turning_force.z = (self.rf(16) - 8.0) * 0.1;
     }
 
-    /// Pavesa: `o->Scale = rand()%50/100.f + base` y luego [`Self::create_drift`].
+    /// Ember: `o->Scale = rand()%50/100.f + base` and then [`Self::create_drift`].
     fn create_fire_snuff(&mut self, o: &mut Leaf, base: f32, z: (i32, i32), flip: f32) {
         o.ty = LeafType::FireSnuff;
         o.scale = self.rf(50) / 100.0 + base;
         self.create_drift(o, z, flip);
     }
 
-    /// `M31HuntingGround::CreateMist` (GMHuntingGround.cpp:915) y `M34CryWolf1st::CreateMist`
-    /// (GMCrywolf1st.cpp:2039): una nube `BITMAP_CLOUD` subtipo 8 en una de 8 direcciones, más
-    /// adelantada si el personaje anda. `ff` es lo que Crywolf resta a las distancias (200); en
-    /// Crywolf la altura se queda en 400 y en Land of Trials va sobre el suelo.
+    /// `M31HuntingGround::CreateMist` (GMHuntingGround.cpp:915) and `M34CryWolf1st::CreateMist`
+    /// (GMCrywolf1st.cpp:2039): a `BITMAP_CLOUD` subtype 8 cloud in one of 8 directions, further
+    /// ahead if the character is walking. `ff` is what Crywolf subtracts from the distances (200); in
+    /// Crywolf the height stays at 400 and in Land of Trials it sits on the ground.
     fn create_mist(&mut self, o: &mut Leaf, light: Vec3, ff: f32, on_ground: bool) {
         let hero = self.env.hero;
         let mut target = Vec3::new(0.0, 0.0, if on_ground { 0.0 } else { 400.0 });
@@ -389,11 +389,11 @@ impl Sim<'_, '_> {
         o.live = false;
     }
 
-    /// La cadena de `Create*` de `MoveLeaves` (ZzzEffectFireLeave.cpp:445-465). Falso si ninguna
-    /// se queda la casilla (que entonces sigue "viva" con lo que tenía).
+    /// The `Create*` chain of `MoveLeaves` (ZzzEffectFireLeave.cpp:445-465). False if none
+    /// takes the slot (which then stays "alive" with what it had).
     fn create(&mut self, o: &mut Leaf, index: usize) -> bool {
         let w = self.env.world;
-        // `CreateDevilSquareRain`: también Crywolf con lluvia.
+        // `CreateDevilSquareRain`: also Crywolf with rain.
         if w == WD_9DEVILSQUARE || (w == WD_34CRYWOLF_1ST && self.weather == 1) {
             self.create_square_rain(o, index, 0);
             return true;
@@ -409,7 +409,7 @@ impl Sim<'_, '_> {
             self.create_drift(o, (300, 50), 3.2);
             return true;
         }
-        // `CreateHeavenRain` (:227): solo las primeras `RainCurrent·MAX_LEAVES/100` casillas.
+        // `CreateHeavenRain` (:227): only the first `RainCurrent·MAX_LEAVES/100` slots.
         if w == WD_10HEAVEN {
             let rainly = self.rain_current * MAX_LEAVES as i32 / 100;
             if (index as i32) < rainly {
@@ -438,8 +438,8 @@ impl Sim<'_, '_> {
             self.create_drift(o, (300, 50), 3.2);
             return true;
         }
-        // `battleCastle::CreateFireSnuff` (GMBattleCastle.cpp:580): en el login viejo siempre; en
-        // Valley of Loren solo en asedio y dentro del castillo. Luz roja (no se ve: plano blanco).
+        // `battleCastle::CreateFireSnuff` (GMBattleCastle.cpp:580): always in the old login; in
+        // Valley of Loren only during siege and inside the castle. Red light (not visible: white plane).
         if w == WD_55LOGINSCENE || (w == WD_30BATTLECASTLE && self.siege_fire) {
             let z = if w == WD_55LOGINSCENE { (1000, 50) } else { (300, 50) };
             self.create_fire_snuff(o, 0.5, z, 3.2);
@@ -450,7 +450,7 @@ impl Sim<'_, '_> {
             self.create_mist(o, Vec3::new(0.05, 0.05, 0.1), 0.0, true);
             return true;
         }
-        // `M33Aida::CreateMist` (GMAida.cpp:1566) siempre devuelve falso.
+        // `M33Aida::CreateMist` (GMAida.cpp:1566) always returns false.
         if self.weather == 2 && w == WD_34CRYWOLF_1ST && self.rand() % 30 == 0 {
             self.create_mist(o, Vec3::splat(0.07), 200.0, false);
             return true;
@@ -486,15 +486,15 @@ impl Sim<'_, '_> {
             Self::fall(o, -20.0, speed);
             return true;
         }
-        // `CGM_PK_Field::CreateFireSpark` (GM_PK_Field.cpp:1040) y `CGMDoppelGanger2::CreateFireSpark`
+        // `CGM_PK_Field::CreateFireSpark` (GM_PK_Field.cpp:1040) and `CGMDoppelGanger2::CreateFireSpark`
         // (GMDoppelGanger2.cpp:637).
         if w == WD_63PK_FIELD || w == WD_66DOPPLEGANGER2 {
             self.create_fire_snuff(o, 0.4, (300, 50), 2.2);
             o.light = Vec3::new(1.0, 0.0, 0.0);
             return true;
         }
-        // `GMEmpireGuardian1::CreateRain` (GMEmpireGuardian1.cpp:2208): nace, avanza un paso y la
-        // mitad muere ya salpicando. Devuelve verdadero aunque haga sol.
+        // `GMEmpireGuardian1::CreateRain` (GMEmpireGuardian1.cpp:2208): spawns, advances one step and
+        // half die right away with a splash. Returns true even when sunny.
         if is_empire_guardian(w) {
             if self.eg_weather == WEATHER_RAIN || self.eg_weather == WEATHER_STORM {
                 o.ty = LeafType::Rain;
@@ -522,8 +522,8 @@ impl Sim<'_, '_> {
         false
     }
 
-    /// Hoja que vuela con giro (`MoveHeavenRain` :354-371, `GMUnitedMarketPlace::MoveRain`):
-    /// velocidad y giro al azar, muere a √200000 ≈ 447 unidades de donde salió.
+    /// Leaf flying with a spin (`MoveHeavenRain` :354-371, `GMUnitedMarketPlace::MoveRain`):
+    /// random speed and spin, dies at √200000 ≈ 447 units from where it started.
     fn tumble(&mut self, o: &mut Leaf) {
         o.velocity.x += (self.rf(16) - 8.0) * 0.1;
         o.velocity.y += (self.rf(16) - 8.0) * 0.1;
@@ -538,10 +538,10 @@ impl Sim<'_, '_> {
         }
     }
 
-    /// La cadena de `Move*` de `MoveLeaves` (ZzzEffectFireLeave.cpp:468-473).
+    /// The `Move*` chain of `MoveLeaves` (ZzzEffectFireLeave.cpp:468-473).
     fn step(&mut self, o: &mut Leaf) {
         let w = self.env.world;
-        // `MoveDevilSquareRain` (:295) y `MoveChaosCastleRain` (:321).
+        // `MoveDevilSquareRain` (:295) and `MoveChaosCastleRain` (:321).
         let square = w == WD_9DEVILSQUARE || (w == WD_34CRYWOLF_1ST && self.weather == 1);
         if square || in_chaos_castle(w) {
             o.position += o.velocity;
@@ -553,8 +553,8 @@ impl Sim<'_, '_> {
             }
             return;
         }
-        // `MoveHeavenRain` (:339): Lorencia e Icarus; la lluvia de Icarus no salpica.
-        // `GMUnitedMarketPlace::MoveRain` (GMUnitedMarketPlace.cpp:538): igual, con salpicadura 2.
+        // `MoveHeavenRain` (:339): Lorencia and Icarus; the Icarus rain does not splash.
+        // `GMUnitedMarketPlace::MoveRain` (GMUnitedMarketPlace.cpp:538): same, with splash 2.
         if w == WD_0LORENCIA || w == WD_10HEAVEN || w == WD_79UNITEDMARKETPLACE {
             if o.ty == LeafType::Rain {
                 o.position += o.velocity;
@@ -573,7 +573,7 @@ impl Sim<'_, '_> {
             }
             return;
         }
-        // `MoveEtcLeaf` (:376): cae dando tumbos y en el suelo se apaga en 20 ticks.
+        // `MoveEtcLeaf` (:376): tumbles down and on the ground fades out in 20 ticks.
         let h = self.height(o.position);
         if o.position.z <= h {
             o.position.z = h;
@@ -591,7 +591,7 @@ impl Sim<'_, '_> {
 }
 
 impl Leaves {
-    /// `iMaxLeaves` y `RainTarget` de `MoveLeaves` (ZzzEffectFireLeave.cpp:399-425).
+    /// `iMaxLeaves` and `RainTarget` of `MoveLeaves` (ZzzEffectFireLeave.cpp:399-425).
     fn max_leaves(&mut self, w: i32) -> usize {
         let mut max = if w == WD_9DEVILSQUARE { MAX_LEAVES } else { 80 };
         if w == WD_10HEAVEN {
@@ -613,8 +613,8 @@ impl Leaves {
         max
     }
 
-    /// `MoveLeaves` (ZzzEffectFireLeave.cpp:397). Lo que pide crear al motor de efectos
-    /// (salpicaduras, niebla) va a `spawns`.
+    /// `MoveLeaves` (ZzzEffectFireLeave.cpp:397). What it asks the effects engine to create
+    /// (splashes, fog) goes to `spawns`.
     pub fn tick(&mut self, env: &Env, spawns: &mut Vec<Spawn>) {
         let max = self.max_leaves(env.world);
         if self.rain_current > self.rain_target {
@@ -622,7 +622,7 @@ impl Leaves {
         } else if self.rain_current < self.rain_target {
             self.rain_current += 1;
         }
-        // `(int)sinf(...)`: se trunca el seno, no el producto.
+        // `(int)sinf(...)`: the sine is truncated, not the product.
         self.rain_speed = ((env.world_time * 0.001).sin() as i32) * 10 + 30;
         self.rain_angle = ((env.world_time * 0.0005 + 50.0).sin() as i32) * 20;
         self.rain_position = (self.rain_position + 20) % 2000;
@@ -645,7 +645,7 @@ impl Leaves {
                 o.light = Vec3::ONE;
                 o.live = true;
                 sim.create(o, i);
-                // Recién creada: sin interpolar desde donde estaba antes.
+                // Freshly created: no interpolation from where it was before.
                 o.prev_position = o.position;
                 o.prev_angle = o.angle;
             } else {
@@ -655,8 +655,8 @@ impl Leaves {
     }
 }
 
-/// Al cambiar de mapa (MapManager.cpp:1633): todas las casillas muertas (lo demás se queda) y las
-/// texturas y mallas del mapa anterior fuera.
+/// On map change (MapManager.cpp:1633): all slots dead (the rest stays) and the previous map's
+/// textures and meshes dropped.
 pub fn reset(mut leaves: ResMut<Leaves>, mut render: ResMut<LeafRender>) {
     for o in &mut leaves.slots {
         o.live = false;
@@ -682,13 +682,13 @@ impl Plugin for LeavesPlugin {
     }
 }
 
-/// `HeroTile`: la textura de la capa 1 bajo el personaje (ZzzInterface.cpp:7640-7643).
+/// `HeroTile`: the layer 1 texture under the character (ZzzInterface.cpp:7640-7643).
 fn hero_tile(t: &LoadedTerrain, pos: Vec2) -> u8 {
     let (x, y) = ((pos.x.max(0.0) as usize).min(255), (pos.y.max(0.0) as usize).min(255));
     t.0.mapping.layer1.get(y * 256 + x).copied().unwrap_or(0)
 }
 
-/// Cámara de MU (x, y, z arriba) desde la de Bevy.
+/// MU camera (x, y, z up) from the Bevy one.
 fn camera_mu(t: &Transform) -> Vec3 {
     Vec3::new(t.translation.x, -t.translation.z, t.translation.y) * MU_SCALE
 }
@@ -704,14 +704,14 @@ fn step_leaves(
     mut fx: ResMut<crate::fx::FxWorld>,
     mut last_hero: Local<Option<Vec2>>,
 ) {
-    // El dibujo interpola desde aquí: lo que no se mueve este tick se queda quieto.
+    // Drawing interpolates from here: what does not move this tick stays still.
     for o in &mut leaves.slots {
         o.prev_position = o.position;
         o.prev_angle = o.angle;
     }
     let (Ok(p), Some(t)) = (players.single(), terrain) else { return };
-    // `CharacterMoveSpeed`: unidades de MU por tick, medidas (un salto de más de una casilla es un
-    // teletransporte, no un paso).
+    // `CharacterMoveSpeed`: MU units per tick, measured (a jump of more than one tile is a
+    // teleport, not a step).
     let moved = last_hero.map_or(0.0, |l| (p.pos - l).length() * MU_SCALE);
     *last_hero = Some(p.pos);
     let speed = if moved <= MU_SCALE { moved } else { 0.0 };
@@ -741,10 +741,10 @@ fn step_leaves(
     }
 }
 
-/// `Change_weather` de `RenderCryWolf1stObjectVisual` (GMCrywolf1st.cpp:381-389): suma uno por cada
-/// objeto del mapa que dibuja cada fotograma y a los 70000 sortea `weather = rand() % 3`. Aquí se
-/// cuentan las mallas del mapa visibles este fotograma (aproximación: el original cuenta objetos
-/// y con su propio recorte).
+/// `Change_weather` of `RenderCryWolf1stObjectVisual` (GMCrywolf1st.cpp:381-389): adds one per
+/// map object drawn each frame and at 70000 rolls `weather = rand() % 3`. Here the visible map
+/// meshes of this frame are counted (approximation: the original counts objects with its own
+/// culling).
 fn crywolf_weather_clock(
     args: Res<Args>,
     mut leaves: ResMut<Leaves>,
@@ -763,22 +763,22 @@ fn crywolf_weather_clock(
     }
 }
 
-// --- Dibujo (`RenderLeaves`, ZzzEffectFireLeave.cpp:478) -------------------------------------------
+// --- Drawing (`RenderLeaves`, ZzzEffectFireLeave.cpp:478) ------------------------------------------
 
-/// Malla de las casillas de un tipo (se rehace cada fotograma).
+/// Mesh of the slots of one type (rebuilt every frame).
 #[derive(Component)]
 struct LeafBatch;
 
-/// Texturas del mapa cargado (`BITMAP_LEAF1`, `LEAF2`, `RAIN`, `FIRE_SNUFF`) y una malla por tipo.
+/// Textures of the loaded map (`BITMAP_LEAF1`, `LEAF2`, `RAIN`, `FIRE_SNUFF`) and one mesh per type.
 #[derive(Resource, Default)]
 pub struct LeafRender {
     world: Option<u16>,
-    /// (imagen, canales: 3 = JPG, 4 = TGA) de cada tipo.
+    /// (image, channels: 3 = JPG, 4 = TGA) of each type.
     textures: HashMap<LeafType, Option<(Handle<Image>, u8)>>,
     batches: HashMap<LeafType, (Handle<Mesh>, Entity)>,
 }
 
-/// `LoadBitmap(carpeta\archivo, ..., filtro, GL_CLAMP_TO_EDGE)`: sin mipmaps, como el original.
+/// `LoadBitmap(folder\file, ..., filter, GL_CLAMP_TO_EDGE)`: no mipmaps, like the original.
 fn load_texture(data: &Path, folder: &str, file: &str, nearest: bool, images: &mut Assets<Image>) -> Option<(Handle<Image>, u8)> {
     let dir = mu_data::fs::find(data, folder)?;
     let name = mu_data::bmd::texture_file_name(file);
@@ -804,10 +804,10 @@ fn load_texture(data: &Path, folder: &str, file: &str, nearest: bool, images: &m
     Some((images.add(image), components))
 }
 
-/// Archivo de `BITMAP_LEAF1` (MapManager.cpp:1557-1560): Main 5.2 carga `leaf01.tga` y encima
-/// `leaf01.jpg`, que la sustituye (o la borra si no existe: `CGlobalBitmap::LoadImage`). MuMain
-/// (MapManager.cpp, `Map==0||Map==3||Map==63`) se queda con la `.tga` en Lorencia, Noria y el 63,
-/// que es lo que se ve en el cliente: las hojas de Lorencia con su silueta y Noria con hojas.
+/// `BITMAP_LEAF1` file (MapManager.cpp:1557-1560): Main 5.2 loads `leaf01.tga` and then
+/// `leaf01.jpg`, which replaces it (or deletes it if missing: `CGlobalBitmap::LoadImage`). MuMain
+/// (MapManager.cpp, `Map==0||Map==3||Map==63`) keeps the `.tga` in Lorencia, Noria and 63,
+/// which is what the client shows: Lorencia leaves with their silhouette and Noria with leaves.
 fn leaf1_file(w: i32) -> &'static str {
     if matches!(w, WD_0LORENCIA | WD_3NORIA | WD_63PK_FIELD) { "leaf01.tga" } else { "leaf01.jpg" }
 }
@@ -845,20 +845,20 @@ impl Batch {
     }
 }
 
-/// Color del original (en sRGB, limitado a [0, 1] como `PackABGR`) → lineal.
+/// Original color (sRGB, clamped to [0, 1] like `PackABGR`) → linear.
 fn linear(c: [f32; 4]) -> [f32; 4] {
     let f = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
     [f(c[0]), f(c[1]), f(c[2]), c[3].clamp(0.0, 1.0)]
 }
 
-/// `RenderPlane3D(width, height, AngleMatrix(angle))` trasladado a `position`
-/// (ZzzOpenglUtil.cpp:930): esquinas (−w,−w,−h), (w,w,−h), (w,w,h), (−w,−w,h).
+/// `RenderPlane3D(width, height, AngleMatrix(angle))` translated to `position`
+/// (ZzzOpenglUtil.cpp:930): corners (−w,−w,−h), (w,w,−h), (w,w,h), (−w,−w,h).
 fn plane_corners(position: Vec3, angle: Vec3, w: f32, h: f32) -> [Vec3; 4] {
     let m = angle_matrix(angle);
     [Vec3::new(-w, -w, -h), Vec3::new(w, w, -h), Vec3::new(w, w, h), Vec3::new(-w, -w, h)].map(|v| position + m * v)
 }
 
-/// Tamaño del plano de una casilla (ZzzEffectFireLeave.cpp:531-553); `None` = no se dibuja.
+/// Plane size of a slot (ZzzEffectFireLeave.cpp:531-553); `None` = not drawn.
 fn plane_size(w: i32, weather: i32, o: &Leaf) -> Option<(f32, f32)> {
     if in_chaos_castle(w) {
         return Some((o.turning_force.x, o.turning_force.y));
@@ -889,7 +889,7 @@ fn draw_leaves(
     let (Ok(cam), Ok(p), Some(t)) = (cameras.single(), players.single(), terrain) else { return };
     let render = &mut *render;
     if render.world != Some(args.world) {
-        // Las mallas del mapa anterior ya se borraron con él (`WorldEntity`).
+        // The previous map's meshes were already despawned with it (`WorldEntity`).
         render.world = Some(args.world);
         render.textures = load_textures(&args, &mut images);
         render.batches.clear();
@@ -923,7 +923,7 @@ fn draw_leaves(
         }
     }
 
-    // Los lotes vacíos se ocultan (Bevy avisa de cada malla vacía que sube).
+    // Empty batches are hidden (Bevy warns about every empty mesh it uploads).
     for (ty, (_, entity)) in &render.batches {
         if let Ok(mut v) = visibility.get_mut(*entity) {
             v.set_if_neq(if out.contains_key(ty) { Visibility::Inherited } else { Visibility::Hidden });
@@ -1016,7 +1016,7 @@ mod tests {
             assert_eq!(o.ty, LeafType::Leaf1);
             let d = o.position - e.hero;
             assert!((-800.0..800.0).contains(&d.x) && (-500.0..900.0).contains(&d.y) && (50.0..350.0).contains(&d.z));
-            // Delante de la cámara (y < cámara + 400) va hacia +X.
+            // In front of the camera (y < camera + 400) it drifts towards +X.
             if o.position.y < e.camera_y + 400.0 {
                 assert!(o.velocity.x > 0.0);
             } else {
@@ -1055,7 +1055,7 @@ mod tests {
             assert!((o.ty == LeafType::Leaf1 && o.scale == 5.0) || (o.ty == LeafType::Leaf2 && o.scale == 10.0));
             let speed = o.velocity.length();
             assert!((8.0..24.0).contains(&speed));
-            // Giro de −30° en X: (0, −0.5, −0.866)·v.
+            // −30° rotation around X: (0, −0.5, −0.866)·v.
             assert!((o.velocity.z / speed + 30f32.to_radians().cos()).abs() < 1e-4);
             assert!((o.velocity.y / speed + 0.5).abs() < 1e-4);
         }
@@ -1094,7 +1094,7 @@ mod tests {
         let mut l = Leaves::default();
         let mut s = vec![];
         l.tick(&env(WD_10HEAVEN), &mut s);
-        // RainCurrent = 1 → 1·200/100 = 2 gotas; las demás quedan "vivas" sin tipo.
+        // RainCurrent = 1 → 1·200/100 = 2 drops; the others stay "alive" without type.
         assert_eq!(l.rain_current, 1);
         assert_eq!(l.slots.iter().filter(|o| o.ty == LeafType::Rain).count(), 2);
         assert_eq!(live(&l), 80);
@@ -1102,7 +1102,7 @@ mod tests {
             l.tick(&env(WD_10HEAVEN), &mut s);
         }
         assert_eq!(l.rain_current, 100);
-        // Sin salpicaduras en Icarus.
+        // No splashes in Icarus.
         assert!(s.is_empty());
     }
 
@@ -1180,7 +1180,7 @@ mod tests {
         assert!(leaves_move(WD_2DEVIAS, 2));
         assert!(leaves_move(65, 0) && leaves_move(73, 0) && leaves_move(53, 0));
         assert!(!leaves_move(1, 0) && !leaves_move(8, 0));
-        // Lorencia en casa: quietas pero visibles; Devias en casa: no se ven.
+        // Lorencia indoors: still but visible; Devias indoors: not visible.
         assert!(leaves_visible(WD_0LORENCIA, 4));
         assert!(!leaves_visible(WD_2DEVIAS, 3));
         assert!(leaves_visible(57, 3));

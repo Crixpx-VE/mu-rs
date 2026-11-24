@@ -1,26 +1,26 @@
-//! Ventana de mover (`M`): `SEASON3B::CNewUIMoveCommandWindow` (NewUIMoveCommandWindow.cpp) y el
-//! cambio de mapa que le contesta el servidor (`ReceiveTeleport`, WSclient.cpp:1698).
+//! Move window (`M`): `SEASON3B::CNewUIMoveCommandWindow` (NewUIMoveCommandWindow.cpp) and the
+//! map change the server replies with (`ReceiveTeleport`, WSclient.cpp:1698).
 //!
-//! - **Lista**: `MOVEREQINFO` de `mu_data::warps::load` (el `movereq_eng.bmd` del original o, en
-//!   los datos de `dist`, el `Maps/Warps.json` de MuMain), en el orden del archivo.
-//! - **Abrir**: `M` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:268-274, con
-//!   `SOUND_CLICK01`) o "Move (M)" del menú de ventanas (NewUIWindowMenu.cpp:107-112, sin sonido).
-//!   Esc la cierra (`UpdateKeyEvent`, con `SOUND_CLICK01`; la cadena de Esc está en options.rs).
-//! - **Dibujo y ratón**: `SetPos`, `RenderFrame`, `Render` y `BtnProcess` tal cual, en la pantalla
-//!   de 640×480 en (1, 1) (`Create(m_pNewUIMng, 1, 1)`, NewUISystem.cpp:327-329). Las columnas, el
-//!   ancho y el alto de las filas dependen de `WindowWidth` (800, 1024 o 1280; con otra resolución
-//!   el original las deja a cero: aquí se usa la más cercana de las tres).
-//! - **Se puede ir** (`SettingCanMoveMap`): nivel (2/3 para MG, DL y RF salvo los de 400), zen y no
-//!   ser asesino (`PK < PVP_MURDERER1`); Icarus pide alas o montura voladora (sin equipo todavía:
-//!   nunca) y Atlans no deja con Uniria (sin equipo: siempre deja). El servidor se toma como PvP
-//!   (`IsNonPvP` falso): Vulcanus (42) es mapa de batalla y pide Gens, que aún no hay.
-//! - **Clic** en un destino permitido (al soltar): `SendRequestMoveMap(GetMoveCommandKey(), index)`
-//!   y se cierra.
-//! - **Respuesta**: `MapChanged`. Si cambia de mapa se carga el nuevo en la casilla que dice (sin
-//!   la pantalla de carga: el original carga de golpe con `LoadWorld`) y, al terminar,
-//!   `ClientReadyAfterMapChange` (`SendRequestFinishLoading`). En el mismo mapa se borran los demás
-//!   jugadores (`ClearCharacters`), se coloca al personaje y se contesta enseguida. Los jugadores
-//!   del mapa nuevo llegan después con `AddCharactersToScope` (remote.rs).
+//! - **List**: `MOVEREQINFO` from `mu_data::warps::load` (the original `movereq_eng.bmd` or, in
+//!   the `dist` data, MuMain's `Maps/Warps.json`), in file order.
+//! - **Open**: `M` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:268-274, with
+//!   `SOUND_CLICK01`) or "Move (M)" in the window menu (NewUIWindowMenu.cpp:107-112, silent).
+//!   Esc closes it (`UpdateKeyEvent`, with `SOUND_CLICK01`; the Esc chain is in options.rs).
+//! - **Drawing and mouse**: `SetPos`, `RenderFrame`, `Render` and `BtnProcess` as is, on the
+//!   640×480 screen at (1, 1) (`Create(m_pNewUIMng, 1, 1)`, NewUISystem.cpp:327-329). The columns,
+//!   width and row height depend on `WindowWidth` (800, 1024 or 1280; at other resolutions the
+//!   original leaves them at zero: here the closest of the three is used).
+//! - **Can go** (`SettingCanMoveMap`): level (2/3 for MG, DL and RF except the 400 ones), zen and
+//!   not being a murderer (`PK < PVP_MURDERER1`); Icarus needs wings or a flying mount (no
+//!   equipment yet: never) and Atlans refuses Uniria (no equipment: always allows). The server is
+//!   treated as PvP (`IsNonPvP` false): Vulcanus (42) is a battle map and needs Gens, not implemented yet.
+//! - **Click** on an allowed destination (on release): `SendRequestMoveMap(GetMoveCommandKey(), index)`
+//!   and the window closes.
+//! - **Reply**: `MapChanged`. On a map change the new map is loaded at the given tile (without
+//!   the loading screen: the original loads at once with `LoadWorld`) and, when done,
+//!   `ClientReadyAfterMapChange` (`SendRequestFinishLoading`) is sent. On the same map the other
+//!   players are cleared (`ClearCharacters`), the character is placed and the reply goes out right
+//!   away. Players of the new map arrive later with `AddCharactersToScope` (remote.rs).
 
 use std::collections::HashMap;
 
@@ -52,9 +52,9 @@ impl Plugin for MoveWindowPlugin {
     }
 }
 
-/// `MOVECOMMAND_MAX_RENDER_TEXTLINE`: filas a la vista.
+/// `MOVECOMMAND_MAX_RENDER_TEXTLINE`: visible rows.
 const MAX_LINES: i32 = 31;
-/// `MOVECOMMAND_SCROLLBTN_WIDTH/HEIGHT`, `SCROLLBAR_TOP_WIDTH/HEIGHT` y `SCROLLBAR_MIDDLE_HEIGHT`.
+/// `MOVECOMMAND_SCROLLBTN_WIDTH/HEIGHT`, `SCROLLBAR_TOP_WIDTH/HEIGHT` and `SCROLLBAR_MIDDLE_HEIGHT`.
 const BTN_W: i32 = 15;
 const BTN_H: i32 = 30;
 const BAR_W: i32 = 7;
@@ -64,9 +64,9 @@ const BAR_MIDDLE_H: i32 = 15;
 const POS: (i32, i32) = (1, 1);
 /// `PVP_MURDERER1` (_define.h:466).
 const PVP_MURDERER1: u8 = 5;
-/// El índice del mapa de batalla (`anStrifeIndex`, NewUIMoveCommandWindow.cpp:286): Vulcanus.
+/// The battle map index (`anStrifeIndex`, NewUIMoveCommandWindow.cpp:286): Vulcanus.
 const STRIFE_INDEX: i32 = 42;
-/// `g_ServerListManager->IsNonPvP()`: nuestro servidor se toma como normal (PvP).
+/// `g_ServerListManager->IsNonPvP()`: our server is treated as normal (PvP).
 const NON_PVP: bool = false;
 /// `GlobalText[933, 2988, 934, 935, 936, 2987, 1002]` (Text_eng.bmd).
 const TITLE: &str = "Warp Command Window";
@@ -76,45 +76,45 @@ const HEAD_LEVEL: &str = "Min. Level";
 const HEAD_ZEN: &str = "Cost";
 const STRIFE_MARK: &str = "(Battle)";
 const CLOSE: &str = "Close";
-/// `GlobalText[55]` (Icarus), `[37]` (Atlans) y `[2686]` (Vulcanus).
+/// `GlobalText[55]` (Icarus), `[37]` (Atlans) and `[2686]` (Vulcanus).
 const ICARUS: &str = "Icarus";
 const ATLANS: &str = "Atlans";
 const VULCANUS: &str = "Vulcanus";
 
-/// Colores de `Render` y `RenderFrame`.
+/// `Render` and `RenderFrame` colors.
 const WHITE: [u8; 3] = [255, 255, 255];
 const TITLE_COLOR: [u8; 3] = [255, 204, 26];
 const HEAD_COLOR: [u8; 3] = [127, 178, 255];
-/// No se puede ir.
+/// Cannot go.
 const DENIED: [u8; 3] = [164, 39, 17];
-/// No llega a ese nivel o a ese zen.
+/// Level or zen not reached.
 const MISSING: [u8; 3] = [255, 51, 26];
 
-// --- Medidas -----------------------------------------------------------------------------------
+// --- Layout ------------------------------------------------------------------------------------
 
-/// Medidas de `SetPos` para un `WindowWidth` (NewUIMoveCommandWindow.cpp:111-188).
+/// `SetPos` measurements for a `WindowWidth` (NewUIMoveCommandWindow.cpp:111-188).
 #[derive(Clone, Copy, PartialEq, Debug)]
 struct Layout {
     /// `m_MapNameUISize`.
     w: i32,
     h: i32,
-    /// `m_iRealFontHeight` (`FontHeight * 640 / WindowWidth + 2`): alto de una fila.
+    /// `m_iRealFontHeight` (`FontHeight * 640 / WindowWidth + 2`): row height.
     fh: i32,
-    /// `m_StrifePos.x`, `m_MapNamePos.x`, `m_ReqLevelPos.x` y `m_ReqZenPos.x`.
+    /// `m_StrifePos.x`, `m_MapNamePos.x`, `m_ReqLevelPos.x` and `m_ReqZenPos.x`.
     strife_x: i32,
     map_x: i32,
     level_x: i32,
     zen_x: i32,
-    /// `g_hFont` (`CreateFont(FontHeight - 1)`, Winmain.cpp:1456-1471) en unidades de la pantalla
-    /// de 640.
+    /// `g_hFont` (`CreateFont(FontHeight - 1)`, Winmain.cpp:1456-1471) in units of the 640
+    /// screen.
     font: f32,
 }
 
 impl Layout {
     fn new(window_width: u32) -> Self {
-        // La resolución más cercana de las del `switch (WindowWidth)`.
+        // The closest resolution of the `switch (WindowWidth)`.
         let ww = [800, 1024, 1280].into_iter().min_by_key(|&c| (c - window_width as i32).abs()).unwrap_or(1024);
-        // (ancho, columnas, `FontHeight` de Winmain.cpp:1458-1461).
+        // (width, columns, `FontHeight` of Winmain.cpp:1458-1461).
         let (w, map, level, zen, font_height) = match ww {
             800 => (200, 69, 129, 174, 13),
             1024 => (180, 64, 119, 159, 14),
@@ -140,7 +140,7 @@ impl Layout {
     fn rows_y(&self) -> i32 {
         POS.1 + 38
     }
-    /// `m_ScrollBarPos` (con `m_Pos.y` dos veces, como el original).
+    /// `m_ScrollBarPos` (with `m_Pos.y` twice, like the original).
     fn bar(&self) -> (i32, i32) {
         (POS.0 + self.w - 14, POS.1 + self.rows_y() - BAR_TOP_H)
     }
@@ -152,17 +152,17 @@ impl Layout {
     fn bar_h(&self) -> i32 {
         MAX_LINES * self.fh
     }
-    /// La barra roja de "Close": `RenderColor(m_StartMapNamePos.x, m_MapNameUISize.y - fh - 6, ...)`
-    /// (sin `m_Pos.y`); el clic mira x = 3 (NewUIMoveCommandWindow.cpp:524, 718).
+    /// The red "Close" bar: `RenderColor(m_StartMapNamePos.x, m_MapNameUISize.y - fh - 6, ...)`
+    /// (without `m_Pos.y`); the click checks x = 3 (NewUIMoveCommandWindow.cpp:524, 718).
     fn close_bar(&self) -> (i32, i32, i32, i32) {
         (self.rows_x(), self.h - self.fh - 6, self.w - 5, self.fh)
     }
 }
 
-// --- Barra de desplazamiento ---------------------------------------------------------------------
+// --- Scroll bar ----------------------------------------------------------------------------------
 
-/// Los contadores de la barra de `SetPos` y lo que mueven `ScrollUp`, `ScrollDown` y
-/// `RecursiveCalcScroll` (NewUIMoveCommandWindow.cpp:156-187, 574-708).
+/// The scroll bar counters of `SetPos` and what `ScrollUp`, `ScrollDown` and
+/// `RecursiveCalcScroll` move (NewUIMoveCommandWindow.cpp:156-187, 574-708).
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 struct Scroll {
     /// `m_ScrollBtnPos.y`.
@@ -188,11 +188,11 @@ struct Scroll {
 }
 
 impl Scroll {
-    /// La parte de la barra de `SetPos` (y `OpenningProcess`, que vuelve a llamarla).
+    /// The scroll bar part of `SetPos` (and `OpenningProcess`, which calls it again).
     fn new(layout: &Layout, rows: usize) -> Self {
         let total_steps = rows as i32 - MAX_LINES;
         let total_px = layout.bar_h() - BTN_H;
-        // Con 31 destinos o menos el original divide por cero o le sale negativo: sin desplazamiento.
+        // With 31 destinations or fewer the original divides by zero or gets a negative value: no scrolling.
         let min = if total_steps > 0 { total_px / total_steps } else { 0 };
         let max = if total_steps > 0 { min + 1 } else { 0 };
         let num_max = total_px - total_steps * min;
@@ -209,7 +209,7 @@ impl Scroll {
             acc: 0,
             mouse_y: 0,
             clicked: false,
-            // `m_iNumPage = 1 + n / 31`: solo se enciende con más de una página.
+            // `m_iNumPage = 1 + n / 31`: only enabled with more than one page.
             active: 1 + rows as i32 / MAX_LINES > 1,
         }
     }
@@ -242,8 +242,8 @@ impl Scroll {
         }
     }
 
-    /// `RecursiveCalcScroll`, con sus rarezas (al acabarse los pasos, lo movido pasa a ser lo que
-    /// queda del valor).
+    /// `RecursiveCalcScroll`, with its quirks (when the steps run out, the moved amount becomes what
+    /// is left of the value).
     fn recursive(&mut self, mut value: i32, moved: &mut i32, down: bool) {
         if down {
             if self.remain_steps > 0 {
@@ -272,16 +272,16 @@ impl Scroll {
         }
     }
 
-    /// `UpdateScrolling`: las filas [inicio, fin) a la vista.
+    /// `UpdateScrolling`: the visible rows [start, end).
     fn visible(&self, rows: usize) -> (usize, usize) {
         let start = (self.total_steps - self.remain_steps).max(0) as usize;
         (start.min(rows), (start + MAX_LINES as usize).min(rows))
     }
 }
 
-// --- Estado ------------------------------------------------------------------------------------
+// --- State -------------------------------------------------------------------------------------
 
-/// Un destino (`MOVEINFODATA`).
+/// A destination (`MOVEINFODATA`).
 #[derive(Clone, Debug, PartialEq)]
 struct Row {
     req: MoveReq,
@@ -290,21 +290,21 @@ struct Row {
     selected: bool,
 }
 
-/// La lista de los datos (`CMoveCommandData::GetMoveCommandDatalist`); el chat la mira para
-/// `/warp` y `/move` (chat.rs).
+/// The data list (`CMoveCommandData::GetMoveCommandDatalist`); the chat reads it for
+/// `/warp` and `/move` (chat.rs).
 #[derive(Resource, Default)]
 pub(crate) struct MoveList(pub Vec<MoveReq>);
 
-/// `INTERFACE_MOVEMAP` y lo que guarda `CNewUIMoveCommandWindow`.
+/// `INTERFACE_MOVEMAP` and what `CNewUIMoveCommandWindow` stores.
 #[derive(Resource, Default)]
 pub struct MoveWindow {
     open: bool,
-    /// Se acaba de abrir: falta `OpenningProcess`.
+    /// Just opened: `OpenningProcess` is pending.
     opening: bool,
     rows: Vec<Row>,
     scroll: Scroll,
     layout: Option<Layout>,
-    /// `m_dwMoveCommandKey`: la de `ReceiveMoveMapChecksum` y luego las que se van generando.
+    /// `m_dwMoveCommandKey`: the one from `ReceiveMoveMapChecksum` and then the generated ones.
     key: u32,
 }
 
@@ -325,21 +325,21 @@ impl MoveWindow {
         self.scroll.clicked = false;
     }
 
-    /// El ratón (pantalla de 640×480) cae en la ventana o arrastra su barra: un clic no hace
-    /// caminar (`UpdateMouseEvent` devuelve falso).
+    /// The mouse (640×480 screen) is over the window or dragging its bar: a click does not
+    /// walk (`UpdateMouseEvent` returns false).
     pub fn blocks(&self, c: Vec2) -> bool {
         let Some(l) = self.layout.filter(|_| self.open) else { return false };
         self.scroll.clicked || inside(c, POS.0, POS.1, l.w, l.h)
     }
 
-    /// `GetMoveCommandKey`: la clave siguiente, que se queda como la última.
+    /// `GetMoveCommandKey`: the next key, which is kept as the last one.
     fn next_key(&mut self) -> u32 {
         self.key = mu_protocol::game::map_move_key(self.key);
         self.key
     }
 
-    /// `/warp <mapa>` del chat: `SendRequestMoveMap(GetMoveCommandKey(), índice)` sin la ventana
-    /// (NewUIChatInputBox.cpp:518-529). La respuesta llega como la de la ventana.
+    /// Chat `/warp <map>`: `SendRequestMoveMap(GetMoveCommandKey(), index)` without the window
+    /// (NewUIChatInputBox.cpp:518-529). The reply arrives like the window's.
     pub fn request_warp(&mut self, net: &mut crate::net::Net, index: u16) {
         let key = self.next_key();
         info!("/warp: índice {index}");
@@ -347,13 +347,13 @@ impl MoveWindow {
     }
 }
 
-/// `CheckMouseIn` (con el ratón en enteros, `MouseX`/`MouseY`).
+/// `CheckMouseIn` (with integer mouse coordinates, `MouseX`/`MouseY`).
 fn inside(c: Vec2, x: i32, y: i32, w: i32, h: i32) -> bool {
     let (mx, my) = (c.x.floor() as i32, c.y.floor() as i32);
     mx >= x && mx < x + w && my >= y && my < y + h
 }
 
-/// Hay que mandar `ClientReadyAfterMapChange` cuando acabe de cargar el mapa.
+/// `ClientReadyAfterMapChange` must be sent once the map finishes loading.
 #[derive(Resource, Default)]
 struct MapChangePending(bool);
 
@@ -366,7 +366,7 @@ fn load_list(args: Res<Args>, mut commands: Commands) {
     commands.insert_resource(MoveList(list));
 }
 
-/// Lo que mira `SettingCanMoveMap` del personaje (`CharacterAttribute`, `CharacterMachine`, `Hero`).
+/// What `SettingCanMoveMap` reads from the character (`CharacterAttribute`, `CharacterMachine`, `Hero`).
 struct HeroState {
     level: i32,
     money: i64,
@@ -375,7 +375,7 @@ struct HeroState {
 }
 
 
-/// Nivel que pide un destino a esta clase (NewUIMoveCommandWindow.cpp:337-345 y 808-816).
+/// Level a destination requires for this class (NewUIMoveCommandWindow.cpp:337-345 and 808-816).
 fn required_level(class: Class, level: i32) -> i32 {
     if matches!(class, Class::Gladiator | Class::Lord | Class::Fighter) && level != 400 {
         (level as f32 * 2.0 / 3.0) as i32
@@ -384,26 +384,26 @@ fn required_level(class: Class, level: i32) -> i32 {
     }
 }
 
-/// `SettingCanMoveMap` de una fila (NewUIMoveCommandWindow.cpp:308-405).
+/// `SettingCanMoveMap` of a row (NewUIMoveCommandWindow.cpp:308-405).
 fn can_move(req: &MoveReq, strife: bool, hero: &HeroState) -> bool {
     let mut can = false;
     if hero.level >= required_level(hero.class, req.level) && hero.money >= req.zen as i64 && hero.pk < PVP_MURDERER1 {
         can = if req.name == ICARUS {
-            // Alas, Dinorant o Fenrir, sin Uniria ni anillo de transformación: sin equipo, no.
+            // Wings, Dinorant or Fenrir, without Uniria or transformation ring: no equipment, so no.
             false
         } else if req.name == ATLANS {
-            // `strncmp(..., GlobalText[37], 8)`: solo "Atlans" (8 pasa del final de la palabra).
-            // Con Uniria o Dinorant no; sin equipo, sí.
+            // `strncmp(..., GlobalText[37], 8)`: only "Atlans" (8 goes past the end of the word).
+            // Not with Uniria or Dinorant; without equipment, yes.
             true
         } else {
             !(NON_PVP && req.name == VULCANUS)
         };
     }
-    // Mapa de batalla: solo con Gens (`m_byGensInfluence`), que aún no hay.
+    // Battle map: only with Gens (`m_byGensInfluence`), not implemented yet.
     can && !strife
 }
 
-// --- Lógica ------------------------------------------------------------------------------------
+// --- Logic -------------------------------------------------------------------------------------
 
 #[allow(clippy::too_many_arguments)]
 fn update(
@@ -419,7 +419,7 @@ fn update(
     mut sound: ResMut<SoundQueue>,
     mut net: ResMut<crate::net::Net>,
 ) {
-    // `M` (con la caja del menú de sistema o el minimapa abiertos las teclas rápidas no llegan,
+    // `M` (hotkeys don't arrive while the system menu box or the minimap is open,
     // NewUIHotKey.cpp:134-137).
     if keys.just_pressed(KeyCode::KeyM) && !game_ui.modal() && !game_ui.minimap {
         w.toggle();
@@ -432,7 +432,7 @@ fn update(
     let l = Layout::new(window.map_or(1024, |w| w.physical_width()));
     let w = &mut *w;
     if w.opening || w.layout != Some(l) {
-        // `OpenningProcess`: `SetPos`, `SetStrifeMap` (y `SettingCanMoveMap`, más abajo).
+        // `OpenningProcess`: `SetPos`, `SetStrifeMap` (and `SettingCanMoveMap`, below).
         w.opening = false;
         let list = list.as_ref().map_or(&[][..], |l| &l.0[..]);
         w.rows = list
@@ -447,7 +447,7 @@ fn update(
     let mouse_y = cursor.map_or(0, |c| c.y.floor() as i32);
     let (press, release) = (mouse.just_pressed(MouseButton::Left), mouse.just_released(MouseButton::Left));
 
-    // `BtnProcess` (NewUIMoveCommandWindow.cpp:407-532): primero el botón de la barra.
+    // `BtnProcess` (NewUIMoveCommandWindow.cpp:407-532): the scroll bar button first.
     let s = &mut w.scroll;
     if at(l.btn_x(), s.btn_y, BTN_W, BTN_H) && press {
         s.clicked = true;
@@ -476,7 +476,7 @@ fn update(
         s.mouse_y = mouse_y;
     }
 
-    // `SettingCanMoveMap` de las filas a la vista.
+    // `SettingCanMoveMap` of the visible rows.
     let hero_state = HeroState {
         level: hero.as_ref().map_or(1, |h| h.level as i32),
         money: info.as_ref().map_or(0, |i| i.0.money as i64),
@@ -516,7 +516,7 @@ fn update(
         }
     }
     if let Some((index, name)) = warp_to {
-        // (El original guarda las opciones antes si el destino es de otro servidor: aquí hay uno.)
+        // (The original saves the options first if the destination is on another server: here there is one.)
         let key = w.next_key();
         info!("mover a {name} (índice {index})");
         net.send(ClientMessage::WarpCommandRequest { key, index: index as u16 });
@@ -524,10 +524,10 @@ fn update(
     } else if close {
         w.close();
     }
-    // `Update` → `UpdateScrolling`: lo hace `Scroll::visible` al usarlo.
+    // `Update` → `UpdateScrolling`: done by `Scroll::visible` when used.
 }
 
-/// `ReceiveMoveMapChecksum`, el zen (`ReceiveGetItem` con `GET_ITEM_ZEN`) y `ReceiveTeleport`.
+/// `ReceiveMoveMapChecksum`, the zen (`ReceiveGetItem` with `GET_ITEM_ZEN`) and `ReceiveTeleport`.
 #[allow(clippy::too_many_arguments)]
 fn net_messages(
     mut commands: Commands,
@@ -561,13 +561,13 @@ fn net_messages(
                 info!("el servidor nos lleva al mapa {map} ({x}, {y})");
                 let facing = crate::character::direction_facing(rotation);
                 if !is_map_change {
-                    // `Flag` 0: teletransporte en el mismo mapa (`CreateTeleportEnd`).
+                    // `Flag` 0: teleport within the same map (`CreateTeleportEnd`).
                     for mut p in &mut players {
                         place(&mut p, x, y, facing);
                     }
                     continue;
                 }
-                // `ClearCharacters`, `HideAll` y, si es otro mapa, `LoadWorld`.
+                // `ClearCharacters`, `HideAll` and, for another map, `LoadWorld`.
                 w.close();
                 game_ui.hide_all();
                 let mut new_info = info.as_deref().map(|i| i.0).unwrap_or_default();
@@ -598,7 +598,7 @@ fn net_messages(
     }
 }
 
-/// `Hero->PositionX/Y`, `SetPlayerStop` y el ángulo.
+/// `Hero->PositionX/Y`, `SetPlayerStop` and the angle.
 fn place(p: &mut crate::character::Player, x: u8, y: u8, facing: f32) {
     p.pos = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
     p.path.clear();
@@ -606,8 +606,8 @@ fn place(p: &mut crate::character::Player, x: u8, y: u8, facing: f32) {
     p.facing = facing;
 }
 
-/// Al terminar de cargar el mapa nuevo: `SendRequestFinishLoading` (que además apunta cuándo, para
-/// las puertas: gate.rs).
+/// When the new map finishes loading: `SendRequestFinishLoading` (which also records when, for
+/// the gates: gate.rs).
 fn finish_map_change(
     mut pending: ResMut<MapChangePending>,
     mut net: ResMut<crate::net::Net>,
@@ -620,7 +620,7 @@ fn finish_map_change(
     }
 }
 
-// --- Dibujo ------------------------------------------------------------------------------------
+// --- Drawing -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Tex {
@@ -649,15 +649,15 @@ impl Tex {
 #[derive(Resource)]
 struct MoveTextures(HashMap<Tex, Handle<Image>>);
 
-/// Una pieza en la pantalla de 640×480.
+/// A piece on the 640×480 screen.
 #[derive(Clone, PartialEq, Debug)]
 enum Piece {
-    /// `RenderColor` con el color de `glColor4f`.
+    /// `RenderColor` with the `glColor4f` color.
     Fill { x: i32, y: i32, w: i32, h: i32, rgba: [u8; 4] },
-    /// `RenderImage(tex, x, y, ancho, alto)`: el trozo de arriba a la izquierda, sin estirar;
+    /// `RenderImage(tex, x, y, width, height)`: the top-left part, unstretched;
     /// `dark` = `glColor4f(0.7, 0.7, 0.7)`.
     Image { tex: Tex, x: i32, y: i32, w: i32, h: i32, dark: bool },
-    /// `RenderText(x, y, texto, 0, 0, RT3_WRITE_CENTER)`: centrado en x, con y arriba.
+    /// `RenderText(x, y, text, 0, 0, RT3_WRITE_CENTER)`: centered on x, with y at the top.
     Text { cx: i32, y: i32, text: String, color: [u8; 3], bold: bool },
 }
 
@@ -666,7 +666,7 @@ fn text(cx: i32, y: i32, s: &str, color: [u8; 3]) -> Piece {
 }
 
 impl MoveWindow {
-    /// `Render` y `RenderFrame` (NewUIMoveCommandWindow.cpp:710-878).
+    /// `Render` and `RenderFrame` (NewUIMoveCommandWindow.cpp:710-878).
     fn pieces(&self, hero: &HeroState) -> Vec<Piece> {
         let Some(l) = self.layout.filter(|_| self.open && !self.opening) else { return Vec::new() };
         let mut out = Vec::new();
@@ -684,14 +684,14 @@ impl MoveWindow {
             out.push(Piece::Image { tex: Tex::BarMiddle, x: bx, y: by + BAR_TOP_H + i * BAR_MIDDLE_H, w: BAR_W, h: BAR_MIDDLE_H, dark: false });
         }
         if remainder > 0 {
-            // El original lo pone sobre el último trozo entero (`icntText`), no después.
+            // The original places it over the last whole piece (`icntText`), not after it.
             out.push(Piece::Image { tex: Tex::BarMiddle, x: bx, y: by + BAR_TOP_H + last * BAR_MIDDLE_H, w: BAR_W, h: remainder, dark: false });
         }
         out.push(Piece::Image { tex: Tex::BarBottom, x: bx, y: by + l.bar_h() - BAR_TOP_H, w: BAR_W, h: BAR_TOP_H, dark: false });
         let s = &self.scroll;
         let tex = if s.active { Tex::BtnOn } else { Tex::BtnOff };
         out.push(Piece::Image { tex, x: l.btn_x(), y: s.btn_y, w: BTN_W, h: BTN_H, dark: s.active && s.clicked });
-        // Título (`g_hFontBold`) y cabeceras.
+        // Title (`g_hFontBold`) and headers.
         let head_y = POS.1 + 4 + 20;
         out.push(Piece::Text { cx: POS.0 + l.w / 2, y: POS.1 + 4, text: TITLE.into(), color: TITLE_COLOR, bold: true });
         out.push(text(l.strife_x, head_y, HEAD_STRIFE, HEAD_COLOR));
@@ -699,7 +699,7 @@ impl MoveWindow {
         out.push(text(l.level_x, head_y, HEAD_LEVEL, HEAD_COLOR));
         out.push(text(l.zen_x, head_y, HEAD_ZEN, HEAD_COLOR));
 
-        // `Render`: las filas.
+        // `Render`: the rows.
         let (start, end) = s.visible(self.rows.len());
         for (k, r) in self.rows[start..end].iter().enumerate() {
             let y = l.rows_y() + l.fh * k as i32;
@@ -713,7 +713,7 @@ impl MoveWindow {
                 out.push(text(l.level_x, y, &level_text, WHITE));
                 out.push(text(l.zen_x, y, &zen_text, WHITE));
                 if r.selected {
-                    // Encima del texto: `glColor4f(0.8, 0.8, 0.1, 0.6)`.
+                    // Over the text: `glColor4f(0.8, 0.8, 0.1, 0.6)`.
                     out.push(Piece::Fill { x: l.rows_x(), y: y - 1, w: l.w - 22, h: l.fh, rgba: [204, 204, 26, 153] });
                 }
             } else {
@@ -725,7 +725,7 @@ impl MoveWindow {
                 out.push(text(l.zen_x, y, &zen_text, if r.req.zen as i64 > hero.money { MISSING } else { DENIED }));
             }
         }
-        // "Close", en x = ancho / 2 (sin `m_Pos.x`).
+        // "Close", at x = width / 2 (without `m_Pos.x`).
         out.push(text(l.w / 2, l.h - l.fh - 5, CLOSE, WHITE));
         out
     }
@@ -740,7 +740,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         .filter_map(|&t| crate::scene::interface_image(&args, &mut images, t.file()).map(|(h, _)| (t, h)))
         .collect();
     commands.insert_resource(MoveTextures(textures));
-    // La pantalla de 640×480 centrada y pegada abajo, como la barra y las demás ventanas.
+    // The 640×480 screen centered and bottom-aligned, like the bar and the other windows.
     commands.spawn((
         Name::new("Ventana de mover"),
         MoveWindowRoot,
@@ -768,10 +768,10 @@ fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
     }
 }
 
-/// Ancho de la caja donde se centra un texto (sobra para cualquier nombre de 31 letras).
+/// Width of the box a text is centered in (enough for any 31-letter name).
 const TEXT_BOX: f32 = 300.0;
 
-/// Rehace la ventana cuando cambia algo de lo que se dibuja.
+/// Rebuilds the window when something it draws changes.
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
@@ -862,11 +862,11 @@ mod tests {
     fn barra_con_37_destinos() {
         let l = Layout::new(1024);
         let mut s = Scroll::new(&l, 37);
-        // 6 pasos en 280 píxeles: 46 o 47 por paso, 4 de 47 y 2 de 46.
+        // 6 steps in 280 pixels: 46 or 47 per step, 4 of 47 and 2 of 46.
         assert_eq!((s.total_steps, s.total_px, s.min, s.max, s.num_min, s.cur), (6, 280, 46, 47, 2, 47));
         assert!(s.active);
         assert_eq!(s.visible(37), (0, 31));
-        // La rueda baja de un paso cada vez; arriba del todo no sube.
+        // The wheel moves down one step at a time; at the very top it does not go up.
         s.up(s.cur);
         assert_eq!(s.visible(37), (0, 31));
         let mut ys = vec![s.btn_y];
@@ -883,7 +883,7 @@ mod tests {
             s.up(cur);
         }
         assert_eq!((s.visible(37), s.btn_y), ((0, 31), 37));
-        // Con 31 o menos, sin barra (el original dividiría por cero).
+        // With 31 or fewer, no bar (the original would divide by zero).
         let s = Scroll::new(&l, 20);
         assert_eq!((s.cur, s.active, s.visible(20)), (0, false, (0, 20)));
     }

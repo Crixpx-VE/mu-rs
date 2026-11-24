@@ -1,16 +1,16 @@
-//! Los demás jugadores del mapa, como los manda el servidor:
-//! - `AddCharactersToScope`: aparecen (su clase, sin equipo) en su casilla;
-//! - `ObjectWalked`: caminan los pasos que dio (o, si no vienen, hasta la casilla de llegada);
-//! - `MapObjectOutOfScope`: desaparecen;
-//! - `ObjectAnimation` (`ReceiveAction`, WSclient.cpp:3120-3353): miran a su dirección, se paran en
-//!   su casilla de llegada (`TargetX/Y`) y ponen la animación de la acción (sentarse, apoyarse,
-//!   curarse, los gestos del chat...). Sentados, apoyados o curándose siguen así hasta que caminan;
-//!   un gesto, hasta que acaba (`PlayerStopAnimationSetting`). Al aparecer, la postura que traen en
-//!   la apariencia (`Class & 0x07`, WSclient.cpp:2167-2191).
+//! The other players on the map, as the server sends them:
+//! - `AddCharactersToScope`: they appear (their class, unequipped) on their tile;
+//! - `ObjectWalked`: they walk the steps taken (or, if none come, to the destination tile);
+//! - `MapObjectOutOfScope`: they disappear;
+//! - `ObjectAnimation` (`ReceiveAction`, WSclient.cpp:3120-3353): they face their direction, stop on
+//!   their destination tile (`TargetX/Y`) and play the action's animation (sit, lean, heal, chat
+//!   emotes...). Sitting, leaning or healing lasts until they walk; an emote, until it ends
+//!   (`PlayerStopAnimationSetting`). On appearing, they take the posture carried in their
+//!   appearance (`Class & 0x07`, WSclient.cpp:2167-2191).
 //!
-//! Los mensajes llegan a veces mientras se carga el mapa: se guardan hasta que el juego está listo.
-//! Los que hablan de nosotros mismos (el id de `GameServerEntered`, `HeroKey`; OpenMU nos manda en
-//! `AddCharactersToScope`) no crean a nadie.
+//! Messages sometimes arrive while the map is loading: they are queued until the game is ready.
+//! Those about ourselves (the id from `GameServerEntered`, `HeroKey`; OpenMU sends us in
+//! `AddCharactersToScope`) create nobody.
 
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
@@ -36,11 +36,11 @@ impl Plugin for RemotePlugin {
     }
 }
 
-/// Mensajes de otros jugadores aún sin aplicar.
+/// Messages from other players not applied yet.
 #[derive(Resource, Default)]
 struct Inbox(Vec<ServerMessage>);
 
-/// Nuestro id de objeto (`HeroKey`, el de `GameServerEntered`).
+/// Our object id (`HeroKey`, the one from `GameServerEntered`).
 #[derive(Resource, Default)]
 pub struct HeroKey(pub u16);
 
@@ -61,16 +61,16 @@ fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<In
     }
 }
 
-/// Otro jugador.
+/// Another player.
 #[derive(Component)]
 pub struct RemotePlayer {
     pub id: u16,
     pub name: String,
     class: Class,
-    /// Posición en casillas (fraccionaria mientras camina).
+    /// Position in tiles (fractional while walking).
     pos: Vec2,
     path: VecDeque<(usize, usize)>,
-    /// `TargetX/Y`: la casilla de llegada del último paseo (o la suya al aparecer).
+    /// `TargetX/Y`: the destination tile of the last walk (or its own tile on appearing).
     target: (u8, u8),
     facing: f32,
     action: usize,
@@ -82,13 +82,13 @@ pub struct RemotePlayer {
 }
 
 impl RemotePlayer {
-    /// Animación y fotograma de ahora (para posar otra vez sus piezas, p. ej. el resaltado).
+    /// Current animation and frame (to pose its parts again, e.g. the highlight).
     pub fn pose_state(&self) -> (usize, f32) {
         (self.action, self.frame)
     }
 }
 
-/// Casillas por segundo al caminar (las del jugador).
+/// Tiles per second when walking (same as the player).
 const WALK_SPEED: f32 = 3.6;
 
 #[allow(clippy::too_many_arguments)]
@@ -104,18 +104,18 @@ fn apply(
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
 ) {
-    // Hasta que el mapa esté cargado.
+    // Until the map is loaded.
     let Some(terrain) = terrain else { return };
     for msg in std::mem::take(&mut inbox.0) {
         match msg {
             ServerMessage::AddCharactersToScope(list) => {
                 for mut c in list {
-                    // `Key >> 15` marca "recién aparecido"; el id son los 15 bits de abajo.
+                    // `Key >> 15` marks "just appeared"; the id is the low 15 bits.
                     c.id &= game::OBJECT_ID_MASK;
                     if c.id == hero.0 {
                         continue;
                     }
-                    // Si ya estaba (otra vez en la lista), se coloca de nuevo.
+                    // If already present (listed again), it is placed again.
                     if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == c.id) {
                         r.pos = Vec2::new(c.x as f32 + 0.5, c.y as f32 + 0.5);
                         r.path.clear();
@@ -129,8 +129,8 @@ fn apply(
                         continue;
                     };
                     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
-                    // `Class & 0x07`: 2 sentado, 3 apoyado, 4 curándose (1, aparecer con
-                    // `CreateTeleportEnd`, no se pinta todavía).
+                    // `Class & 0x07`: 2 sitting, 3 leaning, 4 healing (1, appearing with
+                    // `CreateTeleportEnd`, not drawn yet).
                     let pose = match c.pose {
                         2 => Some(game::action::SIT1),
                         3 => Some(game::action::POSE1),
@@ -168,7 +168,7 @@ fn apply(
                     for child in model.children {
                         e.with_child(child);
                     }
-                    // Si su casilla de llegada no es la de ahora, que camine hasta ella.
+                    // If its destination tile is not the current one, walk there.
                     if (c.target_x, c.target_y) != (c.x, c.y) {
                         inbox.0.push(ServerMessage::ObjectWalked {
                             id: c.id,
@@ -208,13 +208,13 @@ fn apply(
             ServerMessage::ObjectAnimation { id, direction, action, .. } => {
                 let id = id & game::OBJECT_ID_MASK;
                 let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
-                // `Angle[2] = (Angle - 1) * 45`, `Movement = false` y a su `TargetX/Y`.
+                // `Angle[2] = (Angle - 1) * 45`, `Movement = false` and to its `TargetX/Y`.
                 r.facing = rotation_facing(direction);
                 r.path.clear();
                 r.pos = Vec2::new(r.target.0 as f32 + 0.5, r.target.1 as f32 + 0.5);
                 match crate::character::action::for_at(action, r.class.female()) {
                     Some(a) => {
-                        // `SetAction` no vuelve a empezar la que ya tiene.
+                        // `SetAction` does not restart the current action.
                         let a = a.unwrap_or(r.stop);
                         if a != r.action {
                             r.action = a;
@@ -238,7 +238,7 @@ fn apply(
     }
 }
 
-/// Ángulo de MU de la `Rotation` (0..7) que manda el servidor.
+/// MU angle of the `Rotation` (0..7) the server sends.
 fn rotation_facing(rotation: u8) -> f32 {
     crate::character::direction_facing(rotation)
 }
@@ -273,7 +273,7 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
                 budget = 0.0;
             }
         }
-        // Sentado, apoyado o con un gesto sigue así mientras no camine (como el héroe).
+        // Sitting, leaning or emoting continues while not walking (like the hero).
         let keep = crate::character::action::resting(r.action) || crate::character::action::emote(r.action);
         let action = if !r.path.is_empty() {
             r.walk
@@ -290,7 +290,7 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
     }
 }
 
-/// Animación, sombra y la luz del terreno donde está.
+/// Animation, shadow and the terrain light where it stands.
 pub(crate) fn animate(
     time: Res<Time>,
     terrain: Option<Res<LoadedTerrain>>,
@@ -302,8 +302,8 @@ pub(crate) fn animate(
     let Some(terrain) = terrain else { return };
     for (mut r, skinned, shadow, selectable) in &mut q {
         r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
-        // Un gesto acaba: parado (`PlayerStopAnimationSetting`). Una acción que `player.bmd` no
-        // tiene (un número cualquiera del servidor), también.
+        // An emote ends: standing (`PlayerStopAnimationSetting`). Same for an action `player.bmd`
+        // lacks (any number from the server).
         let frames = skinned.action_frames(r.action) as f32;
         if frames == 0.0 || (crate::character::action::emote(r.action) && r.frame >= frames - 1.0) {
             r.action = r.stop;
@@ -318,8 +318,8 @@ pub(crate) fn animate(
         );
         skinned.pose(r.action, r.frame, false, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
-        // `BodyLight`: la luz del terreno en su casilla más `o->Light` (`VectorAdd(Light, o->Light,
-        // c->Light)`, ZzzCharacter.cpp:8909; lo pone `SelectCharacter`, ver `names.rs`).
+        // `BodyLight`: the terrain light on its tile plus `o->Light` (`VectorAdd(Light, o->Light,
+        // c->Light)`, ZzzCharacter.cpp:8909; set by `SelectCharacter`, see `names.rs`).
         let size = mu_data::terrain::SIZE;
         let (x, y) = ((r.pos.x.max(0.0) as usize).min(size - 1), (r.pos.y.max(0.0) as usize).min(size - 1));
         let light = Vec3::from_array(terrain.0.light[y * size + x]) + selectable.map_or(Vec3::ZERO, |s| s.light);

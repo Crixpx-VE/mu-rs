@@ -1,5 +1,5 @@
-//! Texturas `BITMAP_*` de los efectos: se cargan la primera vez que se usan, a partir de la tabla
-//! generada de `ZzzOpenData.cpp` (`gen/bitmaps.rs`).
+//! `BITMAP_*` effect textures: loaded on first use, from the table generated from
+//! `ZzzOpenData.cpp` (`gen/bitmaps.rs`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,12 +13,12 @@ use mu_data::texture::{self, Texture};
 use super::core::TexInfo;
 use super::tables::bitmaps::BITMAPS;
 
-/// Texturas que el original carga al entrar en un mapa (`MapManager.cpp`), no en `OpenBasicData`,
-/// y que por eso no están en la tabla generada: las salpicaduras de la lluvia (MapManager.cpp:1574-1577).
+/// Textures the original loads when entering a map (`MapManager.cpp`), not in `OpenBasicData`,
+/// and are therefore missing from the generated table: the rain splashes (MapManager.cpp:1574-1577).
 const MAP_BITMAPS: &[(i32, &str, bool)] = &[
     (super::core::BITMAP_RAIN_CIRCLE, "World1/rain02.tga", false),
     (super::core::BITMAP_RAIN_CIRCLE + 1, "World10/rain03.tga", false),
-    // Barracks y Refuge de Balgass (MapManager.cpp:556, :581): la llama de la columna de fuego.
+    // Barracks and Refuge of Balgass (MapManager.cpp:556, :581): the fire column flame.
     (super::core::BITMAP_FIRE_RED, "Effect/firered.jpg", false),
 ];
 
@@ -35,7 +35,7 @@ impl FxTextures {
         Self { data, table, loaded: HashMap::new() }
     }
 
-    /// La textura `id` (cargándola si hace falta). `None` si no existe o no se puede leer.
+    /// The texture `id` (loading it if needed). `None` if it does not exist or cannot be read.
     pub fn get(&mut self, id: i32, images: &mut Assets<Image>) -> Option<(Handle<Image>, TexInfo)> {
         if let Some(t) = self.loaded.get(&id) {
             return t.clone();
@@ -63,13 +63,13 @@ impl FxTextures {
         result
     }
 
-    /// Solo el tamaño (carga la textura si hace falta).
+    /// Only the size (loads the texture if needed).
     pub fn info(&mut self, id: i32, images: &mut Assets<Image>) -> Option<TexInfo> {
         self.get(id, images).map(|t| t.1)
     }
 }
 
-/// Imagen de Bevy para un efecto: con mipmaps y repetida o pegada al borde según el original.
+/// Bevy image for an effect: with mipmaps, and repeated or clamped to the edge as in the original.
 pub fn fx_image(tex: &Texture, repeat: bool) -> Image {
     let mut image = crate::terrain::to_bevy_image(tex);
     let mode = if repeat { ImageAddressMode::Repeat } else { ImageAddressMode::ClampToEdge };
@@ -84,7 +84,7 @@ pub fn fx_image(tex: &Texture, repeat: bool) -> Image {
     image
 }
 
-/// Imagen blanca de 1×1 (para mallas sin textura).
+/// 1×1 white image (for untextured meshes).
 pub fn white_image() -> Image {
     Image::new(
         Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },

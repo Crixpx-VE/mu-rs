@@ -1,6 +1,6 @@
-//! Partículas traducidas de `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` y
+//! Particles translated from `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` and
 //! `DescribeParticle`): BITMAP_ENERGY, BITMAP_MAGIC, BITMAP_FLARE, BITMAP_LIGHT+2, BITMAP_MAGIC+1,
-//! BITMAP_BLUE_BLUR, BITMAP_CLUD64, BITMAP_LIGHT+3, BITMAP_TWINTAIL_WATER y BITMAP_SMOKE.
+//! BITMAP_BLUE_BLUR, BITMAP_CLUD64, BITMAP_LIGHT+3, BITMAP_TWINTAIL_WATER and BITMAP_SMOKE.
 
 use std::f32::consts::PI;
 
@@ -16,7 +16,7 @@ pub fn register(r: &mut Registry) {
     r.particle(BITMAP_MAGIC + 1, ParticleKind { create: Some(magic1_create), step: Some(magic1_step), draw: None });
     r.particle(BITMAP_BLUE_BLUR, ParticleKind { create: Some(blue_blur_create), step: Some(blue_blur_step), draw: None });
     r.particle(BITMAP_CLUD64, ParticleKind { create: Some(clud64_create), step: Some(clud64_step), draw: Some(clud64_draw) });
-    // `DescribeParticle` dibuja `o->Type` en vez de `TexType`, pero este tipo nunca cambia de textura.
+    // `DescribeParticle` draws `o->Type` instead of `TexType`, but this type never changes texture.
     r.particle(BITMAP_LIGHT + 3, ParticleKind { create: Some(light3_create), step: Some(light3_step), draw: None });
     r.particle(
         BITMAP_TWINTAIL_WATER,
@@ -25,7 +25,7 @@ pub fn register(r: &mut Registry) {
     r.particle(BITMAP_SMOKE, ParticleKind { create: Some(smoke_create), step: Some(smoke_step), draw: Some(smoke_draw) });
 }
 
-// --- Utilidades ----------------------------------------------------------------------------------
+// --- Utilities -----------------------------------------------------------------------------------
 
 /// `(float)(rand() % n)`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
@@ -37,7 +37,7 @@ fn wt_rot(ctx: &Ctx) -> f32 {
     (ctx.world_time as i32 % 360) as f32
 }
 
-/// Posición y `Live` del personaje que se sigue (si existe).
+/// Position and `Live` of the followed character (if it exists).
 fn target_state(ctx: &Ctx, p: &Particle) -> Option<(Vec3, bool)> {
     ctx.actor(p.target).map(|a| (a.position, a.live))
 }
@@ -50,8 +50,8 @@ fn follow(p: &mut Particle, target: Option<(Vec3, bool)>) {
     }
 }
 
-/// `RenderSprite` de la partícula con su textura; `blend` = `SetState` del caso (si no, la de
-/// `RenderParticles`: JPG suma, TGA prueba de alfa).
+/// `RenderSprite` of the particle with its texture; `blend` = the case's `SetState` (otherwise that
+/// of `RenderParticles`: JPG additive, TGA alpha test).
 fn sprite(p: &Particle, ctx: &DrawCtx, out: &mut DrawList, w: Option<(f32, f32)>, rotation: f32, blend: Option<Blend>) {
     let Some(t) = ctx.tex(p.tex_type) else { return };
     let (width, height) = w.unwrap_or((t.width * p.scale, t.height * p.scale));
@@ -83,7 +83,7 @@ fn energy_create(p: &mut Particle, ctx: &mut Ctx) {
             p.tex_type = BITMAP_MAGIC + 1;
             p.life_time = 10.0;
             p.scale = 0.3 + scale * (ctx.rand() % 8 + 6) as f32 * 0.1;
-            // (El original hace `VectorCopy(o->Light, Light)` sobre el argumento: no tiene efecto.)
+            // (The original does `VectorCopy(o->Light, Light)` on the argument: it has no effect.)
             p.rotation = 0.0;
             p.gravity = 0.0;
         }
@@ -103,7 +103,7 @@ fn energy_step(p: &mut Particle, ctx: &mut Ctx) {
             p.scale += 0.1;
         }
         2 => p.light -= Vec3::splat(0.01),
-        // ChainLighting: pegado a un hueso (o encima) del objetivo.
+        // ChainLighting: attached to a bone of the target (or above it).
         3 | 4 | 5 => {
             if let Some(a) = ctx.actor(p.target) {
                 match p.sub_type {
@@ -127,7 +127,7 @@ fn energy_step(p: &mut Particle, ctx: &mut Ctx) {
 fn magic_create(p: &mut Particle, _ctx: &mut Ctx) {
     if p.sub_type == 0 {
         p.life_time = 10.0;
-        // `o->Scale = Scale` (ya lo es).
+        // `o->Scale = Scale` (already is).
     }
 }
 
@@ -232,7 +232,7 @@ fn flare_step(p: &mut Particle, ctx: &mut Ctx) {
     }
 
     if p.sub_type == 0 {
-        // Si el objetivo camina/corre o usa ciertas habilidades, la chispa se queda quieta y se apaga.
+        // If the target walks/runs or uses certain skills, the spark stays still and fades out.
         let moving = ctx.actor(p.target).is_some_and(|a| {
             let act = a.action as i32;
             (PLAYER_WALK_MALE..=PLAYER_RUN_RIDE_WEAPON).contains(&act)
@@ -254,7 +254,7 @@ fn flare_draw(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
         let Some(t) = ctx.tex(p.tex_type) else { return };
         sprite(p, ctx, out, Some((t.width * 0.5 * p.scale, t.height * 0.4)), p.rotation, None);
     } else if p.sub_type != 4 {
-        // Recién creada (antes de su primer tick) no se dibuja.
+        // Freshly created (before its first tick) it is not drawn.
         if p.life_time != 60.0 {
             sprite(p, ctx, out, None, p.rotation, None);
         }
@@ -301,7 +301,7 @@ fn light2_create(p: &mut Particle, ctx: &mut Ctx) {
         }
         5 => {
             p.tex_type = BITMAP_ADV_SMOKE;
-            // Nace en un hueso al azar del objetivo.
+            // Spawns on a random bone of the target.
             if let Some(n) = ctx.actor(p.target).map(|a| a.bones.len().max(1) as i32) {
                 let bone = (ctx.rand() % n) as usize;
                 if let Some(a) = ctx.actor(p.target) {
@@ -335,7 +335,7 @@ fn light2_create(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Parte común de los subtipos 5, 6 y 7 (humo que sale despedido y cae).
+/// Common part of subtypes 5, 6 and 7 (smoke thrown out that falls).
 fn light2_burst(p: &mut Particle) {
     p.turning_force.z -= p.gravity;
     p.position += p.turning_force;
@@ -344,7 +344,7 @@ fn light2_burst(p: &mut Particle) {
     p.scale += 0.04;
 }
 
-/// Final común de los subtipos 5, 6 y 7 (después de la luz).
+/// Common ending of subtypes 5, 6 and 7 (after the light).
 fn light2_burst_fade(p: &mut Particle) {
     if p.life_time < 10.0 {
         p.alpha -= 0.1;
@@ -505,7 +505,7 @@ fn clud64_create(p: &mut Particle, ctx: &mut Ctx) {
             p.rotation = rf(ctx, 360);
             p.gravity = (ctx.rand() % 10 + 35) as f32 * 0.1;
             p.alpha = 0.0;
-            // `TurningForce` guarda el color pedido; la luz sube con el alfa.
+            // `TurningForce` stores the requested color; the light rises with the alpha.
             p.turning_force = light;
             p.light = Vec3::ZERO;
             if let Some((pos, _)) = target_state(ctx, p) {
@@ -751,7 +751,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
     match p.sub_type {
         0 | 61 | 4 | 9 | 23 => {
             p.life_time = 16.0;
-            // (En el original compara `o->Type` con MODEL_SLAUGHTERER: nunca se cumple.)
+            // (The original compares `o->Type` with MODEL_SLAUGHTERER: never true.)
             if p.ty == MODEL_SLAUGHTERER {
                 p.scale = (ctx.rand() % 3 + 28) as f32 * 0.01;
             } else {
@@ -785,7 +785,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = 25.0;
             p.rotation = rf(ctx, 360);
             p.angle.x = rf(ctx, 360);
-            // `StartPosition` = desplazamiento respecto al objetivo (lo usa el subtipo 36).
+            // `StartPosition` = offset from the target (used by subtype 36).
             let x = (ctx.rand() % 50 - 25) as f32;
             let y = (ctx.rand() % 50 - 25) as f32;
             let z = -rf(ctx, 50);
@@ -868,7 +868,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.position.x += (ctx.rand() % 200 - 100) as f32 * scale;
             p.position.y += (ctx.rand() % 200 - 100) as f32 * scale;
             p.position.z += (ctx.rand() % 20 + 20) as f32;
-            // `Rotation` guarda la altura base (se dibuja sin girar).
+            // `Rotation` stores the base height (drawn without rotation).
             p.rotation = p.position.z;
             p.velocity = Vec3::ZERO;
         }
@@ -1001,7 +1001,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = (ctx.rand() % 50 + 100) as f32;
             p.rotation = rf(ctx, 360);
             p.scale = scale * 0.4;
-            // `Angle[0]` = sentido del giro (±1).
+            // `Angle[0]` = rotation direction (±1).
             p.angle.x = if ctx.rand() % 2 == 0 { 1.0 } else { -1.0 };
         }
         50 => {
@@ -1048,7 +1048,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.angle.x = (ctx.rand() % 90 - 45) as f32;
             p.angle.z = rf(ctx, 360);
             p.velocity = Vec3::new(0.0, -((ctx.rand() % 8 + 40) as f32), 0.0);
-            // `StartPosition` guarda el color pedido.
+            // `StartPosition` stores the requested color.
             p.start_position = p.light;
         }
         60 => {
@@ -1093,7 +1093,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.rotation = rf(ctx, 360);
             p.gravity = (ctx.rand() % 30 + 50) as f32 * 0.01;
             let i_angle = (ctx.rand() % 360) as f32;
-            // (Fórmula del original tal cual: no convierte bien a radianes.)
+            // (Original formula as is: it does not convert to radians correctly.)
             p.turning_force.x = (i_angle / PI * 180.0).sin();
             p.turning_force.y = (i_angle / PI * 180.0).cos();
         }
@@ -1118,7 +1118,7 @@ fn smoke_create(p: &mut Particle, ctx: &mut Ctx) {
             p.scale *= (ctx.rand() % 64 + 64) as f32 * 0.005;
             p.rotation = rf(ctx, 360);
             p.gravity = (ctx.rand() % 16 + 30) as f32 * 0.1;
-            // `Angle` guarda el color pedido (la velocidad es cero, así que no afecta al avance).
+            // `Angle` stores the requested color (velocity is zero, so it does not affect movement).
             p.angle = light;
         }
         _ => {}
@@ -1473,7 +1473,7 @@ fn smoke_step(p: &mut Particle, ctx: &mut Ctx) {
             p.scale += 0.04;
         }
         61 => {
-            // (Calcula `Luminosity` pero no la usa: la luz se queda como se creó.)
+            // (Computes `Luminosity` but does not use it: the light stays as created.)
             p.gravity += 0.2;
             p.position.z += p.gravity;
             p.scale += 0.05;
@@ -1491,7 +1491,7 @@ fn smoke_step(p: &mut Particle, ctx: &mut Ctx) {
         64 => {
             let l = p.life_time / 24.0;
             p.light = Vec3::new(l * 0.1, l * 0.7, l * 0.4);
-            // Segundo `MovePosition` del tick (el común ya lo hizo el núcleo).
+            // Second `MovePosition` of the tick (the core already did the common one).
             p.position += rotate(p.angle, p.velocity);
             p.rotation += 0.05;
             p.gravity -= 0.1;
@@ -1530,13 +1530,13 @@ fn smoke_step(p: &mut Particle, ctx: &mut Ctx) {
         68 => {
             p.light = Vec3::splat(p.life_time / 40.0 * 0.4);
             p.velocity += p.velocity * 0.03;
-            // Segundo `MovePosition` del tick.
+            // Second `MovePosition` of the tick.
             p.position += rotate(p.angle, p.velocity);
             if 30.0 > p.life_time {
                 p.alpha -= 0.02;
             }
         }
-        // ASG_ADD_MAP_KARUTAN: `Angle` guarda el color.
+        // ASG_ADD_MAP_KARUTAN: `Angle` stores the color.
         69 => {
             p.light = p.angle * (p.life_time / 50.0);
             p.gravity -= 0.04;

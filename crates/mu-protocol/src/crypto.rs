@@ -1,14 +1,14 @@
-//! Cifrado completo de una conexión con el Game Server, para cada lado.
+//! Full encryption of a Game Server connection, for each side.
 //!
-//! - Cliente → servidor: Xor32 en **todos** los paquetes y, además, SimpleModulus en los C3/C4.
-//! - Servidor → cliente: solo SimpleModulus en los C3/C4 (C1/C2 van en claro).
+//! - Client → server: Xor32 on **all** packets and, additionally, SimpleModulus on C3/C4.
+//! - Server → client: only SimpleModulus on C3/C4 (C1/C2 are plaintext).
 //!
-//! Igual que `PipelinedEncryptor`/`PipelinedDecryptor` de OpenMU.
+//! Same as OpenMU's `PipelinedEncryptor`/`PipelinedDecryptor`.
 
 use crate::simple_modulus::{DecryptError, SimpleModulus, default_keys};
 use crate::xor::{XOR32_KEY, xor32_decrypt, xor32_encrypt};
 
-/// Lado del cliente: cifra lo que manda y descifra lo que recibe.
+/// Client side: encrypts what it sends and decrypts what it receives.
 #[derive(Debug, Clone)]
 pub struct ClientCrypto {
     encrypt: SimpleModulus,
@@ -25,14 +25,14 @@ impl Default for ClientCrypto {
 }
 
 impl ClientCrypto {
-    /// Paquete en claro → bytes listos para mandar al servidor.
+    /// Plaintext packet → bytes ready to send to the server.
     pub fn encrypt(&mut self, packet: &[u8]) -> Vec<u8> {
         let mut p = packet.to_vec();
         xor32_encrypt(&mut p, &XOR32_KEY);
         self.encrypt.encrypt(&p)
     }
 
-    /// Paquete completo recibido del servidor → en claro.
+    /// Full packet received from the server → plaintext.
     pub fn decrypt(&mut self, packet: &[u8]) -> Result<Vec<u8>, DecryptError> {
         if packet.first().is_some_and(|&b| b >= 0xC3) {
             self.decrypt.decrypt(packet)
@@ -42,7 +42,7 @@ impl ClientCrypto {
     }
 }
 
-/// Lado del servidor: descifra lo que manda el cliente y cifra las respuestas C3/C4.
+/// Server side: decrypts what the client sends and encrypts the C3/C4 replies.
 #[derive(Debug, Clone)]
 pub struct ServerCrypto {
     encrypt: SimpleModulus,

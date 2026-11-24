@@ -1,14 +1,14 @@
-//! Objetos del mapa donde el personaje se sienta, se apoya o se cura (`OPERATE`, `CreateOperate`
-//! en ZzzObject.cpp ≈4551 y los `CreateObject` de cada mapa), y lo que hay bajo el ratón para el
+//! Map objects where the character sits, leans or heals (`OPERATE`, `CreateOperate`
+//! in ZzzObject.cpp ≈4551 and each map's `CreateObject`), and what is under the mouse for the
 //! cursor (`SelectOperate`, `DontMove`).
 //!
-//! - Cada mapa marca unos tipos de objeto (bancos, sillas, troncos, cajas de pose invisibles...).
-//! - `SelectOperate` (ZzzInterface.cpp ≈7815): el rayo del ratón contra la caja de cada uno (la
-//!   posición del objeto más `BoundingBoxMin..Max`, sin girar ni escalar; por defecto
-//!   (-40,-40,0)..(40,40,80)). El primero que toca se ilumina (`Light` = 1.5) y los demás quedan
-//!   con 0.2 (se suma a la luz del terreno, `VectorAdd(Light, o->Light, BodyLight)`).
-//! - Al hacer clic se va hasta su casilla y, al llegar, `Action` con `MOVEMENT_OPERATE`
-//!   (ZzzInterface.cpp ≈3587) pone la animación de sentarse, de pose o de curarse.
+//! - Each map marks some object types (benches, chairs, logs, invisible pose boxes...).
+//! - `SelectOperate` (ZzzInterface.cpp ≈7815): the mouse ray against each one's box (the
+//!   object position plus `BoundingBoxMin..Max`, unrotated and unscaled; by default
+//!   (-40,-40,0)..(40,40,80)). The first hit is highlighted (`Light` = 1.5) and the rest stay
+//!   at 0.2 (added to the terrain light, `VectorAdd(Light, o->Light, BodyLight)`).
+//! - On click the character walks to its tile and, on arrival, `Action` with `MOVEMENT_OPERATE`
+//!   (ZzzInterface.cpp ≈3587) sets the sitting, pose or healing animation.
 
 use bevy::prelude::*;
 
@@ -29,37 +29,37 @@ impl Plugin for OperatePlugin {
     }
 }
 
-/// Lo que hace el personaje al llegar.
+/// What the character does on arrival.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Act {
     /// `PLAYER_SIT1`.
     Sit,
-    /// `PLAYER_POSE1`: apoyado.
+    /// `PLAYER_POSE1`: leaning.
     Pose,
-    /// `PLAYER_HEALING1` (la fuente de Noria).
+    /// `PLAYER_HEALING1` (the Noria fountain).
     Healing,
-    /// Se puede señalar pero no hace nada (el trono de Valley of Loren, solo para el maestro del
-    /// gremio que tiene el castillo).
+    /// Can be pointed at but does nothing (the Valley of Loren throne, only for the master of the
+    /// guild that holds the castle).
     Nothing,
 }
 
-/// Regla de un tipo de objeto en un mapa.
+/// Rule for an object type on a map.
 #[derive(Clone, Copy, Debug)]
 pub struct Rule {
     pub act: Act,
-    /// `Hero->Object.Angle[2] = TargetAngle`: mira hacia donde mira el objeto.
+    /// `Hero->Object.Angle[2] = TargetAngle`: faces where the object faces.
     pub face: bool,
-    /// Cursor `CursorLeanAgainst` (en vez de `CursorSitDown`), ver `RenderCursor`.
+    /// `CursorLeanAgainst` cursor (instead of `CursorSitDown`), see `RenderCursor`.
     pub lean_cursor: bool,
-    /// `BoundingBoxMax` (el mínimo es siempre (-40, -40, 0)).
+    /// `BoundingBoxMax` (the minimum is always (-40, -40, 0)).
     pub bbox_max: Vec3,
 }
 
 const BOX: Vec3 = Vec3::new(40.0, 40.0, 80.0);
-/// Cajas de pose: `Vector(40, 40, 160, BoundingBoxMax)`.
+/// Pose boxes: `Vector(40, 40, 160, BoundingBoxMax)`.
 const TALL: Vec3 = Vec3::new(40.0, 40.0, 160.0);
 
-/// ¿Es `kind` un objeto de sentarse/apoyarse en el mapa `world` (número de carpeta, `WorldActive` + 1)?
+/// Is `kind` a sit/lean object on map `world` (folder number, `WorldActive` + 1)?
 pub fn rule(world: u16, kind: i16) -> Option<Rule> {
     use crate::fx::tables::ids::{MODEL_FURNITURE01, MODEL_POSE_BOX, MODEL_TREE01};
     let r = |act, face, lean_cursor, bbox_max| Some(Rule { act, face, lean_cursor, bbox_max });
@@ -83,7 +83,7 @@ pub fn rule(world: u16, kind: i16) -> Option<Rule> {
             45 | 73 => r(Act::Sit, false, false, BOX),
             _ => None,
         },
-        // Noria: la fuente cura (y lleva el cursor de apoyarse).
+        // Noria: the fountain heals (and uses the lean cursor).
         4 => match k {
             8 => r(Act::Sit, false, false, BOX),
             38 => r(Act::Healing, true, true, BOX),
@@ -93,23 +93,23 @@ pub fn rule(world: u16, kind: i16) -> Option<Rule> {
         8 if k == 39 => r(Act::Pose, true, false, BOX),
         // Tarkan.
         9 if k == 78 => r(Act::Sit, false, false, BOX),
-        // Valley of Loren (castillo): 77 es el trono del maestro del gremio.
+        // Valley of Loren (castle): 77 is the guild master's throne.
         31 => match k {
             77 => r(Act::Nothing, true, false, BOX),
             84 => r(Act::Sit, true, false, BOX),
             _ => None,
         },
-        // Kanturu (ruinas, `M38Kanturu2nd`).
+        // Kanturu (ruins, `M38Kanturu2nd`).
         40 if k == 3 => r(Act::Sit, false, false, BOX),
         // Elbeland (`GMNewTown`).
         52 if k == 103 => r(Act::Sit, true, false, BOX),
-        // Loren Market (`GMUnitedMarketPlace`): caja de pose de 100×100×160.
+        // Loren Market (`GMUnitedMarketPlace`): 100×100×160 pose box.
         80 if k == 67 => r(Act::Pose, true, false, Vec3::new(100.0, 100.0, 160.0)),
-        // `GMUnitedMarketPlace::CreateObject` no mira el mapa: en todos los que caen en el `default`
-        // de `CreateObject` (todos menos Lorencia, Dungeon, Devias, Noria, Atlans, Tarkan y el login,
-        // ZzzObject.cpp:4676-4912) el tipo 67 es también una caja de 100×100×160. Ahí `Action` no
-        // tiene caso: camina hasta ella, se para y suena `SOUND_DROP_ITEM01`.
-        // Chaos Castle no llega a la cadena: `CreateChaosCastleObject` devuelve antes.
+        // `GMUnitedMarketPlace::CreateObject` does not check the map: in every map that falls into the
+        // `default` of `CreateObject` (all but Lorencia, Dungeon, Devias, Noria, Atlans, Tarkan and the
+        // login, ZzzObject.cpp:4676-4912) type 67 is also a 100×100×160 box. There `Action` has no
+        // case: the character walks to it, stops and `SOUND_DROP_ITEM01` plays.
+        // Chaos Castle never reaches the chain: `CreateChaosCastleObject` returns earlier.
         w if k == 67 && !matches!(w, 1 | 2 | 3 | 4 | 8 | 9 | 74 | 75 | 19..=24 | 54) => {
             r(Act::Nothing, false, false, Vec3::new(100.0, 100.0, 160.0))
         }
@@ -117,22 +117,22 @@ pub fn rule(world: u16, kind: i16) -> Option<Rule> {
     }
 }
 
-/// Un objeto de sentarse del mapa cargado.
+/// A sit object of the loaded map.
 pub struct Operate {
     pub rule: Rule,
-    /// Posición en MU.
+    /// MU position.
     pub position: Vec3,
-    /// `Angle[2]` en grados.
+    /// `Angle[2]` in degrees.
     pub angle: f32,
-    /// Materiales propios de sus mallas iluminadas (para resaltarlo) y la luz del terreno que tienen.
+    /// Its own lit mesh materials (for highlighting) and the terrain light they have.
     pub materials: Vec<Handle<ModelMaterial>>,
     pub light: Vec3,
-    /// `o->Light` actual (0 hasta que el ratón pasa por el juego; luego 0.2 o 1.5).
+    /// Current `o->Light` (0 until the mouse moves over the game; then 0.2 or 1.5).
     pub glow: f32,
 }
 
 impl Operate {
-    /// Casilla del objeto (`Position / TERRAIN_SCALE`).
+    /// Object tile (`Position / TERRAIN_SCALE`).
     pub fn tile(&self) -> (i32, i32) {
         ((self.position.x / MU_SCALE) as i32, (self.position.y / MU_SCALE) as i32)
     }
@@ -141,41 +141,41 @@ impl Operate {
 #[derive(Resource, Default)]
 pub struct Operates(pub Vec<Operate>);
 
-/// Lo que hay bajo el ratón, para el cursor y el clic.
+/// What is under the mouse, for the cursor and the click.
 #[derive(Resource, Default)]
 pub struct Pointer {
     /// `SelectedOperate`.
     pub operate: Option<usize>,
-    /// `DontMove`: el último clic en el suelo fue en una casilla a la que no se puede ir.
+    /// `DontMove`: the last ground click was on a tile that cannot be reached.
     pub dont_move: bool,
 }
 
 impl Pointer {
-    /// Cursor del objeto señalado: `Some(true)` apoyarse, `Some(false)` sentarse.
+    /// Cursor of the pointed object: `Some(true)` lean, `Some(false)` sit.
     pub fn operate_cursor(&self, operates: &Operates) -> Option<bool> {
         self.operate.and_then(|i| operates.0.get(i)).map(|o| o.rule.lean_cursor)
     }
 }
 
-/// Al cambiar de mapa.
+/// On map change.
 pub fn reset(mut operates: ResMut<Operates>, mut pointer: ResMut<Pointer>) {
     operates.0.clear();
     *pointer = Pointer::default();
 }
 
-/// `o->Light` del objeto no señalado y del señalado.
+/// `o->Light` of the unpointed and the pointed object.
 const GLOW_IDLE: f32 = 0.2;
 const GLOW_SELECTED: f32 = 1.5;
 
-/// Rayo del ratón en coordenadas de MU (origen, dirección), si el ratón está en la ventana.
+/// Mouse ray in MU coordinates (origin, direction), if the mouse is in the window.
 pub fn mouse_ray_mu(window: &Window, camera: &Camera, cam_tf: &GlobalTransform) -> Option<(Vec3, Vec3)> {
     let ray = camera.viewport_to_world(cam_tf, window.cursor_position()?).ok()?;
     let to_mu = |v: Vec3| Vec3::new(v.x, -v.z, v.y);
     Some((to_mu(ray.origin) * MU_SCALE, to_mu(*ray.direction)))
 }
 
-/// `SelectObjects` → `SelectOperate`: solo con el ratón en la zona de juego (por encima de la barra,
-/// `CheckMouseIn(0, 0, ancho, 429)`) y fuera de las ventanas.
+/// `SelectObjects` → `SelectOperate`: only with the mouse in the game area (above the bar,
+/// `CheckMouseIn(0, 0, width, 429)`) and outside the windows.
 fn select_operate(
     windows: Query<&Window>,
     cameras: Query<(&Camera, &GlobalTransform), With<IsDefaultUiCamera>>,
@@ -188,7 +188,7 @@ fn select_operate(
     pointer.operate = None;
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
     let in_area = crate::mainframe::cursor_virtual(window).is_some_and(|c| c.y < 429.0);
-    // Con un personaje bajo el ratón `SelectOperate` no se llama: las luces se quedan como estaban.
+    // With a character under the mouse `SelectOperate` is not called: the lights stay as they were.
     if over_ui.0 || !in_area || hovered.any() {
         return;
     }
@@ -214,7 +214,7 @@ fn select_operate(
     }
 }
 
-/// `CollisionDetectLineToOBB` con una caja alineada a los ejes (método de las franjas).
+/// `CollisionDetectLineToOBB` with an axis-aligned box (slab method).
 pub(crate) fn ray_hits_box(origin: Vec3, dir: Vec3, min: Vec3, max: Vec3) -> bool {
     let (mut t0, mut t1) = (0.0f32, f32::INFINITY);
     for a in 0..3 {
@@ -244,11 +244,11 @@ mod tests {
     #[test]
     fn rayo_contra_caja() {
         let (min, max) = (Vec3::new(-40.0, -40.0, 0.0), Vec3::new(40.0, 40.0, 80.0));
-        // Desde arriba y por delante, mirando hacia abajo al centro.
+        // From above and in front, looking down at the center.
         assert!(ray_hits_box(Vec3::new(0.0, -500.0, 1000.0), Vec3::new(0.0, 500.0, -960.0).normalize(), min, max));
-        // Pasa por al lado.
+        // Passes beside it.
         assert!(!ray_hits_box(Vec3::new(200.0, -500.0, 1000.0), Vec3::new(0.0, 500.0, -960.0).normalize(), min, max));
-        // La caja está detrás.
+        // The box is behind.
         assert!(!ray_hits_box(Vec3::new(0.0, 0.0, 1000.0), Vec3::Z, min, max));
     }
 

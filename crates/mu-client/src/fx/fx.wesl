@@ -1,5 +1,5 @@
-// Material de los efectos: textura × color del vértice × tinte, con las mezclas del original
-// (se eligen en `FxMaterial::specialize`). Sin luz: los efectos de MU no se iluminan.
+// Effect material: texture × vertex color × tint, with the original's blend modes
+// (chosen in `FxMaterial::specialize`). Unlit: MU effects are not lit.
 
 import bevy_pbr::render::forward_io::VertexOutput;
 

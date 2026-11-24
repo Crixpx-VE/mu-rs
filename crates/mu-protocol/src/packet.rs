@@ -1,21 +1,21 @@
-//! Formato básico de los paquetes.
+//! Basic packet format.
 //!
-//! Todo paquete empieza por una cabecera:
-//! - `C1 <tamaño u8> <código> ...`       (C3 igual pero cifrado)
-//! - `C2 <tamaño u16 BE> <código> ...`   (C4 igual pero cifrado)
+//! Every packet starts with a header:
+//! - `C1 <size u8> <code> ...`       (C3 the same but encrypted)
+//! - `C2 <size u16 BE> <code> ...`   (C4 the same but encrypted)
 //!
-//! Muchos paquetes llevan además un subcódigo justo después del código.
+//! Many packets also carry a subcode right after the code.
 
-/// Cabeceras de paquete de MU. El primer byte indica el tipo de paquete.
+/// MU packet headers. The first byte indicates the packet type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PacketHeader {
-    /// Tamaño en 1 byte, sin cifrar.
+    /// 1-byte size, unencrypted.
     C1,
-    /// Tamaño en 2 bytes, sin cifrar.
+    /// 2-byte size, unencrypted.
     C2,
-    /// Tamaño en 1 byte, cifrado con SimpleModulus.
+    /// 1-byte size, encrypted with SimpleModulus.
     C3,
-    /// Tamaño en 2 bytes, cifrado con SimpleModulus.
+    /// 2-byte size, encrypted with SimpleModulus.
     C4,
 }
 
@@ -30,7 +30,7 @@ impl PacketHeader {
         }
     }
 
-    /// Bytes que ocupa el campo de tamaño (1 para C1/C3, 2 para C2/C4).
+    /// Bytes taken by the size field (1 for C1/C3, 2 for C2/C4).
     pub fn size_field_len(self) -> usize {
         match self {
             Self::C1 | Self::C3 => 1,
@@ -38,7 +38,7 @@ impl PacketHeader {
         }
     }
 
-    /// Bytes de cabecera antes del código: tipo + tamaño.
+    /// Header bytes before the code: type + size.
     pub fn header_len(self) -> usize {
         1 + self.size_field_len()
     }
@@ -48,8 +48,8 @@ impl PacketHeader {
     }
 }
 
-/// Lee el tamaño total de un paquete a partir de sus primeros bytes.
-/// Devuelve `None` si faltan bytes o la cabecera no es válida.
+/// Reads the total size of a packet from its first bytes.
+/// Returns `None` if bytes are missing or the header is invalid.
 pub fn packet_len(buf: &[u8]) -> Option<usize> {
     let header = PacketHeader::from_byte(*buf.first()?)?;
     match header.size_field_len() {
@@ -58,7 +58,7 @@ pub fn packet_len(buf: &[u8]) -> Option<usize> {
     }
 }
 
-/// Vista de un paquete completo ya recibido.
+/// View of a complete received packet.
 #[derive(Debug, Clone, Copy)]
 pub struct Packet<'a> {
     pub header: PacketHeader,
@@ -66,7 +66,7 @@ pub struct Packet<'a> {
 }
 
 impl<'a> Packet<'a> {
-    /// Interpreta `bytes` como un paquete completo (comprueba cabecera y tamaño).
+    /// Interprets `bytes` as a complete packet (checks header and size).
     pub fn parse(bytes: &'a [u8]) -> Option<Self> {
         let header = PacketHeader::from_byte(*bytes.first()?)?;
         let len = packet_len(bytes)?;
@@ -80,18 +80,18 @@ impl<'a> Packet<'a> {
         self.bytes[self.header.header_len()]
     }
 
-    /// Byte siguiente al código (si existe).
+    /// The byte after the code (if any).
     pub fn sub_code(&self) -> Option<u8> {
         self.bytes.get(self.header.header_len() + 1).copied()
     }
 
-    /// Todo lo que va después de la cabecera de tamaño (código incluido).
+    /// Everything after the size header (code included).
     pub fn body(&self) -> &'a [u8] {
         &self.bytes[self.header.header_len()..]
     }
 }
 
-/// Construye un paquete C1 con `body` = código, subcódigo y datos.
+/// Builds a C1 packet with `body` = code, subcode and data.
 pub fn c1(body: &[u8]) -> Vec<u8> {
     let len = body.len() + 2;
     assert!(len <= 255, "paquete C1 demasiado grande ({len} bytes), usa C2");
@@ -102,7 +102,7 @@ pub fn c1(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Construye un paquete C2 con `body` = código, subcódigo y datos.
+/// Builds a C2 packet with `body` = code, subcode and data.
 pub fn c2(body: &[u8]) -> Vec<u8> {
     let len = body.len() + 3;
     assert!(len <= u16::MAX as usize, "paquete demasiado grande ({len} bytes)");
@@ -113,13 +113,13 @@ pub fn c2(body: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Acumula bytes de un socket y va sacando paquetes completos.
+/// Accumulates bytes from a socket and extracts complete packets.
 #[derive(Debug, Default)]
 pub struct PacketBuffer {
     buf: Vec<u8>,
 }
 
-/// El otro extremo mandó algo que no es un paquete de MU.
+/// The other end sent something that is not a MU packet.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InvalidData(pub u8);
 
@@ -128,7 +128,7 @@ impl PacketBuffer {
         self.buf.extend_from_slice(data);
     }
 
-    /// Saca el siguiente paquete completo, si ya ha llegado entero.
+    /// Extracts the next complete packet, if it has fully arrived.
     pub fn next_packet(&mut self) -> Result<Option<Vec<u8>>, InvalidData> {
         let Some(&first) = self.buf.first() else { return Ok(None) };
         let header = PacketHeader::from_byte(first).ok_or(InvalidData(first))?;

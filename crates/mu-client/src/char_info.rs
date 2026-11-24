@@ -1,29 +1,29 @@
-//! Ventana del personaje (`C`): `SEASON3B::CNewUICharacterInfoWindow` (NewUICharacterInfoWindow.cpp
-//! del Main 5.2).
+//! Character window (`C`): `SEASON3B::CNewUICharacterInfoWindow` (NewUICharacterInfoWindow.cpp
+//! of Main 5.2).
 //!
-//! - **Abrir y cerrar**: `C` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:207-212, con
-//!   `SOUND_CLICK01`; con la caja del menú de sistema o el minimapa abiertos no llega), el botón del
-//!   personaje de la barra (`m_BtnChaInfo`, NewUIMainFrameWindow.cpp:782-792, en mainframe.rs) y Esc
-//!   (`UpdateKeyEvent`, 185-199, en la cadena de Esc de options.rs). La cierran la X de arriba
-//!   (`BtnProcess`, 123-129: al apretar) y el botón de abajo a la izquierda (al soltar), sin sonido.
-//!   Al cambiar de mapa se cierra (`HideAll`, WSclient.cpp:946 y 1830).
-//! - **Sitio**: (640 − 190, 0) (`Create`, NewUISystem.cpp:225-226), 190 × 429. Con el inventario
-//!   abierto, el inventario se corre a 640 − 190·2 (`Show`/`Hide`, NewUISystem.cpp:601-616 y
-//!   965-984): eso lo hace el inventario mirando [`CharInfoWindow::is_open`].
-//! - **Ratón**: dentro de la ventana un clic no hace caminar (`UpdateMouseEvent`, 106-119). Las
-//!   ventanas de más arriba (menú de ventanas, opciones, minimapa, caja de mensajes: `GameUi::blocks`)
-//!   se quedan antes el ratón.
-//! - **Dibujo**: `RenderFrame`, `RenderSubjectTexts`, `RenderTableTexts`, `RenderAttribute` y
-//!   `RenderButtons` tal cual (206-1626), con los textos de Text_eng.bmd. Las cuentas son las de
-//!   `CHARACTER_MACHINE` (char_stats.rs), sin equipo ni buffs todavía.
-//! - **Botones "+"**: solo con puntos por repartir (`LevelUpPoint > 0`), 4 (5 el Dark Lord). El
-//!   original manda `SendRequestAddPoint(i)` (C1 F3 06, wsclientinline.h:1154-1161); aquí se manda
-//!   el mensaje [`PedirSubirStat`] y no se toca nada en local: el servidor contesta con los puntos.
+//! - **Open and close**: `C` (`CNewUIHotKey::UpdateKeyEvent`, NewUIHotKey.cpp:207-212, with
+//!   `SOUND_CLICK01`; ignored while the system menu box or the minimap is open), the character
+//!   button of the bar (`m_BtnChaInfo`, NewUIMainFrameWindow.cpp:782-792, in mainframe.rs) and Esc
+//!   (`UpdateKeyEvent`, 185-199, in the Esc chain of options.rs). Closed by the top X
+//!   (`BtnProcess`, 123-129: on press) and the bottom-left button (on release), silently.
+//!   Closes on map change (`HideAll`, WSclient.cpp:946 and 1830).
+//! - **Position**: (640 − 190, 0) (`Create`, NewUISystem.cpp:225-226), 190 × 429. With the
+//!   inventory open, the inventory moves to 640 − 190·2 (`Show`/`Hide`, NewUISystem.cpp:601-616
+//!   and 965-984): the inventory does that by checking [`CharInfoWindow::is_open`].
+//! - **Mouse**: a click inside the window does not walk (`UpdateMouseEvent`, 106-119). Windows on
+//!   higher layers (window menu, options, minimap, message box: `GameUi::blocks`) take the mouse
+//!   first.
+//! - **Drawing**: `RenderFrame`, `RenderSubjectTexts`, `RenderTableTexts`, `RenderAttribute` and
+//!   `RenderButtons` as is (206-1626), with the texts of Text_eng.bmd. The formulas are those of
+//!   `CHARACTER_MACHINE` (char_stats.rs), without equipment or buffs yet.
+//! - **"+" buttons**: only with points to spend (`LevelUpPoint > 0`), 4 (5 for the Dark Lord). The
+//!   original sends `SendRequestAddPoint(i)` (C1 F3 06, wsclientinline.h:1154-1161); here the
+//!   [`PedirSubirStat`] message is sent and nothing changes locally: the server replies with the points.
 //!
-//! **No está:** la ventana de misiones (T), la de la mascota y la del árbol de maestría (no hay;
-//! sus botones se ven y no hacen nada, el de maestría bloqueado y gris como sin 3.ª clase), los
-//! colores de los buffs (pociones secretas, pergaminos...) y el parpadeo del botón de la barra
-//! por las misiones de época.
+//! **Missing:** the quest window (T), the pet window and the master skill tree (none exist yet;
+//! their buttons show and do nothing, the master one locked and gray as without 3rd class), the
+//! buff colors (secret potions, scrolls...) and the bar button blinking for the
+//! seasonal quests.
 
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontSmoothing, FontWeight, LineHeight};
@@ -55,17 +55,17 @@ impl Plugin for CharInfoPlugin {
     }
 }
 
-// --- Estado ------------------------------------------------------------------------------------
+// --- State -------------------------------------------------------------------------------------
 
-/// `CHAINFO_WINDOW_WIDTH/HEIGHT` y `m_Pos` (640 − 190, 0).
+/// `CHAINFO_WINDOW_WIDTH/HEIGHT` and `m_Pos` (640 − 190, 0).
 const W: f32 = 190.0;
 const H: f32 = 429.0;
 const POS: Vec2 = Vec2::new(640.0 - W, 0.0);
-/// `HEIGHT_STRENGTH`, `HEIGHT_DEXTERITY`, `HEIGHT_VITALITY`, `HEIGHT_ENERGY` y `HEIGHT_CHARISMA`
+/// `HEIGHT_STRENGTH`, `HEIGHT_DEXTERITY`, `HEIGHT_VITALITY`, `HEIGHT_ENERGY` and `HEIGHT_CHARISMA`
 /// (NewUICharacterInfoWindow.h:47-51).
 const ROWS: [f32; 5] = [120.0, 175.0, 240.0, 295.0, 350.0];
 
-/// Una estadística que se puede subir (`STAT_STRENGTH`...: el número que va en el paquete).
+/// A stat that can be raised (`STAT_STRENGTH`...: the number sent in the packet).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Stat {
     Strength = 0,
@@ -79,17 +79,17 @@ impl Stat {
     const ALL: [Stat; 5] = [Stat::Strength, Stat::Agility, Stat::Vitality, Stat::Energy, Stat::Command];
 }
 
-/// Se ha pulsado un "+": el original manda `SendRequestAddPoint(tipo)` (C1 F3 06 tipo).
+/// A "+" was pressed: the original sends `SendRequestAddPoint(type)` (C1 F3 06 type).
 #[derive(Message, Clone, Copy, PartialEq, Eq, Debug)]
 pub struct PedirSubirStat(pub Stat);
 
-/// Lo que el equipo suma a las cuentas de la ventana (sin objetos todavía: nada). Lo rellenará el
-/// inventario cuando haya equipo (`CharacterMachine->Equipment`).
+/// What the equipment adds to the window's formulas (no items yet: nothing). The inventory will
+/// fill it once there is equipment (`CharacterMachine->Equipment`).
 #[derive(Resource, Clone, Default, Debug)]
 pub struct CharEquipment(pub EquipBonus);
 
-/// El servidor elegido en el login (`g_ServerListManager->GetSelectServerName/Index` y
-/// `GetNonPVPInfo`), que la ventana enseña bajo el nombre. Lo deja login_ui.rs al salir.
+/// The server chosen at login (`g_ServerListManager->GetSelectServerName/Index` and
+/// `GetNonPVPInfo`), shown under the name. Set by login_ui.rs on exit.
 #[derive(Resource, Clone, Debug, PartialEq)]
 pub struct SelectedServer {
     pub name: String,
@@ -97,12 +97,12 @@ pub struct SelectedServer {
     pub non_pvp: u8,
 }
 
-/// Botones de la ventana.
+/// Window buttons.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Btn {
-    /// Un "+" (`m_BtnStat[i]`).
+    /// A "+" (`m_BtnStat[i]`).
     Stat(usize),
-    /// `m_BtnExit`, `m_BtnQuest`, `m_BtnPet` y `m_BtnMasterLevel`.
+    /// `m_BtnExit`, `m_BtnQuest`, `m_BtnPet` and `m_BtnMasterLevel`.
     Exit,
     Quest,
     Pet,
@@ -110,7 +110,7 @@ enum Btn {
 }
 
 impl Btn {
-    /// (x, y, ancho, alto) dentro de la ventana (`SetButtonInfo`, 53-87).
+    /// (x, y, width, height) inside the window (`SetButtonInfo`, 53-87).
     fn rect(self) -> (f32, f32, f32, f32) {
         match self {
             Btn::Stat(i) => (160.0, ROWS[i] + 2.0, 16.0, 15.0),
@@ -126,8 +126,8 @@ impl Btn {
 #[derive(Resource, Default)]
 pub struct CharInfoWindow {
     open: bool,
-    /// El ratón dentro de la ventana (coordenadas de la ventana) si la ventana lo recibe, y el botón
-    /// izquierdo apretado: para el fotograma de los botones y las ayudas.
+    /// The mouse inside the window (window coordinates) if the window receives it, and whether the
+    /// left button is held: for the button frames and the tooltips.
     cursor: Option<Vec2>,
     held: bool,
 }
@@ -148,21 +148,21 @@ impl CharInfoWindow {
         self.cursor = None;
     }
 
-    /// El ratón (pantalla de 640×480) cae en la ventana: un clic no hace caminar.
+    /// The mouse (640×480 screen) is over the window: a click does not walk.
     pub fn blocks(&self, c: Vec2) -> bool {
         self.open && inside(c - POS, 0.0, 0.0, W, H)
     }
 }
 
-/// `CheckMouseIn` (ratón en enteros).
+/// `CheckMouseIn` (integer mouse position).
 fn inside(c: Vec2, x: f32, y: f32, w: f32, h: f32) -> bool {
     let (mx, my) = (c.x.floor(), c.y.floor());
     mx >= x && mx < x + w && my >= y && my < y + h
 }
 
-// --- Lo que se enseña --------------------------------------------------------------------------
+// --- What is shown -----------------------------------------------------------------------------
 
-/// Lo que la ventana lee del personaje (`CharacterAttribute`, `Hero` y el equipo).
+/// What the window reads from the character (`CharacterAttribute`, `Hero` and the equipment).
 #[derive(Clone, PartialEq, Debug)]
 struct View {
     name: String,
@@ -177,21 +177,21 @@ struct View {
     life_max: u16,
     mana: u16,
     mana_max: u16,
-    /// `AddPoint`, `MaxAddPoint`, `wMinusPoint` y `wMaxMinusPoint` (los frutos).
+    /// `AddPoint`, `MaxAddPoint`, `wMinusPoint` and `wMaxMinusPoint` (the fruits).
     add_point: i16,
     max_add_point: i16,
     minus_point: u16,
     max_minus_point: u16,
     server: Option<SelectedServer>,
     eq: EquipBonus,
-    /// `SkillAttribute[Skill[Hero->CurrentSkill]].Damage` y si es una invocación de la Summoner
-    /// (`AT_SKILL_SUMMON_EXPLOSION`..`REQUIEM`). Sin la lista de habilidades del servidor todavía
-    /// no hay ninguna: la 0, sin daño.
+    /// `SkillAttribute[Skill[Hero->CurrentSkill]].Damage` and whether it is a Summoner summon
+    /// (`AT_SKILL_SUMMON_EXPLOSION`..`REQUIEM`). Without the server's skill list there is none
+    /// yet: skill 0, no damage.
     skill_damage: u16,
     skill_is_summon: bool,
 }
 
-/// `GlobalText` de Text_eng.bmd.
+/// `GlobalText` of Text_eng.bmd.
 mod txt {
     pub const STR: &str = "STR"; // 166
     pub const AGI: &str = "Agility"; // 1702
@@ -200,32 +200,32 @@ mod txt {
     pub const CMD: &str = "Command"; // 1900
     pub const CREATE: &str = "Create"; // 1412
     pub const DECREASE: &str = "Decrease"; // 1903
-    pub const CLOSE_TIP: &str = "Close (C)"; // 927 con "C"
-    pub const QUEST_TIP: &str = "Quest(T)"; // "%s(%s)" con 1140 y "T"
+    pub const CLOSE_TIP: &str = "Close (C)"; // 927 with "C"
+    pub const QUEST_TIP: &str = "Quest(T)"; // "%s(%s)" with 1140 and "T"
     pub const PET_TIP: &str = "Pet"; // 1217
     pub const MASTER_TIP: &str = "Master skill tree (A)"; // 1749
 }
 
-/// Colores de `SetTextColor`.
+/// `SetTextColor` colors.
 const WHITE: [u8; 3] = [255, 255, 255];
 const YELLOW: [u8; 3] = [230, 230, 0];
 const ORANGE: [u8; 3] = [255, 138, 0];
 const BLUE: [u8; 3] = [100, 150, 255];
 const SKY: [u8; 3] = [76, 197, 254];
 
-/// Una pieza de la ventana (coordenadas dentro de ella).
+/// A piece of the window (coordinates inside it).
 #[derive(Clone, PartialEq, Debug)]
 enum Piece {
-    /// `RenderImage(tex, x, y, ancho, alto, 0, sv)`: el trozo de ancho × alto de la textura desde
-    /// (0, sv); con `stretch`, la textura entera estirada (las líneas de 1 píxel). `gray`: el color
-    /// (100, 100, 100) del botón bloqueado.
+    /// `RenderImage(tex, x, y, width, height, 0, sv)`: the width × height part of the texture from
+    /// (0, sv); with `stretch`, the whole texture stretched (the 1-pixel lines). `gray`: the
+    /// (100, 100, 100) color of the locked button.
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32, stretch: bool, gray: bool },
-    /// `RenderColor` (y el fondo de `SetBgColor`).
+    /// `RenderColor` (and the `SetBgColor` background).
     Fill { x: f32, y: f32, w: f32, h: f32, rgba: [u8; 4] },
-    /// `RenderText(x, y, texto, ancho)`: con `center`, centrado en ese ancho (`RT3_SORT_CENTER`).
-    /// `blink`: 0 la clase y 1 el servidor, que se turnan (`RenderSubjectTexts`, 286-290).
+    /// `RenderText(x, y, text, width)`: with `center`, centered in that width (`RT3_SORT_CENTER`).
+    /// `blink`: 0 the class and 1 the server, which alternate (`RenderSubjectTexts`, 286-290).
     Text { x: f32, y: f32, center: Option<f32>, text: String, color: [u8; 3], bold: bool, blink: Option<u8> },
-    /// La ayuda de un botón (`CNewUIButton::Render`, NewUIButton.cpp:439-460).
+    /// A button tooltip (`CNewUIButton::Render`, NewUIButton.cpp:439-460).
     Tooltip { cx: f32, y: f32, text: String },
 }
 
@@ -245,7 +245,7 @@ fn centered(x: f32, y: f32, w: f32, s: String, color: [u8; 3], bold: bool) -> Pi
     Piece::Text { x, y, center: Some(w), text: s, color, bold, blink: None }
 }
 
-/// `GlobalText[461, 460, 3130, 3131]` según `GetNonPVPInfo`.
+/// `GlobalText[461, 460, 3130, 3131]` depending on `GetNonPVPInfo`.
 fn server_text(s: &SelectedServer) -> String {
     let (name, index) = (&s.name, s.index);
     match s.non_pvp {
@@ -256,7 +256,7 @@ fn server_text(s: &SelectedServer) -> String {
     }
 }
 
-/// El tanto por ciento de los frutos (`iAddPoint`/`iMinusPoint`, 358-417).
+/// The fruit percentage (`iAddPoint`/`iMinusPoint`, 358-417).
 fn fruit_rate(used: i32, max: i32) -> i32 {
     if used <= 10 {
         return 100;
@@ -270,7 +270,7 @@ fn fruit_rate(used: i32, max: i32) -> i32 {
     }
 }
 
-/// `GlobalText[203]`/`[204]`: daño (con el mínimo nunca por encima del máximo) y ataque.
+/// `GlobalText[203]`/`[204]`: damage (the minimum never above the maximum) and attack rate.
 fn damage_text(min: i32, max: i32, rating: i32) -> String {
     let min = if min >= max { max } else { min };
     if rating > 0 { format!("Dmg(rate): {min}~{max} ({rating})") } else { format!("Dmg: {min}~{max}") }
@@ -281,7 +281,7 @@ impl View {
         self.class
     }
 
-    /// Fuerza... de una fila (`Strength + AddStrength`) y si lleva algo del equipo (azul).
+    /// Strength... of a row (`Strength + AddStrength`) and whether equipment adds to it (blue).
     fn stat(&self, d: &char_stats::Derived, s: Stat) -> (u16, bool) {
         let eq = &self.eq;
         match s {
@@ -293,15 +293,15 @@ impl View {
         }
     }
 
-    /// Los textos de `RenderSubjectTexts`, `RenderTableTexts` y `RenderAttribute` (267-1599).
+    /// The texts of `RenderSubjectTexts`, `RenderTableTexts` and `RenderAttribute` (267-1599).
     fn texts(&self) -> Vec<Piece> {
         let mut out = Vec::new();
         let class = self.base_class();
         let eq = &self.eq;
         let d = char_stats::calculate(class, &self.points, eq);
 
-        // `RenderSubjectTexts`: el nombre en negrita sobre (20, 20, 20, 20) y, debajo, la clase y
-        // el servidor turnándose (todo en negrita: no se cambia de letra).
+        // `RenderSubjectTexts`: the name in bold over (20, 20, 20, 20) and, below, the class and
+        // the server alternating (all bold: the font is not switched).
         out.push(Piece::Fill { x: 0.0, y: 12.0, w: W, h: 0.0, rgba: [20, 20, 20, 20] });
         let [r, g, b, _] = crate::names::player_color(self.pk);
         out.push(centered(0.0, 12.0, W, self.name.clone(), [r, g, b], true));
@@ -310,7 +310,7 @@ impl View {
             out.push(Piece::Text { x: 0.0, y: 27.0, center: Some(W), text: server_text(s), color: WHITE, bold: true, blink: Some(1) });
         }
 
-        // `RenderTableTexts` (sin maestría: `IsMasterLevel` necesita la 3.ª clase).
+        // `RenderTableTexts` (no master level: `IsMasterLevel` needs the 3rd class).
         out.push(text(18.0, 58.0, format!("Level: {}", self.points.level), YELLOW, true)); // 200
         if self.level_up_points > 0 {
             out.push(text(110.0, 58.0, format!("Point: {}", self.level_up_points), ORANGE, true)); // 217
@@ -328,7 +328,7 @@ impl View {
         };
         out.push(text(18.0, 101.0, fruits, SKY, false));
 
-        // `RenderAttribute`: cada fila con su nombre y su valor en negrita, del mismo color.
+        // `RenderAttribute`: each row with its name and value in bold, same color.
         let rows = if class == Class::Lord { 5 } else { 4 };
         let labels = [txt::STR, txt::AGI, txt::VIT, txt::ENE, txt::CMD];
         for (i, s) in Stat::ALL.into_iter().enumerate().take(rows) {
@@ -338,7 +338,7 @@ impl View {
             out.push(centered(86.0, ROWS[i] + 6.0, 86.0, value.to_string(), color, true));
         }
 
-        // Fuerza: daño y ataque (461-836). Sin habilidades que los suban (`Add_Rat`...: 0).
+        // Strength: damage and attack rate (461-836). No skills raising them (`Add_Rat`...: 0).
         let (mut dmin, mut dmax, alpha) = char_stats::attack_damage(class, &d, eq.hand);
         dmin += eq.window_damage.0;
         dmax += eq.window_damage.1;
@@ -356,21 +356,21 @@ impl View {
             out.push(text(20.0, y, s, WHITE, false));
         }
 
-        // Agilidad: defensa, velocidad y defensa contra jugadores (942-1139).
+        // Agility: defense, speed and PvP defense (942-1139).
         // `t_adjdef + maxdefense + iChangeRingAddDefense`.
         let def = d.defense as i32 + eq.harmony_defense + eq.ring_defense;
         let blocking = d.blocking as i32;
         let s = match (eq.full_set, blocking > 0) {
-            // 206: "Defense (rate):%d (%d +%d)"; el +10 % del conjunto.
+            // 206: "Defense (rate):%d (%d +%d)"; the set's +10 %.
             (true, true) => format!("Defense (rate):{def} ({blocking} +{})", blocking / 10),
-            // 207: `(t_adjdef + iChangeRingAddDefense) / 10`, sin la armonía.
+            // 207: `(t_adjdef + iChangeRingAddDefense) / 10`, without harmony.
             (true, false) => format!("Defense: {def} (+{})", (d.defense as i32 + eq.ring_defense) / 10),
             (false, true) => format!("Defense (rate):{def} ({blocking})"), // 208
             (false, false) => format!("Defense: {def}"),                    // 209
         };
         let mut y = ROWS[1] + 24.0;
         out.push(text(20.0, y, s, WHITE, false));
-        // `MagicSpeed` el Dark Wizard y la Summoner, `AttackSpeed` el resto.
+        // `MagicSpeed` for Dark Wizard and Summoner, `AttackSpeed` for the rest.
         let speed = if matches!(class, Class::Wizard | Class::Summoner) { d.magic_speed } else { d.attack_speed };
         y += 13.0;
         out.push(text(20.0, y, format!("Attack speed: {speed}"), WHITE, false)); // 64
@@ -382,7 +382,7 @@ impl View {
         y += 13.0;
         out.push(text(20.0, y, s, WHITE, false));
 
-        // Vitalidad: vida (y el daño cuerpo a cuerpo del Rage Fighter), 1184-1233.
+        // Vitality: life (and the Rage Fighter's melee damage), 1184-1233.
         let mut y = ROWS[2] + 24.0;
         out.push(text(20.0, y, format!("HP: {} / {}", self.life, self.life_max), WHITE, false)); // 211
         if class == Class::Fighter {
@@ -390,7 +390,7 @@ impl View {
             out.push(text(20.0, y, format!("Melee Damage: {}%", 50 + d.vitality / 10), WHITE, false)); // 3155
         }
 
-        // Energía: maná, daño mágico, maldición y daño de las habilidades (1260-1568).
+        // Energy: mana, magic damage, curse and skill damage (1260-1568).
         let mut y = ROWS[3] + 24.0;
         out.push(text(18.0, y, format!("Mana: {} / {}", self.mana, self.mana_max), WHITE, false)); // 213
         if matches!(class, Class::Wizard | Class::Gladiator | Class::Summoner) {
@@ -443,7 +443,7 @@ impl View {
     }
 }
 
-/// Lo que se dibuja (`Render`: `RenderFrame`, `RenderTexts` y `RenderButtons`).
+/// What is drawn (`Render`: `RenderFrame`, `RenderTexts` and `RenderButtons`).
 fn pieces(v: &View, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
     let mut out = Vec::new();
     let lord = v.base_class() == Class::Lord;
@@ -459,7 +459,7 @@ fn pieces(v: &View, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
     out.push(img(Tex::TableTopRight, 12.0 + 165.0 - 14.0, 48.0, 14.0, 14.0));
     out.push(img(Tex::TableBottomLeft, 12.0, 119.0 - 14.0, 14.0, 14.0));
     out.push(img(Tex::TableBottomRight, 12.0 + 165.0 - 14.0, 119.0 - 14.0, 14.0, 14.0));
-    // Las tiras de 1 píxel, de una vez.
+    // The 1-pixel strips, in one go.
     out.push(line(Tex::TableTopPixel, 26.0, 48.0, 165.0 - 28.0, 14.0));
     out.push(line(Tex::TableBottomPixel, 26.0, 119.0 - 14.0, 165.0 - 28.0, 14.0));
     out.push(line(Tex::TableBottomPixel, 14.0, 48.0 + 12.0, 12.0 + 165.0 - 4.0 - 14.0, 14.0));
@@ -471,8 +471,8 @@ fn pieces(v: &View, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
 
     out.extend(v.texts());
 
-    // `RenderButtons` (1601-1626): `ChangeButtonImgState(true, img, false)`: fotograma 0 y, apretado
-    // encima, el 1 (sin fotograma de ratón encima).
+    // `RenderButtons` (1601-1626): `ChangeButtonImgState(true, img, false)`: frame 0 and, when
+    // pressed over it, frame 1 (no hover frame).
     let over = |b: Btn| {
         let (x, y, w, h) = b.rect();
         cursor.is_some_and(|c| inside(c, x, y, w, h))
@@ -493,7 +493,7 @@ fn pieces(v: &View, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
     ];
     for (b, tex, _) in bottom {
         let (x, y, w, h) = b.rect();
-        // El de maestría, bloqueado (sin 3.ª clase): no cambia de fotograma y va gris
+        // The master button, locked (no 3rd class): no frame change and drawn gray
         // (`OpenningProcess`, 1689-1704).
         let locked = b == Btn::Master;
         let sv = if locked { 0.0 } else { frame(b) * h };
@@ -508,10 +508,10 @@ fn pieces(v: &View, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
     out
 }
 
-// --- Lógica ------------------------------------------------------------------------------------
+// --- Logic -------------------------------------------------------------------------------------
 
-/// Lo que hay del personaje: `HeroInfo` del servidor o, sin él (`--world`), los puntos de la clase
-/// al crearla.
+/// What is known about the character: the server's `HeroInfo` or, without it (`--world`), the
+/// class's starting points.
 fn view(
     hero: Option<&crate::account::Hero>,
     info: Option<&crate::account::HeroInfo>,
@@ -585,7 +585,7 @@ fn update(
     mut sound: ResMut<SoundQueue>,
     mut ask: MessageWriter<PedirSubirStat>,
 ) {
-    // `C` (con la caja del menú de sistema o el minimapa abiertos las teclas rápidas no llegan,
+    // `C` (hotkeys don't arrive while the system menu box or the minimap is open,
     // NewUIHotKey.cpp:134-137).
     if keys.just_pressed(KeyCode::KeyC) && !game_ui.modal() && !game_ui.minimap {
         w.toggle();
@@ -594,7 +594,7 @@ fn update(
     if !w.open {
         return;
     }
-    // Las ventanas de capa más alta se quedan antes el ratón.
+    // Higher-layer windows take the mouse first.
     let cursor = windows
         .single()
         .ok()
@@ -611,7 +611,7 @@ fn update(
     };
     let release = mouse.just_released(MouseButton::Left);
 
-    // `BtnProcess` (121-183), por orden. La X de arriba cierra al apretar.
+    // `BtnProcess` (121-183), in order. The top X closes on press.
     if mouse.just_pressed(MouseButton::Left) && inside(c, 169.0, 7.0, 13.0, 12.0) {
         w.close();
         return;
@@ -621,7 +621,7 @@ fn update(
         let lord = hero.as_ref().is_some_and(|h| h.class == Class::Lord);
         let count = if lord { 5 } else { 4 };
         if let Some(i) = (0..count).find(|&i| at(Btn::Stat(i))) {
-            // `SendRequestAddPoint(i)`, que suena `SOUND_CLICK01`.
+            // `SendRequestAddPoint(i)`, which plays `SOUND_CLICK01`.
             ask.write(PedirSubirStat(Stat::ALL[i]));
             sound.play("SOUND_CLICK01");
             return;
@@ -636,20 +636,20 @@ fn update(
         // `Toggle(INTERFACE_PET)`.
         info!("ventana del personaje: no hay ventana de la mascota todavía");
     }
-    // `m_BtnMasterLevel`: bloqueado sin 3.ª clase (`UpdateMouseEvent` de un botón bloqueado no hace nada).
+    // `m_BtnMasterLevel`: locked without 3rd class (a locked button's `UpdateMouseEvent` does nothing).
 }
 
-/// `PedirSubirStat` todavía no llega al servidor.
+/// `PedirSubirStat` does not reach the server yet.
 fn subir_stat_pendiente(mut asks: MessageReader<PedirSubirStat>) {
     for PedirSubirStat(stat) in asks.read() {
-        // TODO(servidor): mandar `IncreaseCharacterStatPoint` (C1 F3 06 <tipo>, OpenMU
-        // `IncreaseCharacterStatPoint`) y aplicar la respuesta F3 06 (`ReceiveAddPoint`) en
-        // `HeroInfo`. No se cambia nada aquí: lo decide el servidor.
+        // TODO(server): send `IncreaseCharacterStatPoint` (C1 F3 06 <type>, OpenMU
+        // `IncreaseCharacterStatPoint`) and apply the F3 06 reply (`ReceiveAddPoint`) to
+        // `HeroInfo`. Nothing changes here: the server decides.
         info!("ventana del personaje: pedir subir {stat:?} (tipo {}): sin paquete todavía", *stat as u8);
     }
 }
 
-/// `HideAll` al cambiar de mapa (`ReceiveTeleport`, WSclient.cpp:1830).
+/// `HideAll` on map change (`ReceiveTeleport`, WSclient.cpp:1830).
 fn close_on_map_change(mut from: MessageReader<crate::net::FromServer>, mut w: ResMut<CharInfoWindow>) {
     for m in from.read() {
         if let ServerMessage::MapChanged { is_map_change: true, .. } = m.0 {
@@ -658,7 +658,7 @@ fn close_on_map_change(mut from: MessageReader<crate::net::FromServer>, mut w: R
     }
 }
 
-// --- Dibujo ------------------------------------------------------------------------------------
+// --- Drawing -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 enum Tex {
@@ -732,18 +732,18 @@ impl Tex {
     }
 }
 
-/// Las texturas y su tamaño.
+/// The textures and their sizes.
 #[derive(Resource)]
 struct CharInfoTextures(std::collections::HashMap<Tex, (Handle<Image>, Vec2)>);
 
 #[derive(Component)]
 struct CharInfoRoot;
 
-/// El texto de la clase (0) o del servidor (1), que se turnan.
+/// The class (0) or server (1) text, which alternate.
 #[derive(Component)]
 struct Blink(u8);
 
-/// Una ayuda: su centro (la caja se coloca cuando se sabe lo que mide).
+/// A tooltip: its center (the box is placed once its size is known).
 #[derive(Component)]
 struct TooltipBox {
     cx: f32,
@@ -755,7 +755,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         .filter_map(|&t| crate::scene::interface_image(&args, &mut images, t.file()).map(|h| (t, h)))
         .collect();
     commands.insert_resource(CharInfoTextures(textures));
-    // La pantalla de 640×480 centrada y pegada abajo, como la barra; la ventana en (450, 0).
+    // The 640×480 screen centered and bottom-aligned, like the bar; the window at (450, 0).
     commands
         .spawn((
             Name::new("Ventana del personaje"),
@@ -768,7 +768,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
                 height: Val::Px(480.0),
                 ..default()
             },
-            // Por debajo del menú de ventanas y las opciones (capa 5.1 contra 10.4 y 10.5).
+            // Below the window menu and the options (layer 5.1 vs 10.4 and 10.5).
             GlobalZIndex(0),
         ))
         .with_children(|p| {
@@ -787,8 +787,8 @@ fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
     }
 }
 
-/// `g_hFont`/`g_hFontBold` (`CreateFont(FontHeight - 1)`, Winmain.cpp:1456-1472) en unidades de la
-/// pantalla de 640, con la resolución más cercana de las del `switch (WindowWidth)`.
+/// `g_hFont`/`g_hFontBold` (`CreateFont(FontHeight - 1)`, Winmain.cpp:1456-1472) in 640-screen
+/// units, using the closest resolution of the `switch (WindowWidth)`.
 fn font_size(window_width: u32) -> f32 {
     let ww = [800, 1024, 1280].into_iter().min_by_key(|&c| (c - window_width as i32).abs()).unwrap_or(1024);
     let font_height = match ww {
@@ -813,7 +813,7 @@ fn label(t: &str, color: [u8; 3], bold: bool, font: f32) -> impl Bundle {
     )
 }
 
-/// Rehace la ventana cuando cambia algo de lo que se dibuja.
+/// Rebuilds the window when something it draws changes.
 #[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
@@ -858,7 +858,7 @@ fn draw(
                     p.spawn((absolute(*x, *y, *w, *h), image));
                 }
                 Piece::Fill { x, y, w, h, rgba: [r, g, b, a] } => {
-                    // Alto 0: el de una línea de texto.
+                    // Height 0: one text line.
                     let h = if *h > 0.0 { *h } else { font };
                     p.spawn((absolute(*x, *y, *w, h), BackgroundColor(Color::srgba_u8(*r, *g, *b, *a))));
                 }
@@ -888,7 +888,7 @@ fn draw(
                     }
                 }
                 Piece::Tooltip { cx, y, text } => {
-                    // Caja negra de alfa 180, 6 más ancha que el texto (blanco, `g_hFont`).
+                    // Black box with alpha 180, 6 wider than the text (white, `g_hFont`).
                     let guess = text.chars().count() as f32 * font * 0.5 + 6.0;
                     p.spawn((
                         TooltipBox { cx: *cx },
@@ -911,8 +911,8 @@ fn draw(
     *last = (Some(root), pieces, font);
 }
 
-/// La clase y el servidor se turnan: `fAlpha = sin(WorldTime · 0.001) + 1`, la clase con alfa
-/// 127·(2 − fAlpha) y el servidor con 127·fAlpha (`RenderSubjectTexts`, 286-290).
+/// The class and server alternate: `fAlpha = sin(WorldTime · 0.001) + 1`, the class with alpha
+/// 127·(2 − fAlpha) and the server with 127·fAlpha (`RenderSubjectTexts`, 286-290).
 fn blink(time: Res<Time>, w: Res<CharInfoWindow>, mut texts: Query<(&Blink, &mut TextColor)>) {
     if !w.open {
         return;
@@ -926,15 +926,15 @@ fn blink(time: Res<Time>, w: Res<CharInfoWindow>, mut texts: Query<(&Blink, &mut
     }
 }
 
-/// La ayuda va centrada bajo el botón y, si se sale por la derecha de la pantalla de 640, se
-/// mete (`_iTempWidth > 640`, NewUIButton.cpp:450-454). Se coloca cuando se sabe lo que mide.
+/// The tooltip is centered under the button and pulled back in if it goes past the right edge of
+/// the 640 screen (`_iTempWidth > 640`, NewUIButton.cpp:450-454). Placed once its size is known.
 fn place_tooltips(mut boxes: Query<(&TooltipBox, &ComputedNode, &mut Node)>) {
     for (t, computed, mut node) in &mut boxes {
         let width = computed.size().x * computed.inverse_scale_factor();
         if width <= 0.0 {
             continue;
         }
-        // La caja empieza en el centro menos medio texto y mide el texto + 6.
+        // The box starts at the center minus half the text and is the text width + 6.
         let mut left = t.cx - (width - 6.0) / 2.0;
         if POS.x + left + width > 640.0 {
             left = 640.0 - POS.x - width;
@@ -1047,7 +1047,7 @@ mod tests {
         assert_eq!(fruit_rate(80, 100), 40);
         assert_eq!(fruit_rate(20, 0), 70, "sin máximo, 0 %");
 
-        // Con equipo: el valor va en azul y la defensa con el conjunto enseña el +10 %.
+        // With equipment: the value is blue and the defense with the full set shows the +10 %.
         v.eq = EquipBonus { add_strength: 10, full_set: true, pvp_attack_bonus: 7, ..Default::default() };
         let texts = v.texts();
         let blue_str = texts.iter().any(|p| matches!(p, Piece::Text { text, color, .. } if text == "410" && *color == BLUE));
@@ -1064,11 +1064,11 @@ mod tests {
         assert_eq!(count(&pieces(&v, None, false)), 4);
         assert_eq!(count(&pieces(&view_of(Class::Lord, 1, [26, 20, 20, 15, 25], 3), None, false)), 5);
         assert_eq!(count(&pieces(&view_of(Class::Knight, 1, [28, 20, 25, 10, 0], 0), None, false)), 0, "sin puntos, sin +");
-        // Apretado encima de un "+": fotograma 1 (15 más abajo en la textura).
+        // Pressed over a "+": frame 1 (15 lower in the texture).
         let at = Vec2::new(165.0, ROWS[1] + 5.0);
         let p = pieces(&v, Some(at), true);
         assert!(p.iter().any(|p| matches!(p, Piece::Image { tex: Tex::BtnStat, y, sv, .. } if *y == ROWS[1] + 2.0 && *sv == 15.0)));
-        // Ayuda del botón de cerrar.
+        // Close button tooltip.
         let p = pieces(&v, Some(Vec2::new(20.0, 400.0)), false);
         assert!(p.iter().any(|p| matches!(p, Piece::Tooltip { text, .. } if text == "Close (C)")));
     }

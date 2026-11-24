@@ -1,16 +1,16 @@
-//! La cuenta y sus personajes (la lista llega del servidor, `ReceiveCharacterList`).
+//! The account and its characters (the list comes from the server, `ReceiveCharacterList`).
 //!
-//! Las clases con lo que de ellas necesitan la selección, la creación y el juego: las 6 del
-//! Main 5.2 y el Rage Fighter, que ese cliente tiene apagado (`PBG_ADD_NEWCHAR_MONK`) y se saca de
-//! MuMain (`MAX_CLASS` = 7).
+//! The classes, with what character select, creation and the game need from them: the 6 of
+//! Main 5.2 plus the Rage Fighter, which that client has disabled (`PBG_ADD_NEWCHAR_MONK`) and is
+//! taken from MuMain (`MAX_CLASS` = 7).
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
-/// `MAX_ID_SIZE`: largo máximo del nombre.
+/// `MAX_ID_SIZE`: maximum name length.
 pub const MAX_NAME: usize = 10;
 
-/// `CLASS_*` del original (el número es el que va en el paquete y en `NewFaceNN`).
+/// `CLASS_*` of the original (the number is the one sent in packets and used in `NewFaceNN`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, Hash)]
 pub enum Class {
     Wizard = 0,
@@ -19,7 +19,7 @@ pub enum Class {
     Gladiator = 3,
     Lord = 4,
     Summoner = 5,
-    /// `CLASS_RAGEFIGHTER` (de MuMain).
+    /// `CLASS_RAGEFIGHTER` (from MuMain).
     Fighter = 6,
 }
 
@@ -31,12 +31,12 @@ impl Class {
         self as usize
     }
 
-    /// Del índice `CLASS_*` (0 a 6); lo desconocido, Dark Knight.
+    /// From a `CLASS_*` index (0 to 6); unknown values give Dark Knight.
     pub fn from_index(i: u8) -> Self {
         Self::ALL.get(i as usize).copied().unwrap_or(Class::Knight)
     }
 
-    /// `GetCharacterClassText` para la clase base (`GlobalText` 20-24, 1687 y 3150).
+    /// `GetCharacterClassText` for the base class (`GlobalText` 20-24, 1687 and 3150).
     pub fn name(self) -> &'static str {
         match self {
             Class::Wizard => "Dark Wizard",
@@ -49,7 +49,7 @@ impl Class {
         }
     }
 
-    /// `SetCharacterScale` en el juego (`Skin` 0; MuMain ZzzCharacter.cpp:12924).
+    /// `SetCharacterScale` in game (`Skin` 0; MuMain ZzzCharacter.cpp:12924).
     pub fn game_scale(self) -> f32 {
         match self {
             Class::Wizard | Class::Knight | Class::Summoner => 0.9,
@@ -60,7 +60,7 @@ impl Class {
         }
     }
 
-    /// `SetCharacterScale` en la selección: 1.2, el Rage Fighter 1.35.
+    /// `SetCharacterScale` in character select: 1.2, the Rage Fighter 1.35.
     pub fn select_scale(self) -> f32 {
         if self == Class::Fighter { 1.35 } else { 1.2 }
     }
@@ -70,13 +70,13 @@ impl Class {
         matches!(self, Class::Elf | Class::Summoner)
     }
 
-    /// Número de las piezas sin equipo (`HelmClassNN.bmd`...): `GetSkinModelIndex` + 1.
+    /// Number of the unequipped body parts (`HelmClassNN.bmd`...): `GetSkinModelIndex` + 1.
     pub fn skin_file(self) -> usize {
         self.index() + 1
     }
 
-    /// Fuerza, agilidad, vitalidad, energía y (el Dark Lord) mando al crear
-    /// (`apszStat` de `CCharMakeWin::RenderControls`).
+    /// Strength, agility, vitality, energy and (Dark Lord) command at creation
+    /// (`apszStat` of `CCharMakeWin::RenderControls`).
     pub fn base_stats(self) -> (&'static [&'static str; 4], Option<&'static str>) {
         match self {
             Class::Wizard => (&["18", "18", "15", "30"], None),
@@ -90,14 +90,14 @@ impl Class {
     }
 }
 
-/// Un personaje de la cuenta.
+/// A character of the account.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StoredCharacter {
     pub slot: usize,
     pub name: String,
     pub class: Class,
     pub level: u32,
-    /// `GuildStatus` (255 = sin gremio).
+    /// `GuildStatus` (255 = no guild).
     #[serde(default = "no_guild")]
     pub guild_status: u8,
 }
@@ -106,19 +106,19 @@ fn no_guild() -> u8 {
     255
 }
 
-/// La cuenta que entró (`usuario=` de `mu-launcher.txt`).
+/// The logged-in account (`usuario=` in `mu-launcher.txt`).
 pub fn current_account() -> String {
     crate::settings::saved_value("usuario").filter(|n| !n.is_empty()).unwrap_or_else(|| "mu-rs".to_string())
 }
 
 
-/// Lo que manda el servidor al entrar con el personaje (`CharacterInformation`): mapa, casilla,
-/// estadísticas, vida, maná...
+/// What the server sends when entering with the character (`CharacterInformation`): map, tile,
+/// stats, life, mana...
 #[derive(Resource, Clone, Debug)]
 pub struct HeroInfo(pub mu_protocol::game::CharacterInformation);
 
-/// El personaje con el que se entra al juego (`Hero`): lo pone la selección y lo lee el juego.
-/// Sin él (`--world`), un Dark Knight.
+/// The character used to enter the game (`Hero`): set by character select, read by the game.
+/// Without it (`--world`), a Dark Knight.
 #[derive(Resource, Clone, Debug)]
 pub struct Hero {
     pub name: String,
