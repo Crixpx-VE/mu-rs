@@ -17,6 +17,11 @@ DEFINED = {
     "NEW_PROTOCOL_SYSTEM", "FOR_WORK", "ENABLE_EDIT", "CSK_LH_DEBUG_CONSOLE", "CSK_DEBUG_MAP_ATTRIBUTE",
     "CSK_DEBUG_RENDER_BOUNDINGBOX", "CSK_DEBUG_MAP_PATHFINDING", "WIN32", "_WINDOWS", "_LANGUAGE_FOREIGN",
     "_LANGUAGE_ENG", "NDEBUG",
+    # Apagadas en el Main 5.2, pero su código está y los servidores S6 (OpenMU, Louis, Rebirth) ponen esos
+    # monstruos y NPC: Karutan (MuMain también las activa, Defined_Global.h:33-34), los NPC de las misiones
+    # con tiempo (566-568) y David (579).
+    "ASG_ADD_MAP_KARUTAN", "ASG_ADD_KARUTAN_MONSTERS", "ASG_ADD_KARUTAN_NPC", "ASG_ADD_TIME_LIMIT_QUEST_NPC",
+    "LEM_ADD_LUCKYITEM",
 }
 
 

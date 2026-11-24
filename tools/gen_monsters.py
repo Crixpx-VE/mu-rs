@@ -374,6 +374,7 @@ CREATORS = [
     ("GMEmpireGuardian3.cpp", 72, None),
     ("GMEmpireGuardian4.cpp", 78, None),
     ("GMUnitedMarketPlace.cpp", 64, None),
+    ("GMKarutan1.cpp", 365, None),
     # El `switch(Type)` de `CreateMonster` (lo último).
     ("ZzzCharacter.cpp", 12577, None),
 ]
@@ -669,6 +670,36 @@ for slot, case_line in npc_slots:
     st.case_line = case_line
     npc_models[slot] = st
 
+# Los NPC de las misiones con tiempo (566-568): el Main 5.2 los crea (ZzzCharacter.cpp:14390-14414) y a Tercia le
+# pone `PlaySpeed` (ZzzOpenData.cpp:2324), pero no tiene su `AccessModel` (lo dejaron a medias). El archivo, como
+# MuMain (Data/Monsters/Models.json): `tersia.bmd`, `bena.bmd` y, para Zyro, el modelo de Moss.
+MISSING_ACCESS = {
+    "MODEL_TIME_LIMIT_QUEST_NPC_TERSIA": ("Npc", "tersia.bmd"),
+    "MODEL_TIME_LIMIT_QUEST_NPC_BENA": ("Npc", "bena.bmd"),
+    "MODEL_TIME_LIMIT_QUEST_NPC_ZAIRO": "MODEL_GAMBLE_NPC_MOSS",
+}
+for name, where in MISSING_ACCESS.items():
+    slot = Sym(name)
+    assert slot not in npc_models, f"{name} ya tiene AccessModel en el Main 5.2: quitarlo de MISSING_ACCESS"
+    st = NpcState("ZzzOpenData.cpp")
+    it = NpcInterp(Env(type_value=slot, world=0), st, {})
+    for sw in npc_switches:
+        try:
+            it.run(sw)
+        except (Return, Break):
+            pass
+    if isinstance(where, str):
+        base = npc_models[Sym(where)]
+        _, folder, file, _ = next(a for a in base.access if a[0] == Sym(where))
+        st.textures[slot] = base.textures.get(Sym(where), "Npc")
+        st.src = f"MuMain Models.json ({where}, ZzzOpenData.cpp:{base.case_line})"
+    else:
+        folder, file = where
+        st.src = "MuMain Models.json"
+    st.access.append((slot, folder, file, None))
+    st.case_line = None
+    npc_models[slot] = st
+
 
 # --- LinkBone (CreateCharacterPointer) ------------------------------------------------------------
 
@@ -947,9 +978,10 @@ for slot, st in npc_models.items():
     prs = ", ".join(f"({rs_str(repr(p[0]))}, {rs_str(p[1])}, {rs_str(p[2])}, {rs_str(st.textures.get(p[0], 'Npc'))})" for p in parts)
     sp = ", ".join(f"({a}, {rs_f32(v)})" for a, (v, _) in sorted(st.speeds.items()))
     extra = f", texture_patch: {'true' if st.texture_patch else 'false'}"
+    where = getattr(st, "src", None) or f"ZzzOpenData.cpp:{line}"
     out.append(
         f"    NpcModel {{ name: {rs_str(repr(slot))}, dir: {rs_str(folder)}, file: {rs_str(file)}, textures: {rs_str(tex)}, "
-        f"parts: &[{prs}], speeds: &[{sp}]{extra}, src: \"ZzzOpenData.cpp:{line}\" }},"
+        f"parts: &[{prs}], speeds: &[{sp}]{extra}, src: {rs_str(where)} }},"
     )
 out.append("];")
 out.append("")

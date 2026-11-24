@@ -546,6 +546,20 @@ pub static DEFS: &[Def] = &[
     Def { number: 563, model: Model::Monster(206), scale: 1.1, life_time: Some(100), src: "GM_Raklion.cpp:219", seen_in: &[57], name: "Gigante Oscuro", name_en: "Dark Giant", ..BASE },
     Def { number: 564, model: Model::Monster(207), scale: 1.3, src: "GM_Raklion.cpp:232", seen_in: &[57], name: "Coolutin Oscuro", name_en: "Dark Coolutin", ..BASE },
     Def { number: 565, model: Model::Monster(208), scale: 1.8, src: "GM_Raklion.cpp:243", seen_in: &[57], name: "Caballero de Hierro Oscuro", name_en: "Dark Iron Knight", ..BASE },
+    Def { number: 566, model: Model::Npc("MODEL_TIME_LIMIT_QUEST_NPC_TERSIA"), scale: 0.93, src: "ZzzCharacter.cpp:14390", seen_in: &[2], name: "Tercia de Encargados del Gremio Mercenario", name_en: "Mercenary Guild Manager Tercia", ..BASE },
+    Def { number: 567, model: Model::Npc("MODEL_TIME_LIMIT_QUEST_NPC_BENA"), z_offset: 145.0, src: "ZzzCharacter.cpp:14396", name: "Sacerdotisa Veina", name_en: "Priestess Veina", ..BASE },
+    Def { number: 568, model: Model::Npc("MODEL_TIME_LIMIT_QUEST_NPC_ZAIRO"), scale: 0.8, edge_scale: 1.1, life_time: Some(100), model_speeds: &[(0, 0.33), (1, 0.33), (2, 0.33), (3, 0.33), (4, 0.33), (5, 0.33)], src: "ZzzCharacter.cpp:14402", seen_in: &[0, 2, 51], name: "Comerciante Vagabundo Zyro", name_en: "Wandering Merchant Zyro", ..BASE },
+    Def { number: 569, model: Model::Monster(209), scale: 1.0, src: "GMKarutan1.cpp:371", seen_in: &[80], name: "Escorpión de Cadena Venenosa", name_en: "Venomous Chain Scorpion", ..BASE },
+    Def { number: 570, model: Model::Monster(210), scale: 0.58, src: "GMKarutan1.cpp:377", seen_in: &[80], name: "Escorpión de Hueso", name_en: "Bone Scorpion", ..BASE },
+    Def { number: 571, model: Model::Monster(211), scale: 0.64, src: "GMKarutan1.cpp:383", seen_in: &[80, 81], name: "Orco", name_en: "Orcus", ..BASE },
+    Def { number: 572, model: Model::Monster(212), scale: 1.5, src: "GMKarutan1.cpp:389", seen_in: &[81], name: "Gollock", ..BASE },
+    Def { number: 573, model: Model::Monster(213), scale: 1.5, src: "GMKarutan1.cpp:395", seen_in: &[80], name: "Crypta", ..BASE },
+    Def { number: 574, model: Model::Monster(214), scale: 1.25, src: "GMKarutan1.cpp:401", seen_in: &[80], name: "Crypos", ..BASE },
+    Def { number: 575, model: Model::Monster(215), scale: 1.45, life_time: Some(100), src: "GMKarutan1.cpp:407", seen_in: &[81], name: "Condra", ..BASE },
+    Def { number: 576, model: Model::Monster(216), scale: 1.55, life_time: Some(100), notes: &["GMKarutan1.cpp:423 `vec3_t vColor={1.5f,0.1f,0.5f}`", "GMKarutan1.cpp:424 `CreateJoint(BITMAP_JOINT_ENERGY,o->Position,o->Position,o->Angle,24,o,10.f,-1,0,0,-1,vColor)`"], src: "GMKarutan1.cpp:414", seen_in: &[81], name: "Narcondra", ..BASE },
+    Def { number: 577, model: Model::Npc("MODEL_KARUTAN_NPC_REINA"), scale: 1.1, edge_scale: 1.2, src: "ZzzCharacter.cpp:14417", seen_in: &[80], name: "Leina the General Goods Merchant", ..BASE },
+    Def { number: 578, model: Model::Npc("MODEL_KARUTAN_NPC_VOLVO"), scale: 0.9, src: "ZzzCharacter.cpp:14424", seen_in: &[80], name: "Weapons Merchant Bolo", ..BASE },
+    Def { number: 579, model: Model::Npc("MODEL_LUCKYITEM_NPC"), scale: 0.95, edge_scale: 1.2, model_speeds: &[(0, 0.45), (1, 0.5)], src: "ZzzCharacter.cpp:14119", seen_in: &[51], name: "David", ..BASE },
 ];
 
 /// El `default:` del `switch` (ZzzCharacter.cpp:13467): cualquier número que no sale en ningún `case`.
@@ -765,6 +779,14 @@ pub static MONSTER_MODELS: &[MonsterModel] = &[
     MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.34), Some(0.33), Some(0.33), Some(0.5), Some(0.13), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 206 ZzzOpenData.cpp:2413,2414,2415,2416,2417,2418,3062
     MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.46), Some(0.33), Some(0.33), Some(0.5), Some(0.55), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 207 ZzzOpenData.cpp:2413,2414,2416,2417,2418,2419,3065
     MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.25), Some(0.21), Some(0.33), Some(0.5), Some(0.23), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 208 ZzzOpenData.cpp:2413,2414,2417,2418,3068,3069,3070
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.95), Some(0.33), Some(0.33), Some(0.5), Some(0.55), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 209 ZzzOpenData.cpp:2413,2414,2416,2417,2418,2419,3130
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(1.0), Some(0.4), Some(0.4), Some(0.5), Some(0.2), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 210 ZzzOpenData.cpp:2413,2414,2418,3133,3134,3135,3136
+    MonsterModel { speeds: [Some(0.7), Some(0.7), Some(0.6), Some(0.8), Some(0.8), Some(0.25), Some(0.3), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 211 ZzzOpenData.cpp:3139,3140,3141,3142,3143,3144,3145
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.34), Some(0.4), Some(0.33), Some(0.5), Some(0.3), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 212 ZzzOpenData.cpp:2413,2414,2415,2417,2418,3148,3149
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.9), Some(0.37), Some(0.37), Some(0.5), Some(0.25), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 213 ZzzOpenData.cpp:2413,2414,2418,3153,3154,3155,3156
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.9), Some(0.37), Some(0.37), Some(0.5), Some(0.25), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 214 ZzzOpenData.cpp:2413,2414,2418,3153,3154,3155,3156
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.34), Some(0.8), Some(0.8), Some(0.5), Some(0.55), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 215 ZzzOpenData.cpp:2413,2414,2415,2418,2419,3159,3160
+    MonsterModel { speeds: [Some(0.25), Some(0.2), Some(0.34), Some(0.75), Some(0.75), Some(0.5), Some(0.55), None, None, None, None, None], hold: 0x0040, bone_head: -1, stream_mesh: -1, sounds: [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1], link_bones: [33, 42] }, // 216 ZzzOpenData.cpp:2413,2414,2415,2418,2419,3163,3164
 ];
 
 /// `LoadWaveFile(SOUND_MONSTER + n, ...)` de `OpenMonsterModel`: (n, archivo bajo la carpeta del cliente).
@@ -1084,6 +1106,12 @@ pub static NPC_MODELS: &[NpcModel] = &[
     NpcModel { name: "MODEL_UNITEDMARKETPLACE_CHRISTIN", dir: "Npc", file: "UnitedMarketPlace_christine.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.5), (1, 0.6), (2, 0.5)], texture_patch: false, src: "ZzzOpenData.cpp:2245" },
     NpcModel { name: "MODEL_UNITEDMARKETPLACE_RAUL", dir: "Npc", file: "UnitedMarkedPlace_raul.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.5), (1, 0.5), (2, 0.5)], texture_patch: false, src: "ZzzOpenData.cpp:2249" },
     NpcModel { name: "MODEL_UNITEDMARKETPLACE_JULIA", dir: "Npc", file: "UnitedMarkedPlace_julia.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.5), (1, 0.5), (2, 0.5)], texture_patch: false, src: "ZzzOpenData.cpp:2253" },
+    NpcModel { name: "MODEL_KARUTAN_NPC_REINA", dir: "Npc", file: "UnitedMarketPlace_christine.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.5), (1, 0.6), (2, 0.5)], texture_patch: false, src: "ZzzOpenData.cpp:2258" },
+    NpcModel { name: "MODEL_KARUTAN_NPC_VOLVO", dir: "Npc", file: "volvo.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.2), (1, 0.25)], texture_patch: false, src: "ZzzOpenData.cpp:2262" },
+    NpcModel { name: "MODEL_LUCKYITEM_NPC", dir: "Npc/LuckyItem", file: "npc_burial.bmd", textures: "Npc/LuckyItem", parts: &[], speeds: &[], texture_patch: false, src: "ZzzOpenData.cpp:2269" },
+    NpcModel { name: "MODEL_TIME_LIMIT_QUEST_NPC_TERSIA", dir: "Npc", file: "tersia.bmd", textures: "Npc", parts: &[], speeds: &[(0, 0.35), (1, 0.3)], texture_patch: false, src: "MuMain Models.json" },
+    NpcModel { name: "MODEL_TIME_LIMIT_QUEST_NPC_BENA", dir: "Npc", file: "bena.bmd", textures: "Npc", parts: &[], speeds: &[], texture_patch: false, src: "MuMain Models.json" },
+    NpcModel { name: "MODEL_TIME_LIMIT_QUEST_NPC_ZAIRO", dir: "Npc", file: "gambler_moss.bmd", textures: "Npc", parts: &[], speeds: &[], texture_patch: false, src: "MuMain Models.json (MODEL_GAMBLE_NPC_MOSS, ZzzOpenData.cpp:2217)" },
 ];
 
 /// `LinkBone` de las armas de los modelos que no son `MonsterNN` (`CreateCharacterPointer`).
