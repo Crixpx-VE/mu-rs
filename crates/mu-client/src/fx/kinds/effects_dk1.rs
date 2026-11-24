@@ -9,9 +9,9 @@
 //! Main 5.2 line numbers are cited as `ZzzEffect.cpp:NNNN`; where it differs from MuMain, Main 5.2
 //! is followed.
 
-use bevy::math::Vec3;
+use bevy::math::{Vec2, Vec3};
 use mu_data::items::Item;
-use mu_data::items::glow::item_passes;
+use mu_data::items::glow::{ItemCtx, ItemPass, item_passes};
 use mu_data::items::model::item_object_meshes;
 
 use super::common::{self, draw_nothing, luminosity, owner_actor};
@@ -51,8 +51,8 @@ pub(super) fn weapon_scale(model: i32) -> f32 {
 /// no excellent/ancient option. `RenderPartObjectBody`/`BodyColor` draw at `Alpha`,
 /// `RenderPartObjectBodyColor2` (the CHROME2/CHROME4 passes) at 1 (ZzzObject.cpp:10229, 10245);
 /// `o->BlendMesh` is the one `ItemObjectAttribute` gives the weapon.
-/// TODO(original): the per-item branches of `RenderPartObjectBody*` and the pulsing/random
-/// `BlendMeshLight` of `ItemObjectAttribute` are not reproduced, nor `b->Skin =
+/// The per-item branches of `RenderPartObjectBody` come with `item_passes` (`mu_data::items::body`).
+/// TODO(original): the pulsing/random `BlendMeshLight` of `ItemObjectAttribute` is not reproduced, nor `b->Skin =
 /// GetBaseClass(Hero->Class)` (class-dependent textures).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level: u8, position: Vec3, angle: Vec3, scale: f32, light: Vec3, alpha: f32) {
@@ -64,13 +64,26 @@ pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level
         return;
     }
     let item = Item { level, ..Item::new((rel / MAX_ITEM_INDEX) as u8, (rel % MAX_ITEM_INDEX) as u16) };
-    let (blend_mesh, _) = item_object_meshes(&item);
-    for pass in item_passes(&item, light.to_array(), RENDER_LEVEL) {
+    let (blend_mesh, hidden_mesh) = item_object_meshes(&item);
+    // `num_meshes` only matters for the inventory armour textures (`body.rs`), never a weapon.
+    let item_ctx = ItemCtx { hide_skin: false, num_meshes: 0, white_light: false };
+    for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), RENDER_LEVEL, &item_ctx) {
+        // TODO(fx): `ModelDraw::texture` takes a `BITMAP_*` id and there is no mapping from
+        // `render::Bitmap` yet, so the per-item calls that swap the texture (`BITMAP_CHROME`...)
+        // are skipped here instead of being drawn with the wrong texture.
+        if pass.texture.is_some() {
+            continue;
+        }
         let mut d = ModelDraw::new(model, position, angle, scale);
-        d.light = Vec3::from_array(pass.light.at(ctx.world_time));
+        d.light = Vec3::from_array(pass_light.at(ctx.world_time));
         d.render_flags = pass.flags;
-        d.alpha = if pass.flags & (RENDER_CHROME2 | RENDER_CHROME4) != 0 { 1.0 } else { alpha };
-        d.blend_mesh = blend_mesh;
+        d.alpha = if pass.flags & (RENDER_CHROME2 | RENDER_CHROME4) != 0 { 1.0 } else { pass.alpha.unwrap_or(alpha) };
+        d.blend_mesh = pass.blend_mesh.unwrap_or(blend_mesh);
+        d.hidden_mesh = pass.hidden_mesh.unwrap_or(hidden_mesh);
+        d.mesh = pass.mesh.map_or(-1, |m| m as i32);
+        if let Some([u, v]) = pass.tex_coord {
+            d.blend_mesh_tex_coord = Vec2::new(u.at(ctx.world_time), v.at(ctx.world_time));
+        }
         out.models.push(d);
     }
 }

@@ -495,7 +495,7 @@ fn animate_materials(
         let glow = match a.glow {
             None | Some(Glow::Steady(_)) => None,
             Some(Glow::Flicker { min, max }) => new_tick.then(|| min + (max - min) * random(&mut rng)),
-            Some(Glow::Pulse { freq, amp, base }) => Some((t * freq).sin() * amp + base),
+            Some(g @ (Glow::Pulse { .. } | Glow::AbsPulse { .. })) => Some(g.at(t)),
         };
         // Time-varying `o->Light` (added to the ground light).
         let moving_light = a.tint.is_some_and(|(_, add)| matches!(add, Some(LightAdd::Wave { .. })));
@@ -1128,7 +1128,7 @@ pub(crate) fn object_material(
     let g = match glow {
         Some(Glow::Steady(g)) => g,
         Some(Glow::Flicker { max, .. }) => max,
-        Some(Glow::Pulse { amp, base, .. }) => base + amp,
+        Some(Glow::Pulse { amp, base, .. } | Glow::AbsPulse { amp, base, .. }) => base + amp,
         None => 1.0,
     };
     // Outside the login the `BlendMesh`'s `BlendMeshLight` goes in the tint with `BodyLight`

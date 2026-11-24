@@ -127,7 +127,7 @@ const MARKET_8: &[Pass] = &[
     Pass::mesh(2, flags::TEXTURE),
     Pass::mesh(3, flags::TEXTURE),
     Pass::mesh(4, flags::TEXTURE),
-    Pass::mesh(1, flags::TEXTURE | flags::BRIGHT).blend_mesh(1).tex_coord(Saw::ZERO, Saw { period: 10000.0, k: -0.001 }),
+    Pass::mesh(1, flags::TEXTURE | flags::BRIGHT).blend_mesh(1).tex_coord(Saw::ZERO, Saw::new(10000.0, -0.001)),
     Pass::mesh(0, flags::TEXTURE | flags::BRIGHT).blend_mesh(0),
 ];
 

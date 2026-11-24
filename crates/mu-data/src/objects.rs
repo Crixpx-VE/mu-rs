@@ -141,6 +141,25 @@ pub enum Glow {
     Flicker { min: f32, max: f32 },
     /// Smooth pulse: `sin(t · freq) · amp + base`, with `t` in seconds.
     Pulse { freq: f32, amp: f32, base: f32 },
+    /// `|sin(t · freq)| · amp + base` (`absf(sinf(WorldTime*0.001f))`, ZzzObject.cpp:7188).
+    AbsPulse { freq: f32, amp: f32, base: f32 },
+}
+
+impl Glow {
+    /// The value at `t` seconds; a [`Glow::Flicker`] (random on each update) gives its `max`.
+    pub fn at(self, t: f32) -> f32 {
+        match self {
+            Glow::Steady(g) => g,
+            Glow::Flicker { max, .. } => max,
+            Glow::Pulse { freq, amp, base } => (t * freq).sin() * amp + base,
+            Glow::AbsPulse { freq, amp, base } => (t * freq).sin().abs() * amp + base,
+        }
+    }
+
+    /// Changes over time.
+    pub fn animated(self) -> bool {
+        !matches!(self, Glow::Steady(_))
+    }
 }
 
 /// Special drawing rules for an object type.
@@ -262,12 +281,12 @@ impl ModelRules {
     }
     /// `o->BlendMeshTexCoordU = k · ((int)WorldTime % period)`.
     fn tex_u(mut self, period: f32, k: f32) -> Self {
-        self.tex_coord[0] = Saw { period, k };
+        self.tex_coord[0] = Saw::new(period, k);
         self
     }
     /// `o->BlendMeshTexCoordV = k · ((int)WorldTime % period)`.
     fn tex_v(mut self, period: f32, k: f32) -> Self {
-        self.tex_coord[1] = Saw { period, k };
+        self.tex_coord[1] = Saw::new(period, k);
         self
     }
     /// `Models[type].StreamMesh = mesh`.

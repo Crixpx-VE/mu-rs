@@ -44,7 +44,7 @@ const TB: u32 = flags::TEXTURE | flags::BRIGHT;
 
 /// `k · ((int)WorldTime % period)` (`k` < 0 = the original's `-(int)WorldTime % period · |k|`).
 const fn saw(period: f32, k: f32) -> Saw {
-    Saw { period, k }
+    Saw::new(period, k)
 }
 
 /// Rules for the maps of this file (`None` = not one of them).
@@ -298,7 +298,7 @@ const KANTURU3_43: &[Pass] = &[
     Pass::mesh(0, TB)
         .light([1.0; 3])
         .blend_mesh(0)
-        .texture(Bitmap::File { path: "Object40/Mtowereffe.jpg", nearest_clamp: false })
+        .texture(Bitmap::File { path: "Object40/Mtowereffe.jpg", nearest: false, clamp: false })
         .tex_coord(Saw::ZERO, saw(5000.0, 0.0001)),
     Pass::mesh(0, T),
     Pass::mesh(1, T).light([0.4; 3]),

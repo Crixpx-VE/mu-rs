@@ -45,6 +45,7 @@ mod hero_dress;
 mod hud;
 mod invasion;
 mod inventory;
+mod item_draw;
 mod item_view;
 mod leaves;
 mod logfile;

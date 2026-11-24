@@ -126,7 +126,7 @@ const VULCANUS_16: &[Pass] = &[
 ];
 
 const VULCANUS_68: &[Pass] = &[
-    Pass::body(flags::TEXTURE).stream(1).tex_coord(Saw::ZERO, Saw { period: 10000.0, k: 0.0001 }),
+    Pass::body(flags::TEXTURE).stream(1).tex_coord(Saw::ZERO, Saw::new(10000.0, 0.0001)),
     Pass::mesh(0, flags::TEXTURE).stream(-1),
     Pass::mesh(0, flags::CHROME | flags::BRIGHT).light([0.2, 0.0, 0.0]).stream(-1).blend_mesh(0).glow(Glow::Steady(0.2)),
 ];
@@ -162,7 +162,7 @@ fn balgass(kind: i16) -> ModelRules {
 const BALGASS_78: &[Pass] = &[Pass::mesh(0, flags::TEXTURE | flags::BRIGHT)
     .light([0.52; 3])
     .stream(0)
-    .tex_coord(Saw { period: 100000.0, k: -0.00001 }, Saw::ZERO)];
+    .tex_coord(Saw::new(100000.0, -0.00001), Saw::ZERO)];
 
 const BALGASS_82_83: &[Pass] = &[
     Pass::mesh(0, flags::TEXTURE),
@@ -174,7 +174,7 @@ const BALGASS_84: &[Pass] = &[
         .stream(0)
         .blend_mesh(0)
         .pulse(0.001, 0.5, 0.5)
-        .tex_coord(Saw { period: 10000.0, k: 0.0001 }, Saw::ZERO),
+        .tex_coord(Saw::new(10000.0, 0.0001), Saw::ZERO),
     Pass::body(flags::TEXTURE).stream(-1),
 ];
 
@@ -222,7 +222,7 @@ const KARUTAN_1: &[Pass] = &[
 const KARUTAN_54: &[Pass] = &[Pass::mesh(0, flags::TEXTURE | flags::BRIGHT).blend_mesh(0).pulse(0.002, 0.5, 1.25)];
 
 const KARUTAN_55_57: &[Pass] =
-    &[Pass::mesh(0, flags::TEXTURE | flags::BRIGHT).stream(0).tex_coord(Saw::ZERO, Saw { period: 10000.0, k: 0.0001 })];
+    &[Pass::mesh(0, flags::TEXTURE | flags::BRIGHT).stream(0).tex_coord(Saw::ZERO, Saw::new(10000.0, 0.0001))];
 
 const KARUTAN_58: &[Pass] = &[
     Pass::mesh(0, flags::TEXTURE),

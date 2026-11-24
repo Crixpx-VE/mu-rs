@@ -14,6 +14,7 @@
 //! - [`glow`]: the level, excellent and ancient glow passes (`RenderPartObjectEffect`).
 //! - [`info`]: the lines of the info tooltip (`RenderItemInfo`).
 
+pub mod body;
 pub mod glow;
 pub mod info;
 pub mod model;
