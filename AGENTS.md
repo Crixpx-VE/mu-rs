@@ -89,6 +89,8 @@ Debug examples in `crates/mu-data/examples` (`bmdinfo`, `models`, `attrmap`, `te
 
 ## 7. Style
 
-- Code comments, docs and commit messages are in **Spanish**; identifiers are mostly English.
+- **English is the project language**: commit messages, docs, code comments and identifiers.
+  Older code still has Spanish comments; translate them to English when you touch that code.
+  In-game texts (the localisation the player sees) are not affected by this rule.
 - Keep comments about *why* and *where it comes from*; the code says *what*.
 - Small, focused commits. Tests for parsers, packets and game rules.

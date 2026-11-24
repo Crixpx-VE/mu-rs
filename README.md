@@ -104,7 +104,7 @@ Louis agree on (`tools/gen_spawns.py`).
 
 Issues and pull requests are welcome, made by hand or with AI. Read [`AGENTS.md`](AGENTS.md) first:
 it has the project rules (stay faithful to the original, cite the source of every number, never
-commit game data or secrets). Code comments and commit messages are in Spanish.
+commit game data or secrets). English is the project language for commits, docs and code comments.
 
 ## License
 
@@ -198,7 +198,7 @@ clientes xulek/muonline y muonlinejs como inspiración.
 
 Se aceptan issues y pull requests, hechos a mano o con IA. Lee antes [`AGENTS.md`](AGENTS.md): tiene
 las reglas del proyecto (fidelidad al original, citar de dónde sale cada número, no subir nunca
-datos del juego ni secretos). Los comentarios del código y los commits están en español.
+datos del juego ni secretos). El idioma del proyecto es el inglés: commits, documentación y comentarios del código.
 
 ### Licencia
 
