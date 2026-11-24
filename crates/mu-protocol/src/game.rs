@@ -36,7 +36,8 @@
 //! server → client  AddCharactersToScope         C2 len 12 <n> n × [<id u16 BE> <x> <y> <appearance 18> <name 10>
 //!                                                                 <target x> <target y> <rotation:4 | hero:4>
 //!                                                                 <n effects> <effects n>]
-//!                                               (appearance: byte 0 = class << 3 | pose)
+//!                                               (appearance: see [`crate::appearance`])
+//! server → client  AppearanceChanged            C1 11 25 <id u16 BE> <item 12, Item[1] = slot << 4 | glow level>
 //! server → client  MapObjectOutOfScope          C1 len 14 <n> n × <id u16 BE>
 //! server → client  MapMoveChecksumKey           C1 08 8E 01 <key u32 LE>
 //! client → server  WarpCommandRequest           C1 0A 8E 02 <key u32 LE> <index u16 LE>
@@ -114,6 +115,7 @@
 //! - `CharacterCreationSuccessful` and byte 0 of the appearance: `class << 3`
 //!   (the client undoes it in `ChangeServerClassTypeToClientClassType`).
 
+use crate::appearance::{self, Appearance, VisibleItem};
 use crate::packet::{Packet, c1, c2};
 use crate::xor::xor3;
 
@@ -319,33 +321,7 @@ pub fn base_class_index(class_number: u8) -> u8 {
 /// byte 0 = `class << 3` (+ pose, 0 = standing), weapons `FF`, armor indices with all
 /// bits set ("empty"), levels 0, no wings and no pet (`byte 5 |= 3`).
 pub fn appearance_for_class(class: u8) -> [u8; 18] {
-    let mut a = [0u8; 18];
-    a[0] = (class << 3) & 0xF8;
-    // Left / right hand: index FF, group with the 3 high bits set.
-    a[1] = 0xFF;
-    a[12] |= 0xF0;
-    a[2] = 0xFF;
-    a[13] |= 0xF0;
-    // Empty helm, armor, pants, gloves and boots (index nibble, extra bit in
-    // byte 9 and index high nibble in bytes 13..15).
-    a[3] |= 0xF0;
-    a[9] |= 0x80;
-    a[13] |= 0x0F;
-    a[3] |= 0x0F;
-    a[9] |= 0x40;
-    a[14] |= 0xF0;
-    a[4] |= 0xF0;
-    a[9] |= 0x20;
-    a[14] |= 0x0F;
-    a[4] |= 0x0F;
-    a[9] |= 0x10;
-    a[15] |= 0xF0;
-    a[5] |= 0xF0;
-    a[9] |= 0x08;
-    a[15] |= 0x0F;
-    // No pet.
-    a[5] |= 0x03;
-    a
+    Appearance::new(class).encode()
 }
 
 /// Class (`CharacterClassNumber`) from the appearance bytes (only looks at byte 0).
@@ -483,8 +459,8 @@ pub struct CharacterListEntry {
     /// `CharacterStatus` (0 normal, 1 banned). Only 4 bits fit in the list: it sends
     /// `status & 0x0F` (the "GameMaster" 32 doesn't fit; that goes in `CharacterInformation`).
     pub status: u8,
-    /// `CharacterClassNumber`; on the wire it goes inside the appearance (`class << 3`).
-    pub class: u8,
+    /// Class (`CharacterClassNumber`) and visible equipment.
+    pub appearance: Appearance,
     /// `GuildMemberRole`: 0 member, 32 battle master, 64 assistant, 128 master, 255 no guild.
     pub guild_position: u8,
 }
@@ -533,8 +509,8 @@ pub struct ScopeCharacter {
     pub id: u16,
     pub x: u8,
     pub y: u8,
-    /// `CharacterClassNumber`; goes in the appearance (without equipment).
-    pub class: u8,
+    /// Class (`CharacterClassNumber`), pose and visible equipment.
+    pub appearance: Appearance,
     pub name: String,
     pub target_x: u8,
     pub target_y: u8,
@@ -542,8 +518,6 @@ pub struct ScopeCharacter {
     pub rotation: u8,
     /// `CharacterHeroState`, low nibble of byte 34.
     pub hero_state: u8,
-    /// `CharacterPose` (see [`action::pose`]): low 3 bits of appearance byte 0.
-    pub pose: u8,
 }
 
 /// A monster or NPC entering the view area (`PCREATE_MONSTER` from `ReceiveCreateMonsterViewport`,
@@ -663,6 +637,10 @@ pub enum ServerMessage {
     /// refused with a message, 0xFE = refused and the store closes, anything else = sold; `money` is
     /// the zen after the sale (OpenMU sends 0 or 1).
     SellResult { result: u8, money: u32 },
+    /// `ReceiveChangePlayer` (C1 25, `PCHANGE_CHARACTER`, WSclient.cpp:1871): a player in view changed
+    /// what it shows in `slot` (see [`appearance::slot`]); `None` = took it off. Apply it with
+    /// [`Appearance::apply_change`]. OpenMU's `AppearanceChanged`.
+    AppearanceChanged { id: u16, slot: u8, item: Option<VisibleItem> },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1086,7 +1064,7 @@ impl CharacterListEntry {
         // e[11]: padding (the level WORD is 2-aligned).
         put_u16_le(e, 12, self.level);
         e[14] = self.status & 0x0F; // high nibble: IsItemBlockActive = false
-        e[15..33].copy_from_slice(&appearance_for_class(self.class));
+        e[15..33].copy_from_slice(&self.appearance.encode());
         e[33] = self.guild_position;
     }
 
@@ -1097,7 +1075,7 @@ impl CharacterListEntry {
             name: unfixed(&e[1..11]),
             level: get_u16_le(e, 12)?,
             status: e[14] & 0x0F,
-            class: class_from_appearance(&e[15..33]),
+            appearance: Appearance::decode(e[15..33].try_into().ok()?),
             guild_position: e[33],
         })
     }
@@ -1108,10 +1086,7 @@ impl ScopeCharacter {
         out.extend_from_slice(&self.id.to_be_bytes());
         out.push(self.x);
         out.push(self.y);
-        let mut appearance = appearance_for_class(self.class);
-        // `target[0] |= Pose` (OpenMU's AppearanceSerializer.cs:125).
-        appearance[0] |= self.pose & 0x07;
-        out.extend_from_slice(&appearance);
+        out.extend_from_slice(&self.appearance.encode());
         out.extend_from_slice(&fixed::<10>(&self.name));
         out.push(self.target_x);
         out.push(self.target_y);
@@ -1131,13 +1106,12 @@ impl ScopeCharacter {
             id: get_u16_be(e, 0)?,
             x: e[2],
             y: e[3],
-            class: class_from_appearance(&e[4..22]),
+            appearance: Appearance::decode(e[4..22].try_into().ok()?),
             name: unfixed(&e[22..32]),
             target_x: e[32],
             target_y: e[33],
             rotation: e[34] >> 4,
             hero_state: e[34] & 0x0F,
-            pose: e[4] & 0x07,
         };
         Some((c, next))
     }
@@ -1300,6 +1274,12 @@ impl ServerMessage {
                 put_u32_le(&mut p, 4, *money);
                 p
             }
+            Self::AppearanceChanged { id, slot, item } => {
+                let mut body = vec![0x25];
+                body.extend_from_slice(&id.to_be_bytes());
+                body.extend_from_slice(&appearance::encode_changed_item(*slot as usize, *item));
+                c1(&body)
+            }
         }
     }
 
@@ -1418,6 +1398,12 @@ impl ServerMessage {
             0x33 => {
                 let d = short_header(&p)?;
                 return Some(Self::SellResult { result: *d.get(3)?, money: get_u32_le(d, 4).unwrap_or(0) });
+            }
+            // `PCHANGE_CHARACTER`: `KeyH`, `KeyL`, `Item[PACKET_ITEM_LENGTH]`.
+            0x25 => {
+                let d = short_header(&p)?;
+                let (slot, item) = appearance::decode_changed_item(d.get(5..17)?.try_into().ok()?);
+                return Some(Self::AppearanceChanged { id: get_u16_be(d, 3)?, slot: slot as u8, item });
             }
             _ => {}
         }
@@ -1639,9 +1625,9 @@ mod tests {
     #[test]
     fn lista_de_personajes() {
         let characters = vec![
-            CharacterListEntry { slot: 0, name: "Mago".into(), level: 400, status: 0, class: 3, guild_position: 255 },
-            CharacterListEntry { slot: 1, name: "Elfa".into(), level: 1, status: 1, class: 8, guild_position: 128 },
-            CharacterListEntry { slot: 4, name: "Lord".into(), level: 250, status: 0, class: 17, guild_position: 0 },
+            CharacterListEntry { slot: 0, name: "Mago".into(), level: 400, status: 0, appearance: Appearance::new(3), guild_position: 255 },
+            CharacterListEntry { slot: 1, name: "Elfa".into(), level: 1, status: 1, appearance: Appearance::new(8), guild_position: 128 },
+            CharacterListEntry { slot: 4, name: "Lord".into(), level: 250, status: 0, appearance: Appearance::new(17), guild_position: 0 },
         ];
         let msg = ServerMessage::CharacterList { unlock_flags: 0x0F, move_count: 3, vault_extended: true, characters };
         let wire = ida_y_vuelta_servidor(msg);
@@ -1757,25 +1743,23 @@ mod tests {
                 id: 0x8000 | 123,
                 x: 130,
                 y: 125,
-                class: 4,
+                appearance: Appearance::new(4),
                 name: "Guerrero".into(),
                 target_x: 132,
                 target_y: 127,
                 rotation: 3,
                 hero_state: 3,
-                pose: 0,
             },
             ScopeCharacter {
                 id: 456,
                 x: 1,
                 y: 2,
-                class: 20,
+                appearance: Appearance::new(20),
                 name: "Invocadora".into(),
                 target_x: 1,
                 target_y: 2,
                 rotation: 0,
                 hero_state: 0,
-                pose: 0,
             },
         ];
         let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(jugadores));
@@ -1799,7 +1783,7 @@ mod tests {
         }
 
         // Sitting (`CharacterPose::Sitting` = 2): in appearance byte 0, below the class.
-        let sentado = ScopeCharacter { id: 9, class: 8, name: "Elfa".into(), pose: 2, ..Default::default() };
+        let sentado = ScopeCharacter { id: 9, appearance: Appearance { pose: 2, ..Appearance::new(8) }, name: "Elfa".into(), ..Default::default() };
         let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(vec![sentado]));
         assert_eq!(wire[9], (8 << 3) | 2);
 
@@ -1807,6 +1791,48 @@ mod tests {
         assert_eq!(fuera, [0xC1, 10, 0x14, 3, 0, 1, 0x12, 0x34, 0x7F, 0xFF]);
         let muchos = ServerMessage::MapObjectOutOfScope((0..300).collect()).encode();
         assert_eq!(muchos.len(), 4 + 2 * MAX_OUT_OF_SCOPE_IDS);
+    }
+
+    #[test]
+    fn apariencia_con_equipo_en_la_lista_y_en_vista() {
+        // A Blade Knight with gear as OpenMU's `AppearanceSerializer` writes it (appearance.rs tests).
+        let bytes = [0x30, 0x0E, 0x09, 0x18, 0x3F, 0x5B, 0x04, 0x7D, 0x44, 0xB3, 0xA0, 0x61, 0x04, 0xC0, 0x11, 0xF0, 0x00, 0x01];
+        let appearance = Appearance::decode(&bytes);
+        assert_eq!(appearance.class, 6);
+        assert_eq!(appearance.equipment[appearance::slot::WEAPON_RIGHT].map(|w| (w.group, w.index, w.level)), Some((0, 14, 9)));
+        let entry = CharacterListEntry { slot: 0, name: "Caballero".into(), level: 380, status: 0, appearance, guild_position: 255 };
+        let wire = ida_y_vuelta_servidor(ServerMessage::CharacterList {
+            unlock_flags: 0,
+            move_count: 0,
+            vault_extended: false,
+            characters: vec![entry],
+        });
+        assert_eq!(&wire[8 + 15..8 + 33], &bytes);
+        let scope = ScopeCharacter { id: 7, appearance, name: "Caballero".into(), ..Default::default() };
+        let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(vec![scope]));
+        assert_eq!(&wire[9..27], &bytes);
+    }
+
+    #[test]
+    fn cambio_de_apariencia() {
+        // OpenMU's `AppearanceChanged`: player 0x1234 equips a Kris +9 (excellent bit 0x02, durability 42)
+        // in slot 0; `Item[1]` carries `slot << 4 | glow level` (AppearanceChangedPlugIn.cs:62-63).
+        let kris = [0xC1, 0x11, 0x25, 0x12, 0x34, 0x05, 0x04, 0x2A, 0x02, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(
+            ServerMessage::decode(&kris),
+            Some(ServerMessage::AppearanceChanged {
+                id: 0x1234,
+                slot: 0,
+                item: Some(VisibleItem { group: 0, index: 5, level: 9, excellent: 2, ancient: 0 }),
+            })
+        );
+        // Wings taken off: the item is all FF except `Item[1]`.
+        let sin_alas = ida_y_vuelta_servidor(ServerMessage::AppearanceChanged { id: 0x1234, slot: 7, item: None });
+        let mut esperado = vec![0xC1, 0x11, 0x25, 0x12, 0x34];
+        esperado.extend_from_slice(&[0xFF, 0x70, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(sin_alas, esperado);
+        let armadura = VisibleItem { group: 8, index: 40, level: 13, excellent: 1, ancient: 5 };
+        ida_y_vuelta_servidor(ServerMessage::AppearanceChanged { id: 3, slot: 3, item: Some(armadura) });
     }
 
     #[test]

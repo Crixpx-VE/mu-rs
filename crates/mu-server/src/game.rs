@@ -39,6 +39,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use mu_protocol::appearance::Appearance;
 use mu_protocol::crypto::ServerCrypto;
 use mu_protocol::game::{
     self, CharacterInformation, CharacterListEntry, ClientMessage, LoginResult, ScopeCharacter, ServerMessage,
@@ -80,14 +81,14 @@ impl InWorld {
             id,
             x: self.x,
             y: self.y,
-            class: game::class_number(self.class),
+            // No equipment is sent yet (no inventory on this server).
+            appearance: Appearance { pose: self.pose, ..Appearance::new(game::class_number(self.class)) },
             name: self.name.clone(),
             target_x: self.x,
             target_y: self.y,
             rotation: self.rotation,
             // `CharacterHeroState::Normal` (3): no PK (with 0 the client paints it as an NPC).
             hero_state: 3,
-            pose: self.pose,
         }
     }
 }
@@ -268,7 +269,7 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
                         name: c.name.clone(),
                         level: c.level,
                         status: 0,
-                        class: game::class_number(c.class),
+                        appearance: Appearance::new(game::class_number(c.class)),
                         guild_position: c.guild_status,
                     })
                     .collect(),

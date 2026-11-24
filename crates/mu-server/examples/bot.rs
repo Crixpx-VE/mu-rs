@@ -168,6 +168,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     })?;
     println!("[{user}] personajes: {:?}", chars.iter().map(|c| &c.name).collect::<Vec<_>>());
+    for c in &chars {
+        println!("[{user}]   {} apariencia {:?}", c.name, c.appearance);
+    }
     if !chars.iter().any(|c| &c.name == name) {
         c.send(ClientMessage::CreateCharacter { name: name.clone(), class: mu_protocol::game::class_number(1) })?;
         let created = c.wait(|m| match m {
