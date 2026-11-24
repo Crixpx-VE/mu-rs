@@ -6,9 +6,15 @@
 //!
 //! Note: when a kind has a `step`, the engine skips the common `MoveEffect` tail
 //! (`PlayAnimation` + `MoveParticle`), so each `step` does it by hand where needed.
+//! Main 5.2 line numbers are cited as `ZzzEffect.cpp:NNNN`; where it differs from MuMain, Main 5.2
+//! is followed.
 
-use bevy::math::{Vec2, Vec3};
+use bevy::math::Vec3;
+use mu_data::items::Item;
+use mu_data::items::glow::item_passes;
+use mu_data::items::model::item_object_meshes;
 
+use super::common::{self, draw_nothing, luminosity, owner_actor};
 use crate::fx::core::*;
 
 pub fn register(r: &mut Registry) {
@@ -25,66 +31,78 @@ pub fn register(r: &mut Registry) {
 
 // --- Common ----------------------------------------------------------------------------------------
 
-/// `Luminosity` from the start of `MoveEffect` (consumes one `rand()` per effect, like the original).
-fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
-    let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
-    if e.life_time < 5.0 {
-        l -= (5.0 - e.life_time) * 0.2;
-        if l < 0.0 {
-            l = 0.0;
-        }
-    }
-    l
-}
-
-/// `MoveParticle(o, true)`: move along `Direction` rotated by `Angle`.
-fn move_particle_turn(e: &mut Effect) {
-    e.position += rotate(e.angle, e.direction);
-}
-
-/// `RenderEffects` draws nothing for these kinds (outside `MODEL_SKILL_BEGIN..END` or `case: break`).
-fn draw_nothing(_e: &Effect, _ctx: &DrawCtx, _out: &mut DrawList) {}
-
-/// Owner entity, if it is a character.
-fn owner_actor<'a>(owner: Option<Target>, actors: &'a std::collections::HashMap<bevy::prelude::Entity, Actor>) -> Option<&'a Actor> {
-    match owner? {
-        Target::Actor(e) => actors.get(&e),
-        Target::Effect(_) => None,
-    }
-}
-
-/// `WD_24HELLAS..=WD_24HELLAS_END` (24..=29) or `WD_24HELLAS_7` (36): `gMapManager.InHellas()`.
-fn in_hellas(world: i32) -> bool {
-    (24..=29).contains(&world) || world == 36
-}
-
 /// `MAX_ITEM_INDEX`: items per group.
 const MAX_ITEM_INDEX: i32 = 512;
 
-// --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------
+/// `g_pOption->GetRenderLevel()` for the weapon glow.
+/// TODO(engine): `DrawCtx` does not carry the option; this is its default (options.rs:59).
+const RENDER_LEVEL: u8 = 4;
 
-fn wheel1_create(e: &mut Effect, _ctx: &mut Ctx) {
-    e.life_time = 5.0;
-    // TODO(original): CharacterMachine->PacketSerial++ (network).
+/// `ItemObjectAttribute(o)` on the effect drawn as a weapon (ZzzObject.cpp:5306-5309): scale 0.8,
+/// 0.7 for `MODEL_SPEAR..=MODEL_STAFF+13`.
+pub(super) fn weapon_scale(model: i32) -> f32 {
+    if (MODEL_SPEAR..=MODEL_STAFF + 13).contains(&model) { 0.7 } else { 0.8 }
 }
 
+/// `RenderPartObject(o, Type, NULL, Light, Alpha, Owner->WeaponLevel<<3, 0, 0, true, true, true)`
+/// (ZzzObject.cpp:10469) for the owner's weapon drawn by an effect (`RenderWheelWeapon`,
+/// `RenderFuryStrike`): nothing at `Alpha <= 0.01`, then the general branch of
+/// `RenderPartObjectEffect` (ZzzObject.cpp:10132-10275, `mu_data::items::glow::item_passes`) with
+/// no excellent/ancient option. `RenderPartObjectBody`/`BodyColor` draw at `Alpha`,
+/// `RenderPartObjectBodyColor2` (the CHROME2/CHROME4 passes) at 1 (ZzzObject.cpp:10229, 10245);
+/// `o->BlendMesh` is the one `ItemObjectAttribute` gives the weapon.
+/// TODO(original): the per-item branches of `RenderPartObjectBody*` and the pulsing/random
+/// `BlendMeshLight` of `ItemObjectAttribute` are not reproduced, nor `b->Skin =
+/// GetBaseClass(Hero->Class)` (class-dependent textures).
+#[allow(clippy::too_many_arguments)]
+pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level: u8, position: Vec3, angle: Vec3, scale: f32, light: Vec3, alpha: f32) {
+    if alpha <= 0.01 {
+        return;
+    }
+    let rel = model - MODEL_ITEM;
+    if rel < 0 {
+        return;
+    }
+    let item = Item { level, ..Item::new((rel / MAX_ITEM_INDEX) as u8, (rel % MAX_ITEM_INDEX) as u16) };
+    let (blend_mesh, _) = item_object_meshes(&item);
+    for pass in item_passes(&item, light.to_array(), RENDER_LEVEL) {
+        let mut d = ModelDraw::new(model, position, angle, scale);
+        d.light = Vec3::from_array(pass.light.at(ctx.world_time));
+        d.render_flags = pass.flags;
+        d.alpha = if pass.flags & (RENDER_CHROME2 | RENDER_CHROME4) != 0 { 1.0 } else { alpha };
+        d.blend_mesh = blend_mesh;
+        out.models.push(d);
+    }
+}
+
+// --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------
+
+/// ZzzEffect.cpp:2039-2042.
+fn wheel1_create(e: &mut Effect, _ctx: &mut Ctx) {
+    e.life_time = 5.0;
+    // TODO(combat): CharacterMachine->PacketSerial++ (the attack serial; no combat protocol yet).
+}
+
+/// ZzzEffect.cpp:9887-9889.
 fn wheel1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     // A new wheel every tick; the subtype (4 − LifeTime) gives its alpha.
     ctx.create_effect(MODEL_SKILL_WHEEL2, e.position, e.angle, e.light, 4 - e.life_time as i32, e.owner, e.pk_key, e.kind, e.skill, 0.0);
-    // WHEEL1 is excluded from the common tail (no animation, no MoveParticle).
+    // WHEEL1 is excluded from the common tail (no animation, no MoveParticle, ZzzEffect.cpp:18061).
 }
 
 // --- MODEL_SKILL_WHEEL2 (Twisting Slash: the spinning ghost sword) ---------------------------------
 
+/// ZzzEffect.cpp:2043-2046.
 fn wheel2_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 25.0;
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    // TODO(combat): o->Weapon = CharacterMachine->PacketSerial (the attack serial).
     // user[0] = Direction[2] of the previous tick; user[1] = Angle[2] after the tick (to interpolate when drawing).
     e.user[0] = e.direction.z;
     e.user[1] = e.angle.z;
 }
 
+/// ZzzEffect.cpp:9890-9952.
 fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
     let luminosity = luminosity(e, ctx);
     match e.sub_type {
@@ -107,15 +125,13 @@ fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.angle.z -= 18.0;
 
-    if ctx.rand_fps_check(1) {
-        ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, e.light, 3, 1.0, None);
-        let light = Vec3::splat(luminosity * 0.3);
-        ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-    }
+    ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, e.light, 3, 1.0, None);
+    let light = Vec3::splat(luminosity * 0.3);
+    ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
 
-    let mut light = Vec3::ONE;
+    let light = Vec3::ONE;
     let mut height = 20.0;
-    if in_hellas(ctx.world_active) {
+    if common::in_hellas(ctx.world_active) {
         height = 60.0;
         let mut angle = Vec3::new((ctx.rand() % 60 + 60 - 90) as f32, 0.0, (ctx.rand() % 30 + 90) as f32);
         angle += e.angle;
@@ -123,22 +139,18 @@ fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
         position.x += (ctx.rand() % 20 - 10) as f32;
         position.y += (ctx.rand() % 20 - 10) as f32;
         position.z += 120.0;
-        light = Vec3::splat(0.5);
-        if ctx.rand_fps_check(1) {
-            ctx.create_particle(BITMAP_WATERFALL_5, position, angle, light, 3, 1.0, None);
-        }
+        ctx.create_particle(BITMAP_WATERFALL_5, position, angle, Vec3::splat(0.5), 3, 1.0, None);
     } else {
-        for _ in 0..4 {
-            if ctx.rand_fps_check(1) {
-                let mut angle = Vec3::new((ctx.rand() % 60 + 60 - 90) as f32, 0.0, (ctx.rand() % 30 + 90) as f32);
-                angle += e.angle;
-                let mut position = e.position;
-                position.x += (ctx.rand() % 20 - 10) as f32;
-                position.y += (ctx.rand() % 20 - 10) as f32;
-                ctx.create_joint(BITMAP_JOINT_SPARK, position, position, angle, 0, None, 10.0);
-                if ctx.rand() % 4 == 0 {
-                    ctx.create_particle(BITMAP_SPARK, position, angle, light, 0, 1.0, None);
-                }
+        for j in 0..4 {
+            let mut angle = Vec3::new((ctx.rand() % 60 + 60 - 90) as f32, 0.0, (ctx.rand() % 30 + 90) as f32);
+            angle += e.angle;
+            let mut position = e.position;
+            position.x += (ctx.rand() % 20 - 10) as f32;
+            position.y += (ctx.rand() % 20 - 10) as f32;
+            ctx.create_joint(BITMAP_JOINT_SPARK, position, position, angle, 0, None, 10.0);
+            // `if(j==0)` (ZzzEffect.cpp:9938); MuMain uses `rand()%4==0` instead.
+            if j == 0 {
+                ctx.create_particle(BITMAP_SPARK, position, angle, light, 0, 1.0, None);
             }
         }
     }
@@ -148,16 +160,21 @@ fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
 
     // TODO(original): in Hellas, every 4 ticks of life AddWaterWave(x, y, 2, -150) (no water yet).
 
-    // `UpdateDrawnEffectSprites`: the wheel spins faster and faster.
+    // `RenderWheelWeapon` (ZzzEffect.cpp:18175) does `o->Direction[2] -= 30` once per rendered
+    // frame (MuMain: `UpdateDrawnEffectSprites`): done here once per tick.
+    // TODO(original): its `ItemObjectAttribute(o)` (ZzzEffect.cpp:18191) also leaves the effect
+    // with Light 0.3, Alpha 1, Scale 0.8/0.7, AnimationFrame/Velocity 0 after each render (the
+    // smoke above then uses Light 0.3); MuMain draws a copy and keeps the effect as is, like here.
     e.user[0] = e.direction.z;
     e.direction.z -= 30.0;
     e.user[1] = e.angle.z;
 }
 
-/// `RenderWheelWeapon`: the owner's WEAPON MODEL, rotated and raised by 100.
+/// `RenderWheelWeapon` (ZzzEffect.cpp:18169-18201): the owner's WEAPON MODEL, rotated and raised by
+/// 100, with its level glow.
 fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let Some(actor) = owner_actor(e.owner, ctx.actors) else { return };
-    let Some((model, _level)) = actor.weapon else { return };
+    let Some((model, level)) = actor.weapon else { return };
 
     // Direction[2] interpolated with the same fraction as the angle (user[0] = previous, user[1] = final Angle[2]).
     let wrap = |d: f32| (d + 540.0).rem_euclid(360.0) - 180.0;
@@ -173,65 +190,62 @@ fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     position.z += 100.0;
 
     // `ItemObjectAttribute`: scale 0.8 (0.7 for spears through staffs), light 0.3, frame 0.
-    let scale = if (MODEL_SPEAR..=MODEL_PLATINA_STAFF).contains(&model) { 0.7 } else { 0.8 };
-    // `RequestModelTerrainLight + o->Light(0.3)`.
+    let scale = weapon_scale(model);
+    // `RequestTerrainLight + o->Light(0.3)`.
     // TODO(original): no terrain light at draw time; approximated with 0.7.
     const TERRAIN_LIGHT: f32 = 0.7;
-    let mut d = ModelDraw::new(model, position, angle, scale);
-    d.light = Vec3::splat(TERRAIN_LIGHT + 0.3);
-    d.alpha = e.alpha;
-    // TODO(original): RenderPartObject with WeaponLevel (weapon level glow) and b->Skin per class.
-    out.models.push(d);
+    let light = Vec3::splat(TERRAIN_LIGHT + 0.3);
+    // `Alpha` = `o->Alpha` saved before `ItemObjectAttribute`.
+    render_weapon(out, ctx, model, level, position, angle, scale, light, e.alpha);
 }
 
 // --- MODEL_SPEAR ("lightSpear": invisible Death Stab/Impale emitter) -------------------------------
 
+/// ZzzEffect.cpp:756-758.
 fn spear_create(e: &mut Effect, _ctx: &mut Ctx) {
-    // EffectTypes.json: lifeTime 10.
     e.life_time = 10.0;
+    // An item model with no `case` in RenderEffects: nothing is drawn.
     e.visible = false;
 }
 
+/// ZzzEffect.cpp:7551-7560: leaves a BITMAP_FLARE trail that follows it.
 fn spear_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // `Behaviors::MoveSpear`: leaves a BITMAP_FLARE trail that follows it.
     let me = Some(Target::Effect(e.id));
     if e.sub_type == 1 {
-        if ctx.rand_fps_check(1) {
-            ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 12, me, 100.0);
-        }
-    } else if e.sub_type == 0 && ctx.rand_fps_check(1) {
+        ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 12, me, 100.0);
+    } else if e.sub_type == 0 {
         ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 4, me, 50.0);
     }
-    // Common tail: MoveParticle(o, true).
-    move_particle_turn(e);
+    // Common tail (not in MODEL_BIRD01..MODEL_SKILL_END: MoveParticle(o, true) only).
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL__SPEAR (Impale: wind-up) ----------------------------------------------------------------
 
+/// ZzzEffect.cpp:759-762.
 fn spear2_create(e: &mut Effect, _ctx: &mut Ctx) {
-    // EffectTypes.json: lifeTime 5, angle [0, 0, 0].
     e.life_time = 5.0;
     e.angle = Vec3::ZERO;
     e.visible = false;
 }
 
+/// ZzzEffect.cpp:7561-7578: three healing trails converging on it.
 fn spear2_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // `Move_MODEL__SPEAR`: three healing trails converging on it.
     let p = Vec3::new(0.0, -100.0, 0.0);
     for _ in 0..3 {
         let angle = Vec3::new((ctx.rand() % 90) as f32, 0.0, (ctx.rand() % 360) as f32);
         let position = e.position - rotate(angle, p);
-        if ctx.rand_fps_check(1) {
-            ctx.create_joint(BITMAP_JOINT_HEALING, position, e.position, angle, 6, None, 5.0);
-        }
+        ctx.create_joint(BITMAP_JOINT_HEALING, position, e.position, angle, 6, None, 5.0);
     }
-    move_particle_turn(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SPEARSKILL (Impale: the spears) ---------------------------------------------------------
 
+/// ZzzEffect.cpp:764-769. (`o->BlendMeshLight = 1` is set by `RenderSkillSpear` while drawing,
+/// ZzzEffect.cpp:18243; nothing else reads it.)
 fn spearskill_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 20.0;
     e.scale = 1.5;
@@ -241,21 +255,22 @@ fn spearskill_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.direction.y = -5.0 * a.cos();
 }
 
+/// ZzzEffect.cpp:7713 (the case only breaks), then the common tail: `PlayAnimation` (ending the
+/// action with `CurrentAction = 255`) and `MoveParticle(o, false)` (ZzzEffect.cpp:18074-18090).
 fn spearskill_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // Move_MODEL_SPEARSKILL does nothing; common tail: PlayAnimation and MoveParticle(o, false).
-    // TODO(original): PlayAnimation stops at the end of a non-looping action (CurrentAction = 255).
-    e.animation_frame += e.velocity;
-    e.position += e.direction;
+    common::play_animation(e, ctx);
+    common::move_particle(e, false);
 }
 
-/// `RenderSkillSpear`: additive RidingSpear01 (`RENDER_BRIGHT`) with light · LifeTime · 0.05.
+/// `RenderSkillSpear` (ZzzEffect.cpp:18237-18248): `RenderPartObject(o, MODEL_SPEARSKILL, NULL,
+/// Light · LifeTime · 0.05, 1, ..., RENDER_BRIGHT|RENDER_TEXTURE)`, level 0 (the body pass only).
 fn spearskill_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.model = MODEL_SPEARSKILL;
     d.light = e.light * e.life_time * 0.05;
     d.alpha = 1.0;
-    d.bright = true;
+    d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
     out.models.push(d);
 }
 
@@ -290,24 +305,13 @@ fn magic1_create(e: &mut Effect, ctx: &mut Ctx) {
     e.visible = false;
 }
 
-/// `CreateHealing`: three `BITMAP_JOINT_HEALING` trails descending toward the effect.
-fn create_healing(e: &Effect, ctx: &mut Ctx) {
-    let p = Vec3::new(0.0, -200.0, 0.0);
-    for _ in 0..3 {
-        let angle = Vec3::new((ctx.rand() % 90) as f32, 0.0, (ctx.rand() % 360) as f32);
-        let mut position = e.position - rotate(angle, p);
-        position.z += 120.0;
-        let sub = if e.sub_type == 5 { 11 } else { e.sub_type };
-        ctx.create_joint(BITMAP_JOINT_HEALING, position, e.position, angle, sub, e.owner, 5.0);
-    }
-}
-
+/// ZzzEffect.cpp:8348-8394.
 fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     let s = e.sub_type;
     // (Without ENABLE_POTION_EFFECT the `else if` hangs off the first `if`.)
     if s >= 1 && !matches!(s, 4 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13) {
-        create_healing(e, ctx);
+        common::create_healing(e, ctx);
     } else if s == 6 {
         // Light sparks along the owner's bones (BodyOrigin = StartPosition).
         e.blend_mesh_light = (ctx.rand() % 10) as f32 * 0.1;
@@ -318,27 +322,30 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
             while (i as f32) < e.life_time && num_bones > 0 {
                 i += 1;
                 let index = (ctx.rand() % num_bones) as usize;
-                // TODO(original): Dummy bones are skipped (unknown which ones they are in Actor).
+                // `if (b->Bones[iIndex].Dummy) continue;` (ZzzEffect.cpp:8379).
+                if owner.is_dummy_bone(index) {
+                    continue;
+                }
                 let p = Vec3::new(
                     (-50 + ctx.rand() % 100) as f32,
                     (-10 + ctx.rand() % 20) as f32,
                     (-10 + ctx.rand() % 20) as f32,
                 );
                 let position = owner.bone_world(index, p) - owner.position + e.start_position;
-                if ctx.rand_fps_check(1) {
-                    ctx.create_particle(BITMAP_LIGHT, position, owner.angle, light, 8, 1.0, None);
-                }
+                ctx.create_particle(BITMAP_LIGHT, position, owner.angle, light, 8, 1.0, None);
             }
-            // TODO(original): o->Owner->Alpha = LifeTime / 80 (the character fades out).
+            // TODO(original): o->Owner->Alpha = LifeTime / 80 (the character fades out); the owner
+            // is a read-only snapshot.
         }
     } else if s == 9 {
         e.scale += 0.3;
-        e.light *= 1.0 / 1.1;
+        e.light /= 1.1;
     }
-    // Common tail: MoveParticle(o, true).
-    move_particle_turn(e);
+    // Common tail (not in MODEL_BIRD01..MODEL_SKILL_END: MoveParticle(o, true) only).
+    common::move_tail(e, ctx);
 
-    // `UpdateDrawnEffectShadowState` (after the tick's `LifeTime -= 1`).
+    // What `RenderEffectShadows` changes while drawing (ZzzEffect.cpp:19373-19437; MuMain:
+    // `UpdateDrawnEffectShadowState`), once per tick with the `LifeTime` the draw will see.
     let lt = e.life_time - 1.0;
     if lt <= 0.0 {
         return;
@@ -356,12 +363,12 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
         8 if lt as i32 % 2 == 0 => {
             ctx.create_effect(BITMAP_MAGIC + 1, e.position, e.angle, e.light, 9, e.owner, -1, 0, 0, 0.0);
         }
-        13 => e.light *= 1.0 / 1.05,
+        13 => e.light /= 1.05,
         _ => {}
     }
 }
 
-/// `DescribeEffectShadow` for `BITMAP_MAGIC+1`: the mark stuck to the ground.
+/// `RenderEffectShadows` for `BITMAP_MAGIC+1` (ZzzEffect.cpp:19333-19438): the mark stuck to the ground.
 fn magic1_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let s = e.sub_type;
     let mut luminosity = 1.0;
@@ -404,16 +411,6 @@ fn magic1_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
         // In the original `Light` is left uninitialized.
         _ => Vec3::ZERO,
     };
-    // Decal(BITMAP_MAGIC+1, x, y, Scale, Scale, Light, -Angle[2]): size in tiles (×100),
-    // 5 above the ground. The original rotates the UV by -Angle[2], i.e. the image by +Angle[2].
-    out.decals.push(DecalDraw {
-        texture: BITMAP_MAGIC + 1,
-        center: Vec2::new(e.position.x, e.position.y),
-        width: scale * 100.0,
-        height: scale * 100.0,
-        color: [light.x, light.y, light.z, 1.0],
-        rotation: e.angle.z,
-        lift: 5.0,
-        blend,
-    });
+    // RenderTerrainAlphaBitmap(BITMAP_MAGIC+1, x, y, Scale, Scale, Light, -Angle[2]) (ZzzEffect.cpp:19428).
+    common::terrain_bitmap(out, BITMAP_MAGIC + 1, e.position.x, e.position.y, scale, scale, light, -e.angle.z, 1.0, 5.0, blend);
 }
