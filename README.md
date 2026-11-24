@@ -32,7 +32,7 @@ Requirements:
   and none will be.
 
 ```sh
-git clone https://github.com/<you>/mu-rs
+git clone https://github.com/Crixpx-VE/mu-rs
 cd mu-rs
 cargo build --release          # all programs, into target/release
 cargo test                     # unit and protocol tests (no game data needed for most)
@@ -146,7 +146,7 @@ Necesitas:
 - **Tu propia carpeta `Data` de un cliente MU Online Season 6.** Aquí no hay archivos del juego, ni los habrá.
 
 ```sh
-git clone https://github.com/<tu-usuario>/mu-rs
+git clone https://github.com/Crixpx-VE/mu-rs
 cd mu-rs
 cargo build --release          # todos los programas, en target/release
 cargo test                     # tests (la mayoría no necesita los datos del juego)
