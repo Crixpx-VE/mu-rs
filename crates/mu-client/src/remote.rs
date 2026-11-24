@@ -204,6 +204,8 @@ fn apply(
                         r,
                         crate::names::Selectable::player(c.name.clone(), c.hero_state),
                     ));
+                    // Filled by `animate` (not live until its first pose).
+                    e.insert(crate::fx::ActorState(crate::fx::Actor { live: false, ..Default::default() }));
                     for child in model.children {
                         e.with_child(child);
                     }
@@ -399,11 +401,17 @@ pub(crate) fn animate(
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
-    mut q: Query<(&mut RemotePlayer, &crate::character::Skinned, &crate::shadow::Shadow, Option<&crate::names::Selectable>)>,
+    mut q: Query<(
+        &mut RemotePlayer,
+        &crate::character::Skinned,
+        &crate::shadow::Shadow,
+        Option<&crate::names::Selectable>,
+        Option<&mut crate::fx::ActorState>,
+    )>,
     mut visibility: Query<&mut Visibility, Without<RemotePlayer>>,
 ) {
     let Some(terrain) = terrain else { return };
-    for (mut r, skinned, shadow, selectable) in &mut q {
+    for (mut r, skinned, shadow, selectable, actor) in &mut q {
         r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         // An emote ends: standing (`PlayerStopAnimationSetting`). Same for an action `player.bmd`
         // lacks (any number from the server).
@@ -426,7 +434,24 @@ pub(crate) fn animate(
             time: time.elapsed_secs(),
             ..default()
         };
-        skinned.pose(r.action, r.frame, links, &mut meshes, &mut sh);
+        let bones = skinned.pose(r.action, r.frame, links, &mut meshes, &mut sh);
+        if let Some(mut actor) = actor {
+            // Snapshot for the effects engine and the client-side hit tests (`CharactersClient[]`).
+            actor.0 = crate::fx::Actor {
+                ty: crate::fx::core::MODEL_PLAYER,
+                kind: crate::fx::core::KIND_PLAYER,
+                key: r.id as i32,
+                position: Vec3::new(r.pos.x * MU_SCALE, r.pos.y * MU_SCALE, ground),
+                angle: Vec3::new(0.0, 0.0, r.facing.to_degrees()),
+                scale: r.class.game_scale(),
+                bones: std::sync::Arc::new(bones),
+                action: r.action,
+                frame: r.frame,
+                light: r.light,
+                safe_zone: safe,
+                ..Default::default()
+            };
+        }
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
         // `BodyLight`: the terrain light on its tile plus `o->Light` (`VectorAdd(Light, o->Light,
         // c->Light)`, ZzzCharacter.cpp:8909; set by `SelectCharacter`, see `names.rs`).

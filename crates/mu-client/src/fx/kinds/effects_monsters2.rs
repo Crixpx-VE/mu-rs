@@ -175,7 +175,7 @@ fn check_target_range(e: &mut Effect, ctx: &Ctx) {
 /// Only `Luminosity` + the common tail (types with no `case` in `MoveEffect`).
 fn tail_only_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SHADOW_ROOK_* / MODEL_ICE_GIANT_PART5/6: falling body pieces ----------------------------
@@ -218,7 +218,7 @@ fn piece_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.x -= 0.15 * life(e) as f32;
         e.angle.y -= 0.15 * life(e) as f32;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_SAPITRES_ATTACK / _1 / _2 ------------------------------------------------------------
@@ -241,7 +241,7 @@ fn sapitres_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.y += (ctx.rand() % 120 - 60) as f32;
         ctx.create_effect(MODEL_EFFECT_SAPITRES_ATTACK_1, e.position, e.angle, e.light, 0, e.owner, -1, 0, 0, 0.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:4883.
@@ -276,7 +276,7 @@ fn sapitres1_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// The `MODEL_EFFECT_SAPITRES_ATTACK_2` path of the `MODEL_ICE_SMALL` case (ZzzEffect.cpp:2939-3014).
@@ -342,7 +342,7 @@ fn sapitres2_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if sub == 1 {
         e.gravity += 0.5;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_BROKEN_ICE0..3 / MODEL_CONDRA_STONE* / MODEL_NARCONDRA_STONE* ---------------------
@@ -434,7 +434,7 @@ fn broken_ice_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzEffect.cpp:18496, ZzzObject.cpp:1796: `BodyLight = Light`,
@@ -482,7 +482,7 @@ fn dragon_head_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_joint_ex(BITMAP_JOINT_SPIRIT2, pos, pos, angle, 14, None, 100.0, 0, 0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:3912.
@@ -504,7 +504,7 @@ fn phoenix_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 5.0 {
         e.alpha = life(e) as f32 * 0.2;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:3929.
@@ -574,7 +574,7 @@ fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
         let quake = (ctx.rand() % 8 - 8) as f32 * 0.1;
         ctx.set_earthquake(quake);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:3937.
@@ -616,7 +616,7 @@ fn cundun_skill_step(e: &mut Effect, ctx: &mut Ctx) {
         2 if e.pk_key == 0 && e.life_time < 10.0 => e.pk_key = 1,
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MONSTER01+77 (catapult) ------------------------------------------------------------------
@@ -646,7 +646,7 @@ fn catapult_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 5.0 {
         e.alpha /= 1.3;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_FLY_BIG_STONE1 / 2: catapult stones --------------------------------------------------------
@@ -826,7 +826,7 @@ fn fly_stone1_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.add_terrain_light(e.position.x, e.position.y, Vec3::splat(-0.5), 4.0);
     }
     // Tail: PlayAnimation only (no MoveParticle for the flying stones, ZzzEffect.cpp:18105).
-    common::play_animation(e);
+    common::play_animation(e, ctx);
 }
 
 /// ZzzEffect.cpp:14019.
@@ -849,7 +849,7 @@ fn fly_stone2_step(e: &mut Effect, ctx: &mut Ctx) {
         light = l;
     }
     ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
-    common::play_animation(e);
+    common::play_animation(e, ctx);
 }
 
 /// What `Draw_RenderObject` does to a landed stone (ZzzObject.cpp:1453/1471), moved here from the
@@ -938,7 +938,7 @@ fn stone_part_step(e: &mut Effect, ctx: &mut Ctx) {
         } else if ctx.rand() % 2 == 0 {
             ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, e.light, 24, 0.2, None);
         }
-        move_tail(e);
+        move_tail(e, ctx);
         return;
     }
     e.position += e.direction;
@@ -973,7 +973,7 @@ fn stone_part_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.z = height;
         ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, Vec3::new(0.2, 0.5, 0.35), 11, 2.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:1481.
@@ -1036,7 +1036,7 @@ fn gate_part_step(e: &mut Effect, ctx: &mut Ctx) {
         // is the closest meaningful point.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_TOWER_GATE_PLANE --------------------------------------------------------------------------
@@ -1055,7 +1055,7 @@ fn tower_gate_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.owner.is_some() && e.live {
         e.position.z = e.start_position.z + (ctx.world_time() * 0.001).sin() * 200.0 + 200.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18585: drawn at its position and mirrored around `StartPosition.z + 200`.
@@ -1115,7 +1115,7 @@ fn napin_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_sprite(BITMAP_LIGHT, pos, 8.0, flare, 0.0, 0);
         ctx.create_sprite(BITMAP_LIGHT, pos, 8.0, flare, 0.0, 0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_SKURA_ITEM (cherry blossom item) -----------------------------------------------------
@@ -1179,7 +1179,7 @@ fn skura_step(e: &mut Effect, ctx: &mut Ctx) {
             e.animation_frame += e.velocity / 3.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderObject` → ZzzObject.cpp:715: `RenderBody(RENDER_COLOR, ...)`.
@@ -1205,7 +1205,7 @@ fn trace_create(e: &mut Effect, ctx: &mut Ctx) {
         let mut j = Joint::new(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 17, me(e), e.scale);
         j.pk_key = -1;
         j.light = e.light;
-        ctx.spawns.push(Spawn::Joint(j));
+        ctx.spawn_joint(j);
     }
 }
 
@@ -1248,7 +1248,7 @@ fn ice_breath_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_RAKLION_CLOUDS, pos, angle, Vec3::new(0.5, 0.6, 0.94), 1, scale, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5158.
@@ -1267,7 +1267,7 @@ fn fire_breath_step(e: &mut Effect, ctx: &mut Ctx) {
         // The original passes the direction as the Angle argument.
         ctx.create_effect(MODEL_MOONHARVEST_MOON, e.position, dir, e.light, 1, None, -1, 0, 0, 0.3);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_LAVAGIANT_FOOTPRINT_R / V ---------------------------------------------------------------
@@ -1289,7 +1289,7 @@ fn footprint_step(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
     }
     e.light *= 0.93;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18727: `EnableAlphaBlend` + `RenderTerrainAlphaBitmap` (default rotation, alpha
@@ -1339,7 +1339,7 @@ fn projectile_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.y += e.direction.y * e.velocity;
         e.position.z += e.direction.z;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- Door / statue crush pieces ----------------------------------------------------------------------
@@ -1391,7 +1391,7 @@ fn crush_piece_step(e: &mut Effect, ctx: &mut Ctx) {
     if ctx.rand() % 3 == 0 {
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, e.light, 6, 1.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5229 (`Scale` is the argument).
@@ -1407,7 +1407,7 @@ fn crush_ruin_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 40.0 {
         e.alpha -= 0.1;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:5239 (LifeTime is not set: whatever the slot had).
@@ -1526,7 +1526,7 @@ fn blow_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.light /= 1.05;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:19058.
@@ -1564,7 +1564,7 @@ fn umbrella_die_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_effect(BITMAP_RING_OF_GRADATION, pos, e.angle, Vec3::new(1.0, 0.2, 0.5), 0, e.owner, 0, 0, 0, 1.2);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:6048.
@@ -1596,7 +1596,7 @@ fn umbrella_gold_step(e: &mut Effect, ctx: &mut Ctx) {
         e.gravity = -e.gravity * 0.3;
         e.life_time -= 2.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2397.
@@ -1622,5 +1622,5 @@ fn defender_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     ctx.create_sprite(BITMAP_SHOCK_WAVE, e.position, e.scale, e.light, 0.0, 0);
     ctx.create_particle(BITMAP_FIRE + 2, e.position, e.angle, e.light, 16, 2.5, None);
-    move_tail(e);
+    move_tail(e, ctx);
 }

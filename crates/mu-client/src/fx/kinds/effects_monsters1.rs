@@ -160,7 +160,7 @@ fn raklion_crack_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.alpha -= 0.03;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_RAKLION_BOSS_MAGIC -----------------------------------------------------------------------
@@ -179,7 +179,7 @@ fn raklion_magic_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.alpha -= 0.03;
     }
-    move_tail(e);
+    move_tail(e, ctx);
     // `RenderEffectShadows` (ZzzEffect.cpp:19268) draws `Luminosity = (rand()%4+8)*0.1f` every
     // frame; draw functions cannot call rand(), so it is drawn here once per tick.
     e.user[0] = (ctx.rand() % 4 + 8) as f32 * 0.1;
@@ -236,7 +236,7 @@ fn storm3_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_joint(BITMAP_JOINT_THUNDER, pos1, pos2, angle, 20, me(e), 20.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderEffects` only sets `m_bRenderAfterCharacter` (ZzzEffect.cpp:18322); `RenderAfterEffects`
@@ -277,7 +277,7 @@ fn mayastar_step(e: &mut Effect, ctx: &mut Ctx) {
     // `EarthQuake = (rand()%6-6)*0.5f` (an assignment; the engine keeps the strongest of the tick).
     let quake = (ctx.rand() % 6 - 6) as f32 * 0.5;
     ctx.set_earthquake(quake);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzEffect.cpp:18328). In Kanturu 3rd it goes to `RenderKanturu3rdObjectMesh`
@@ -336,7 +336,7 @@ fn mayastone_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_EXPLOTION, position, e.angle, light, 0, 4.0, None);
         e.live = false;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzEffect.cpp:18329-18334) for every Maya stone. In Kanturu 3rd it goes to
@@ -393,7 +393,7 @@ fn mayastone45_step(e: &mut Effect, ctx: &mut Ctx) {
     if ctx.rand() % 10 == 0 {
         ctx.create_particle(BITMAP_FIRE, e.position, e.angle, e.light, 15, 1.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MAYASTONEFIRE (blue fire around a falling stone) -------------------------------------------
@@ -423,7 +423,7 @@ fn mayastonefire_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.position.z < height {
         e.live = false;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MAYAHANDSKILL (hendlight02.bmd) -------------------------------------------------------------
@@ -460,7 +460,7 @@ fn mayahand_step(e: &mut Effect, ctx: &mut Ctx) {
         pos.z += 100.0;
         ctx.create_particle(BITMAP_SMOKE, pos, e.angle, e.start_position, 17, 10.0, None);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `RenderEffects` only sets `m_bRenderAfterCharacter` (ZzzEffect.cpp:18323); `RenderAfterEffects`
@@ -555,7 +555,7 @@ fn cundun_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Subtypes 2 and 3 (ZzzEffect.cpp:11377-11484): the part waits, falls into the water and rocks
@@ -729,14 +729,14 @@ fn move_part(e: &mut Effect, ctx: &mut Ctx, damp: f32) {
 fn part_step_08(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
     move_part(e, ctx, 0.8);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Shadow pawn/knight/rook and ice giant parts (ZzzEffect.cpp:11677-11732).
 fn part_step_05(e: &mut Effect, ctx: &mut Ctx) {
     let _luminosity = luminosity(e, ctx);
     move_part(e, ctx, 0.5);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_DOPPELGANGER_SLIME_CHIP --------------------------------------------------------------------
@@ -794,5 +794,5 @@ fn slime_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.x -= 0.35 * lt as f32;
         e.angle.y -= 0.35 * lt as f32;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }

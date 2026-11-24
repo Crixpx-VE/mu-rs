@@ -94,10 +94,11 @@ fn owner_pose(ctx: &Ctx, owner: Option<Target>) -> Option<(Vec3, Vec3)> {
 /// `o->Owner->LifeTime`: the parent's current `LifeTime` travels in the child's
 /// [`SLOT_OWNER_LIFE`].
 fn create_child_with_owner_life(ctx: &mut Ctx, e: &Effect, ty: i32, sub: i32) {
-    ctx.create_effect(ty, e.position, e.angle, e.light, sub, me(e), -1, 0, 0, 0.0);
-    if let Some(Spawn::Effect(child)) = ctx.spawns.last_mut() {
-        child.user[SLOT_OWNER_LIFE] = e.life_time;
-    }
+    *ctx.next_effect_id += 1;
+    let mut child = Effect::new(*ctx.next_effect_id, ty, e.position, e.angle, e.light, sub, me(e), -1, 0, 0, 0.0);
+    // Set before its creation code runs, which reads it.
+    child.user[SLOT_OWNER_LIFE] = e.life_time;
+    ctx.spawn_effect(child);
 }
 
 /// `o->LifeTime = o->Owner->LifeTime` at creation.
@@ -214,7 +215,7 @@ fn scream_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.ty == MODEL_DARK_SCREAM {
         check_client_arrow(e, ctx);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:1537-1544: `RenderBody` with `BlendMeshLight` 1; the fire is `RENDER_BRIGHT`.
@@ -267,7 +268,7 @@ fn darklord_step(e: &mut Effect, ctx: &mut Ctx) {
             e.blend_mesh_light /= 1.8;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_DEASULER (Empire Guardian: the spinning boomerang sword) ----------------------------------
@@ -420,7 +421,7 @@ fn deasuler_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:528-533: mesh 0 textured with `BodyLight(o,b)`, mesh 1 `RENDER_BRIGHT` with
@@ -611,7 +612,7 @@ fn ground_stone_step(e: &mut Effect, ctx: &mut Ctx) {
         e.blend_mesh_light /= 2.0;
     }
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(0.79, 0.72, 0.49), 2.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SKILL_JAVELIN -----------------------------------------------------------------------------
@@ -677,7 +678,7 @@ fn javelin_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position.z = e.start_position.z - height;
     }
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(1.0, 0.6, 0.3), 2.0);
-    play_animation(e);
+    play_animation(e, ctx);
 }
 
 /// ZzzObject.cpp:1595-1600: body light (1, 0.6, 0.3), textured.
@@ -741,7 +742,7 @@ fn sword_force_step(e: &mut Effect, ctx: &mut Ctx) {
         e.light = Vec3::splat(e.alpha);
     }
     // TODO(original): the second PlayAnimation runs even when CurrentAction == 255.
-    play_animation(e);
+    play_animation(e, ctx);
     e.animation_frame += e.velocity;
     move_particle(e, true);
 }
@@ -810,7 +811,7 @@ fn stun_stone_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         ctx.add_terrain_light(e.position.x, e.position.y, e.light, 1.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:746-752: textured with `BodyLight(o,b)`.
@@ -861,7 +862,7 @@ fn skin_shell_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.x -= e.scale * 16.0;
     }
     e.alpha = life(e) as f32 / 10.0;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:733-745: subtype 0 with `BodyLight = o->Light`, subtype 1 `RENDER_BRIGHT` with
@@ -934,7 +935,7 @@ fn mana_rune_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.alpha = life(e) as f32 / 20.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:1589-1594: subtype 0 textured with body light (0.3, 0.6, 1); the rest generic.
@@ -983,7 +984,7 @@ fn air_force_step(e: &mut Effect, ctx: &mut Ctx) {
         position.z += 100.0;
         e.position += position;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_WAVES / MODEL_COMBO -------------------------------------------------------------------------
@@ -1020,7 +1021,7 @@ fn combo_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.blend_mesh_light /= 1.4;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:3416-3473. `PKKey` carries the scale for subtypes 2-6.
@@ -1095,7 +1096,7 @@ fn waves_step(e: &mut Effect, ctx: &mut Ctx) {
             e.angle.y += 45.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:1567-1575: subtypes 3-5 render with HiddenMesh -1.
@@ -1195,7 +1196,7 @@ fn fall_stone_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_FENRIR_FOOT_THUNDER / MODEL_TWINTAIL_EFFECT (ground marks) ----------------------------------
@@ -1246,7 +1247,7 @@ fn foot_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
             e.user[SLOT_TIME] = ctx.world_time();
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18604-18610: `RenderTerrainAlphaBitmap(BITMAP_FENRIR_FOOT_THUNDER1 + anim%5, x, y,
@@ -1310,7 +1311,7 @@ fn twintail_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.scale -= 0.02;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18611-18626 (`EnableAlphaBlend`).
@@ -1354,7 +1355,7 @@ fn skill_damage_create(e: &mut Effect, ctx: &mut Ctx) {
 /// No `MoveEffect` case: only the common tail.
 fn skill_damage_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PROTECTGUILD --------------------------------------------------------------------------------
@@ -1397,7 +1398,7 @@ fn protect_guild_step(e: &mut Effect, ctx: &mut Ctx) {
     let Some(owner) = ctx.actor(e.owner).cloned() else {
         // `LifeTime = 0; break;`: the tail still runs and the effect dies.
         e.life_time = 0.0;
-        move_tail(e);
+        move_tail(e, ctx);
         return;
     };
     if e.alpha >= 1.0 {
@@ -1440,7 +1441,7 @@ fn protect_guild_step(e: &mut Effect, ctx: &mut Ctx) {
         let z = e.position.z + 48.0 - life(e) as f32 + rf(ctx, 5);
         ctx.create_particle(BITMAP_SPARK, Vec3::new(x, y, z), e.angle, e.light, 5, 2.0, me(e));
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:1576-1581: two `RENDER_BRIGHT|RENDER_CHROME` passes with body light (0.4, 0.6, 1).

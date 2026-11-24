@@ -149,7 +149,7 @@ fn check_target_range(e: &mut Effect, ctx: &mut Ctx) {
 /// The `MoveEffect` cases that only fall into the common tail.
 fn plain_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_ICE ------------------------------------------------------------------------------------
@@ -249,7 +249,7 @@ fn ice_step(e: &mut Effect, ctx: &mut Ctx) {
         },
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SNOW1 / MODEL_WOOSISTONE ---------------------------------------------------------------
@@ -268,7 +268,7 @@ fn snow1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
     e.direction.z -= 2.5;
     check_target_range(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:2447.
@@ -319,7 +319,7 @@ fn woosistone_step(e: &mut Effect, ctx: &mut Ctx) {
         e.direction.z -= 2.0;
         check_target_range(e, ctx);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- Fall-through chain: MODEL_BONE1/2, MODEL_BIG_STONE1/2, MODEL_SNOW2/3, MODEL_ICE_SMALL,
@@ -456,17 +456,17 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
             if let Some(p) = ctx.target_position(e.owner) {
                 e.position = p + e.start_position;
             }
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         } else if sub == 11 {
             if e.life_time < 10.0 {
                 e.alpha *= 0.8;
             }
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         } else if sub == 13 || sub == 14 {
             move_bouncing_piece(e, ctx);
-            common::move_tail(e);
+            common::move_tail(e, ctx);
             return;
         }
     }
@@ -478,7 +478,7 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
         if let Some(p) = ctx.target_position(e.owner) {
             e.position = p + e.start_position;
         }
-        common::move_tail(e);
+        common::move_tail(e, ctx);
         return;
     }
     // MODEL_ICE_SMALL / METEO1 / METEO2 / BOSS_ATTACK (11113).
@@ -509,7 +509,7 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.z += 20.0;
         e.gravity += 0.5;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BIG_METEO1..3 ------------------------------------------------------------------------------
@@ -662,7 +662,7 @@ fn storm_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderEffects` ZzzEffect.cpp:18309: subtypes 3-7 are a ground mark, the rest `RenderObject`.
@@ -744,7 +744,7 @@ fn storm2_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_LASER ------------------------------------------------------------------------------------
@@ -779,7 +779,7 @@ fn laser_step(e: &mut Effect, ctx: &mut Ctx) {
         e.direction.y -= e.velocity;
         e.velocity += 1.0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SKILL_INFERNO ----------------------------------------------------------------------------
@@ -926,7 +926,7 @@ fn inferno_step(e: &mut Effect, ctx: &mut Ctx) {
         e.scale += 0.04;
         // `VectorCopy(o->Light, b->BodyLight)`: the draw already uses o->Light as body light.
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SKILL_BLAST (Lightning/Meteor-like blast from the sky) -------------------------------
@@ -965,7 +965,7 @@ fn blast_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     let light = Vec3::new(luminosity * 0.2, luminosity * 0.4, luminosity * 1.0);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_POISON -------------------------------------------------------------------------------------
@@ -984,7 +984,7 @@ fn poison_step(e: &mut Effect, ctx: &mut Ctx) {
     e.alpha = e.life_time * 0.1;
     let light = Vec3::new(luminosity * 0.3, luminosity * 1.0, luminosity * 0.6);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BLIZZARD -----------------------------------------------------------------------------------
@@ -1089,7 +1089,7 @@ fn blizzard_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_CIRCLE (Hellfire) ----------------------------------------------------------------------
@@ -1162,7 +1162,7 @@ fn circle_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzObject.cpp:1520): subtypes 2 and 3 with body light (0.5, 0.5, 1).
@@ -1254,7 +1254,7 @@ fn circle_light_step(e: &mut Effect, ctx: &mut Ctx) {
         let light = Vec3::splat(e.blend_mesh_light);
         ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzObject.cpp:1514): subtypes 3 and 4 with body light (0.1, 0.1, 10).
@@ -1306,7 +1306,7 @@ fn magic_circle_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.scale += 0.01;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_PROTECT ------------------------------------------------------------------------------------
@@ -1330,7 +1330,7 @@ fn protect_step(e: &mut Effect, ctx: &mut Ctx) {
     if !owner_live(ctx, e.owner) {
         e.live = false;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `BodyLight` (ZzzObject.cpp:213): pulsing white, ignoring `o->Light`.
@@ -1362,7 +1362,7 @@ fn wave_force_step(e: &mut Effect, ctx: &mut Ctx) {
     e.blend_mesh_light = e.life_time / 20.0;
     let light = Vec3::splat(-luminosity * 0.5);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 5.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_STAFF+8 (the falling staff) ----------------------------------------------------------------
@@ -1393,7 +1393,7 @@ fn staff8_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     let light = Vec3::new(luminosity * 0.2, luminosity * 0.4, luminosity * 1.0);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_SKULL ----------------------------------------------------------------------------------------
@@ -1465,7 +1465,7 @@ fn skull_step(e: &mut Effect, ctx: &mut Ctx) {
         let light = Vec3::new(luminosity, luminosity * 0.3, luminosity * 0.1);
         ctx.add_terrain_light(e.position.x, e.position.y, light, 4.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzObject.cpp:1549): orange body light and two red glowing eyes.
@@ -1502,7 +1502,7 @@ fn warcraft_step(e: &mut Effect, ctx: &mut Ctx) {
     if let Some(p) = ctx.target_position(e.owner) {
         e.position = p;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_GATE / MODEL_GATE+1 (castle gate pieces) ----------------------------------------------------
@@ -1551,7 +1551,7 @@ fn gate_step(e: &mut Effect, ctx: &mut Ctx) {
         // position is used instead.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_STONE_COFFIN / MODEL_STONE_COFFIN+1 ---------------------------------------------------------
@@ -1598,7 +1598,7 @@ fn coffin_step(e: &mut Effect, ctx: &mut Ctx) {
         // The original passes MoveEffect's uninitialized local `Position`; see `gate_step`.
         ctx.create_particle(BITMAP_SMOKE + 1, e.position, e.angle, Vec3::ONE, 0, 1.0, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzObject.cpp:1428).
@@ -1644,7 +1644,7 @@ fn shine_step(e: &mut Effect, ctx: &mut Ctx) {
         let scale = (ctx.rand() % 30 + 50) as f32 / 100.0;
         ctx.create_particle(BITMAP_SHINY, position, e.angle, e.light, 2, scale, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_BLOOD --------------------------------------------------------------------------------------
@@ -1723,7 +1723,7 @@ fn dragon_step(e: &mut Effect, ctx: &mut Ctx) {
         e.animation_frame = 0.0;
         e.current_action = 0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_DESAIR ---------------------------------------------------------------------------------------
@@ -1744,7 +1744,7 @@ fn desair_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(MODEL_FEATHER, e.position, e.angle, e.light, 2, None, -1, 0, 0, 1.4);
         ctx.create_effect(MODEL_FEATHER, e.position, e.angle, e.light, 3, None, -1, 0, 0, 1.4);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderObject` (ZzzObject.cpp:1531): body light 1.
@@ -1796,7 +1796,7 @@ fn ghost_step(e: &mut Effect, ctx: &mut Ctx) {
     e.angle.x += wave * e.distance / 3.0;
     e.light = Vec3::new(e.blend_mesh_light / 10.0, e.blend_mesh_light / 10.0, e.blend_mesh_light / 4.0);
     ctx.create_particle(BITMAP_LIGHT, e.position, e.angle, e.light, 9, e.scale, None);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_TREE_ATTACK (Aida) ------------------------------------------------------------------------------
@@ -1817,7 +1817,7 @@ fn tree_attack_step(e: &mut Effect, ctx: &mut Ctx) {
         e.alpha -= 0.07;
         e.scale = 1.0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- MODEL_MAGIC_CAPSULE2 ----------------------------------------------------------------------------------
@@ -1838,7 +1838,7 @@ fn capsule_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 10.0 {
         e.blend_mesh_light = (e.life_time as i32) as f32 * 0.1;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `RenderEffects` ZzzEffect.cpp:18568 → `RenderObject`.
@@ -1879,5 +1879,5 @@ fn water_wave_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_WATERFALL_5, e.position, e.angle, light, 1, 1.0, None);
     }
     ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }

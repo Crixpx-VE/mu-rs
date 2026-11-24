@@ -111,7 +111,7 @@ fn joint_lit(ctx: &mut Ctx, ty: i32, pos: Vec3, target_pos: Vec3, angle: Vec3, s
     j.pk_key = pk_key;
     j.skill = skill;
     j.light = light;
-    ctx.spawns.push(Spawn::Joint(j));
+    ctx.spawn_joint(j);
 }
 
 /// `RenderObject(o)`: nothing when `Alpha < 0.01` (`Calc_RenderObject`, ZzzObject.cpp:245).
@@ -157,7 +157,7 @@ fn wristring_step(e: &mut Effect, ctx: &mut Ctx) {
     // b->PlayAnimation(..., o->Velocity / 5, ...)
     // TODO(original): PlayAnimation wraps the frame at the action length (unknown here).
     e.animation_frame += e.velocity / 5.0;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SUMMONER_EQUIP_HEAD_SAHAMUTT / NEIL / LAGUL --------------------------------------------------
@@ -247,7 +247,7 @@ fn head_sahamutt_step(e: &mut Effect, ctx: &mut Ctx) {
             _ => e.live = false,
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:851.
@@ -280,7 +280,7 @@ fn head_neil_step(e: &mut Effect, ctx: &mut Ctx) {
             _ => e.live = false,
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18430/18436: only SubType 0.
@@ -306,7 +306,7 @@ fn head_lagul_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_CLUD64, e.position, e.angle, light, 10, 1.0, e.owner);
     }
     casting_move(e);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SUMMONER_CASTING_EFFECT1..4 ---------------------------------------------------------------
@@ -352,7 +352,7 @@ fn casting_move(e: &mut Effect) {
 fn casting_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     casting_move(e);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18442 + Draw_RenderObject (ZzzObject.cpp:1718):
@@ -447,7 +447,7 @@ fn sahamutt_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_FIRE_CURSEDLICH, p, e.angle, light, 2, 4.0, me);
         ctx.create_particle(BITMAP_FIRE_CURSEDLICH, p, e.angle, light, 2, 3.0, me);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18451 + Draw_RenderObject (ZzzObject.cpp:1722): `RenderBody(RENDER_TEXTURE)`.
@@ -506,7 +506,7 @@ fn neil_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         ctx.play_sound("SOUND_SUMMON_REQUIEM");
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18454 + Draw_RenderObject (ZzzObject.cpp:1727): meshes 0 and 2 additive with
@@ -548,7 +548,7 @@ fn nife_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.alpha < 1.0 {
         e.alpha += 0.05;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18457 + Draw_RenderObject (ZzzObject.cpp:1779): meshes 0 and 2 normal, mesh 1
@@ -578,7 +578,7 @@ fn ground_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.alpha < 1.0 {
         e.alpha += 0.3;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18462 + Draw_RenderObject (ZzzObject.cpp:1786): meshes 0 and 1 additive with
@@ -661,7 +661,7 @@ fn lagul_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_TWINTAIL_WATER, p, e.angle, Vec3::new(0.7, 0.7, 1.0), 1, 1.0, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 
     // EffectDestructor (ZzzEffect.cpp:240) when it dies this tick.
     // TODO(original): also when another effect deletes it (`DeleteEffect`), which the engine
@@ -781,7 +781,7 @@ fn orb_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.light /= 1.08;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_CHAIN_LIGHTNING -----------------------------------------------------------------------------------
@@ -802,7 +802,7 @@ fn chain_step(e: &mut Effect, ctx: &mut Ctx) {
     if (0..=2).contains(&e.sub_type) {
         chain_move(e, ctx);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn chain_move(e: &mut Effect, ctx: &mut Ctx) {
@@ -876,7 +876,7 @@ fn drain_step(e: &mut Effect, ctx: &mut Ctx) {
     if let (Some(src), Some(tgt)) = (actor_of(ctx, e.owner).filter(|a| a.live), actor_of(ctx, e.target).filter(|a| a.live)) {
         drain_move(e, ctx, &src, &tgt);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn drain_move(e: &Effect, ctx: &mut Ctx, src: &Actor, tgt: &Actor) {
@@ -979,7 +979,7 @@ fn alice_buff_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 3 || e.sub_type == 4 {
         alice_debuff_move(e, ctx);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// SubTypes 0-2: the spinning ring over the target (ZzzEffect.cpp:9268-9388).
@@ -1161,7 +1161,7 @@ fn shock_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => shock_burn(e, ctx),
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// SubType 0: the red orb falls from above the caster (ZzzEffect.cpp:9439-9501).
@@ -1293,7 +1293,7 @@ fn swell_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time - 1.0 <= 20.0 {
         e.blend_mesh_light *= 0.86;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn swell_move(e: &mut Effect, ctx: &mut Ctx, a: &Actor) {
@@ -1372,7 +1372,7 @@ fn swell_buff_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.life_time = 999.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18853: a pulsing purple light on every bone of the owner.

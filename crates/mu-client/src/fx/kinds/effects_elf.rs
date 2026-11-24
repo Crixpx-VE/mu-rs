@@ -235,7 +235,7 @@ fn autoload_step(e: &mut Effect, ctx: &mut Ctx) {
             e.angle = a.angle + Vec3::new(85.0, -17.0, 20.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18689: only SubType 1. ZzzObject.cpp:1606: RENDER_TEXTURE|RENDER_BRIGHT.
@@ -289,7 +289,7 @@ fn infinity_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position = a.bone_world(29, Vec3::ZERO);
         e.angle = a.angle;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_INFINITY_ARROW1..3 ------------------------------------------------------------------------
@@ -327,7 +327,7 @@ fn infinity_n_step(e: &mut Effect, ctx: &mut Ctx) {
     {
         e.position = p;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_INFINITY_ARROW4 -----------------------------------------------------------------------------
@@ -349,7 +349,7 @@ fn infinity4_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position = a.bone_world(29, Vec3::ZERO);
         e.angle = a.angle;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_ARROWSRE06 ----------------------------------------------------------------------------------
@@ -417,7 +417,7 @@ fn arrowsre06_step(e: &mut Effect, ctx: &mut Ctx) {
             _ => {}
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
     // Draw_RenderObject (ZzzObject.cpp:1929), before the render that follows this tick (LifeTime
     // there is already decremented).
     if e.alpha >= 0.01 && life(e) - 1 > 0 && life(e) - 1 <= 10 {
@@ -468,7 +468,7 @@ fn piercing_step(e: &mut Effect, ctx: &mut Ctx) {
     if !owner_live(e, ctx) {
         // `LifeTime = -1; break;` (the common tail still runs).
         e.life_time = -1.0;
-        move_tail(e);
+        move_tail(e, ctx);
         return;
     }
     e.gravity += 90.0;
@@ -496,7 +496,7 @@ fn piercing_step(e: &mut Effect, ctx: &mut Ctx) {
         // TODO(original): if Owner->Owner == Hero: AddWaterWave(x / TERRAIN_SCALE, y / TERRAIN_SCALE, 2, -200).
     }
     e.head_angle.y = e.gravity;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18580: nothing for SubType 3.
@@ -530,7 +530,7 @@ fn piercing1_step(e: &mut Effect, ctx: &mut Ctx) {
     ctx.create_particle(BITMAP_FIRE, e.position, e.angle, light, 5, 1.0, None);
     let light = Vec3::new(lum * 0.6, lum * 0.8, lum * 0.8);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PIERCING2 -----------------------------------------------------------------------------------
@@ -564,7 +564,7 @@ fn piercing2_step(e: &mut Effect, ctx: &mut Ctx) {
         e.blend_mesh_light /= 1.6;
         ctx.create_effect(MODEL_WAVES, e.position, e.angle, e.light, 2, None, life(e), 0, 0, 0.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18575: nothing for SubTypes 1 and 2.
@@ -607,7 +607,7 @@ fn crossbow_step(e: &mut Effect, ctx: &mut Ctx) {
     let light = Vec3::new(lum, lum * 0.4, lum * 0.2);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
     check_client_arrow(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:11841.
@@ -618,7 +618,7 @@ fn double_step(e: &mut Effect, ctx: &mut Ctx) {
     let light = Vec3::new(lum * 0.2, lum * 0.4, lum);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
     check_client_arrow(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_ARROW_HOLY ----------------------------------------------------------------------------------
@@ -668,7 +668,7 @@ fn holy_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    common::play_animation(e);
+    common::play_animation(e, ctx);
     e.start_position += rotate(e.angle, e.direction);
 }
 
@@ -770,7 +770,7 @@ fn multi_shot_step(e: &mut Effect, ctx: &mut Ctx) {
     };
     e.blend_mesh_light = life(e) as f32 / 18.0;
     e.alpha = e.blend_mesh_light;
-    move_tail(e);
+    move_tail(e, ctx);
     // RenderEffects 18303 (before the draw): b->PlayAnimation(..., Velocity/6, ...).
     e.animation_frame += e.velocity / 6.0;
 }
@@ -808,7 +808,7 @@ fn arrow_step(e: &mut Effect, ctx: &mut Ctx) {
         MODEL_ARROW_GAMBLE => gamble(e, ctx, lum),
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `MODEL_ARROW` (ZzzEffect.cpp:11881).
@@ -922,7 +922,7 @@ fn darkstinger(e: &mut Effect, ctx: &mut Ctx) {
         let mut j = Joint::new(BITMAP_FLARE + 1, v_pos, v_pos, e.angle, 18, me(e), 90.0);
         j.pk_key = 40;
         j.light = Vec3::new(0.4, 0.4, 0.9);
-        ctx.spawns.push(Spawn::Joint(j));
+        ctx.spawn_joint(j);
     }
 }
 
@@ -1057,7 +1057,7 @@ fn tanker_hit_step(e: &mut Effect, ctx: &mut Ctx) {
         e.position = e.start_position;
     }
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(1.0, 0.0, 0.0), 4.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_ARROW_BOMB --------------------------------------------------------------------------------
@@ -1099,7 +1099,7 @@ fn bomb_step(e: &mut Effect, ctx: &mut Ctx) {
     let light = Vec3::new(lum * 0.6, lum * 0.8, lum * 0.8);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 2.0);
     check_client_arrow(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_ARROW_DRILL -------------------------------------------------------------------------------
@@ -1155,7 +1155,7 @@ fn drill_step(e: &mut Effect, ctx: &mut Ctx) {
         check_client_arrow(e, ctx);
     }
     if e.sub_type != 3 {
-        move_tail(e);
+        move_tail(e, ctx);
     }
 }
 
@@ -1196,7 +1196,7 @@ fn impact_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 1 {
         e.live = false;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_IRON_RIDER_ARROW --------------------------------------------------------------------------
@@ -1224,7 +1224,7 @@ fn iron_rider_step(e: &mut Effect, ctx: &mut Ctx) {
     ctx.create_particle(BITMAP_SPARK + 1, e.position, e.angle, e.light, 10, 3.0, None);
     set_eye_left(e, e.position);
     ctx.create_effect(MODEL_WAVES, e.position, e.angle, e.light, 3, None, 0, 0, 0, 0.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_KENTAUROS_ARROW ---------------------------------------------------------------------------
@@ -1253,7 +1253,7 @@ fn kentauros_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_SMOKE, e.position, e.angle, v_light, 26, 0.2, None);
     }
     e.alpha += 0.001;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SUMMON ------------------------------------------------------------------------------------
@@ -1278,7 +1278,7 @@ fn summon_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.angle.z += 1.0;
     e.user[7] = if ctx.world_active == WD_39KANTURU_3RD { 1.0 } else { 0.0 };
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18326 → ZzzObject.cpp:515.
@@ -1319,7 +1319,7 @@ fn dark_elf_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     let light = Vec3::new(lum * 0.3, lum * 0.6, lum);
     ctx.add_terrain_light(position.x, position.y, light, 3.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MAGIC1 ------------------------------------------------------------------------------------
@@ -1340,7 +1340,7 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.angle.y += 20.0;
     e.blend_mesh_light = life(e) as f32 * 0.1;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_MAGIC2 ------------------------------------------------------------------------------------
@@ -1381,7 +1381,7 @@ fn magic2_step(e: &mut Effect, ctx: &mut Ctx) {
         let rot = rf(ctx, 360);
         ctx.create_sprite(BITMAP_LIGHT, position, 3.5, light, rot, 0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SAW ---------------------------------------------------------------------------------------
@@ -1397,6 +1397,6 @@ fn saw_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn saw_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     e.angle.z -= 30.0;
-    common::play_animation(e);
+    common::play_animation(e, ctx);
     common::move_particle(e, false);
 }

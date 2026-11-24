@@ -216,7 +216,7 @@ fn skull_step(e: &mut Effect, ctx: &mut Ctx) {
             },
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRE_CURSEDLICH ------------------------------------------------------------------------
@@ -309,7 +309,7 @@ fn cursedlich_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_ENERGY ---------------------------------------------------------------------------------
@@ -334,7 +334,7 @@ fn energy_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(lum * 0.2, lum * 0.4, lum * 1.0), 2.0);
         check_target_range(e, ctx);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// `CheckTargetRange(o)` for `BITMAP_ENERGY` (ZzzEffect.cpp:366, 407): on reaching its owner
@@ -369,7 +369,7 @@ fn spark1_step(e: &mut Effect, ctx: &mut Ctx) {
         let s = if j == 0 { scale * 2.0 } else { scale };
         ctx.create_particle(BITMAP_SPARK + 1, position, e.angle, light, 1, s, None);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_BOSS_LASER..+2 -------------------------------------------------------------------------
@@ -412,7 +412,7 @@ fn boss_laser_create(e: &mut Effect, _ctx: &mut Ctx) {
 /// `Direction`, each lighting the terrain.
 fn boss_laser_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 
     // RenderEffects only draws live effects: the tick's `LifeTime--` comes after this.
     if e.life_time - 1.0 <= 0.0 {
@@ -483,7 +483,7 @@ fn lightning1_step(e: &mut Effect, ctx: &mut Ctx) {
             e.alpha = 1.0;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19569).
@@ -503,7 +503,7 @@ fn fire_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn fire_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
     ctx.create_particle(BITMAP_FIRE, e.position, e.angle, Vec3::ONE, 9, 1.0, e.owner);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:1213.
@@ -518,7 +518,7 @@ fn fire1_step(e: &mut Effect, ctx: &mut Ctx) {
     let lum = common::luminosity(e, ctx);
     ctx.create_particle(BITMAP_FIRE + 1, e.position, e.angle, Vec3::ONE, 1, 1.0, None);
     ctx.add_terrain_light(e.position.x, e.position.y, Vec3::new(lum * 1.0, lum * 0.6, lum * 0.3), 2.0);
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_FIRE_HIK2_MONO -------------------------------------------------------------------------
@@ -556,7 +556,7 @@ fn hik2_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_FIRE + 3, position, e.angle, Vec3::ONE, 13, 2.5, None);
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19440).
@@ -584,7 +584,7 @@ fn cloud_step(e: &mut Effect, ctx: &mut Ctx) {
         e.light /= 1.05;
         e.scale += 0.03;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19448).
@@ -637,7 +637,7 @@ fn impact_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.scale > 2.0 {
         ctx.create_sprite(BITMAP_ORORA, e.position, scale_bk, light, spin, 0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_MAGIC ----------------------------------------------------------------------------------
@@ -758,7 +758,7 @@ fn magic_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19274).
@@ -856,7 +856,7 @@ fn magic2_step(e: &mut Effect, ctx: &mut Ctx) {
         e.scale += 0.3;
         e.light /= 1.1;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19478): two spinning cylinders (`RenderCircle`) and the
@@ -921,7 +921,7 @@ fn influence_step(e: &mut Effect, ctx: &mut Ctx) {
             e.life_time = 50.0;
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19526, `ASG_ADD_INFLUENCE_GROUND_EFFECT`).
@@ -995,7 +995,7 @@ fn zin_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 /// RenderEffectShadows (ZzzEffect.cpp:19506). (Other subtypes leave `vLight` uninitialized in the
@@ -1064,7 +1064,7 @@ fn shiny6_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_PIN_LIGHT ------------------------------------------------------------------------------
@@ -1116,7 +1116,7 @@ fn pin_light_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_ORORA ----------------------------------------------------------------------------------
@@ -1140,7 +1140,7 @@ fn orora_step(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
         ctx.create_effect(e.ty, e.position, e.angle, e.light, e.sub_type, e.owner, -1, 0, 0, 0.0);
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_SPARK+2 --------------------------------------------------------------------------------
@@ -1161,7 +1161,7 @@ fn spark2_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(e.ty, e.position, e.angle, e.light, e.sub_type, 0.5, e.owner);
         }
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 }
 
 // --- BITMAP_LIGHT_MARKS ----------------------------------------------------------------------------
@@ -1184,7 +1184,7 @@ fn light_marks_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if lt(e) <= 5 {
         e.life_time = 65.0;
     }
-    common::move_tail(e);
+    common::move_tail(e, ctx);
 
     if !e.live {
         return;

@@ -41,6 +41,13 @@ pub struct FxWorld {
     pub map_objects: Vec<MapObject>,
     /// Sounds requested during the ticks (`PlayBuffer`); played by `sound.rs`.
     pub sounds: Vec<&'static str>,
+    /// Effect model files for the kinds (`Models[]`).
+    pub models: super::model_data::ModelData,
+    /// `CharacterAttribute->Skill[]`: the hero's skills by slot, once the client knows them.
+    pub hero_skills: Vec<i32>,
+    /// Damage requests the hero's projectiles would send (`AttackCharacterRange`); for the combat
+    /// protocol, which does not exist yet. Kept to the last 64.
+    pub attack_requests: Vec<AttackRequest>,
 }
 
 impl FxWorld {
@@ -134,12 +141,36 @@ pub fn step(
     let effect_infos: Vec<EffectInfo> = world
         .effects
         .iter()
-        .map(|e| EffectInfo { id: e.id, ty: e.ty, sub_type: e.sub_type, owner: e.owner, position: e.position, angle: e.angle })
+        .map(|e| EffectInfo { id: e.id, ty: e.ty, sub_type: e.sub_type, owner: e.owner, position: e.position, angle: e.angle, life_time: e.life_time, pk_key: e.pk_key, kind: e.kind, skill: e.skill })
         .collect();
     let mut deletes: Vec<Delete> = Vec::new();
-    let mut spawns: Vec<Spawn> = std::mem::take(&mut world.pending);
+    let pending: Vec<Spawn> = std::mem::take(&mut world.pending);
+    let mut spawns: Vec<Spawn> = Vec::new();
+    world.models.set_world(world_active);
+    let free = [
+        MAX_PARTICLES.saturating_sub(world.particles.len()),
+        MAX_JOINTS.saturating_sub(world.joints.len()),
+        MAX_EFFECTS.saturating_sub(world.effects.len()),
+    ];
 
-    let FxWorld { particles, joints, effects, sprites, rng, next_effect_id, earthquake, casts, blurs: world_blurs, map_objects, ticks, sounds, .. } = world;
+    let FxWorld {
+        particles,
+        joints,
+        effects,
+        sprites,
+        rng,
+        next_effect_id,
+        earthquake,
+        casts,
+        blurs: world_blurs,
+        map_objects,
+        ticks,
+        sounds,
+        models,
+        hero_skills,
+        attack_requests,
+        ..
+    } = world;
     let mut ctx = Ctx {
         rng,
         world_time,
@@ -156,6 +187,12 @@ pub fn step(
         sounds,
         effects: &effect_infos,
         deletes: &mut deletes,
+        registry,
+        models,
+        hero_skills,
+        attack_requests,
+        free,
+        depth: 0,
     };
 
     // Map objects (`MoveObjects` / `UpdateObjectVisual`): only nearby ones, like the original,
@@ -248,48 +285,21 @@ pub fn step(
         }
     }
 
-    // Create what was requested (and whatever the create functions request in turn).
-    let mut rounds = 0;
-    while !ctx.spawns.is_empty() && rounds < 8 {
-        rounds += 1;
-        let batch = std::mem::take(ctx.spawns);
-        for s in batch {
-            match s {
-                Spawn::Particle(mut p) => {
-                    if let Some(create) = registry.particles.get(&p.ty).and_then(|k| k.create) {
-                        create(&mut p, &mut ctx);
-                    }
-                    p.prev_position = p.position;
-                    p.prev_scale = p.scale;
-                    p.prev_light = p.light;
-                    if p.live && particles.len() < MAX_PARTICLES {
-                        particles.push(p);
-                    }
-                }
-                Spawn::Joint(mut j) => {
-                    if let Some(create) = registry.joints.get(&j.ty).and_then(|k| k.create) {
-                        create(&mut j, &mut ctx);
-                    }
-                    if j.create_tails && j.tails.is_empty() {
-                        j.tails.push(j.make_tail());
-                    }
-                    if j.live && joints.len() < MAX_JOINTS {
-                        joints.push(j);
-                    }
-                }
-                Spawn::Effect(mut e) => {
-                    if let Some(create) = registry.effects.get(&e.ty).and_then(|k| k.create) {
-                        create(&mut e, &mut ctx);
-                    }
-                    e.prev_position = e.position;
-                    e.prev_angle = e.angle;
-                    if e.live && effects.len() < MAX_EFFECTS {
-                        effects.push(e);
-                    }
-                }
-            }
+    // Requests from outside the engine (characters, map objects): their creation code runs now.
+    // What the kinds created during the tick already ran it, in the middle of their code.
+    for sp in pending {
+        ctx.spawn(sp);
+    }
+    for sp in std::mem::take(ctx.spawns) {
+        match sp {
+            Spawn::Particle(p) if particles.len() < MAX_PARTICLES => particles.push(p),
+            Spawn::Joint(j) if joints.len() < MAX_JOINTS => joints.push(j),
+            Spawn::Effect(e) if effects.len() < MAX_EFFECTS => effects.push(e),
+            _ => {}
         }
     }
+    let overflow = ctx.attack_requests.len().saturating_sub(64);
+    ctx.attack_requests.drain(..overflow);
 
     // Deletions requested during the tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`).
     for d in deletes {

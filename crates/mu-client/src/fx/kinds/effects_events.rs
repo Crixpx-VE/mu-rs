@@ -153,7 +153,7 @@ fn halloween_ex_create(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzEffect.cpp:7612: the case only breaks (it dies on its first tick, `LifeTime` is 0).
 fn halloween_ex_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_HALLOWEEN_CANDY_BLUE/ORANGE/YELLOW/RED/HOBAK/STAR ----------------------------------------
@@ -210,7 +210,7 @@ fn candy_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_FIRE, e.position, e.angle, e.light, 5, scale, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS_EVENT_BOX/CANDY/TREE/SOCKS ---------------------------------------------------------
@@ -247,7 +247,7 @@ fn xmas_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 
     e.position += e.direction;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS_EVENT_ICEHEART (Santa transformation) -----------------------------------------------
@@ -269,7 +269,7 @@ fn iceheart_step(e: &mut Effect, ctx: &mut Ctx) {
             e.live = false;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18360 → `RenderObject` → ZzzObject.cpp:1683-1689: `BodyLight` (1, 0.4, 0.4),
@@ -325,7 +325,7 @@ fn snowman_head_step(e: &mut Effect, ctx: &mut Ctx) {
 
         e.position += e.direction;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_XMAS2008_SNOWMAN_BODY (the dying snowman's body) -----------------------------------------
@@ -346,7 +346,7 @@ fn snowman_body_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn snowman_body_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     e.animation_frame += e.velocity / 5.0;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18646 → `RenderObject` → ZzzObject.cpp:1899-1905: meshes 0, 2 (and 3, which this
@@ -412,7 +412,7 @@ fn newyear_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 
     e.position += e.direction;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18369 → `RenderObject` → ZzzObject.cpp:1694-1700: `RENDER_TEXTURE`, then a
@@ -468,7 +468,7 @@ fn moon_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => e.scale += 0.01,
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
     // RenderEffects (ZzzEffect.cpp:18380): `o->m_iAnimation++` once per rendered frame.
     if e.sub_type == 0 {
         e.user[0] += 1.0;
@@ -530,7 +530,7 @@ fn songpyeon_step(e: &mut Effect, ctx: &mut Ctx) {
         e.gravity = -e.gravity * 0.3;
         e.life_time -= 2.0;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_CURSEDTEMPLE_HOLYITEM / PRODECTION_SKILL / RESTRAINT_SKILL ---------------------------------
@@ -563,7 +563,7 @@ fn holyitem_step(e: &mut Effect, ctx: &mut Ctx) {
             e.animation_frame += e.velocity / 3.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18411 → `RenderObject` → ZzzObject.cpp:623-635: two sprites, the body without
@@ -614,7 +614,7 @@ fn protection_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_effect(BITMAP_SHOCK_WAVE, owner_position, e.angle, e.light, 10, e.owner, -1, 0, 0, 0.0);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18412 → `RenderObject` → ZzzObject.cpp:636-641: `BodyLight` (0.3, 0.3, 1),
@@ -648,7 +648,7 @@ fn restraint_step(e: &mut Effect, ctx: &mut Ctx) {
             e.animation_frame += e.velocity / 3.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:18417 → `RenderObject` → ZzzObject.cpp:642-646:
@@ -699,7 +699,7 @@ fn statue_part_step(e: &mut Effect, ctx: &mut Ctx) {
     } else {
         e.alpha -= 0.01;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_HEAD / RED_HEAD --------------------------------------------
@@ -748,7 +748,7 @@ fn assassin_head_step(e: &mut Effect, ctx: &mut Ctx) {
     // vPosition = Position + Angle·(0, 0, 0) = Position.
     let sub = if e.ty == MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_HEAD { 4 } else { 3 };
     ctx.create_effect(BITMAP_FIRE_CURSEDLICH, e.position, e.angle, Vec3::ONE, sub, Some(Target::Effect(e.id)), -1, 0, 0, 0.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_PKFIELD_ASSASSIN_EFFECT_GREEN_BODY / RED_BODY --------------------------------------------
@@ -768,5 +768,5 @@ fn assassin_body_step(e: &mut Effect, ctx: &mut Ctx) {
     if e.life_time < 20.0 {
         e.alpha = 0.1 * e.life_time;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }

@@ -262,7 +262,7 @@ fn wolf_head_create(e: &mut Effect, ctx: &mut Ctx) {
 fn wolf_head_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     wolf_head_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17056.
@@ -316,7 +316,7 @@ fn sbumb_create(e: &mut Effect, ctx: &mut Ctx) {
 fn sbumb_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     sbumb_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17106.
@@ -355,13 +355,13 @@ fn down_dummy_create(e: &mut Effect, ctx: &mut Ctx) {
 fn down_dummy_l_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     down_dummy_move(e, ctx, false);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn down_dummy_r_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     down_dummy_move(e, ctx, true);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17133 (left) and 17175 (right).
@@ -403,7 +403,7 @@ fn swordeff_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn swordeff_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     swordeff_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17220.
@@ -548,7 +548,7 @@ fn shockwave01_step(e: &mut Effect, ctx: &mut Ctx) {
             e.position.z = 220.0 + e.scale * 80.0;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2494-2526: `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0, ...)` once or
@@ -592,7 +592,7 @@ fn shockwave02_step(e: &mut Effect, ctx: &mut Ctx) {
     e.scale += 0.1;
     e.start_position *= 0.95;
     e.position -= e.start_position;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects ZzzEffect.cpp:19098 → ZzzObject.cpp:2527: `BodyLight = Light`, `RenderBody`
@@ -619,7 +619,7 @@ fn damage1_create(e: &mut Effect, ctx: &mut Ctx) {
 fn damage1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     damage1_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17353.
@@ -667,7 +667,7 @@ fn spin01_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.light *= 0.9;
     e.alpha = 1.0;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2533: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)`.
@@ -697,7 +697,7 @@ fn event_cloud_step(e: &mut Effect, ctx: &mut Ctx) {
     }
     e.angle.x = (ctx.world_time() as i32).wrapping_neg() as f32 * 0.5;
     e.light *= 0.9;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects ZzzEffect.cpp:19091: `EnableAlphaBlend` + `RenderTerrainAlphaBitmap`.
@@ -721,7 +721,7 @@ fn windfoce_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn windfoce_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     windfoce_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17409.
@@ -791,7 +791,7 @@ fn shiny4_step(e: &mut Effect, ctx: &mut Ctx) {
     let y = e.position.y + (ctx.rand() % 100 - 40) as f32;
     let z = e.position.z + (ctx.rand() % 100 + 50) as f32;
     ctx.create_particle(BITMAP_SHINY + 4, Vec3::new(x, y, z), e.angle, e.light, 2, e.scale, None);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- BITMAP_LIGHT_RED -------------------------------------------------------------------------------
@@ -822,7 +822,7 @@ fn light_red_create(e: &mut Effect, ctx: &mut Ctx) {
 fn light_red_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     light_red_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
     // What RenderEffects (ZzzEffect.cpp:19158) does while drawing subtype 0: VectorCopy(o->Owner->
     // Position, o->Position). Moved here (once per tick).
     if let Some(p) = ctx.target_position(e.owner) {
@@ -934,7 +934,7 @@ fn mirror_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn mirror_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     mirror_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17565.
@@ -977,7 +977,7 @@ fn sword_mono_step(e: &mut Effect, ctx: &mut Ctx) {
         };
         ctx.create_effect(MODEL_SHOCKWAVE01, e.position, e.angle, light, 2, e.owner, -1, 0, 0, 1.0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_WOLF_HEAD_EFFECT2 ------------------------------------------------------------------------
@@ -1015,7 +1015,7 @@ fn wolf_head2_create(e: &mut Effect, ctx: &mut Ctx) {
 fn wolf_head2_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     wolf_head2_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17611. (Its `else if (o->SubType == 4)` branch is unreachable: 4 is taken by the
@@ -1078,7 +1078,7 @@ fn ground01_step(e: &mut Effect, ctx: &mut Ctx) {
         2 => 0.7,
         _ => 0.8,
     };
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2555: `BodyLight = Light * 6`, `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha,
@@ -1109,7 +1109,7 @@ fn dragon_kick_create(e: &mut Effect, ctx: &mut Ctx) {
 fn dragon_kick_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     dragon_kick_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17691.
@@ -1199,7 +1199,7 @@ fn lava_create(e: &mut Effect, ctx: &mut Ctx) {
 fn lava_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     lava_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17785.
@@ -1289,7 +1289,7 @@ fn dragon_lower_create(e: &mut Effect, ctx: &mut Ctx) {
 fn dragon_lower_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     // pModel->PlayAnimation(..., o->Velocity, ...) inside the case (the common tail plays it again).
-    common::play_animation(e);
+    common::play_animation(e, ctx);
     if e.animation_frame > 1.0 && e.animation_frame < 6.0 {
         let mut temp = e.position;
         temp.z = 250.0;
@@ -1300,7 +1300,7 @@ fn dragon_lower_step(e: &mut Effect, ctx: &mut Ctx) {
         e.life_time = 80.0;
     }
     e.alpha *= 0.96;
-    move_tail(e);
+    move_tail(e, ctx);
 
     // RenderEffects 19105-19107: PlayAnimation(..., o->Velocity / 6, ...) every rendered frame.
     if e.current_action != 255 {
@@ -1336,7 +1336,7 @@ fn targetmon_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn targetmon_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     targetmon_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17903.
@@ -1392,7 +1392,7 @@ fn volcano_create(e: &mut Effect, ctx: &mut Ctx) {
 fn volcano_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = luminosity(e, ctx);
     volcano_move(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:17942.
@@ -1489,7 +1489,7 @@ fn volcano_stone_step(e: &mut Effect, ctx: &mut Ctx) {
 
     let scale = e.scale * (ctx.rand() % 5 + 5) as f32 * 0.1;
     fire(ctx, e.position, e.angle, Vec3::ONE, [0, 4, 0], scale);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzObject.cpp:2595: `BodyLight = Light`, `RenderBody(RENDER_TEXTURE, ...)`.

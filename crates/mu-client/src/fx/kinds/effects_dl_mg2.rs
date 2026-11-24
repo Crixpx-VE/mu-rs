@@ -223,7 +223,7 @@ fn nasa_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 0 {
         e.blend_mesh_light = lt as f32 * 0.01;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Default RenderObject → ZzzObject.cpp:505: BodyLight (0.5, 0.5, 0.9).
@@ -261,7 +261,7 @@ fn cylinder_step(e: &mut Effect, ctx: &mut Ctx) {
         e.blend_mesh_light = life(e) as f32 * 0.015;
         e.scale += 0.08;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Default RenderObject → ZzzObject.cpp:510: BodyLight (0.4, 0.5, 1).
@@ -295,7 +295,7 @@ fn skill_fissure_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(MODEL_FISSURE_LIGHT, e.position, angle, e.light, 0, me(e), -1, 0, 0, 0.0);
         e.live = false;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_FISSURE / MODEL_FISSURE_LIGHT --------------------------------------------------------------
@@ -337,13 +337,13 @@ fn fissure_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_particle(BITMAP_SMOKE, position, e.angle, Vec3::ONE, 21, 1.0, None);
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// `MODEL_FISSURE_LIGHT` has no `case` in `MoveEffect`: only the common tail.
 fn fissure_light_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_BALGAS_SKILL --------------------------------------------------------------------------------
@@ -363,7 +363,7 @@ fn balgas_step(e: &mut Effect, ctx: &mut Ctx) {
     // `Models[MODEL_BALGAS_SKILL].Actions[0].Loop = false` (ZzzOpenData.cpp:4176).
     play_anim(e, e.velocity * 2.0);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_SHIELD_CRASH / MODEL_SHIELD_CRASH2 ---------------------------------------------------------
@@ -434,7 +434,7 @@ fn shield_crash_step(e: &mut Effect, ctx: &mut Ctx) {
         }
     }
     // The common tail then moves it by `Direction` (the color) rotated by `Angle`, as the original.
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:611.
@@ -453,7 +453,7 @@ fn shield_crash2_step(e: &mut Effect, ctx: &mut Ctx) {
     if let Some(p) = ctx.target_position(e.owner) {
         e.position = p;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_BLADE_SKILL ------------------------------------------------------------------------------
@@ -532,7 +532,7 @@ fn blade_step(e: &mut Effect, ctx: &mut Ctx) {
             // equipment and skill tables, not available to effects).
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Default RenderObject → ZzzObject.cpp:1649: `BodyLight = Light` and three passes of
@@ -674,7 +674,7 @@ fn blow_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 
     // RenderEffects 18760 (SubType 0): a sprite whose scale uses rand(), drawn by the render that
     // follows this tick (LifeTime already decremented).
@@ -742,7 +742,7 @@ fn plancrack_b_create(e: &mut Effect, _ctx: &mut Ctx) {
 fn fade_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     e.alpha -= 0.04;
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:15289.
@@ -753,7 +753,7 @@ fn plancrack_a_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 1 {
         e.alpha *= 0.9;
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18787 → ZzzObject.cpp:594: `BodyLight = Light · Alpha` and
@@ -842,7 +842,7 @@ fn flame_strike_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// RenderEffects 18794: the model hangs from the owner's bone 33 (`RotationPosition` sets the
@@ -914,7 +914,7 @@ fn star_shine_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         ctx.create_sprite(BITMAP_SHINY, e.position, e.scale, e.light, e.angle.x, 0);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_FEATHER / MODEL_FEATHER_FOREIGN ----------------------------------------------------------
@@ -978,7 +978,7 @@ fn feather_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         e.angle += eye_right(e);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// ZzzEffect.cpp:4987.
@@ -1000,7 +1000,7 @@ fn feather_foreign_step(e: &mut Effect, ctx: &mut Ctx) {
         e.alpha *= 0.97;
         e.angle += eye_right(e);
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Default RenderObject → ZzzObject.cpp:1822 / 1906: mesh 0 with `RENDER_TEXTURE`, BlendMesh 0 and
@@ -1075,7 +1075,7 @@ fn move_target_step(e: &mut Effect, ctx: &mut Ctx) {
             e.light *= e.blend_mesh_light;
         }
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 // --- MODEL_EFFECT_SD_AURA ---------------------------------------------------------------------------
@@ -1099,7 +1099,7 @@ fn sd_aura_step(e: &mut Effect, ctx: &mut Ctx) {
         }
         None => e.live = false,
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 /// Default RenderObject → ZzzObject.cpp:2402: `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha,
@@ -1136,5 +1136,5 @@ fn aurora_step(e: &mut Effect, ctx: &mut Ctx) {
         e.live = false;
     }
     e.blend_mesh_tex_coord.x = ctx.world_time() * 0.0005;
-    move_tail(e);
+    move_tail(e, ctx);
 }

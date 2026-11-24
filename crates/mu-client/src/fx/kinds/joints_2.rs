@@ -1614,7 +1614,7 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
                 let mut nj = Joint::new(BITMAP_FLARE, j.position, j.position, j.angle, 44, j.target, j.scale);
                 nj.pk_key = 0;
                 nj.light = j.light;
-                ctx.spawns.push(Spawn::Joint(nj));
+                ctx.spawn_joint(nj);
             }
         } else {
             j.live = false;

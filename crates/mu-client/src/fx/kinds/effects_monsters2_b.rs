@@ -417,7 +417,7 @@ fn gaion_step(e: &mut Effect, ctx: &mut Ctx) {
         20 => step_sub20(e),
         _ => {}
     }
-    move_tail(e);
+    move_tail(e, ctx);
 }
 
 fn rate_of(e: &Effect, ext: i32) -> f32 {

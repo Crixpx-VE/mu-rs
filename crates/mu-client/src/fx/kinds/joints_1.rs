@@ -2078,7 +2078,7 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
                     let mut nj = Joint::new(BITMAP_JOINT_THUNDER, p, j.target_position, j.angle, 28, j.target, scale);
                     nj.pk_key = -1;
                     nj.light = j.light;
-                    ctx.spawns.push(Spawn::Joint(nj));
+                    ctx.spawn_joint(nj);
                 }
             }
             break;
