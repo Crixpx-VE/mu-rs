@@ -15,6 +15,7 @@ pub mod minimap;
 pub mod monsters;
 pub mod objects;
 pub mod path;
+pub mod quest;
 pub mod reader;
 pub mod terrain;
 pub mod texture;
