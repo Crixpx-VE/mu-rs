@@ -170,17 +170,27 @@ fn skull_step(e: &mut Effect, ctx: &mut Ctx) {
     } else {
         // `!o->Owner->Live` (the original crashes without an owner; here that ends the effect).
         // The owner is a character: an effect owner is treated as gone.
-        let owner = ctx.actor(e.owner).filter(|a| a.live).map(|a| (a.position, a.scale));
+        let owner = ctx.actor(e.owner).filter(|a| a.live).map(|a| (a.position, a.scale, a.has_buff(eDeBuff_Defense), a.has_buff(eBuff_Cloaking)));
         match owner {
             None => {
                 e.life_time = 0.0;
                 e.live = false;
             }
-            Some((owner_pos, owner_scale)) => match e.sub_type {
+            Some((owner_pos, owner_scale, defense_debuff, cloaking)) => match e.sub_type {
                 0 | 1 | 3 => {
-                    // TODO(original): subtype 0: if g_isCharacterBuff(Owner, eDeBuff_Defense) then
-                    // LifeTime = 10, and if also eBuff_Cloaking then Visible = false and no skulls
-                    // this tick; otherwise it falls through to subtypes 1/3 (done here).
+                    // Subtype 0 (ZzzEffect.cpp:7481-7489): under eDeBuff_Defense it keeps
+                    // LifeTime 10; cloaked as well, the effect hides and makes no skulls this
+                    // tick (`break`). Otherwise it falls through to subtypes 1/3.
+                    if e.sub_type == 0 && defense_debuff {
+                        e.life_time = 10.0;
+                        if cloaking {
+                            // (RenderEffects recomputes `Visible` every frame and draws
+                            // nothing for this type.)
+                            e.visible = false;
+                            common::move_tail(e, ctx);
+                            return;
+                        }
+                    }
                     for i in 0..3 {
                         let mut param = i as f32 * PI * 2.0 / 3.0 + lt(e) as f32 * 0.17;
                         if e.sub_type == 3 {
@@ -340,8 +350,8 @@ fn energy_step(e: &mut Effect, ctx: &mut Ctx) {
 /// `CheckTargetRange(o)` for `BITMAP_ENERGY` (ZzzEffect.cpp:366, 407): on reaching its owner
 /// (within 100 units) it ends with a spark.
 fn check_target_range(e: &mut Effect, ctx: &mut Ctx) {
-    // TODO(original): also requires Owner->Visible (frustum), not known here.
-    let Some(to) = ctx.actor(e.owner).filter(|a| a.live) else { return };
+    // `to != NULL && to->Live && to->Visible` (the only creator passes a character, ZzzCharacter.cpp:4974).
+    let Some(to) = ctx.actor(e.owner).filter(|a| a.live && a.visible) else { return };
     let dx = e.position.x - to.position.x;
     let dy = e.position.y - to.position.y;
     if (dx * dx + dy * dy).sqrt() <= 100.0 {
@@ -375,7 +385,7 @@ fn spark1_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- BITMAP_BOSS_LASER..+2 -------------------------------------------------------------------------
 
 /// ZzzEffect.cpp:1116.
-fn boss_laser_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn boss_laser_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 20.0;
     let p1 = match e.ty - BITMAP_BOSS_LASER {
         0 => {
@@ -403,8 +413,16 @@ fn boss_laser_create(e: &mut Effect, _ctx: &mut Ctx) {
         }
     };
     e.direction = rotate(e.angle, p1);
-    // TODO(original): if Owner == Hero, AttackCharacterRange(o->Skill, P, 150, o->Weapon, o->PKKey)
-    // at 4 points P stepping by (0, -150, 0) rotated by Angle from the position (damage system).
+    // ZzzEffect.cpp:1155-1167: the hero's laser hits along 4 points 150 units apart.
+    if ctx.hero.is_some() && e.owner == ctx.hero.map(Target::Actor) {
+        let direction = rotate(e.angle, Vec3::new(0.0, -150.0, 0.0));
+        let mut position = e.position;
+        for _ in 0..4 {
+            position += direction;
+            // `o->Weapon` is not set by CreateEffect (the slot keeps an old value); 0 here.
+            ctx.attack_character_range(e.skill, position, 150.0, e.weapon, e.pk_key);
+        }
+    }
 }
 
 /// No `MoveEffect` case; the common tail only animates (no `MoveParticle` for these types).
@@ -843,14 +861,16 @@ fn magic2_step(e: &mut Effect, ctx: &mut Ctx) {
             while i < lt(e) && num_bones > 0 {
                 i += 1;
                 let index = (ctx.rand() % num_bones) as usize;
-                // TODO(original): bones flagged `Dummy` are skipped (`continue`, no more rand()):
-                // Actor does not say which ones they are.
+                if owner.is_dummy_bone(index) {
+                    continue;
+                }
                 let p = Vec3::new((-50 + ctx.rand() % 100) as f32, (-10 + ctx.rand() % 20) as f32, (-10 + ctx.rand() % 20) as f32);
                 // TransformPosition(..., true): BodyOrigin = StartPosition.
                 let position = owner.bone_world(index, p) - owner.position + e.start_position;
                 ctx.create_particle(BITMAP_LIGHT, position, owner.angle, Vec3::ONE, 8, 1.0, None);
             }
-            // TODO(original): o->Owner->Alpha = LifeTime / 80 (the character fades out).
+            // TODO(original): o->Owner->Alpha = LifeTime / 80.0f (the character fades out): writes
+            // to the owner are not possible (actors are read-only snapshots).
         }
     } else if s == 9 {
         e.scale += 0.3;
@@ -1032,7 +1052,9 @@ fn bone_sparkles(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 100.0;
     let Some(owner) = ctx.actor(e.owner).cloned() else { return };
     let Some(bone) = random_bone(ctx, &owner) else { return };
-    // TODO(original): nothing is created on bones flagged `Dummy` (unknown in Actor).
+    if owner.is_dummy_bone(bone) {
+        return;
+    }
     let mut world = owner.bone_world(bone, Vec3::new(0.0, 0.0, 100.0));
     if ctx.rand() % 2 == 0 {
         world.z -= 20.0;
@@ -1106,8 +1128,8 @@ fn pin_light_step(e: &mut Effect, ctx: &mut Ctx) {
             } else {
                 e.scale -= 0.02;
                 e.alpha -= 0.001;
-                // TODO(original): skipped if bone 11 of the owner's model is `Dummy`.
-                if let Some(owner) = ctx.actor(e.owner) {
+                // Nothing when bone 11 of the owner's model is `Dummy`.
+                if let Some(owner) = ctx.actor(e.owner).filter(|o| !o.is_dummy_bone(11)) {
                     let world = owner.bone_world(11, Vec3::ZERO);
                     e.position = world;
                     ctx.create_sprite(BITMAP_PIN_LIGHT, world, e.scale, e.light, e.angle.y, 0);

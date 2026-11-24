@@ -643,14 +643,8 @@ fn twilight_step(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- BITMAP_SHOCK_WAVE (shock wave ground ring) ----------------------------------------------------------
 
-/// `user[3]`: 1 when the effect is in Hellas (Kalima), for `RenderEffectShadows`.
-fn store_hellas(e: &mut Effect, ctx: &Ctx) {
-    e.user[3] = if common::in_hellas(ctx.world_active) { 1.0 } else { 0.0 };
-}
-
 /// ZzzEffect.cpp:3765-3847.
 fn shock_wave_create(e: &mut Effect, ctx: &mut Ctx) {
-    store_hellas(e, ctx);
     match e.sub_type {
         0 => {
             e.life_time = 30.0;
@@ -718,7 +712,6 @@ fn shock_wave_create(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzEffect.cpp:13450-13573.
 fn shock_wave_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = common::luminosity(e, ctx);
-    store_hellas(e, ctx);
     let lt = e.life_time as i32;
     // Subtypes 6 and 14 `break` out of the case before the scale clamp and the light code.
     let mut done = false;
@@ -789,10 +782,13 @@ fn shock_wave_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// `RenderEffectShadows` for `BITMAP_TWLIGHT` and `BITMAP_SHOCK_WAVE` (ZzzEffect.cpp:19575-19587).
-fn shock_wave_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    if e.ty == BITMAP_SHOCK_WAVE && e.user[3] != 0.0 && e.sub_type != 6 {
-        // TODO(original): in Hellas the ring is drawn with RenderWaterTerrain (on the Kalima water
-        // surface, `CSWaterTerrain::RenderWaterAlphaBitmap`, depth mask off); drawn on the ground here.
+fn shock_wave_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    if e.ty == BITMAP_SHOCK_WAVE && common::in_hellas(ctx.world_active) && e.sub_type != 6 {
+        // TODO(original): in Hellas the ring is drawn with RenderWaterTerrain (ZzzEffect.cpp:19577-19580,
+        // depth mask off): `CSWaterTerrain::RenderWaterAlphaBitmap` (CSWaterTerrain.cpp:312) lays
+        // the same tiles on the Kalima water, each vertex at `m_iWaveHeight[0][cell] + 400`.
+        // `water_terrain.rs` does not expose the ripple page 0 to the effects; drawn on the
+        // ground here.
     }
     common::terrain_bitmap(out, e.ty, e.position.x, e.position.y, e.scale, e.scale, e.light, -e.angle.z, 1.0, 5.0, Blend::Glow);
 }
@@ -989,7 +985,9 @@ fn joint_force_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// The `MODEL_SWORD_FORCE` case of `MoveEffect` (ZzzEffect.cpp:14767-14832, with the
 /// `PBG_ADD_NEWCHAR_MONK_SKILL` subtypes 2 and 3), reached by `BITMAP_JOINT_FORCE` through the
-/// missing `break`.
+/// missing `break`. Same code as the case part of `sword_force_step` in `effects_dl_mg1.rs`
+/// (private copy: that one also runs `MODEL_SWORD_FORCE`'s own tail, which a `BITMAP_*` type does
+/// not have; here the common tail is only `MoveParticle(o, true)`).
 fn sword_force_fallthrough(e: &mut Effect, ctx: &mut Ctx) {
     let lt = e.life_time as i32;
     if e.sub_type == 0 || e.sub_type == 2 {
