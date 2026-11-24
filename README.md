@@ -23,6 +23,103 @@ formulas, timings and numbers are taken from the original client logic, not gues
 | `mu-server` | Connect + Game Server in one program: accounts, characters, enter world, walking, monster spawns | Early, not playable yet |
 | `mu-launcher` | `mu-launcher` (updates the client and starts it) and `mu-update-server` (serves the client folder) | Works |
 
+## Features
+
+**Overall progress: 44 of 79 features done (56%)**
+
+`███████████░░░░░░░░░` 56%
+
+Checked items work in the client against [OpenMU](https://github.com/MUnique/OpenMU) unless they
+say otherwise; the last section is our own server. The list grows as the game does, so the
+percentage measures what is listed, not the whole original game.
+
+- **Engine and world**
+  - [x] Terrain: heights, light map, texture layers, slopes, tiles without ground
+  - [x] Terrain water, Atlans/Kalima seas, Vulcanus lava
+  - [x] Grass with wind
+  - [x] Dynamic lights on the ground (fires, effects)
+  - [x] Map objects of every Season 6 map with the original drawing rules (additive meshes, glow, scrolling textures, hidden objects)
+  - [x] Animated objects, roofs that fade when you walk inside
+  - [x] Leaves, rain, snow, embers, sand and smoke layers per map
+  - [x] Birds, bats, butterflies, fish, crows and the other ambient creatures
+  - [x] Character and monster shadows, original model lighting
+  - [x] Ambient sounds and music of every map
+  - [x] Fixed 25 Hz game logic with interpolation (smooth at any frame rate)
+  - [x] Effects engine (particles, trails, sprites, effect models)
+  - [ ] All effect types of the original (many are translated, not all)
+  - [x] Dragon invasion event (visual)
+- **Login and characters**
+  - [x] Title and loading screens
+  - [x] Login screen with the original tour camera
+  - [x] Server list and login with the original error messages
+  - [x] Character selection, creation (7 classes) and deletion
+  - [x] Options and credits windows
+- **Hero**
+  - [x] Click to walk and hold to follow the mouse (path finding)
+  - [x] Original camera and zoom levels
+  - [x] Armour, weapons and wings on the character, with their glow by level
+  - [x] Sitting, leaning and healing objects, chat gestures
+  - [x] Dark Knight skills with their effects (offline)
+  - [ ] Skills of the other classes
+  - [ ] Pets and mounts (Dark Horse, Fenrir, Dinorant...)
+- **Interface**
+  - [x] Main bar with life/mana/AG/SD orbs and experience
+  - [x] Chat, whispers, server notices, text over heads
+  - [x] Character window (C) with the original formulas
+  - [x] Inventory window (V) with 3D items, tooltips and equipment
+  - [x] Move window (M) and minimap (Tab)
+  - [x] Names and outline on mouse over
+  - [ ] Skill bar and hotkeys for potions
+  - [ ] Quest window
+  - [ ] Party, guild and friends windows
+  - [ ] Trade and personal store
+  - [ ] Chaos Machine mixes
+- **Network and gameplay (against the server)**
+  - [x] Connect Server, encryption (SimpleModulus, Xor32, Xor3)
+  - [x] Enter the world, other players in view, walking sync
+  - [x] Chat, whispers, notices, animations
+  - [x] Map travel (M window, walk-in gates)
+  - [x] Monsters and NPCs from the server (appear, walk, leave the view)
+  - [ ] Inventory from the server and moving items (in progress)
+  - [ ] Talking to NPCs
+  - [ ] NPC shops: buy, sell, repair
+  - [ ] Vault
+  - [ ] Quests (Sevina, Marlon...)
+  - [ ] Attacking monsters, damage numbers
+  - [ ] Monsters attacking, death and respawn
+  - [ ] Experience, level up, stat points
+  - [ ] Item drops, picking up items and zen
+  - [ ] Potions and consumables
+  - [ ] Party, guild, trade, duel
+  - [ ] Events (Blood Castle, Devil Square, Chaos Castle...)
+- **Launcher**
+  - [x] Automatic updates, compressed and parallel downloads
+  - [x] Self-update
+  - [x] Update server (`mu-update-server`)
+  - [x] Client logs uploaded to the server
+- **Our server (`mu-server`)**
+  - [x] Accounts and characters (JSON), login, character list, create, delete
+  - [x] Enter the world, walking, players in view
+  - [x] Chat, whispers, notices, Game Master `/goldnotice`
+  - [x] Map travel and walk-in gates
+  - [x] Monster and NPC spawns from three Season 6 data sets, monsters wandering in their area
+  - [x] Connect Server
+  - [ ] Database storage (instead of JSON)
+  - [ ] Inventory and items with atomic operations (no duplication possible)
+  - [ ] NPC shops and vault
+  - [ ] Combat, experience and drops
+  - [ ] Skills
+  - [ ] Quests
+  - [ ] Party and guild
+  - [ ] Trade
+  - [ ] Events
+  - [ ] Character stats from the original formulas for every class
+  - [ ] Game Master commands beyond notices
+  - [ ] Anti-cheat checks (speed, distance, packet validation)
+  - [ ] Monster AI: chasing and attacking players
+  - [ ] Pets and mounts
+  - [ ] Personal stores
+
 ## Building
 
 Requirements:
@@ -110,8 +207,11 @@ commit game data or secrets). English is the project language for commits, docs 
 
 Licensed under either of [Apache License 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT), at your option.
 
-*MU Online is a trademark of Webzen Inc. This is a non-commercial fan project, not affiliated with
-or endorsed by Webzen. It contains no game assets: you need your own client data.*
+## Legal
+
+MU Online is a trademark of Webzen Inc. This is a non-commercial fan project, not affiliated with
+or endorsed by Webzen. It contains no game assets: you need your own client data. See
+[LEGAL.md](LEGAL.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -128,6 +228,8 @@ las fórmulas, tiempos y números salen de la lógica del cliente original, no s
 > generadores de tablas en [`tools/`](tools) y bots de prueba que entran y juegan contra un servidor.
 
 ### Estado
+
+La lista completa de funciones y lo que falta está en [Features](#features) (en inglés).
 
 | Crate | Qué es | Estado |
 |---|---|---|
@@ -204,5 +306,8 @@ datos del juego ni secretos). El idioma del proyecto es el inglés: commits, doc
 
 A tu elección, [Apache License 2.0](LICENSE-APACHE) o [MIT](LICENSE-MIT).
 
-*MU Online es una marca de Webzen Inc. Es un proyecto de fans sin ánimo de lucro, sin relación con
-Webzen ni respaldado por ellos. No contiene archivos del juego: necesitas tus propios datos del cliente.*
+### Aviso legal
+
+MU Online es una marca de Webzen Inc. Es un proyecto de fans sin ánimo de lucro, sin relación con
+Webzen ni respaldado por ellos. No contiene archivos del juego: necesitas tus propios datos del cliente.
+Ver [LEGAL.md](LEGAL.md) y [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

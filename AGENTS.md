@@ -52,6 +52,11 @@ what you expected. Commit the generator and its output together.
   so the game looks the same at 60, 144 or 240 fps. Never scale "per frame" values by the frame
   rate.
 - Network work happens on separate threads (`mu-client/src/net.rs`); systems read `FromServer`.
+- **The server is the only authority over items and zen.** The client only *requests* (move, buy,
+  sell, repair, vault, drop, pick up) and changes its inventory or money when the server answers,
+  like the original client. Never predict or apply those changes locally. On the server side
+  (`mu-server`), every item/zen operation is validated and stored atomically, with no intermediate
+  state that two concurrent requests or a dropped connection could exploit (no dupes, ever).
 - New packets go in `mu-protocol` with an encode/decode test using real bytes (from the original
   or captured from OpenMU).
 
