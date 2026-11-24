@@ -26,6 +26,7 @@ pub mod fire;
 pub mod effects_elf;
 pub mod effects_summoner;
 pub mod effects_wizard;
+pub mod effects_dl_mg1;
 
 use super::core::Registry;
 
@@ -53,4 +54,5 @@ pub fn register_all(r: &mut Registry) {
     effects_elf::register(r);
     effects_summoner::register(r);
     effects_wizard::register(r);
+    effects_dl_mg1::register(r);
 }
