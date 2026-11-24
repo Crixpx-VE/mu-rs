@@ -1,2 +1,24 @@
 /target
 /target-traza
+
+# Nothing private or game-owned goes in the repo / Nada privado ni del juego va al repo:
+# client data, accounts, logs, launcher config (server address), keys and secrets.
+/Data/
+/dist/
+/referencias/
+cuentas.json*
+*.log
+mu-launcher.txt
+trace-*.json
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+id_rsa*
+id_ed25519*
+*-github
+*-github.pub
+
+__pycache__/

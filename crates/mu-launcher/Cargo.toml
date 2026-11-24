@@ -3,6 +3,7 @@ name = "mu-launcher"
 description = "Lanzador que actualiza el cliente al abrirse, y el servidor de actualizaciones"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "mu-launcher"
