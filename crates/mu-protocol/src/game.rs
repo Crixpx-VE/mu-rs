@@ -426,6 +426,45 @@ pub enum ClientMessage {
     /// `SendRequestAction(acción, dirección)` (`AnimationRequest`): `action` es un `AT_*` (ver
     /// [`action`]) y `rotation` la dirección 0..7 hacia donde mira.
     Animation { rotation: u8, action: u8 },
+    /// `SendRequestEquipmentItem` (wsclientinline.h): move the item in `from_slot` of
+    /// `from_storage` to `to_slot` of `to_storage` (see [`storage`]). `item` is the item being moved
+    /// (OpenMU ignores it). Only one move may be pending: the client waits for `ItemMoved` /
+    /// `ItemMoveFailed` before the next one (`EquipmentItem` flag).
+    ItemMove { from_storage: u8, from_slot: u8, item: [u8; 12], to_storage: u8, to_slot: u8 },
+    /// `SendRequestTalk(key)`: talk to the NPC with scope id `id`.
+    TalkToNpc { id: u16 },
+    /// `SendExitInventory`: close the NPC dialog (shop, vault...). Not encrypted.
+    CloseNpc,
+    /// `SendRequestBuy(index)`: buy the item in `slot` of the NPC store.
+    BuyItem { slot: u8 },
+    /// `SendRequestSell(index)`: sell the inventory item in `slot` (12-75) to the open NPC.
+    SellItem { slot: u8 },
+    /// `SendRequestRepair(index, addGold)`: repair `slot` (0xFF = all equipped items); `self_repair`
+    /// is the inventory "repair" button (`p_AddGold` 1), not an NPC.
+    RepairItem { slot: u8, self_repair: bool },
+}
+
+/// Item storages of [`ClientMessage::ItemMove`] and `ItemMoved` (`ItemStorageKind`, OpenMU
+/// CommonEnums.xml; the `REQUEST_EQUIPMENT_*` source/target types of Main 5.2).
+pub mod storage {
+    pub const INVENTORY: u8 = 0;
+    pub const TRADE: u8 = 1;
+    pub const VAULT: u8 = 2;
+    pub const CHAOS_MACHINE: u8 = 3;
+    pub const PERSONAL_SHOP: u8 = 4;
+}
+
+/// Inventory slots: equipment 0-11, the 8×8 grid 12-75 (`MAX_EQUIPMENT_INDEX`, `MAX_MY_INVENTORY_INDEX`).
+pub const FIRST_GRID_SLOT: u8 = 12;
+pub const GRID_SLOTS: u8 = 64;
+
+/// Window kinds of `NpcWindow` (`ReceiveTalk`, WSclient.cpp:5829: 2 vault, 3 Chaos Goblin...;
+/// any value without its own `case` opens the NPC shop).
+pub mod npc_window {
+    pub const MERCHANT: u8 = 0;
+    pub const MERCHANT1: u8 = 1;
+    pub const VAULT: u8 = 2;
+    pub const CHAOS_MACHINE: u8 = 3;
 }
 
 /// Un personaje de la lista de la pantalla de selección.
@@ -589,6 +628,31 @@ pub enum ServerMessage {
     /// Alguien hace una animación (`ReceiveAction`): `direction` como en `MapChanged`, `action` un
     /// `AT_*` (ver [`action`]) y `target` el id del objetivo (0 si no hay).
     ObjectAnimation { id: u16, direction: u8, action: u8, target: u16 },
+    /// The whole inventory after entering the world (`ReceiveInventory`, C4 F3 10): slot and the 12
+    /// item bytes of each item (equipment 0-11, grid 12-75, personal shop 204+).
+    InventoryList(Vec<(u8, [u8; 12])>),
+    /// `ReceiveEquipmentItem` (0x24) with `SubCode` != 255: the pending move was done and the item is
+    /// now in `slot` of `storage` (see [`storage`]).
+    ItemMoved { storage: u8, slot: u8, item: [u8; 12] },
+    /// `ReceiveEquipmentItem` with `SubCode` 255: the move was refused (`BackupPickedItem`).
+    ItemMoveFailed,
+    /// `ReceiveDeleteInventory` (0x28): the item in `slot` is gone (used up, stacked...).
+    ItemRemoved { slot: u8 },
+    /// `ReceiveDurability` (0x2A): new durability (or stack size) of the item in `slot`.
+    ItemDurability { slot: u8, durability: u8, by_consumption: bool },
+    /// `ReceiveTalk` (C3 30): the NPC dialog opens; `window` (see [`npc_window`]) says which one.
+    NpcWindow { window: u8 },
+    /// `ReceiveTradeInventory` (C2 31): items of the NPC store or of the vault (`kind` 0), with their
+    /// slot in that storage.
+    StoreItemList { kind: u8, items: Vec<(u8, [u8; 12])> },
+    /// `ReceiveBuy` (C1 32) with a slot: the bought item went to inventory slot `slot`.
+    ItemBought { slot: u8, item: [u8; 12] },
+    /// `ReceiveBuy` with `Index` 255 (or 254, "store closed"): the purchase failed.
+    BuyFailed { closed: bool },
+    /// `ReceiveSell` (C3 33, `PRECEIVE_GOLD`): `result` 0 = refused (the item goes back), 0xFF =
+    /// refused with a message, 0xFE = refused and the store closes, anything else = sold; `money` is
+    /// the zen after the sale (OpenMU sends 0 or 1).
+    SellResult { result: u8, money: u32 },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -651,6 +715,32 @@ fn fixed_c3(len: usize, code: u8, sub_code: u8) -> Vec<u8> {
     let mut p = fixed_c1(len, code, sub_code);
     p[0] = 0xC3;
     p
+}
+
+/// The same packet marked to go encrypted (C1 → C3, C2 → C4).
+fn encrypted(mut p: Vec<u8>) -> Vec<u8> {
+    p[0] = if p[0] == 0xC2 { 0xC4 } else { 0xC3 };
+    p
+}
+
+/// `[n] n × {slot, 12 item bytes}` from `i` (inventory, store and vault lists).
+fn read_item_list(d: &[u8], i: usize) -> Option<Vec<(u8, [u8; 12])>> {
+    let count = *d.get(i)? as usize;
+    (0..count)
+        .map(|k| {
+            let e = d.get(i + 1 + k * 13..i + 1 + (k + 1) * 13)?;
+            Some((e[0], e[1..13].try_into().ok()?))
+        })
+        .collect()
+}
+
+fn write_item_list(body: &mut Vec<u8>, items: &[(u8, [u8; 12])]) {
+    let items = &items[..items.len().min(255)];
+    body.push(items.len() as u8);
+    for (slot, item) in items {
+        body.push(*slot);
+        body.extend_from_slice(item);
+    }
 }
 
 fn put_u16_le(p: &mut [u8], i: usize, v: u16) {
@@ -807,6 +897,21 @@ impl ClientMessage {
                 p
             }
             Self::Animation { rotation, action } => c1(&[0x18, *rotation, *action]),
+            // `spe.Send(TRUE)`: encrypted (C3), except `SendExitInventory`.
+            Self::ItemMove { from_storage, from_slot, item, to_storage, to_slot } => {
+                let mut body = vec![0x24, *from_storage, *from_slot];
+                body.extend_from_slice(item);
+                body.extend_from_slice(&[*to_storage, *to_slot]);
+                encrypted(c1(&body))
+            }
+            Self::TalkToNpc { id } => {
+                let [h, l] = id.to_be_bytes();
+                encrypted(c1(&[0x30, h, l]))
+            }
+            Self::CloseNpc => c1(&[0x31]),
+            Self::BuyItem { slot } => encrypted(c1(&[0x32, *slot])),
+            Self::SellItem { slot } => encrypted(c1(&[0x33, *slot])),
+            Self::RepairItem { slot, self_repair } => encrypted(c1(&[0x34, *slot, *self_repair as u8])),
         }
     }
 
@@ -830,6 +935,20 @@ impl ClientMessage {
                 let (target, message) = read_chat(d)?;
                 return Some(Self::Whisper { target, message });
             }
+            0x24 if d.len() >= 19 => {
+                return Some(Self::ItemMove {
+                    from_storage: d[3],
+                    from_slot: d[4],
+                    item: d[5..17].try_into().ok()?,
+                    to_storage: d[17],
+                    to_slot: d[18],
+                });
+            }
+            0x30 => return Some(Self::TalkToNpc { id: get_u16_be(d, 3)? }),
+            0x31 => return Some(Self::CloseNpc),
+            0x32 => return Some(Self::BuyItem { slot: *d.get(3)? }),
+            0x33 => return Some(Self::SellItem { slot: *d.get(3)? }),
+            0x34 => return Some(Self::RepairItem { slot: *d.get(3)?, self_repair: *d.get(4).unwrap_or(&0) != 0 }),
             _ => {}
         }
         match (p.code(), p.sub_code()?) {
@@ -1125,6 +1244,43 @@ impl ServerMessage {
                 let [th, tl] = target.to_be_bytes();
                 c1(&[0x18, ih, il, *direction, *action, th, tl])
             }
+            // OpenMU `CharacterInventory`: C4 F3 10 <n> n × {slot, item}.
+            Self::InventoryList(items) => {
+                let mut body = vec![0xF3, 0x10];
+                write_item_list(&mut body, items);
+                encrypted(c2(&body))
+            }
+            // `ItemMoved` / `ItemMoveRequestFailed` (17 bytes, `[3]` = 0xFF when it failed).
+            Self::ItemMoved { storage, slot, item } => {
+                let mut body = vec![0x24, *storage, *slot];
+                body.extend_from_slice(item);
+                encrypted(c1(&body))
+            }
+            Self::ItemMoveFailed => {
+                let mut body = vec![0x24, 0xFF, 0];
+                body.extend_from_slice(&[0; 12]);
+                encrypted(c1(&body))
+            }
+            Self::ItemRemoved { slot } => c1(&[0x28, *slot, 1]),
+            Self::ItemDurability { slot, durability, by_consumption } => c1(&[0x2A, *slot, *durability, *by_consumption as u8]),
+            // `NpcWindowResponse` measures 11; only the window byte means something.
+            Self::NpcWindow { window } => encrypted(c1(&[0x30, *window, 0, 0, 0, 0, 0, 0, 0])),
+            Self::StoreItemList { kind, items } => {
+                let mut body = vec![0x31, *kind];
+                write_item_list(&mut body, items);
+                c2(&body)
+            }
+            Self::ItemBought { slot, item } => {
+                let mut body = vec![0x32, *slot];
+                body.extend_from_slice(item);
+                c1(&body)
+            }
+            Self::BuyFailed { closed } => c1(&[0x32, if *closed { 0xFE } else { 0xFF }]),
+            Self::SellResult { result, money } => {
+                let mut p = encrypted(c1(&[0x33, *result, 0, 0, 0, 0]));
+                put_u32_le(&mut p, 4, *money);
+                p
+            }
         }
     }
 
@@ -1196,6 +1352,48 @@ impl ServerMessage {
                     action: *d.get(6)?,
                     target: get_u16_be(d, 7).unwrap_or(0),
                 });
+            }
+            0xF3 if long_header(&p).is_some() => {
+                let d = long_header(&p)?;
+                return match *d.get(4)? {
+                    0x10 => Some(Self::InventoryList(read_item_list(d, 5)?)),
+                    _ => None,
+                };
+            }
+            // `PHEADER_DEFAULT_SUBCODE_ITEM`: `SubCode` (storage, 255 = failed), `Index`, `Item`.
+            0x24 => {
+                let d = short_header(&p)?;
+                return Some(match *d.get(3)? {
+                    0xFF => Self::ItemMoveFailed,
+                    storage => Self::ItemMoved { storage, slot: *d.get(4)?, item: d.get(5..17)?.try_into().ok()? },
+                });
+            }
+            0x28 => return Some(Self::ItemRemoved { slot: *short_header(&p)?.get(3)? }),
+            0x2A => {
+                let d = short_header(&p)?;
+                return Some(Self::ItemDurability {
+                    slot: *d.get(3)?,
+                    durability: *d.get(4)?,
+                    by_consumption: d.get(5).is_some_and(|&b| b != 0),
+                });
+            }
+            0x30 => return Some(Self::NpcWindow { window: *short_header(&p)?.get(3)? }),
+            0x31 => {
+                let d = long_header(&p)?;
+                return Some(Self::StoreItemList { kind: *d.get(4)?, items: read_item_list(d, 5)? });
+            }
+            // `PHEADER_DEFAULT_ITEM`: 255 failed, 254 failed and the store closes.
+            0x32 => {
+                let d = short_header(&p)?;
+                return Some(match *d.get(3)? {
+                    0xFF => Self::BuyFailed { closed: false },
+                    0xFE => Self::BuyFailed { closed: true },
+                    slot => Self::ItemBought { slot, item: d.get(4..16)?.try_into().ok()? },
+                });
+            }
+            0x33 => {
+                let d = short_header(&p)?;
+                return Some(Self::SellResult { result: *d.get(3)?, money: get_u32_le(d, 4).unwrap_or(0) });
             }
             _ => {}
         }
@@ -1754,5 +1952,68 @@ mod tests {
         // Un C1 en claro (caminar) también pasa por la capa de cifrado del cliente (Xor32).
         let walk = ClientMessage::Walk { source_x: 1, source_y: 2, rotation: 3, directions: vec![4, 5] };
         assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&walk.encode())).unwrap()), Some(walk));
+    }
+
+    /// A +9 Kris with skill and luck (group 0, index 1), as OpenMU's `ItemSerializer` writes it.
+    const KRIS: [u8; 12] = [1, 0x80 | 9 << 3 | 4, 30, 0, 0, 0, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+
+    #[test]
+    fn item_and_npc_requests() {
+        // ItemMoveRequest: 19 bytes, from (storage, slot), the item, to (storage, slot); encrypted.
+        let mv = ClientMessage::ItemMove { from_storage: storage::INVENTORY, from_slot: 12, item: KRIS, to_storage: storage::INVENTORY, to_slot: 0 };
+        let wire = ida_y_vuelta_cliente(mv);
+        assert_eq!(wire.len(), 19);
+        assert_eq!(&wire[..5], &[0xC3, 19, 0x24, 0, 12]);
+        assert_eq!(&wire[5..17], &KRIS);
+        assert_eq!(&wire[17..], &[0, 0]);
+
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::TalkToNpc { id: 0x1234 }), [0xC3, 5, 0x30, 0x12, 0x34]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::CloseNpc), [0xC1, 3, 0x31]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::BuyItem { slot: 16 }), [0xC3, 4, 0x32, 16]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::SellItem { slot: 20 }), [0xC3, 4, 0x33, 20]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::RepairItem { slot: 0xFF, self_repair: true }), [0xC3, 5, 0x34, 0xFF, 1]);
+    }
+
+    #[test]
+    fn inventory_and_npc_answers() {
+        // CharacterInventory (OpenMU UpdateInventoryListPlugIn): C4 len F3 10 <n> n × {slot, item}.
+        let mut wire = vec![0xC4, 0, 6 + 2 * 13, 0xF3, 0x10, 2, 0];
+        wire.extend_from_slice(&KRIS);
+        wire.push(12);
+        wire.extend_from_slice(&KRIS);
+        let list = ServerMessage::decode(&wire).unwrap();
+        assert_eq!(list, ServerMessage::InventoryList(vec![(0, KRIS), (12, KRIS)]));
+        assert_eq!(list.encode(), wire);
+
+        // StoreItemList (merchant and vault): C2 len 31 <kind> <n> n × {slot, item}.
+        let mut wire = vec![0xC2, 0, 6 + 13, 0x31, 0, 1, 16];
+        wire.extend_from_slice(&KRIS);
+        assert_eq!(ServerMessage::decode(&wire), Some(ServerMessage::StoreItemList { kind: 0, items: vec![(16, KRIS)] }));
+
+        // ItemMoved / ItemMoveRequestFailed: 17 bytes, [3] storage or 0xFF.
+        let moved = ida_y_vuelta_servidor(ServerMessage::ItemMoved { storage: storage::INVENTORY, slot: 0, item: KRIS });
+        assert_eq!((moved.len(), &moved[..5]), (17, &[0xC3, 17, 0x24, 0, 0][..]));
+        let failed = ida_y_vuelta_servidor(ServerMessage::ItemMoveFailed);
+        assert_eq!((failed.len(), failed[3]), (17, 0xFF));
+
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemRemoved { slot: 20 }), [0xC1, 5, 0x28, 20, 1]);
+        assert_eq!(
+            ida_y_vuelta_servidor(ServerMessage::ItemDurability { slot: 20, durability: 3, by_consumption: true }),
+            [0xC1, 6, 0x2A, 20, 3, 1]
+        );
+        // NpcWindowResponse measures 11 and only [3] matters (OpenMU leaves the rest uncleared).
+        let window = ida_y_vuelta_servidor(ServerMessage::NpcWindow { window: npc_window::VAULT });
+        assert_eq!((window.len(), &window[..4]), (11, &[0xC3, 11, 0x30, 2][..]));
+        assert_eq!(ServerMessage::decode(&[0xC3, 11, 0x30, 0, 9, 9, 9, 9, 9, 9, 9]), Some(ServerMessage::NpcWindow { window: 0 }));
+
+        // ItemBought (16 bytes) or NpcItemBuyFailed (C1 04 32 FF).
+        let bought = ida_y_vuelta_servidor(ServerMessage::ItemBought { slot: 12, item: KRIS });
+        assert_eq!((bought.len(), &bought[..4]), (16, &[0xC1, 16, 0x32, 12][..]));
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::BuyFailed { closed: false }), [0xC1, 4, 0x32, 0xFF]);
+        // NpcItemSellResult: success and the total money, little endian.
+        assert_eq!(
+            ida_y_vuelta_servidor(ServerMessage::SellResult { result: 1, money: 0x0001_E240 }),
+            [0xC3, 8, 0x33, 1, 0x40, 0xE2, 0x01, 0x00]
+        );
     }
 }

@@ -331,6 +331,12 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::Whisper { target, message } => whisper(s, shared, &target, &message),
         ClientMessage::EnterGate { gate, .. } => enter_gate(s, shared, gate),
         ClientMessage::Animation { rotation, action } => animation(s, shared, rotation, action),
+        // No items or NPC stores yet. Refusing is the only safe answer until the inventory is
+        // stored with atomic operations (AGENTS.md: the server is the only authority over items).
+        ClientMessage::ItemMove { .. } => s.send(ServerMessage::ItemMoveFailed),
+        ClientMessage::BuyItem { .. } => s.send(ServerMessage::BuyFailed { closed: false }),
+        ClientMessage::SellItem { .. } => s.send(ServerMessage::SellResult { result: 0, money: 0 }),
+        ClientMessage::TalkToNpc { .. } | ClientMessage::CloseNpc | ClientMessage::RepairItem { .. } => {}
     }
     true
 }
