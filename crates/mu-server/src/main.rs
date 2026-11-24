@@ -1,10 +1,10 @@
-//! Servidor de MU (Connect Server + Game Server en un solo programa).
+//! MU server (Connect Server + Game Server in a single program).
 //!
-//!   mu-server [--data <Data del cliente>] [--db <cuentas.json>]
+//!   mu-server [--data <client Data dir>] [--db <cuentas.json>]
 //!             [--connect 0.0.0.0:44405] [--game 0.0.0.0:55901] [--public-ip IP]
 //!
-//! El Connect Server da la lista con un solo Game Server, en `--public-ip` (la IP con la que los
-//! clientes llegan a esta máquina; por defecto 127.0.0.1) y el puerto de `--game`.
+//! The Connect Server lists a single Game Server, at `--public-ip` (the IP clients use to reach
+//! this machine; 127.0.0.1 by default) and the `--game` port.
 
 mod classes;
 mod db;

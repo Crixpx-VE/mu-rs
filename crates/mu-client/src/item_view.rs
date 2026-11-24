@@ -1,21 +1,21 @@
-//! Objetos en 3D dentro de las ventanas: la cámara `CNewUI3DCamera` del original
-//! (NewUI3DRenderMng.cpp:94-130) y `RenderItem3D` / `RenderObjectScreen` (ZzzInventory.cpp).
+//! 3D items inside windows: the original `CNewUI3DCamera` camera
+//! (NewUI3DRenderMng.cpp:94-130) and `RenderItem3D` / `RenderObjectScreen` (ZzzInventory.cpp).
 //!
-//! - **Cámara**: la del original es la identidad con `gluPerspective2(1°, ancho/alto, 20, 2000)` sobre
-//!   toda la pantalla, y los objetos van en su espacio (`CreateScreenVector` con `MousePosition` = 0):
-//!   cada uno a 0.1 · 2000 de profundidad (0.07 el que va en el ratón) en la recta del punto de su
-//!   casilla. Aquí esa cámara dibuja en una imagen del tamaño de la pantalla de 640×480 (en píxeles
-//!   reales), que la ventana enseña encima de su fondo y debajo de los cuadros de información, como el
-//!   orden de capas del original (ventana 4.2, cámara 5.5, sus efectos 2D después).
-//! - **Ejes**: el espacio de la cámara del original (x derecha, y arriba, -z delante) se pasa a Bevy con
-//!   el mismo giro que el resto del juego (MU (x, y, z) → Bevy (x, z, -y)), y la cámara de Bevy lleva ese
-//!   giro: así la normal que lee el sombreador para el cromado (`model_light.wesl`) es la del original.
-//! - **Modelo**: el del objeto en la pose 0 de su animación 0; las armaduras, con el esqueleto de
-//!   `player.bmd` (`ObjectSelect.Type = MODEL_PLAYER`) y su `BodyHeight`. Sin luz (`LightEnable = false`:
-//!   color plano `BodyLight`), sin las mallas de piel (`HideSkin`).
-//! - **Brillo**: las pasadas de [`mu_data::items::glow::item_passes`] resueltas malla a malla como los
-//!   objetos del mapa; las que laten (excelente, +3 a +6, antiguos) cambian su color cada fotograma.
-//! - **Ratón encima**: el objeto gira (`ObjectSelect.Angle[1] = WorldTime · 0.45`).
+//! - **Camera**: the original's is the identity with `gluPerspective2(1°, width/height, 20, 2000)` over
+//!   the whole screen, and items live in its space (`CreateScreenVector` with `MousePosition` = 0):
+//!   each at depth 0.1 · 2000 (0.07 for the one on the cursor) on the ray through its slot's
+//!   point. Here that camera renders into an image the size of the 640×480 screen (in real
+//!   pixels), shown by the window above its background and below the info boxes, matching the
+//!   original's layer order (window 4.2, camera 5.5, its 2D effects afterwards).
+//! - **Axes**: the original camera space (x right, y up, -z forward) is mapped to Bevy with the
+//!   same rotation as the rest of the game (MU (x, y, z) → Bevy (x, z, -y)), and the Bevy camera carries
+//!   that rotation: so the normal the shader reads for chrome (`model_light.wesl`) is the original's.
+//! - **Model**: the item's, in pose 0 of its animation 0; armors use the
+//!   `player.bmd` skeleton (`ObjectSelect.Type = MODEL_PLAYER`) and its `BodyHeight`. Unlit (`LightEnable = false`:
+//!   flat `BodyLight` color), without the skin meshes (`HideSkin`).
+//! - **Glow**: the passes of [`mu_data::items::glow::item_passes`] resolved mesh by mesh like map
+//!   objects; the pulsing ones (excellent, +3 to +6, ancient) change color every frame.
+//! - **Hover**: the item spins (`ObjectSelect.Angle[1] = WorldTime · 0.45`).
 
 use std::collections::HashMap;
 use std::f32::consts::FRAC_PI_2;
@@ -41,11 +41,11 @@ use crate::Args;
 use crate::model_light::ModelMaterial;
 use crate::terrain::to_bevy_image;
 
-/// Los sistemas que dibujan lo pedido en [`ItemViews`] (las ventanas lo piden antes).
+/// Systems that draw what was requested in [`ItemViews`] (windows request it earlier).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ItemViewSet;
 
-/// Capa de los objetos de las ventanas (la 1 es la vista previa de crear personaje).
+/// Layer of window items (layer 1 is the character creation preview).
 pub const ITEM_LAYER: usize = 2;
 
 pub struct ItemViewPlugin;
@@ -60,8 +60,8 @@ impl Plugin for ItemViewPlugin {
     }
 }
 
-/// Lo que se sabe de los objetos: la tabla (`ItemAttribute`), el maná de las habilidades y los modelos
-/// de MuMain para lo que no está en la tabla del original.
+/// What is known about items: the table (`ItemAttribute`), skill mana and the MuMain
+/// models for what is missing from the original's table.
 #[derive(Resource, Default)]
 pub struct ItemData {
     pub table: Option<ItemTable>,
@@ -74,7 +74,7 @@ impl ItemData {
         self.table.as_ref()?.by_kind(item.kind())
     }
 
-    /// Ruta del modelo relativa a `Data`: la tabla del original y, si no, la de MuMain.
+    /// Model path relative to `Data`: the original's table, falling back to MuMain's.
     pub fn model_path(&self, item: &Item) -> Option<PathBuf> {
         match model::model_file(item.group, item.index) {
             Some(ModelFile { dir, name }) => Some(Path::new(dir).join(name)),
@@ -102,25 +102,25 @@ fn load_item_data(args: Res<Args>, mut data: ResMut<ItemData>) {
     }
 }
 
-/// Un objeto que dibujar este fotograma, en el rectángulo `rect` (x, y, ancho, alto) de la pantalla de
-/// 640×480 (lo que se pasa a `RenderItem3D`).
+/// An item to draw this frame, in rectangle `rect` (x, y, width, height) of the 640×480
+/// screen (what is passed to `RenderItem3D`).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub struct ItemView {
-    /// Identifica el objeto entre fotogramas (su sitio en la ventana).
+    /// Identifies the item across frames (its place in the window).
     pub key: u32,
     pub item: Item,
     pub rect: [f32; 4],
-    /// Va en el ratón (`PickUp`: más cerca de la cámara).
+    /// On the cursor (`PickUp`: closer to the camera).
     pub picked: bool,
-    /// El ratón está encima (`Select`: gira).
+    /// Hovered (`Select`: spins).
     pub hovered: bool,
 }
 
-/// Lo que piden las ventanas y la imagen donde se dibuja.
+/// What the windows request and the image it is drawn into.
 #[derive(Resource, Default)]
 pub struct ItemViews {
     pub views: Vec<ItemView>,
-    /// `g_pOption->GetRenderLevel()` (0 a 4).
+    /// `g_pOption->GetRenderLevel()` (0 to 4).
     pub render_level: u8,
     pub image: Option<Handle<Image>>,
     size: UVec2,
@@ -129,18 +129,18 @@ pub struct ItemViews {
 #[derive(Component)]
 struct ItemCamera;
 
-/// Un objeto dibujado.
+/// A drawn item.
 #[derive(Component)]
 struct ItemEntity {
     key: u32,
     item: Item,
     render_level: u8,
     pose: ScreenPose,
-    /// Materiales cuyo color cambia con el tiempo.
+    /// Materials whose color changes over time.
     animated: Vec<(Handle<ModelMaterial>, GlowLight)>,
 }
 
-/// Una malla del modelo ya posada.
+/// An already posed model mesh.
 struct Part {
     mesh: Handle<Mesh>,
     info: MeshInfo,
@@ -150,13 +150,13 @@ struct Part {
 #[derive(Resource, Default)]
 struct ViewCache {
     player: Option<Option<Bmd>>,
-    /// (ruta, esqueleto del personaje, `BodyHeight`) → mallas.
+    /// (path, character skeleton, `BodyHeight`) → meshes.
     models: HashMap<(PathBuf, bool, i32), Option<Arc<Vec<Part>>>>,
     images: HashMap<PathBuf, Option<(Handle<Image>, AlphaKind)>>,
     bitmaps: HashMap<Bitmap, Option<Handle<Image>>>,
 }
 
-/// La imagen del tamaño de la pantalla de 640×480 en píxeles reales, y la cámara que dibuja en ella.
+/// The image the size of the 640×480 screen in real pixels, and the camera that renders into it.
 fn ensure_target(
     mut commands: Commands,
     mut views: ResMut<ItemViews>,
@@ -165,7 +165,7 @@ fn ensure_target(
     scale: Res<UiScale>,
     mut cameras: Query<(Entity, &mut Camera), With<ItemCamera>>,
 ) {
-    // Sin ventana (modo captura) la interfaz va a escala 1 de píxeles (camera.rs).
+    // Without a window (capture mode) the UI uses pixel scale 1 (camera.rs).
     let s = scale.0 * windows.single().map_or(1.0, |w| w.scale_factor());
     let size = UVec2::new((640.0 * s).round().max(1.0) as u32, (480.0 * s).round().max(1.0) as u32);
     let active = !views.views.is_empty();
@@ -190,7 +190,7 @@ fn ensure_target(
                 far: ITEMVIEW_FAR,
                 ..default()
             }),
-            // La cámara del original (identidad) con el giro de MU a Bevy.
+            // The original camera (identity) with the MU-to-Bevy rotation.
             Transform::from_rotation(Quat::from_rotation_x(-FRAC_PI_2)),
             RenderLayers::layer(ITEM_LAYER),
         ));
@@ -205,7 +205,7 @@ fn ensure_target(
     }
 }
 
-/// Posición, giro y escala del objeto (en el espacio de la cámara del original, pasado a Bevy).
+/// Item position, rotation and scale (in the original camera space, mapped to Bevy).
 fn view_transform(pose: &ScreenPose, view: &ItemView, world_time: f32) -> Transform {
     let p = model::item_position(pose, view.rect, view.picked);
     let mut angle = pose.angle;
@@ -271,7 +271,7 @@ fn sync_views(
         for part in parts.iter() {
             for (k, look) in render::resolve_all(&only, &draw, &part.info) {
                 let light = passes[k].1;
-                // `LightEnable = false`: la luz por la normal es color plano `BodyLight`.
+                // `LightEnable = false`: normal-based light becomes flat `BodyLight` color.
                 let look = if look.color == LookColor::Lit { render::MeshLook { color: LookColor::Flat, ..look } } else { look };
                 let image = match (look.textured, look.texture) {
                     (false, _) => None,
@@ -305,7 +305,7 @@ impl ViewCache {
         self.bitmaps.entry(b).or_insert_with(|| crate::objects::load_bitmap(data, b, images)).clone()
     }
 
-    /// Las mallas del modelo `path` (relativa a `Data`), posadas como pide `pose`.
+    /// The meshes of model `path` (relative to `Data`), posed as `pose` asks.
     fn parts(
         &mut self,
         data: &Path,
@@ -334,7 +334,7 @@ impl ViewCache {
         meshes: &mut Assets<Mesh>,
         images: &mut Assets<Image>,
     ) -> Option<Vec<Part>> {
-        // Carpeta real (`Item`, `Player`, `Item/partCharge1`...) sin distinguir mayúsculas.
+        // Real folder (`Item`, `Player`, `Item/partCharge1`...) case-insensitively.
         let mut dir = data.to_path_buf();
         for c in path.parent()?.iter() {
             dir = fs::find(&dir, c.to_str()?)?;
@@ -390,16 +390,16 @@ impl ViewCache {
     }
 }
 
-/// `OpenTexture` (LoadData.cpp:46-71): las texturas que empiezan por `ski` o `level` son la piel
-/// (`BITMAP_SKIN`) y las de `hair` el pelo (`BITMAP_HAIR`), que `HideSkin` no dibuja; las de `hid`
-/// (`BITMAP_HIDE`) no se dibujan nunca.
+/// `OpenTexture` (LoadData.cpp:46-71): textures starting with `ski` or `level` are skin
+/// (`BITMAP_SKIN`) and those with `hair` are hair (`BITMAP_HAIR`), which `HideSkin` does not draw; `hid`
+/// ones (`BITMAP_HIDE`) are never drawn.
 fn hidden_texture(name: &str) -> bool {
     let file = name.rsplit(['\\', '/']).next().unwrap_or(name);
     file.starts_with("ski") || file.to_ascii_lowercase().starts_with("level") || file.starts_with("hid") || file.starts_with("hair")
 }
 
-/// Huesos de `player.bmd` en la pose 0 con `BodyHeight` (`BMD::Animation`, ZzzBMD.cpp:128-134: con la
-/// animación bloqueada, el hueso 0 baja `BodyHeight`; y con él todos los que cuelgan de él).
+/// `player.bmd` bones in pose 0 with `BodyHeight` (`BMD::Animation`, ZzzBMD.cpp:128-134: with the
+/// animation locked, bone 0 drops by `BodyHeight`, and with it all bones hanging from it).
 fn player_bones(skel: &Bmd, body_height: f32) -> Vec<bmd::Mat34> {
     let mut bones = skel.bone_matrices(0, 0);
     let locked = skel.actions.first().is_some_and(|a| a.lock_positions.is_some());
@@ -425,13 +425,13 @@ mod tests {
         assert!(hidden_texture("Level_man01.jpg"));
         assert!(hidden_texture("hide.jpg"));
         assert!(!hidden_texture("Sword01.jpg"));
-        // `ski` distingue mayúsculas en el original.
+        // `ski` is case-sensitive in the original.
         assert!(!hidden_texture("Skin.jpg"));
     }
 
-    /// La armadura de dragón con el esqueleto del personaje cabe en su casilla (2×3 = 40×60 de la
-    /// pantalla de 640): su alto a la escala del inventario, en píxeles de esa pantalla, ronda el de
-    /// la casilla.
+    /// The dragon armor with the character skeleton fits its slot (2×3 = 40×60 of the
+    /// 640 screen): its height at inventory scale, in pixels of that screen, is about the
+    /// slot's.
     #[test]
     fn armadura_del_tamano_de_su_casilla() {
         let data = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data");
@@ -450,7 +450,7 @@ mod tests {
                 hi = hi.max(p[2]);
             }
         }
-        // Unidades de la cámara por unidad de la pantalla de 640 a 200 de profundidad.
+        // Camera units per 640-screen unit at depth 200.
         let unit = 200.0 * 0.5f32.to_radians().tan() / 240.0;
         let px = (hi - lo) * pose.scale / unit;
         eprintln!("armadura: alto {:.0} → {px:.1} de la pantalla de 640 (z {lo:.0}..{hi:.0})", hi - lo);

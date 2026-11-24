@@ -1,27 +1,27 @@
-//! Estelas (1): cola de escorpión, energía, curación, fantasma de dos líneas, espíritus, láser,
-//! chispas, humo, rayo de Fenrir, láser/desenfoque +1 y rayos. Traducido de `ZzzEffectJoint.cpp`
-//! (`CreateJoint`, `MoveJoint` y lo que `UpdateDrawnJointEffects` hace con ellas).
+//! Joints (1): scorpion tail, energy, healing, two-line ghost, spirits, laser,
+//! sparks, smoke, Fenrir thunder, laser/blur +1 and thunder. Translated from `ZzzEffectJoint.cpp`
+//! (`CreateJoint`, `MoveJoint` and what `UpdateDrawnJointEffects` does with them).
 //!
-//! `FPS_ANIMATION_FACTOR` = 1 (25 ticks/s): las multiplicaciones por él se han quitado.
+//! `FPS_ANIMATION_FACTOR` = 1 (25 ticks/s): multiplications by it have been removed.
 //!
-//! Colas: estos tipos dejan sus colas a mano en vez de con el `follow_tail` del núcleo, porque el
-//! original las deja con la matriz del ángulo que tenía la estela al EMPEZAR `MoveJoint` (antes de
-//! que `MoveHumming` y compañía la giren), algunos subtipos no tienen cola inicial
-//! (`NumTails = -1`) y la energía 54 usa la cola con desenfoque. El `m_bCreateTails` del original
-//! se guarda en `user[3]` y `joint.create_tails` se deja a `false` al salir de `create`/`step`
-//! para que el núcleo no añada otra cola.
+//! Tails: these types add their tails by hand instead of with the core's `follow_tail`, because the
+//! original adds them with the matrix of the angle the joint had at the START of `MoveJoint` (before
+//! `MoveHumming` and friends rotate it), some subtypes have no initial tail
+//! (`NumTails = -1`) and energy 54 uses the blurred tail. The original `m_bCreateTails`
+//! is stored in `user[3]` and `joint.create_tails` is left `false` on leaving `create`/`step`
+//! so the core does not add another tail.
 
 use bevy::math::Vec3;
 
 use crate::fx::core::*;
 
-/// `EndlessLifeTime`: estela que vive hasta que algo la quita.
+/// `EndlessLifeTime`: a joint that lives until something removes it.
 const ENDLESS_LIFE_TIME: f32 = 1.0e9;
-/// Campo `user` donde se guarda `m_bCreateTails`.
+/// `user` field where `m_bCreateTails` is stored.
 const TAILS_FLAG: usize = 3;
-/// Campo `user` con un índice de "ranura" para `GetMagicScrew(iIndex)` (los espíritus 3 y 13).
+/// `user` field with a "slot" index for `GetMagicScrew(iIndex)` (spirits 3 and 13).
 const SLOT_INDEX: usize = 0;
-/// `MAX_JOINTS` del original (para el índice de ranura).
+/// The original `MAX_JOINTS` (for the slot index).
 const MAX_JOINTS: i32 = 500;
 
 pub fn register(r: &mut Registry) {
@@ -41,9 +41,9 @@ pub fn register(r: &mut Registry) {
     r.joint(BITMAP_JOINT_THUNDER, k(create_thunder, step_thunder));
 }
 
-// --- Utilidades -------------------------------------------------------------------------------------
+// --- Helpers ----------------------------------------------------------------------------------------
 
-/// `rand() % n` como `f32`.
+/// `rand() % n` as `f32`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
@@ -58,7 +58,7 @@ fn valid_tail(t: &[Vec3; 4]) -> bool {
     ((t[0] + t[1]) * 0.5).length_squared() >= 1.0
 }
 
-/// `SetNewestTail(o, AngleMatrix(angle), 2)`: la cruz de 4 puntos en `position`.
+/// `SetNewestTail(o, AngleMatrix(angle), 2)`: the 4-point cross at `position`.
 fn tail_at(position: Vec3, angle: Vec3, scale: f32) -> [Vec3; 4] {
     let h = scale * 0.5;
     [
@@ -69,14 +69,14 @@ fn tail_at(position: Vec3, angle: Vec3, scale: f32) -> [Vec3; 4] {
     ]
 }
 
-/// `CreateTail(o, AngleMatrix(angle))`: desplaza las colas y deja una nueva delante.
+/// `CreateTail(o, AngleMatrix(angle))`: shifts the tails and adds a new one in front.
 fn create_tail(j: &mut Joint, angle: Vec3) {
     let t = tail_at(j.position, angle, j.scale);
     j.tails.insert(0, t);
     j.tails.truncate(j.max_tails.clamp(1, MAX_TAILS));
 }
 
-/// `CreateTail(o, Matrix, true)`: dos colas; la primera, media entre la nueva y la anterior.
+/// `CreateTail(o, Matrix, true)`: two tails; the first one halfway between the new and the previous.
 fn create_tail_blur(j: &mut Joint, angle: Vec3) {
     let t = tail_at(j.position, angle, j.scale);
     let max = j.max_tails.clamp(1, MAX_TAILS);
@@ -91,8 +91,8 @@ fn create_tail_blur(j: &mut Joint, angle: Vec3) {
     j.tails.truncate(max);
 }
 
-/// Comienzo de `create`: la cola inicial (`bCreateStartTail`) con la posición y el ángulo de
-/// antes del `switch` del original.
+/// Start of `create`: the initial tail (`bCreateStartTail`) with the position and angle from
+/// before the original `switch`.
 fn begin(j: &mut Joint, start_tail: bool) {
     if start_tail {
         let t = tail_at(j.position, j.angle, j.scale);
@@ -100,14 +100,14 @@ fn begin(j: &mut Joint, start_tail: bool) {
     }
 }
 
-/// Fin de `create`/`step`: guarda `m_bCreateTails` y desactiva las colas del núcleo.
+/// End of `create`/`step`: saves `m_bCreateTails` and disables the core tails.
 fn finish(j: &mut Joint) {
     j.user[TAILS_FLAG] = if j.create_tails { 1.0 } else { 0.0 };
     j.create_tails = false;
 }
 
-/// Lo común de `MoveJoint` alrededor del código de cada tipo: `FollowTail` con la matriz del
-/// ángulo inicial si `m_bCreateTails` y la estela sigue viva.
+/// The common part of `MoveJoint` around each type's code: `FollowTail` with the initial angle
+/// matrix if `m_bCreateTails` and the joint is still alive.
 fn run(j: &mut Joint, ctx: &mut Ctx, f: fn(&mut Joint, &mut Ctx)) {
     j.create_tails = j.user[TAILS_FLAG] != 0.0;
     let matrix_angle = j.angle;
@@ -122,14 +122,14 @@ fn run(j: &mut Joint, ctx: &mut Ctx, f: fn(&mut Joint, &mut Ctx)) {
     finish(j);
 }
 
-/// Posición de antes del avance genérico por −Y·Velocity que el núcleo ya aplicó este tick
-/// (el original calcula `dx`, `dy` antes de moverla).
+/// Position before the generic −Y·Velocity advance the core already applied this tick
+/// (the original computes `dx`, `dy` before moving it).
 fn pre_move_position(j: &Joint) -> Vec3 {
     j.position - rotate(j.angle, Vec3::new(0.0, -j.velocity, 0.0))
 }
 
-/// `MoveHumming(Position, Angle, TargetPosition, Turn)`: gira hacia el objetivo y devuelve la
-/// distancia.
+/// `MoveHumming(Position, Angle, TargetPosition, Turn)`: turns toward the target and returns the
+/// distance.
 fn move_humming(position: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f32 {
     let turn = if turn.is_nan() { 0.0 } else { turn };
     let ta = create_angle(position.x, position.y, target.x, target.y);
@@ -141,7 +141,7 @@ fn move_humming(position: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f3
     range.length()
 }
 
-/// `GetMagicScrewAt(frame, vResult, fSpeedRate)` (en doble precisión como el original).
+/// `GetMagicScrewAt(frame, vResult, fSpeedRate)` (in double precision like the original).
 fn magic_screw_at(frame: f64, speed_rate: f32) -> Vec3 {
     let sr = speed_rate as f64;
     let speed = [0.048 * sr, 0.0613 * sr, 0.1113 * sr];
@@ -156,7 +156,7 @@ fn magic_screw_at(frame: f64, speed_rate: f32) -> Vec3 {
     )
 }
 
-/// `GetMagicScrew(iParam, vResult, fSpeedRate)`: con el reloj `WorldTime / 40`.
+/// `GetMagicScrew(iParam, vResult, fSpeedRate)`: with the `WorldTime / 40` clock.
 pub(crate) fn magic_screw(param: i32, speed_rate: f32, world_time: f32) -> Vec3 {
     magic_screw_at(param as f64 + world_time as f64 / 40.0, speed_rate)
 }
@@ -175,7 +175,7 @@ fn target_bone(ctx: &Ctx, t: Option<Target>, bone: usize, offset: Vec3) -> Optio
     ctx.actor(t).map(|a| a.bone_world(bone, offset))
 }
 
-/// Puntos de los monstruos que el original guarda en el `OBJECT` (`EyeLeft`, `SetTrailLeft`...).
+/// Monster points the original stores in the `OBJECT` (`EyeLeft`, `SetTrailLeft`...).
 #[derive(Clone, Copy)]
 enum Eye {
     Left,
@@ -190,13 +190,13 @@ enum Eye {
 
 /// `o->Target->EyeLeft`...
 fn eye(ctx: &Ctx, t: Option<Target>, which: Eye) -> Option<Vec3> {
-    // TODO(original): EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/SetTrailLeft/Right los
-    // rellena el dibujo de cada monstruo concreto; `Actor` aún no los tiene (sin ellos valen 0).
+    // TODO(original): EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/SetTrailLeft/Right are
+    // filled by each specific monster's draw code; `Actor` does not have them yet (they are 0).
     let _ = (ctx, t, which);
     None
 }
 
-/// `UpdateJointTargetPosition(o, eyePos)`: al ojo si existe; si no, a la posición del objetivo.
+/// `UpdateJointTargetPosition(o, eyePos)`: to the eye if it exists; otherwise to the target position.
 fn update_joint_target_position(j: &mut Joint, ctx: &Ctx, which: Eye) {
     if let Some(p) = eye(ctx, j.target, which).filter(|p| valid(*p)) {
         j.position = p;
@@ -205,14 +205,14 @@ fn update_joint_target_position(j: &mut Joint, ctx: &Ctx, which: Eye) {
     }
 }
 
-/// `VectorCopy(o->Target->EyeXxx, o->Position)` sin comprobar nada.
+/// `VectorCopy(o->Target->EyeXxx, o->Position)` without any check.
 fn copy_eye(j: &mut Joint, ctx: &Ctx, which: Eye) {
     if let Some(p) = eye(ctx, j.target, which) {
         j.position = p;
     }
 }
 
-/// `CreateBomb(p, true, 4)` de `ZzzEffect.cpp`.
+/// `CreateBomb(p, true, 4)` from `ZzzEffect.cpp`.
 fn create_bomb4(ctx: &mut Ctx, p: Vec3) {
     let position = p + Vec3::new(0.0, 0.0, 80.0);
     let mut angle;
@@ -256,7 +256,7 @@ fn move_scolpion_tail(j: &mut Joint, ctx: &mut Ctx) {
 
 fn create_energy(j: &mut Joint, ctx: &mut Ctx) {
     begin(j, !matches!(j.sub_type, 10 | 11 | 14 | 15 | 55 | 56 | 57));
-    // `vPriorColor`: no se pasa a `create_joint`; se toma como dado si quien la creó cambió la luz.
+    // `vPriorColor`: not passed to `create_joint`; assumed given if the creator changed the light.
     let prior_color = j.light != Vec3::ONE;
     let sub = j.sub_type;
     match sub {
@@ -342,7 +342,7 @@ fn create_energy(j: &mut Joint, ctx: &mut Ctx) {
         40 | 41 => {
             j.velocity = 0.0;
             j.life_time = ENDLESS_LIFE_TIME;
-            // (el original no da MaxTails a estos subtipos: queda el de la ranura anterior)
+            // (the original gives no MaxTails to these subtypes: the previous slot's value remains)
             j.position = j.target_position;
         }
         42 => {
@@ -383,7 +383,7 @@ fn create_energy(j: &mut Joint, ctx: &mut Ctx) {
         }
         57 => {
             j.velocity = 0.0;
-            // MaxTails = iChaIndex: `create_joint` no lo lleva; quien la cree debe poner `max_tails`.
+            // MaxTails = iChaIndex: `create_joint` does not carry it; the creator must set `max_tails`.
             j.life_time = 10.0;
             j.tex_type = BITMAP_JOINT_ENERGY;
         }
@@ -418,7 +418,7 @@ fn create_energy(j: &mut Joint, ctx: &mut Ctx) {
 
 fn step_energy(j: &mut Joint, ctx: &mut Ctx) {
     run(j, ctx, move_energy);
-    // TODO(original): el subtipo 54 no se dibuja si el objetivo no está en MONSTER01_ATTACK1.
+    // TODO(original): subtype 54 is not drawn if the target is not in MONSTER01_ATTACK1.
 }
 
 fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
@@ -435,7 +435,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
                 }
             };
             match sub {
-                // Izquierda
+                // Left
                 2 | 4 | 5 | 8 | 10 | 14 | 17 | 18 | 28 | 22 | 24 => {
                     update_joint_target_position(j, ctx, Eye::Left);
                     if sub == 8 {
@@ -444,7 +444,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
                 }
                 20 | 30 => update_joint_target_position(j, ctx, Eye::Left2),
                 26 | 32 => update_joint_target_position(j, ctx, Eye::Left3),
-                // Derecha
+                // Right
                 3 | 11 | 15 | 19 | 29 | 23 | 25 | 47 => update_joint_target_position(j, ctx, Eye::Right),
                 21 | 31 => update_joint_target_position(j, ctx, Eye::Right2),
                 54 => match j.pk_key {
@@ -522,7 +522,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
                         j.position.y += j.multi_use * rf(ctx, 5);
                         j.position.z += 6.0;
                     }
-                    // (la rama del 44 de aquí es inalcanzable en el original)
+                    // (the 44 branch here is unreachable in the original)
                     _ => {
                         j.angle.z -= 10.0;
                         j.position.z += 5.0;
@@ -550,7 +550,7 @@ fn move_energy(j: &mut Joint, ctx: &mut Ctx) {
                     j.velocity = (j.velocity + 5.0).min(30.0);
                 }
                 let old_angle = j.angle.z;
-                // (la rama del subtipo 7 es inalcanzable: no está en este `case`)
+                // (the subtype 7 branch is unreachable: it is not in this `case`)
                 let distance = if sub == 6 || sub == 9 {
                     move_humming(j.position, &mut j.angle, j.target_position, j.velocity)
                 } else {
@@ -719,7 +719,7 @@ fn create_healing(j: &mut Joint, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    // TODO(original): el subtipo 8 se dibuja sin prueba de profundidad.
+    // TODO(original): subtype 8 is drawn without depth test.
     finish(j);
 }
 
@@ -748,7 +748,7 @@ fn move_healing(j: &mut Joint, ctx: &mut Ctx) {
             j.light = Vec3::new(l * 0.4, l * 0.6, l);
         }
         9 | 10 => {
-            // Las colas siguen al objetivo (todas menos la última, como el original).
+            // The tails follow the target (all but the last, like the original).
             let new_target = target_pos.unwrap_or(j.target_position);
             let d = j.target_position - new_target;
             j.target_position = new_target;
@@ -845,10 +845,10 @@ fn move_healing(j: &mut Joint, ctx: &mut Ctx) {
     }
 }
 
-/// `UpdateDrawnJointEffects` para la curación 9/10: un destello por segmento y la luz que se
-/// apaga un poco por cada segmento dibujado.
+/// `UpdateDrawnJointEffects` for healing 9/10: one flare per segment and the light that
+/// dims a bit for each drawn segment.
 fn healing_drawn_sprites(j: &mut Joint, ctx: &mut Ctx) {
-    // Se hace tras mover; la estela que muere este tick (vida < 0 tras restar 1) no se dibuja.
+    // Done after moving; a joint dying this tick (life < 0 after subtracting 1) is not drawn.
     if !j.live || j.life_time - 1.0 < 0.0 || j.tails.len() < 2 || j.render_face == 0 {
         return;
     }
@@ -870,7 +870,7 @@ fn healing_drawn_sprites(j: &mut Joint, ctx: &mut Ctx) {
         let light = j.light - Vec3::splat(h);
         ctx.create_sprite(BITMAP_FLARE_BLUE, pos, if j.sub_type == 9 { 0.5 } else { 0.7 }, light, 0.0, 0);
     }
-    // TODO(original): DescribeJoint no dibuja el último segmento de estos subtipos.
+    // TODO(original): DescribeJoint does not draw the last segment of these subtypes.
 }
 
 // --- BITMAP_2LINE_GHOST ------------------------------------------------------------------------------
@@ -884,11 +884,11 @@ fn create_2line_ghost(j: &mut Joint, ctx: &mut Ctx) {
         j.max_tails = 26;
         j.scale += (ctx.rand() % 200 + 1) as f32;
         j.direction.x = 0.0;
-        // (m_sTargetIndex = 2: solo lo usa el paso como temporal)
+        // (m_sTargetIndex = 2: only used by the step as a temporary)
         if ctx.rand() % 3 < 2 {
             j.light = Vec3::splat(0.5);
-            // TODO(original): CreateEffect(MODEL_DESAIR, ...) que va montado en esta estela (por su
-            // índice en Joints[]); el núcleo no permite que un efecto siga a una estela.
+            // TODO(original): CreateEffect(MODEL_DESAIR, ...) mounted on this joint (by its
+            // index in Joints[]); the core does not allow an effect to follow a joint.
         }
     } else if j.sub_type == 1 {
         j.render_type = JointRender::AlphaBlend;
@@ -939,7 +939,7 @@ fn move_2line_ghost(j: &mut Joint, ctx: &mut Ctx) {
 fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
     begin(j, true);
     let spirit = j.ty == BITMAP_JOINT_SPIRIT;
-    // `iIndex` (su ranura en Joints[]) para GetMagicScrew: aquí, una al azar.
+    // `iIndex` (its slot in Joints[]) for GetMagicScrew: here, a random one.
     j.user[SLOT_INDEX] = (ctx.rand() % MAX_JOINTS) as f32;
     j.render_type = JointRender::AlphaBlendMinus;
     match j.sub_type {
@@ -981,7 +981,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
             j.max_tails = 10;
             j.angle = Vec3::ZERO;
             j.light = Vec3::new(0.3, 0.3, 1.0);
-            // Rayo hecho de golpe desde la posición hasta TargetPosition.
+            // Bolt built all at once from the position to TargetPosition.
             let sp = (j.target_position - j.position) / j.max_tails as f32;
             j.start_position = sp;
             let mut p = sp;
@@ -1146,9 +1146,9 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
             j.position.y += (ctx.rand() % 300 - 150) as f32;
             let rargle_scale = j.scale / 70.0;
             if 0.9 <= rargle_scale {
-                // TODO(original): CreateEffect(MODEL_SUMMONER_SUMMON_LAGUL, ..., luz (0,0,0.1), 1,
-                // dueño = esta estela, escala rargle_scale); el efecto sigue a la estela y el núcleo
-                // no permite que un efecto tenga una estela por dueño.
+                // TODO(original): CreateEffect(MODEL_SUMMONER_SUMMON_LAGUL, ..., light (0,0,0.1), 1,
+                // owner = this joint, scale rargle_scale); the effect follows the joint and the core
+                // does not allow an effect to be owned by a joint.
             }
         }
         25 => {
@@ -1157,7 +1157,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
             j.velocity = 9.0;
             j.life_time = 26.0;
             j.max_tails = 30;
-            // (Skill = SkillIndex: lo pone quien la crea)
+            // (Skill = SkillIndex: set by the creator)
             j.light = Vec3::new(0.9, 0.8, 1.0);
             j.angle = Vec3::new(-90.0, 0.0, 0.0);
             j.direction = Vec3::ZERO;
@@ -1181,9 +1181,9 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
             if j.scale == 80.0 {
                 let laser_sub = if sub == 5 { 3 } else { 0 };
                 ctx.create_effect(MODEL_LASER, j.position, j.angle, j.light, laser_sub, None, -1, 0, 0, 0.0);
-                // TODO(original): en Battle Castle, dentro de zona sin ataque, Velocity = 0 y
-                // LifeTime /= 5 (y no hace nada más este tick).
-                // TODO(original): cada 15 ticks, si el objetivo es el héroe, SpinMonstersInTornado(150).
+                // TODO(original): in Battle Castle, inside a no-attack zone, Velocity = 0 and
+                // LifeTime /= 5 (and nothing else this tick).
+                // TODO(original): every 15 ticks, if the target is the hero, SpinMonstersInTornado(150).
             } else if sub == 19 {
                 ctx.create_effect(MODEL_SKULL, j.position, j.angle, j.light, 0, None, -1, 0, 0, 0.0);
             }
@@ -1225,7 +1225,7 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
         }
         3 | 13 => {
             let mut scale = 3.0;
-            // `Light` sin inicializar en el original si no entra en ninguna rama.
+            // `Light` is uninitialized in the original if no branch is taken.
             let mut light = j.light;
             if sub != 13 || j.life_time > 28.0 {
                 let v = magic_screw(j.user[SLOT_INDEX] as i32, 1.0, ctx.world_time) * 50.0;
@@ -1268,7 +1268,7 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
             ctx.create_sprite(BITMAP_SHINY + 1, j.position, scale / 2.0, light, rot, 0);
         }
         2 | 6 | 7 | 21 | 22 | 23 => {
-            // `Light` sin inicializar en el original para un Skill que no sea 0 ni 1.
+            // `Light` is uninitialized in the original for a Skill other than 0 or 1.
             let mut light = j.light;
             match sub {
                 2 => light = Vec3::new(1.0, 0.5, 0.1),
@@ -1341,7 +1341,7 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
             if ctx.rand_fps_check(200) {
                 ctx.create_joint(BITMAP_JOINT_SPIRIT, position, position, j.angle, 12, None, 0.9);
             }
-            // (el original usa el ángulo en grados como radianes)
+            // (the original uses the angle in degrees as radians)
             j.position.x += j.angle.z.cos() * 20.0;
             j.position.y += j.angle.z.sin() * 20.0;
         }
@@ -1377,9 +1377,9 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
                         ctx.create_joint(BITMAP_JOINT_SPIRIT, position, position, angle, 14, None, 0.9);
                     }
                 }
-                // TODO(original): si hay objetivo (un OBJECT), le pone Angle[0] = Angle[1] = 0,
-                // Alpha = 1 si su LifeTime > 5 y lo coloca delante de la estela
-                // (Position + (sin, −cos)(Angle[2])·(30 + PKKey·0.1)); el núcleo no deja escribir en él.
+                // TODO(original): if there is a target (an OBJECT), sets its Angle[0] = Angle[1] = 0,
+                // Alpha = 1 if its LifeTime > 5 and places it in front of the joint
+                // (Position + (sin, −cos)(Angle[2])·(30 + PKKey·0.1)); the core does not allow writing to it.
             }
             j.position.x += j.angle.z.sin() * (30.0 + pk * 0.1);
             j.position.y -= j.angle.z.cos() * (30.0 + pk * 0.1);
@@ -1410,8 +1410,8 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
             }
             j.angle.x -= j.pk_key as f32;
             j.angle.z += 10.0;
-            // TODO(original): si hay objetivo (un OBJECT), Alpha = 1 si su LifeTime > 5 y se mueve a
-            // la posición de la estela; el núcleo no deja escribir en él.
+            // TODO(original): if there is a target (an OBJECT), Alpha = 1 if its LifeTime > 5 and it moves to
+            // the joint position; the core does not allow writing to it.
             ctx.create_particle(BITMAP_SMOKE, j.position, j.angle, Vec3::ONE, 19, 7.0, None);
         }
         24 => {
@@ -1435,8 +1435,8 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
                 1.0
             };
             j.light = Vec3::new(0.7 * l, 0.7 * l, 0.9 * l);
-            // TODO(original): copia su posición y ángulo al objetivo (un OBJECT); el núcleo no deja
-            // escribir en él.
+            // TODO(original): copies its position and angle to the target (an OBJECT); the core does not
+            // allow writing to it.
         }
         25 => {
             if j.life_time < 10.0 {
@@ -1565,7 +1565,7 @@ fn create_smoke(j: &mut Joint, _ctx: &mut Ctx) {
             j.life_time = 20.0;
             j.velocity = 0.0;
             j.tex_type = BITMAP_FLARE;
-            // TODO(original): DescribeJoint no dibuja el primer segmento de este subtipo.
+            // TODO(original): DescribeJoint does not draw the first segment of this subtype.
         }
         1 => {
             j.max_tails = 15;
@@ -1589,8 +1589,8 @@ fn step_smoke(j: &mut Joint, ctx: &mut Ctx) {
 }
 
 fn move_smoke(j: &mut Joint, ctx: &mut Ctx) {
-    // El original solo sigue a objetivos vivos de tipo MODEL_MAYASTONE1..3 o MODEL_FIRE.
-    // TODO(original): el núcleo no dice el tipo del efecto seguido: se sigue a cualquier efecto.
+    // The original only follows live targets of type MODEL_MAYASTONE1..3 or MODEL_FIRE.
+    // TODO(original): the core does not expose the followed effect's type: any effect is followed.
     if let Some(Target::Effect(id)) = j.target {
         if let Some(p) = ctx.effect_positions.get(&id) {
             j.position = *p;
@@ -1628,7 +1628,7 @@ fn step_fenrir_thunder(j: &mut Joint, ctx: &mut Ctx) {
 }
 
 fn move_fenrir_thunder(j: &mut Joint, ctx: &mut Ctx) {
-    // El rayo se rehace entero cada tick: MaxTails colas de golpe.
+    // The bolt is rebuilt every tick: MaxTails tails at once.
     for _ in 0..j.max_tails {
         if let Some(tp) = ctx.target_position(j.target) {
             j.target_position = tp + Vec3::new(0.0, 0.0, 80.0);
@@ -1643,7 +1643,7 @@ fn move_fenrir_thunder(j: &mut Joint, ctx: &mut Ctx) {
             if j.scale == 50.0 {
                 ctx.create_particle(BITMAP_ENERGY, j.position, j.angle, j.light, 0, 1.0, None);
                 if ctx.rand_fps_check(8) {
-                    // (posición al azar que el original calcula y no usa)
+                    // (random position the original computes and never uses)
                     let _ = (ctx.rand(), ctx.rand(), ctx.rand());
                     ctx.create_particle(BITMAP_SMOKE, j.position, j.angle, j.light, 0, 1.0, None);
                 }
@@ -1704,7 +1704,7 @@ fn move_blur1(j: &mut Joint, ctx: &mut Ctx) {
 
         if distance <= j.velocity * 2.0 {
             if ctx.rand_fps_check(2) {
-                // (posición al azar que el original calcula y no usa)
+                // (random position the original computes and never uses)
                 let _ = (ctx.rand(), ctx.rand(), ctx.rand());
                 ctx.create_particle(BITMAP_FIRE, j.position, j.angle, j.light, 0, 1.0, None);
             }
@@ -1723,7 +1723,7 @@ fn move_blur1(j: &mut Joint, ctx: &mut Ctx) {
 
 // --- BITMAP_JOINT_THUNDER ----------------------------------------------------------------------------
 
-/// Los subtipos 4, 10 y 14 del rayo hecho de golpe hasta TargetPosition (`jitter` = 0, 8 o 16).
+/// Subtypes 4, 10 and 14 of the bolt built all at once up to TargetPosition (`jitter` = 0, 8 or 16).
 fn thunder_bolt_tails(j: &mut Joint, ctx: &mut Ctx, jitter: i32) {
     let sp = (j.target_position - j.position) / j.max_tails as f32;
     j.start_position = sp;
@@ -1763,8 +1763,8 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
             }
         }
         3 => {
-            // Velocity/MaxTails = SkillIndex y LifeTime = PKKey: los pone quien la crea en
-            // `skill` y `pk_key`.
+            // Velocity/MaxTails = SkillIndex and LifeTime = PKKey: set by the creator in
+            // `skill` and `pk_key`.
             let pk = j.pk_key;
             j.velocity = j.skill as f32;
             j.pk_key = -1;
@@ -1846,8 +1846,8 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 80.0;
             j.max_tails = 0;
             j.multi_use = 0.0;
-            // TODO(original): guarda en TargetIndex[] los monstruos vivos y visibles a ≤ 400 (que
-            // no sean Target); no hay lista de monstruos, así que no encuentra ninguno.
+            // TODO(original): stores in TargetIndex[] the live, visible monsters within ≤ 400 (other
+            // than Target); there is no monster list, so none are found.
             j.weapon = j.multi_use * 15.0;
             j.multi_use = 0.0;
             j.start_position = j.target_position + Vec3::new(0.0, 0.0, 150.0);
@@ -1890,7 +1890,7 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
         }
         27 | 28 => {
             j.life_time = 2.0;
-            // (Light = vPriorColor: la luz que trae)
+            // (Light = vPriorColor: the light it came with)
         }
         33 => {
             j.light = Vec3::new(0.3, 0.3, 1.0);
@@ -1899,8 +1899,8 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    // El original suma el desplazamiento del rayo y, si hay bTileMapping, también el de mosaico;
-    // el núcleo solo admite uno: con mosaico se usa el de mosaico.
+    // The original adds the bolt scroll and, with bTileMapping, also the tiling one;
+    // the core supports only one: with tiling, the tiling one is used.
     j.scroll = if j.tile_mapping { JointScroll::Tile } else { JointScroll::Thunder };
     finish(j);
 }
@@ -1912,13 +1912,13 @@ fn step_thunder(j: &mut Joint, ctx: &mut Ctx) {
 fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
     let sub = j.sub_type;
     if sub == 15 {
-        // El subtipo 15 no avanza con su velocidad: se deshace lo que movió el núcleo.
+        // Subtype 15 does not advance with its velocity: undo what the core moved.
         j.position = pre_move_position(j);
     }
     if (sub == 6 && j.life_time > 4.0) || sub == 8 {
         return;
     }
-    // `Position` local del original (se reutiliza entre casos e iteraciones).
+    // The original's local `Position` (reused across cases and iterations).
     let mut position = Vec3::ZERO;
     match sub {
         4 | 5 => {
@@ -1941,7 +1941,7 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // `Distance` sin inicializar en el original para el subtipo 12.
+    // `Distance` is uninitialized in the original for subtype 12.
     let mut distance = f32::MAX;
     for k in 0..j.max_tails {
         if sub == 15 {
@@ -1982,8 +1982,8 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
                 distance = move_humming(j.position, &mut j.angle, position, turn);
             }
             12 => {
-                // TODO(original): Position = TransformPosition(g_fBoneSave[3], (0, -100, 0)) del
-                // modelo del objetivo (huesos guardados por el dibujo de un monstruo concreto).
+                // TODO(original): Position = TransformPosition(g_fBoneSave[3], (0, -100, 0)) of the
+                // target's model (bones saved by a specific monster's draw code).
             }
             18 => distance = move_humming(j.position, &mut j.angle, j.target_position, 110.0),
             19 => {
@@ -2003,7 +2003,7 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
                             23 => target_bone(ctx, j.target, 28, Vec3::ZERO),
                             _ => ctx.target_position(j.target).map(|p| p + Vec3::new(0.0, 0.0, 80.0)),
                         };
-                        // (sic: rand() % 1024 − 512 / Scale, por la precedencia del original)
+                        // (sic: rand() % 1024 − 512 / Scale, due to the original's precedence)
                         j.direction.x = (ctx.rand() % 1024) as f32 - 512.0 / j.scale;
                         j.direction.z = (ctx.rand() % 1024) as f32 - 512.0 / j.scale;
                         let angle = j.angle + j.direction;
@@ -2011,8 +2011,8 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
                         if let Some(p) = v_pos {
                             j.position = p;
                         }
-                        // TODO(original): TargetPosition = posición del personaje m_sTargetIndex + 80;
-                        // no hay índice de personajes: se mantiene el TargetPosition con que se creó.
+                        // TODO(original): TargetPosition = position of character m_sTargetIndex + 80;
+                        // there is no character index: the TargetPosition it was created with is kept.
                     }
                     distance = move_humming(j.position, &mut j.angle, j.target_position, j.velocity);
                 }
@@ -2067,14 +2067,14 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
             if j.scale == 50.0 {
                 ctx.create_particle(BITMAP_ENERGY, j.position, j.angle, j.light, 0, 1.0, None);
                 if ctx.rand_fps_check(8) {
-                    // (posición al azar que el original calcula y no usa)
+                    // (random position the original computes and never uses)
                     let _ = (ctx.rand(), ctx.rand(), ctx.rand());
                     ctx.create_particle(BITMAP_SMOKE, j.position, j.angle, j.light, 0, 1.0, None);
                 }
                 if (sub == 0 || sub == 27) && (ctx.world_time as i32) % 1000 < 500 && ctx.rand_fps_check(16) {
                     let p = Vec3::new(rf(ctx, 100) - 50.0, rf(ctx, 100) - 50.0, rf(ctx, 120) - 60.0) + j.target_position;
                     let scale = 6.0 + rf(ctx, 8);
-                    // CreateJoint(..., 28, Target, Scale, -1, 0, 0, 0, o->Light): con la luz de esta.
+                    // CreateJoint(..., 28, Target, Scale, -1, 0, 0, 0, o->Light): with this one's light.
                     let mut nj = Joint::new(BITMAP_JOINT_THUNDER, p, j.target_position, j.angle, 28, j.target, scale);
                     nj.pk_key = -1;
                     nj.light = j.light;
@@ -2105,10 +2105,10 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
     } else if sub == 15 && (j.life_time as i32) % 2 == 0 {
         ctx.create_joint(BITMAP_JOINT_THUNDER, j.position, j.start_position, j.angle, 0, None, 50.0);
         ctx.create_joint(BITMAP_JOINT_THUNDER, j.position, j.start_position, j.angle, 0, None, 10.0);
-        // (`Light` sin inicializar en el original)
+        // (`Light` is uninitialized in the original)
         ctx.create_particle(BITMAP_ENERGY, j.position, j.angle, j.light, 0, 1.0, None);
-        // TODO(original): rayos desde StartPosition+100 encadenados a cada monstruo de
-        // TargetIndex[] (uno cada 15 de MultiUse) si sigue vivo y visible; no hay lista de monstruos.
+        // TODO(original): bolts from StartPosition+100 chained to each monster in
+        // TargetIndex[] (one per 15 of MultiUse) if still alive and visible; there is no monster list.
         if j.multi_use < j.weapon && (j.life_time as i32) % 2 == 0 {
             j.multi_use += 1.0;
         }

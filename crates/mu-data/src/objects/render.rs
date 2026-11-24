@@ -1,12 +1,12 @@
-//! Cómo dibuja el original cada malla de un modelo: `BMD::RenderBody` / `BMD::RenderMesh`
-//! (`ZzzBMD.cpp` ≈937-1354 y ≈1851-1913), traducido a datos.
+//! How the original draws each mesh of a model: `BMD::RenderBody` / `BMD::RenderMesh`
+//! (`ZzzBMD.cpp` ≈937-1354 and ≈1851-1913), translated into data.
 //!
-//! El código de dibujo de cada objeto (`RenderObject`, `ZzzObject.cpp`) hace una o varias llamadas a
-//! `RenderBody` (todas las mallas) o `RenderMesh(i)` (una), cada una con sus `RENDER_*`, una textura en
-//! lugar de la de la malla (`MeshTexture`), un `b->BodyLight` y un `b->StreamMesh`. Aquí cada llamada es
-//! un [`Pass`]; [`resolve`] decide, para cada malla, con qué textura, coordenadas, color y mezcla queda
-//! ([`MeshLook`]), como las ramas de `RenderMesh`. Las pasadas se dibujan en orden y, como el original
-//! usa `glDepthFunc(GL_LEQUAL)`, una pasada posterior sobre la misma malla tapa a la anterior.
+//! Each object's draw code (`RenderObject`, `ZzzObject.cpp`) makes one or more calls to
+//! `RenderBody` (all meshes) or `RenderMesh(i)` (one), each with its `RENDER_*`, a texture replacing
+//! the mesh's (`MeshTexture`), a `b->BodyLight` and a `b->StreamMesh`. Here each call is a
+//! [`Pass`]; [`resolve`] decides, per mesh, which texture, coordinates, color and blending it gets
+//! ([`MeshLook`]), like the branches of `RenderMesh`. Passes are drawn in order and, since the original
+//! uses `glDepthFunc(GL_LEQUAL)`, a later pass over the same mesh covers the earlier one.
 
 use crate::bmd::TextureScript;
 
@@ -27,11 +27,11 @@ pub mod flags {
     pub const OIL: u32 = 0x0000_8000;
     pub const CHROME6: u32 = 0x0001_0000;
     pub const CHROME7: u32 = 0x0002_0000;
-    /// Cualquiera de las que entran en la rama de cromado de `RenderMesh` (`ZzzBMD.cpp:1022-1031`).
+    /// Any of the flags that take the chrome branch of `RenderMesh` (`ZzzBMD.cpp:1022-1031`).
     pub const ANY_CHROME: u32 = CHROME | CHROME2 | CHROME3 | CHROME4 | CHROME5 | CHROME6 | CHROME7 | METAL | OIL;
 }
 
-/// Texturas globales que el código de dibujo pone en lugar de la de la malla (`BITMAP_*`).
+/// Global textures the draw code uses instead of the mesh's (`BITMAP_*`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Bitmap {
     /// `BITMAP_CHROME`: `Effect\Chrome01.jpg` (`GL_LINEAR`, `GL_REPEAT`; `ZzzOpenData.cpp:5091`).
@@ -44,22 +44,22 @@ pub enum Bitmap {
     Chrome6,
     /// `BITMAP_CHROME7`: `Effect\Chrome07.jpg` (`GL_NEAREST`, `GL_CLAMP_TO_EDGE`).
     Chrome7,
-    /// `BITMAP_CHROME8`: `Effect\Chrome08.jpg` (`GL_LINEAR`, `GL_CLAMP_TO_EDGE`), que cargan Raklion
-    /// y otros mapas (`MapManager.cpp:753`, `:759`).
+    /// `BITMAP_CHROME8`: `Effect\Chrome08.jpg` (`GL_LINEAR`, `GL_CLAMP_TO_EDGE`), loaded by Raklion
+    /// and other maps (`MapManager.cpp:753`, `:759`).
     Chrome8,
     /// `BITMAP_SHINY`: `Effect\Shiny01.jpg` (`GL_LINEAR`, `GL_CLAMP_TO_EDGE`; `ZzzOpenData.cpp:5085`).
     Shiny,
-    /// `BITMAP_WATER + WaterTextureNumber`: las 32 cáusticas `Object8\wt00-31.jpg` (`GL_LINEAR`,
-    /// `GL_REPEAT`; `MapManager.cpp:1041-1053`), una por tick (`WaterTextureNumber++`, ZzzScene.cpp:2315).
-    /// [`Bitmap::path`] es la primera; las demás, [`Bitmap::frame_path`].
+    /// `BITMAP_WATER + WaterTextureNumber`: the 32 caustics `Object8\wt00-31.jpg` (`GL_LINEAR`,
+    /// `GL_REPEAT`; `MapManager.cpp:1041-1053`), one per tick (`WaterTextureNumber++`, ZzzScene.cpp:2315).
+    /// [`Bitmap::path`] is the first one; the rest, [`Bitmap::frame_path`].
     Water,
-    /// Otra textura que carga el mapa (p. ej. `BITMAP_CHROME+2` = `Object9\sand01.jpg` en Tarkan,
-    /// `MapManager.cpp:150`): ruta relativa a `Data` y si es `GL_NEAREST` + `GL_CLAMP_TO_EDGE`.
+    /// Another texture loaded by the map (e.g. `BITMAP_CHROME+2` = `Object9\sand01.jpg` in Tarkan,
+    /// `MapManager.cpp:150`): path relative to `Data` and whether it is `GL_NEAREST` + `GL_CLAMP_TO_EDGE`.
     File { path: &'static str, nearest_clamp: bool },
 }
 
 impl Bitmap {
-    /// Ruta relativa a `Data` (con la extensión del original: `.jpg` = `.OZJ`, `.tga` = `.OZT`).
+    /// Path relative to `Data` (with the original extension: `.jpg` = `.OZJ`, `.tga` = `.OZT`).
     pub fn path(self) -> &'static str {
         match self {
             Bitmap::Chrome => "Effect/Chrome01.jpg",
@@ -74,12 +74,12 @@ impl Bitmap {
         }
     }
 
-    /// Fotogramas de una textura animada (`BITMAP_WATER`: 32); 1 el resto.
+    /// Frames of an animated texture (`BITMAP_WATER`: 32); 1 for the rest.
     pub fn frames(self) -> usize {
         if self == Bitmap::Water { WATER_FRAMES } else { 1 }
     }
 
-    /// Ruta del fotograma `i` (`Object8\wt{i:02}.jpg` del agua; la de siempre para el resto).
+    /// Path of frame `i` (`Object8\wt{i:02}.jpg` for water; the usual one for the rest).
     pub fn frame_path(self, i: usize) -> String {
         match self {
             Bitmap::Water => format!("Object8/wt{:02}.jpg", i % WATER_FRAMES),
@@ -87,7 +87,7 @@ impl Bitmap {
         }
     }
 
-    /// `GL_NEAREST` y `GL_CLAMP_TO_EDGE` (si no, `GL_LINEAR`; `GL_REPEAT` salvo `Shiny`).
+    /// `GL_NEAREST` and `GL_CLAMP_TO_EDGE` (otherwise `GL_LINEAR`; `GL_REPEAT` except `Shiny`).
     pub fn nearest(self) -> bool {
         match self {
             Bitmap::Chrome2 | Bitmap::Chrome3 | Bitmap::Chrome6 | Bitmap::Chrome7 => true,
@@ -104,33 +104,33 @@ impl Bitmap {
 /// `BITMAP_WATER` .. `BITMAP_WATER + 31`.
 pub const WATER_FRAMES: usize = 32;
 
-/// `b->BodyLight` que cambia con el tiempo durante una pasada: `v = sin(Timer + WorldTime · freq_ms) ·
-/// amp + base`, y `BodyLight = (v, v, v)` o, con `relative`, `BodyLight · v` (la luz del suelo).
+/// `b->BodyLight` that changes over time during a pass: `v = sin(Timer + WorldTime · freq_ms) ·
+/// amp + base`, and `BodyLight = (v, v, v)` or, with `relative`, `BodyLight · v` (the ground light).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BodyWave {
     pub freq_ms: f32,
     pub amp: f32,
     pub base: f32,
     pub relative: bool,
-    /// Suma el `o->Timer` del objeto (cada objeto, su fase; si no, `Timer = 0`).
+    /// Adds the object's `o->Timer` (each object its own phase; otherwise `Timer = 0`).
     pub timer: bool,
 }
 
 impl BodyWave {
-    /// El factor `v` con `WorldTime` en ms y el `o->Timer` del objeto.
+    /// The factor `v` with `WorldTime` in ms and the object's `o->Timer`.
     pub fn at(self, world_time: f32, timer: f32) -> f32 {
         let t = if self.timer { timer } else { 0.0 };
         (t + world_time * self.freq_ms).sin() * self.amp + self.base
     }
 
-    /// `b->BodyLight` con la luz del objeto `object`.
+    /// `b->BodyLight` with the light of object `object`.
     pub fn light(self, object: [f32; 3], world_time: f32, timer: f32) -> [f32; 3] {
         let v = self.at(world_time, timer);
         if self.relative { object.map(|c| c * v) } else { [v; 3] }
     }
 }
 
-/// Fórmula de las coordenadas de cromado (`g_chrome`) de `RenderMesh` (`ZzzBMD.cpp:1054-1108`).
+/// Chrome coordinate formula (`g_chrome`) of `RenderMesh` (`ZzzBMD.cpp:1054-1108`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u32)]
 pub enum ChromeMode {
@@ -141,11 +141,11 @@ pub enum ChromeMode {
     Chrome5 = 5,
     Chrome6 = 6,
     Chrome7 = 7,
-    /// `RENDER_METAL` (y `RENDER_OIL`, que no se traduce): la rama `else`.
+    /// `RENDER_METAL` (and `RENDER_OIL`, not translated): the `else` branch.
     Metal = 8,
 }
 
-/// Qué fórmula usa una combinación de `RENDER_*`, en el orden de los `if` del original.
+/// Which formula a `RENDER_*` combination uses, in the order of the original `if`s.
 pub fn chrome_mode(f: u32) -> Option<ChromeMode> {
     use flags::*;
     if f & ANY_CHROME == 0 {
@@ -173,11 +173,11 @@ pub fn chrome_mode(f: u32) -> Option<ChromeMode> {
 /// `LightVector` (`ZzzBMD.cpp:49`).
 pub const LIGHT_VECTOR: [f32; 3] = [0.0, -0.1, -0.8];
 
-/// `g_chrome[j]` de una normal ya girada (`NormalTransform`, ejes de MU) con `WorldTime` en ms.
+/// `g_chrome[j]` from an already rotated normal (`NormalTransform`, MU axes) with `WorldTime` in ms.
 ///
-/// No depende de la cámara: `BMD::Chrome` (el que usaba `g_vright`) no lo llama nadie. Todas son
-/// lineales en la normal, así que interpolarlas por píxel da lo mismo que por vértice. La versión del
-/// sombreador (`model_light.wesl`) es copia de esta.
+/// Camera-independent: `BMD::Chrome` (the one using `g_vright`) is never called. All formulas are
+/// linear in the normal, so per-pixel interpolation equals per-vertex. The shader version
+/// (`model_light.wesl`) is a copy of this one.
 pub fn chrome_uv(mode: ChromeMode, n: [f32; 3], world_time: f32) -> [f32; 2] {
     let wt = world_time.floor();
     let wave = wt.rem_euclid(10000.0) * 0.0001;
@@ -208,8 +208,8 @@ pub fn chrome_uv(mode: ChromeMode, n: [f32; 3], world_time: f32) -> [f32; 2] {
     }
 }
 
-/// `k · ((int)WorldTime % periodo)`, con `WorldTime` en ms: los `BlendMeshTexCoordU/V` de `MoveObject`
-/// (p. ej. `-(int)WorldTime%1000 * 0.001f` = `Saw { period: 1000, k: -0.001 }`). `k = 0`: nada.
+/// `k · ((int)WorldTime % period)`, with `WorldTime` in ms: the `BlendMeshTexCoordU/V` of `MoveObject`
+/// (e.g. `-(int)WorldTime%1000 * 0.001f` = `Saw { period: 1000, k: -0.001 }`). `k = 0`: none.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct Saw {
     pub period: f32,
@@ -227,32 +227,32 @@ impl Saw {
     }
 }
 
-/// Una llamada a `RenderBody` (`mesh: None`) o `RenderMesh(mesh)` del código de dibujo de un objeto.
+/// A `RenderBody` (`mesh: None`) or `RenderMesh(mesh)` call from an object's draw code.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pass {
-    /// `None` = `RenderBody`: todas las mallas, con los guiones de textura (`_H` oculta, `_R` suma) y
-    /// sin `HiddenMesh`. `Some(i)` = `RenderMesh(i, ...)`: los guiones `_H`/`_R` no cuentan.
+    /// `None` = `RenderBody`: all meshes, with texture scripts (`_H` hides, `_R` adds) and
+    /// without `HiddenMesh`. `Some(i)` = `RenderMesh(i, ...)`: the `_H`/`_R` scripts do not apply.
     pub mesh: Option<usize>,
     /// `RENDER_*` ([`flags`]).
     pub flags: u32,
-    /// `MeshTexture` / `Texture`: en lugar de la textura de la malla.
+    /// `MeshTexture` / `Texture`: replaces the mesh's texture.
     pub texture: Option<Bitmap>,
-    /// `b->BodyLight` durante la llamada (`None` = el del objeto: la luz del terreno).
+    /// `b->BodyLight` during the call (`None` = the object's: the terrain light).
     pub light: Option<[f32; 3]>,
-    /// `b->StreamMesh` durante la llamada (`None` = el del modelo, [`super::ModelRules::stream_mesh`]).
+    /// `b->StreamMesh` during the call (`None` = the model's, [`super::ModelRules::stream_mesh`]).
     pub stream_mesh: Option<i32>,
-    /// El parámetro `BlendMesh` (`None` = `o->BlendMesh`, [`super::ModelRules::additive_mesh`]).
-    /// Se compara con el índice de textura de la malla; `<= -2` = todas suman.
+    /// The `BlendMesh` parameter (`None` = `o->BlendMesh`, [`super::ModelRules::additive_mesh`]).
+    /// Compared with the mesh's texture index; `<= -2` = all are additive.
     pub blend_mesh: Option<i32>,
-    /// El parámetro `BlendMeshTexCoordU/V` (`None` = los de `o`, [`super::ModelRules::tex_coord`]).
+    /// The `BlendMeshTexCoordU/V` parameter (`None` = those of `o`, [`super::ModelRules::tex_coord`]).
     pub tex_coord: Option<[Saw; 2]>,
-    /// El parámetro `BlendMeshLight` de esta llamada (`None` = el de `o`, [`super::ModelRules::glow`]),
-    /// p. ej. `RenderBody(RENDER_TEXTURE, o->Alpha, 0, fLumi, ...)`.
+    /// The `BlendMeshLight` parameter of this call (`None` = that of `o`, [`super::ModelRules::glow`]),
+    /// e.g. `RenderBody(RENDER_TEXTURE, o->Alpha, 0, fLumi, ...)`.
     pub glow: Option<super::Glow>,
-    /// El parámetro `Alpha` de la llamada (`None` = `o->Alpha`, 1). Con `RENDER_TEXTURE` y menos de
-    /// 0.99, `EnableAlphaTest` y `glColor4f(..., Alpha)` (`ZzzBMD.cpp:1201-1204`, 1272-1280).
+    /// The call's `Alpha` parameter (`None` = `o->Alpha`, 1). With `RENDER_TEXTURE` and below
+    /// 0.99, `EnableAlphaTest` and `glColor4f(..., Alpha)` (`ZzzBMD.cpp:1201-1204`, 1272-1280).
     pub alpha: Option<f32>,
-    /// `b->BodyLight` que cambia con el tiempo (en lugar de [`Pass::light`]).
+    /// Time-varying `b->BodyLight` (instead of [`Pass::light`]).
     pub body_wave: Option<BodyWave>,
 }
 
@@ -272,7 +272,7 @@ impl Pass {
             body_wave: None,
         }
     }
-    /// `Alpha` de la llamada.
+    /// The call's `Alpha`.
     pub const fn alpha(mut self, a: f32) -> Self {
         self.alpha = Some(a);
         self
@@ -311,96 +311,96 @@ impl Pass {
         self.tex_coord = Some([u, v]);
         self
     }
-    /// `BlendMeshLight` de la llamada.
+    /// The call's `BlendMeshLight`.
     pub const fn glow(mut self, g: super::Glow) -> Self {
         self.glow = Some(g);
         self
     }
-    /// `BlendMeshLight = sin(WorldTime · freq_ms) · amp + base` (frecuencia del original, por ms).
+    /// `BlendMeshLight = sin(WorldTime · freq_ms) · amp + base` (original frequency, per ms).
     pub const fn pulse(self, freq_ms: f32, amp: f32, base: f32) -> Self {
         self.glow(super::Glow::Pulse { freq: freq_ms * 1000.0, amp, base })
     }
 }
 
-/// La pasada por defecto: `RenderBody(RENDER_TEXTURE, o->Alpha, o->BlendMesh, ...)`.
+/// The default pass: `RenderBody(RENDER_TEXTURE, o->Alpha, o->BlendMesh, ...)`.
 pub const DEFAULT_PASSES: &[Pass] = &[Pass::body(flags::TEXTURE)];
 
-/// Mezcla con la que queda una malla.
+/// Blending a mesh ends up with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LookBlend {
     /// `DisableAlphaBlend`.
     Opaque,
-    /// `EnableAlphaTest`: mezcla + prueba de alfa (> 0.25), escribe profundidad.
+    /// `EnableAlphaTest`: blending + alpha test (> 0.25), writes depth.
     AlphaTest,
-    /// `EnableAlphaBlend`: ONE, ONE (suma), sin escribir profundidad.
+    /// `EnableAlphaBlend`: ONE, ONE (additive), no depth write.
     Add,
-    /// `EnableAlphaBlendMinus`: ZERO, ONE_MINUS_SRC_COLOR (oscurece), sin escribir profundidad.
+    /// `EnableAlphaBlendMinus`: ZERO, ONE_MINUS_SRC_COLOR (darkens), no depth write.
     Subtract,
 }
 
-/// Color con el que se multiplica la textura.
+/// Color the texture is multiplied by.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum LookColor {
-    /// `LightTransform`: `BodyLight` por la intensidad según la normal.
+    /// `LightTransform`: `BodyLight` times the intensity from the normal.
     Lit,
-    /// `glColor3fv(BodyLight)`: la `StreamMesh` y el cromado.
+    /// `glColor3fv(BodyLight)`: the `StreamMesh` and chrome.
     Flat,
-    /// `glColor3f(BodyLight · BlendMeshLight)`: la `BlendMesh`.
+    /// `glColor3f(BodyLight · BlendMeshLight)`: the `BlendMesh`.
     BlendLight,
 }
 
-/// Cómo queda una malla en una pasada.
+/// How a mesh looks in a pass.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MeshLook {
-    /// `None` = la textura de la malla.
+    /// `None` = the mesh's texture.
     pub texture: Option<Bitmap>,
-    /// `false` = `DisableTexture` (solo color).
+    /// `false` = `DisableTexture` (color only).
     pub textured: bool,
-    /// Coordenadas de cromado en vez de las del modelo.
+    /// Chrome coordinates instead of the model's.
     pub chrome: Option<ChromeMode>,
-    /// Se suman `BlendMeshTexCoordU/V` a las coordenadas (`EnableWave`, o `RENDER_CHROME4`).
+    /// `BlendMeshTexCoordU/V` are added to the coordinates (`EnableWave`, or `RENDER_CHROME4`).
     pub wave: Option<[Saw; 2]>,
     pub color: LookColor,
-    /// `BodyLight` de la pasada (`None` = el del objeto).
+    /// The pass's `BodyLight` (`None` = the object's).
     pub light: Option<[f32; 3]>,
     pub blend: LookBlend,
-    /// Alfa del color (`glColor4f`); 1 = opaco.
+    /// Color alpha (`glColor4f`); 1 = opaque.
     pub alpha: f32,
-    /// `BodyLight` que cambia con el tiempo (manda sobre [`MeshLook::light`]).
+    /// Time-varying `BodyLight` (overrides [`MeshLook::light`]).
     pub body_wave: Option<BodyWave>,
 }
 
-/// Lo que hace falta saber de una malla para decidir cómo se dibuja.
+/// What is needed about a mesh to decide how it is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MeshInfo {
     pub index: usize,
     /// `m->Texture`.
     pub texture_index: i32,
     pub script: Option<TextureScript>,
-    /// `pBitmap->Components == 4` de la textura de la malla (TGA con alfa).
+    /// `pBitmap->Components == 4` of the mesh's texture (TGA with alpha).
     pub has_alpha: bool,
 }
 
-/// Lo del objeto que usan todas sus pasadas.
+/// Object data shared by all its passes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ObjectDraw {
-    /// `o->BlendMesh` (`-1` = ninguna).
+    /// `o->BlendMesh` (`-1` = none).
     pub blend_mesh: i32,
-    /// `Models[tipo].StreamMesh` (`-1` = ninguna).
+    /// `Models[tipo].StreamMesh` (`-1` = none).
     pub stream_mesh: i32,
     /// `o->BlendMeshTexCoordU/V`.
     pub tex_coord: [Saw; 2],
-    /// `o->HiddenMesh` (`-1` = ninguna).
+    /// `o->HiddenMesh` (`-1` = none).
     pub hidden_mesh: i32,
 }
 
-/// Cómo queda la malla `m` en la pasada `p` (`None` = esa llamada no la dibuja).
+/// How mesh `m` looks in pass `p` (`None` = that call does not draw it).
 pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
     use flags::*;
     let i = m.index as i32;
     let mut blend_mesh = p.blend_mesh.unwrap_or(o.blend_mesh);
     match p.mesh {
-        // `RenderBody`: `_H` y `HiddenMesh` no se dibujan; `_R` hace a la malla su `BlendMesh`.
+        // `RenderBody`: `_H` and `HiddenMesh` are not drawn; `_R` makes the mesh its own `BlendMesh`.
         None => {
             if i == o.hidden_mesh || m.script.is_some_and(|s| s.hidden) {
                 return None;
@@ -415,11 +415,11 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
     let tex_coord = p.tex_coord.unwrap_or(o.tex_coord);
     let has_offset = tex_coord.iter().any(|s| s.k != 0.0);
     let model_stream = p.stream_mesh.unwrap_or(o.stream_mesh);
-    // El guion `_S` solo activa el desplazamiento; la luz plana es de `StreamMesh` del modelo.
+    // The `_S` script only enables scrolling; flat light comes from the model's `StreamMesh`.
     let stream = if m.script.is_some_and(|s| s.stream) { i } else { model_stream };
     let wave = ((i == blend_mesh || i == stream) && has_offset).then_some(tex_coord);
     let lit = if i == model_stream { LookColor::Flat } else { LookColor::Lit };
-    // `pBitmap`: la textura que se usa al final.
+    // `pBitmap`: the texture finally used.
     let has_alpha = if p.texture.is_some() { p.texture.is_some_and(|b| b.path().ends_with(".tga")) } else { m.has_alpha };
     let f = p.flags;
     let look = |texture, blend, color, wave| MeshLook {
@@ -456,7 +456,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         } else {
             LookBlend::Opaque
         };
-        // `BindTexture`: con `MeshTexture == -1` la de cada fórmula; si no, la pedida.
+        // `BindTexture`: with `MeshTexture == -1` each formula's own; otherwise the requested one.
         let texture = match p.texture {
             Some(t) => Some(t),
             None if f & (CHROME2 | CHROME3 | CHROME4) != 0 => Some(Bitmap::Chrome2),
@@ -465,7 +465,7 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
             None if f & METAL != 0 => Some(Bitmap::Shiny),
             None => None,
         };
-        // Solo `RENDER_CHROME4` suma `BlendMeshTexCoordU/V` (`ZzzBMD.cpp:1301`).
+        // Only `RENDER_CHROME4` adds `BlendMeshTexCoordU/V` (`ZzzBMD.cpp:1301`).
         let wave = (mode == ChromeMode::Chrome4 && has_offset).then_some(tex_coord);
         return Some(MeshLook { chrome: Some(mode), ..look(texture, blend, LookColor::Flat, wave) });
     }
@@ -491,12 +491,12 @@ pub fn resolve(p: &Pass, o: &ObjectDraw, m: &MeshInfo) -> Option<MeshLook> {
         }
         return Some(MeshLook { textured: false, ..look(None, LookBlend::Add, lit, None) });
     }
-    // Sin `RENDER_TEXTURE` ni nada: el original dibuja con la textura y la mezcla que hubiera.
+    // No `RENDER_TEXTURE` or anything else: the original draws with whatever texture and blending were set.
     Some(look(p.texture, if has_alpha { LookBlend::AlphaTest } else { LookBlend::Opaque }, lit, wave))
 }
 
-/// Las pasadas de cada malla, en orden, quitando las que una pasada posterior opaca sobre la misma
-/// malla tapa del todo (con `GL_LEQUAL` lo último dibujado gana): `out[k]` = (índice de pasada, aspecto).
+/// Each mesh's passes, in order, dropping those fully covered by a later opaque pass on the same
+/// mesh (with `GL_LEQUAL` the last drawn wins): `out[k]` = (pass index, look).
 pub fn resolve_all(passes: &[Pass], o: &ObjectDraw, m: &MeshInfo) -> Vec<(usize, MeshLook)> {
     let looks: Vec<(usize, MeshLook)> =
         passes.iter().enumerate().filter_map(|(k, p)| resolve(p, o, m).map(|l| (k, l))).collect();
@@ -521,17 +521,17 @@ mod tests {
 
     #[test]
     fn cromado_sin_camara() {
-        // RENDER_CHROME en WorldTime = 2500 ms: Wave = 0.25.
+        // RENDER_CHROME at WorldTime = 2500 ms: Wave = 0.25.
         let uv = chrome_uv(ChromeMode::Chrome, [0.0, 0.6, 0.8], 2500.0);
         assert!((uv[0] - (0.4 + 0.25)).abs() < 1e-6 && (uv[1] - (0.3 + 0.5)).abs() < 1e-6, "{uv:?}");
-        // Wave = (int)WorldTime % 10000 · 0.0001: a los 10 s vuelve a empezar.
+        // Wave = (int)WorldTime % 10000 · 0.0001: restarts every 10 s.
         assert_eq!(chrome_uv(ChromeMode::Chrome, [0.0, 0.0, 1.0], 10_000.0), [0.5, 0.0]);
         // CHROME3: LightVector (0, -0.1, -0.8).
         let uv = chrome_uv(ChromeMode::Chrome3, [0.0, 0.0, -1.0], 0.0);
         assert!((uv[0] - 0.8).abs() < 1e-6 && (uv[1] - 0.2).abs() < 1e-6);
-        // METAL: sin tiempo.
+        // METAL: time-independent.
         assert_eq!(chrome_uv(ChromeMode::Metal, [0.0, 0.0, 0.0], 1234.0), [0.2, 0.5]);
-        // Orden de los `if`: CHROME2 gana a CHROME; BRIGHT solo no es cromado.
+        // Order of the `if`s: CHROME2 beats CHROME; BRIGHT alone is not chrome.
         assert_eq!(chrome_mode(CHROME | CHROME2 | BRIGHT), Some(ChromeMode::Chrome2));
         assert_eq!(chrome_mode(CHROME | BRIGHT), Some(ChromeMode::Chrome));
         assert_eq!(chrome_mode(BRIGHT | TEXTURE), None);
@@ -550,29 +550,29 @@ mod tests {
     fn ramas_de_render_mesh() {
         let o = ObjectDraw { blend_mesh: 4, ..obj() };
         let body = Pass::body(TEXTURE);
-        // La BlendMesh suma con BodyLight·BlendMeshLight.
+        // The BlendMesh adds with BodyLight·BlendMeshLight.
         let l = resolve(&body, &o, &mesh(4, None, false)).unwrap();
         assert_eq!((l.blend, l.color), (LookBlend::Add, LookColor::BlendLight));
-        // TGA: prueba de alfa; JPG: opaca.
+        // TGA: alpha test; JPG: opaque.
         assert_eq!(resolve(&body, &o, &mesh(1, None, true)).unwrap().blend, LookBlend::AlphaTest);
         assert_eq!(resolve(&body, &o, &mesh(1, None, false)).unwrap().blend, LookBlend::Opaque);
-        // Con textura de cromado (JPG) en lugar de la TGA: opaca.
+        // With a chrome texture (JPG) instead of the TGA: opaque.
         let p = Pass::body(TEXTURE).texture(Bitmap::Chrome);
         assert_eq!(resolve(&p, &o, &mesh(1, None, true)).unwrap().blend, LookBlend::Opaque);
-        // Guiones: `_H` no se dibuja en RenderBody, sí con RenderMesh; `_R` suma solo en RenderBody.
+        // Scripts: `_H` is not drawn in RenderBody but is with RenderMesh; `_R` adds only in RenderBody.
         let h = Some(TextureScript { hidden: true, ..Default::default() });
         assert!(resolve(&body, &obj(), &mesh(0, h, false)).is_none());
         assert!(resolve(&Pass::mesh(0, TEXTURE), &obj(), &mesh(0, h, false)).is_some());
         let r = Some(TextureScript { bright: true, ..Default::default() });
         assert_eq!(resolve(&body, &obj(), &mesh(2, r, false)).unwrap().blend, LookBlend::Add);
         assert_eq!(resolve(&Pass::mesh(2, TEXTURE), &obj(), &mesh(2, r, false)).unwrap().blend, LookBlend::Opaque);
-        // `_N`: sin cromado.
+        // `_N`: no chrome.
         let n = Some(TextureScript { none_blend: true, ..Default::default() });
         assert!(resolve(&Pass::body(CHROME | BRIGHT), &obj(), &mesh(0, n, false)).is_none());
-        // Cromado + BRIGHT: suma con BITMAP_CHROME y color plano.
+        // Chrome + BRIGHT: additive with BITMAP_CHROME and flat color.
         let l = resolve(&Pass::mesh(0, CHROME | BRIGHT), &obj(), &mesh(0, None, false)).unwrap();
         assert_eq!((l.blend, l.color, l.texture, l.chrome), (LookBlend::Add, LookColor::Flat, Some(Bitmap::Chrome), Some(ChromeMode::Chrome)));
-        // DARK: resta.
+        // DARK: subtract.
         assert_eq!(resolve(&Pass::body(TEXTURE | DARK), &obj(), &mesh(0, None, false)).unwrap().blend, LookBlend::Subtract);
     }
 
@@ -580,13 +580,13 @@ mod tests {
     fn stream_mesh() {
         let saw = [Saw { period: 1000.0, k: -0.001 }, Saw::ZERO];
         let o = ObjectDraw { tex_coord: saw, ..obj() };
-        // StreamMesh del modelo: luz plana y se desplaza.
+        // Model StreamMesh: flat light and scrolling.
         let p = Pass::body(TEXTURE).stream(2);
         let l = resolve(&p, &o, &mesh(2, None, false)).unwrap();
         assert_eq!((l.color, l.wave), (LookColor::Flat, Some(saw)));
         let l = resolve(&p, &o, &mesh(1, None, false)).unwrap();
         assert_eq!((l.color, l.wave), (LookColor::Lit, None));
-        // Guion `_S`: se desplaza pero sigue iluminada.
+        // `_S` script: scrolls but stays lit.
         let s = Some(TextureScript { stream: true, ..Default::default() });
         let l = resolve(&Pass::body(TEXTURE), &o, &mesh(1, s, false)).unwrap();
         assert_eq!((l.color, l.wave), (LookColor::Lit, Some(saw)));
@@ -595,9 +595,9 @@ mod tests {
     #[test]
     fn la_pasada_opaca_tapa_las_anteriores() {
         let passes = [Pass::body(TEXTURE).texture(Bitmap::Chrome).stream(2), Pass::body(TEXTURE)];
-        // Malla JPG: la segunda la tapa del todo.
+        // JPG mesh: the second pass covers it completely.
         assert_eq!(resolve_all(&passes, &obj(), &mesh(0, None, false)).len(), 1);
-        // Malla TGA: el cromado se ve por los huecos de la segunda.
+        // TGA mesh: the chrome shows through the holes of the second pass.
         let both = resolve_all(&passes, &obj(), &mesh(2, None, true));
         assert_eq!(both.iter().map(|(k, _)| *k).collect::<Vec<_>>(), vec![0, 1]);
     }

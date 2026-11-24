@@ -11,12 +11,12 @@ mu-data.workspace = true
 mu-protocol.workspace = true
 bevy.workspace = true
 serde.workspace = true
-# Copiar y pegar en las cajas de texto (portapapeles de Windows), solo texto.
+# Copy and paste in text boxes (Windows clipboard), text only.
 arboard = { version = "3", default-features = false }
 serde_json.workspace = true
 ab_glyph.workspace = true
 
 [features]
-# Para medir: `cargo build --release -p mu-client --features traza` escribe una traza de Chrome
-# (`trace-*.json`) con lo que tarda cada sistema. No va en la versión que se publica.
+# Profiling: `cargo build --release -p mu-client --features traza` writes a Chrome trace
+# (`trace-*.json`) with the time spent in each system. Not enabled in published builds.
 traza = ["bevy/trace_chrome"]

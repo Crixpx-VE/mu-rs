@@ -1,8 +1,8 @@
-//! Personaje jugable: modelo animado (esqueleto de `player.bmd` + piezas de armadura)
-//! que camina por el mapa al hacer clic en el suelo.
+//! Playable character: animated model (`player.bmd` skeleton + armor pieces)
+//! that walks around the map when clicking the ground.
 //!
-//! La animación se hace en CPU: cada fotograma se recalculan los vértices de cada pieza
-//! con los huesos de la pose actual. Para unos pocos personajes es de sobra rápido.
+//! Animation runs on the CPU: every frame the vertices of each piece are recomputed
+//! with the bones of the current pose. Plenty fast for a few characters.
 
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
@@ -18,27 +18,27 @@ use mu_data::{fs, path, texture};
 use crate::Args;
 use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
 
-/// Animaciones de `player.bmd` (enum `PLAYER_*` del original).
+/// `player.bmd` animations (the original `PLAYER_*` enum).
 pub mod action {
     use crate::fx::tables::ids;
     pub const STOP_MALE: usize = 1;
     pub const WALK_MALE: usize = 15;
     pub const SIT1: usize = ids::PLAYER_SIT1 as usize;
-    /// `PLAYER_SIT1..=PLAYER_POSE_FEMALE1`: sentado, curándose o apoyado (se queda así hasta moverse).
+    /// `PLAYER_SIT1..=PLAYER_POSE_FEMALE1`: sitting, healing or leaning (stays that way until moving).
     pub fn resting(a: usize) -> bool {
         (SIT1..=ids::PLAYER_POSE_FEMALE1 as usize).contains(&a)
     }
 
-    /// Los gestos (`PLAYER_GREETING1..=PLAYER_RUSH1`): caen en el `PLAYER_ATTACK_FIST..PLAYER_SHOCK`
-    /// de `PlayerStopAnimationSetting` (ZzzCharacter.cpp:3264-3282), así que al acabar la animación
-    /// vuelve a estar parado (`SetPlayerStop`).
+    /// Emotes (`PLAYER_GREETING1..=PLAYER_RUSH1`): they fall in the `PLAYER_ATTACK_FIST..PLAYER_SHOCK`
+    /// range of `PlayerStopAnimationSetting` (ZzzCharacter.cpp:3264-3282), so when the animation ends
+    /// the character is standing again (`SetPlayerStop`).
     pub fn emote(a: usize) -> bool {
         (ids::PLAYER_GREETING1 as usize..=ids::PLAYER_RUSH1 as usize).contains(&a)
     }
 
-    /// `ReceiveAction` (WSclient.cpp:3142-3350): la animación de `player.bmd` de una acción `AT_*`
-    /// (las de mujer, uno más; sentarse, dos). `Some(None)` = `AT_STAND1/2` (`SetPlayerStop`);
-    /// `None` = ninguna que se sepa poner (ataques y daño, sin armas ni monstruos todavía).
+    /// `ReceiveAction` (WSclient.cpp:3142-3350): the `player.bmd` animation of an `AT_*` action
+    /// (female ones, one more; sitting, two). `Some(None)` = `AT_STAND1/2` (`SetPlayerStop`);
+    /// `None` = none known yet (attacks and damage, no weapons or monsters yet).
     pub fn for_at(at: u8, female: bool) -> Option<Option<usize>> {
         use mu_protocol::game::action as at_;
         let f = female as i32;
@@ -79,8 +79,8 @@ pub mod action {
         Some(Some(a as usize))
     }
 
-    /// `SetActionClass` (ZzzInterface.cpp:4416-4432): solo se pone estando parado (`PLAYER_STOP_MALE..
-    /// =PLAYER_STOP_RIDE_WEAPON`, `PLAYER_STOP_TWO_HAND_SWORD_TWO` o el del Rage Fighter).
+    /// `SetActionClass` (ZzzInterface.cpp:4416-4432): only applied while standing (`PLAYER_STOP_MALE..
+    /// =PLAYER_STOP_RIDE_WEAPON`, `PLAYER_STOP_TWO_HAND_SWORD_TWO` or the Rage Fighter one).
     pub fn standing(a: usize) -> bool {
         let a = a as i32;
         (ids::PLAYER_STOP_MALE..=ids::PLAYER_STOP_RIDE_WEAPON).contains(&a)
@@ -89,20 +89,20 @@ pub mod action {
     }
 }
 
-/// `((Angle[2] + 22.5) / 360 * 8 + 1) % 8`: la dirección que mandan `SendRequestAction` y el
-/// `SendCharacterMove` de una casilla (wsclientinline.h:454-457), con el ángulo en [0, 360).
+/// `((Angle[2] + 22.5) / 360 * 8 + 1) % 8`: the direction sent by `SendRequestAction` and the
+/// single-tile `SendCharacterMove` (wsclientinline.h:454-457), with the angle in [0, 360).
 pub fn facing_direction(facing: f32) -> u8 {
     let deg = facing.to_degrees().rem_euclid(360.0);
     (((deg + 22.5) / 360.0 * 8.0 + 1.0) as u32 % 8) as u8
 }
 
-/// Casillas por segundo al caminar.
+/// Tiles per second when walking.
 const WALK_SPEED: f32 = 3.6;
-/// Fotogramas de animación por segundo.
+/// Animation frames per second.
 const ANIM_FPS: f32 = 8.0;
 
-/// `SetPlayerStop` sin arma (o en zona segura): la Elfa `STOP_FEMALE`, la Summoner
-/// `STOP_SUMMONER` y el resto `STOP_MALE`; con la espada en la mano fuera de zona segura, el Dark
+/// `SetPlayerStop` without a weapon (or in a safe zone): the Elf `STOP_FEMALE`, the Summoner
+/// `STOP_SUMMONER` and the rest `STOP_MALE`; with the sword in hand outside a safe zone, the Dark
 /// Knight `STOP_SWORD`.
 pub fn stop_action(class: crate::account::Class, sword_in_hand: bool) -> usize {
     use crate::account::Class;
@@ -117,13 +117,13 @@ pub fn stop_action(class: crate::account::Class, sword_in_hand: bool) -> usize {
     }
 }
 
-/// `SetPlayerWalk` sin arma: `WALK_FEMALE` las mujeres y `WALK_MALE` el resto.
+/// `SetPlayerWalk` without a weapon: `WALK_FEMALE` for women and `WALK_MALE` for the rest.
 pub fn walk_action(class: crate::account::Class) -> usize {
     if class.female() { crate::fx::tables::ids::PLAYER_WALK_FEMALE as usize } else { action::WALK_MALE }
 }
 
-/// `PlaySpeed` (fotogramas por tick de 25 Hz) de las animaciones que usan la selección y el juego
-/// (ZzzOpenData.cpp ≈330-361; `SetPlayerWalk` pone 0.33 a las de caminar).
+/// `PlaySpeed` (frames per 25 Hz tick) of the animations used by character selection and the game
+/// (ZzzOpenData.cpp ≈330-361; `SetPlayerWalk` sets 0.33 for the walking ones).
 pub fn play_speed(a: usize) -> f32 {
     use crate::fx::tables::ids;
     let a = a as i32;
@@ -141,7 +141,7 @@ pub fn play_speed(a: usize) -> f32 {
     } else if a == ids::PLAYER_HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 {
         0.2
     } else if a == ids::PLAYER_SEE1 || a == ids::PLAYER_SEE_FEMALE1 {
-        // ZzzOpenData.cpp:358-359 (el resto de gestos, `PLAYER_DEFENSE1..=PLAYER_SHOCK`, a 0.32).
+        // ZzzOpenData.cpp:358-359 (the rest of the emotes, `PLAYER_DEFENSE1..=PLAYER_SHOCK`, at 0.32).
         0.28
     } else if action::resting(a as usize) {
         0.4
@@ -150,12 +150,12 @@ pub fn play_speed(a: usize) -> f32 {
     }
 }
 
-/// Velocidad de la animación en fotogramas por segundo.
+/// Animation speed in frames per second.
 fn action_fps(a: usize) -> f32 {
     play_speed(a) * crate::fx::sim::TICKS_PER_SECOND
 }
 
-/// El ratón manda al personaje (para ordenar los sistemas que leen lo que hay bajo el ratón).
+/// The mouse drives the character (to order the systems that read what is under the mouse).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct HeroInput;
 
@@ -171,26 +171,26 @@ impl Plugin for CharacterPlugin {
 
 #[derive(Component)]
 pub struct Player {
-    /// Posición en casillas (puede ser fraccionaria mientras camina).
+    /// Position in tiles (may be fractional while walking).
     pub pos: Vec2,
-    /// Casillas que faltan por recorrer.
+    /// Tiles left to walk.
     pub path: VecDeque<(usize, usize)>,
-    /// Hacia dónde mira, en radianes alrededor del eje vertical de MU.
+    /// Facing, in radians around the MU vertical axis.
     pub facing: f32,
     pub action: usize,
     pub frame: f32,
-    /// Haciendo una habilidad: su animación manda hasta que acaba (fotogramas por segundo).
+    /// Casting a skill: its animation rules until it ends (frames per second).
     pub casting: Option<f32>,
-    /// `MOVEMENT_OPERATE`: va hacia este objeto de sentarse (índice en `Operates`).
+    /// `MOVEMENT_OPERATE`: heading to this sitting object (index in `Operates`).
     pub operate: Option<usize>,
     pub class: crate::account::Class,
-    /// Animaciones de parado y de caminar de su clase.
+    /// Stand and walk animations of its class.
     pub stop: usize,
     pub walk: usize,
 }
 
-/// Habilidades del Dark Knight en las teclas (sin servidor todavía: se lanzan en el sitio):
-/// (tecla, `AT_SKILL_*`, acción de `player.bmd`, velocidad `PlaySpeed` de `SetAttackSpeed`).
+/// Dark Knight skills on the keys (no server yet: cast in place):
+/// (key, `AT_SKILL_*`, `player.bmd` action, `PlaySpeed` speed from `SetAttackSpeed`).
 const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
     use crate::fx::core::*;
     [
@@ -207,13 +207,13 @@ const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
     ]
 };
 
-/// Habilidad elegida (`Hero->CurrentSkill`): índice en `SKILL_KEYS`.
+/// Selected skill (`Hero->CurrentSkill`): index in `SKILL_KEYS`.
 #[derive(Resource, Default)]
 pub struct CurrentSkill(pub Option<usize>);
 
-/// Como el original: `1`-`0` eligen la habilidad de ese atajo (`UseHotKey`) y el botón derecho la
-/// usa hacia donde apunta el ratón; en zona segura no se usan (`CheckAttack`). Sin la lista de
-/// habilidades todavía, los atajos traen las del Dark Knight en orden.
+/// Like the original: `1`-`0` select that hotkey's skill (`UseHotKey`) and the right button
+/// casts it toward the mouse; not usable in a safe zone (`CheckAttack`). Without the skill
+/// list yet, the hotkeys hold the Dark Knight's in order.
 #[allow(clippy::too_many_arguments)]
 fn cast_skill(
     keys: Res<ButtonInput<KeyCode>>,
@@ -229,7 +229,7 @@ fn cast_skill(
     mut players: Query<(Entity, &mut Player)>,
 ) {
     let Ok((entity, mut p)) = players.single_mut() else { return };
-    // Las habilidades de los atajos son las del Dark Knight.
+    // The hotkey skills are the Dark Knight's.
     if p.class != crate::account::Class::Knight {
         return;
     }
@@ -239,7 +239,7 @@ fn cast_skill(
     if p.casting.is_some() {
         return;
     }
-    // `--probar-habilidades`: una tras otra, sin ratón y en cualquier sitio.
+    // `--probar-habilidades`: one after another, no mouse, anywhere.
     let (index, target) = if args.skill_test {
         *auto += 1;
         ((*auto - 1) % SKILL_KEYS.len(), None)
@@ -254,7 +254,7 @@ fn cast_skill(
         if safe {
             return;
         }
-        // Punto del suelo bajo el ratón.
+        // Ground point under the mouse.
         let hit = windows.single().ok().zip(cameras.single().ok()).zip(terrain.as_ref()).and_then(|((w, (cam, tf)), t)| {
             let ray = cam.viewport_to_world(tf, w.cursor_position()?).ok()?;
             raycast_terrain(&t.0, ray)
@@ -264,7 +264,7 @@ fn cast_skill(
     let (_, skill, action, speed) = SKILL_KEYS[index];
     p.path.clear();
     p.pos = Vec2::new(p.pos.x.floor() + 0.5, p.pos.y.floor() + 0.5);
-    // Mira hacia el objetivo.
+    // Face the target.
     if let Some(t) = target {
         let d = t - p.pos;
         if d.length() > 1e-3 {
@@ -273,28 +273,28 @@ fn cast_skill(
     }
     p.action = action;
     p.frame = 0.0;
-    // `PlaySpeed` son fotogramas por tick del original (25 por segundo).
+    // `PlaySpeed` is in original frames per tick (25 per second).
     p.casting = Some(speed * crate::fx::sim::TICKS_PER_SECOND);
-    // Sin monstruos todavía: el objetivo es el punto del ratón (o 2 casillas por delante).
+    // No monsters yet: the target is the mouse point (or 2 tiles ahead).
     let (s, c) = p.facing.sin_cos();
     let at = target.unwrap_or(Vec2::new(p.pos.x + 2.0 * s, p.pos.y - 2.0 * c));
     world.casts.push(crate::fx::core::Cast::new(entity, skill, None, Vec3::new(at.x * MU_SCALE, at.y * MU_SCALE, 0.0)));
 }
 
-/// Esqueleto + piezas, compartido por la animación.
+/// Skeleton + pieces, shared by the animation.
 #[derive(Component)]
 pub struct Skinned {
     skeleton: Bmd,
-    /// (modelo de la pieza, índice de malla, malla de Bevy que se actualiza)
+    /// (piece model, mesh index, Bevy mesh being updated)
     parts: Vec<(usize, usize, Handle<Mesh>)>,
     models: Vec<Bmd>,
-    /// El arma de la mano derecha y sus mallas.
+    /// The right-hand weapon and its meshes.
     weapon: Option<(Bmd, Vec<(usize, Handle<Mesh>)>)>,
 }
 
 impl Skinned {
-    /// Pone las piezas y el arma (en la mano o a la espalda) en la pose `action`/`frame` y añade
-    /// sus vértices a la sombra. Devuelve los huesos de esa pose.
+    /// Places the pieces and the weapon (in hand or on the back) in pose `action`/`frame` and adds
+    /// their vertices to the shadow. Returns the bones of that pose.
     pub fn pose(
         &self,
         action: usize,
@@ -326,49 +326,49 @@ impl Skinned {
         bones
     }
 
-    /// Fotogramas de la animación `action` de `player.bmd` (0 si no la tiene).
+    /// Frames of animation `action` of `player.bmd` (0 if missing).
     pub fn action_frames(&self, action: usize) -> usize {
         self.skeleton.actions.get(action).map_or(0, |a| a.frames)
     }
 
-    /// Los huesos de la pose `action`/`frame` (los mismos que usa [`Skinned::pose`]).
+    /// The bones of pose `action`/`frame` (the same ones [`Skinned::pose`] uses).
     pub fn bones_at(&self, action: usize, frame: f32) -> Vec<bmd::Mat34> {
         self.skeleton.bone_matrices_at(action, frame)
     }
 
-    /// Las mallas de las piezas del cuerpo, sin el arma: (modelo de la pieza, índice de malla).
+    /// The body piece meshes, without the weapon: (piece model, mesh index).
     pub fn body_meshes(&self) -> impl Iterator<Item = (&Bmd, usize)> + '_ {
         self.parts.iter().map(|(model, mesh, _)| (&self.models[*model], *mesh))
     }
 }
 
-/// Un personaje cargado: esqueleto y piezas, las mallas (hijas de la entidad del personaje)
-/// y sus materiales (para darles luz).
+/// A loaded character: skeleton and pieces, the meshes (children of the character entity)
+/// and their materials (to light them).
 pub struct CharacterModel {
     pub skinned: Skinned,
     pub children: Vec<(Mesh3d, MeshMaterial3d<crate::model_light::ModelMaterial>)>,
     pub materials: Vec<Handle<crate::model_light::ModelMaterial>>,
-    /// Huesos de la pose inicial.
+    /// Bones of the initial pose.
     pub bones: Vec<bmd::Mat34>,
-    /// Materiales del brillo del equipo cuyo color cambia con el tiempo (hero_dress.rs).
+    /// Equipment glow materials whose color changes over time (hero_dress.rs).
     pub glow: Vec<(Handle<crate::model_light::ModelMaterial>, mu_data::items::glow::GlowLight)>,
 }
 
-/// Equipo puesto en vez de las piezas de la clase (`BodyPart[].Type` y `Weapon[0].Type` con el modelo
-/// del objeto): ruta del modelo dentro de `Data` y el objeto (para su brillo). Lo llena hero_dress.rs.
+/// Worn equipment replacing the class pieces (`BodyPart[].Type` and `Weapon[0].Type` with the item
+/// model): model path inside `Data` and the item (for its glow). Filled by hero_dress.rs.
 #[derive(Default, Clone)]
 pub struct Dress {
-    /// Casco, armadura, pantalones, guantes y botas (en el orden de [`BODY_PARTS`]).
+    /// Helm, armor, pants, gloves and boots (in [`BODY_PARTS`] order).
     pub parts: [Option<(std::path::PathBuf, mu_data::items::Item)>; 5],
-    /// El arma de la mano derecha.
+    /// The right-hand weapon.
     pub weapon: Option<(std::path::PathBuf, mu_data::items::Item)>,
     /// `g_pOption->GetRenderLevel()`.
     pub render_level: u8,
 }
 
-/// Carga `player.bmd` y las piezas sin equipo de la clase (`{Helm,Armor,Pant,Glove,Boot}ClassNN`),
-/// en la pose `action` (fotograma 0); el Dark Knight, con la espada en la mano. `None` si falta
-/// el esqueleto.
+/// Loads `player.bmd` and the class's unequipped pieces (`{Helm,Armor,Pant,Glove,Boot}ClassNN`),
+/// in pose `action` (frame 0); the Dark Knight with the sword in hand. `None` if the skeleton
+/// is missing.
 pub fn load_character(
     args: &Args,
     class: crate::account::Class,
@@ -380,7 +380,7 @@ pub fn load_character(
     load_character_dressed(args, class, action, None, meshes, materials, images)
 }
 
-/// Como [`load_character`], con el equipo `dress` (sin él, la espada corta del Dark Knight).
+/// Like [`load_character`], with the `dress` equipment (without it, the Dark Knight short sword).
 pub fn load_character_dressed(
     args: &Args,
     class: crate::account::Class,
@@ -411,7 +411,7 @@ pub fn load_character_dressed(
             warn!("falta la pieza {name}");
             continue;
         };
-        // La pieza del equipo (si la hay y se puede leer) en vez de la de la clase.
+        // The equipment piece (if any and readable) instead of the class piece.
         let equipped = dress.and_then(|d| d.parts[k].as_ref()).and_then(|(path, item)| {
             let (pdir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
             Some((fs::read(&pdir, file).and_then(|b| bmd::read(&b)).ok()?, pdir, *item))
@@ -444,8 +444,8 @@ pub fn load_character_dressed(
         models.push(model);
     }
 
-    // Arma en la mano derecha (como `RenderLinkObject` con `Link` = true): la del equipo o, sin equipo,
-    // la espada corta del Dark Knight.
+    // Right-hand weapon (like `RenderLinkObject` with `Link` = true): the equipped one or, without
+    // equipment, the Dark Knight short sword.
     let item_dir = args.data.join("Item");
     let knight = class == crate::account::Class::Knight;
     let dressed_weapon = dress.and_then(|d| d.weapon.as_ref()).and_then(|(path, item)| {
@@ -494,7 +494,7 @@ pub fn load_character_dressed(
     })
 }
 
-/// Piezas del cuerpo sin equipo (`BodyPart[BODYPART_HELM..BOOTS]`).
+/// Unequipped body pieces (`BodyPart[BODYPART_HELM..BOOTS]`).
 const BODY_PARTS: [&str; 5] = ["Helm", "Armor", "Pant", "Glove", "Boot"];
 
 fn spawn_player(
@@ -520,14 +520,14 @@ fn spawn_player(
         return;
     };
 
-    // Con servidor, donde diga (`CharacterInformation`); si no, `--spawn` o el centro del mapa.
+    // With a server, where it says (`CharacterInformation`); otherwise `--spawn` or the map center.
     let from_server = info.as_ref().map(|i| [i.0.x as f32 + 0.5, i.0.y as f32 + 0.5]);
     let start = from_server.or(args.spawn).unwrap_or(if args.world == 1 { [133.0, 127.0] } else { [128.0, 128.0] });
     let mut pos = Vec2::from_array(start);
     if let Some(t) = &terrain {
         pos = nearest_walkable(&t.0, pos).unwrap_or(pos);
     }
-    // `Direction` (0..7, como los pasos de caminar) → ángulo de MU.
+    // `Direction` (0..7, like walking steps) → MU angle.
     let facing = info.as_ref().map_or(0.0, |i| direction_facing(i.0.direction));
     if let Some(i) = &info {
         let i = &i.0;
@@ -574,18 +574,18 @@ fn spawn_player(
     }
 }
 
-/// Arma inicial del Dark Knight: la espada corta (`MODEL_SWORD + 1` = `Item/Sword02.bmd`).
+/// Initial Dark Knight weapon: the short sword (`MODEL_SWORD + 1` = `Item/Sword02.bmd`).
 const WEAPON_FILE: &str = "Sword02.bmd";
 const WEAPON_MODEL: i32 = crate::fx::core::MODEL_SWORD + 1;
-/// `Weapon[0].LinkBone`: la mano derecha de `player.bmd`.
+/// `Weapon[0].LinkBone`: the right hand of `player.bmd`.
 pub const RIGHT_HAND_BONE: usize = 33;
 
-/// Huesos del arma en la mano: el arma en mano se coloca con `Link = false` (`PlanAttachments`,
-/// ZzzCharacter.cpp ≈14257), o sea, directamente con la matriz del hueso de la mano. (El giro
-/// (70°, 0, 90°) desplazado (-20, 5, 40) de `PlaceLinkedPart` es para las armas a la espalda.)
+/// Bones of the weapon in hand: a weapon in hand is placed with `Link = false` (`PlanAttachments`,
+/// ZzzCharacter.cpp ≈14257), i.e. directly with the hand bone matrix. (The
+/// (70°, 0, 90°) rotation offset by (-20, 5, 40) of `PlaceLinkedPart` is for weapons on the back.)
 ///
-/// En zona segura el original la lleva a la espalda (`AreWeaponsOnBack`): hueso 47 con `Link`
-/// (`PlaceLinkedPart`: `AngleMatrix(70°, 0, 90°)` desplazada (-20, 5, 40) para las espadas).
+/// In a safe zone the original carries it on the back (`AreWeaponsOnBack`): bone 47 with `Link`
+/// (`PlaceLinkedPart`: `AngleMatrix(70°, 0, 90°)` offset by (-20, 5, 40) for swords).
 fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec<bmd::Mat34> {
     let local = weapon.bone_matrices(0, 0);
     let parent = if on_back {
@@ -602,10 +602,10 @@ fn weapon_bones(weapon: &Bmd, player_bones: &[bmd::Mat34], on_back: bool) -> Vec
     local.iter().map(|b| bmd::concat(&parent, b)).collect()
 }
 
-/// `CreateWeaponBlur` para el Dark Knight con espada: en las habilidades de espada (SWORD1-5) a
-/// partir del fotograma 3, la estela va de (0, -20, 0) a (0, -120, 0) del hueso del arma
-/// (`BlurType` 1), con `motion_blur_r` (`BlurMapping` 2), blanca y corta. Cada fotograma se recalcula
-/// la pose 10 veces a lo largo del último trozo de animación (`PlaySpeed`) para que salga continua.
+/// `CreateWeaponBlur` for the Dark Knight with a sword: in sword skills (SWORD1-5) from
+/// frame 3 on, the trail goes from (0, -20, 0) to (0, -120, 0) of the weapon bone
+/// (`BlurType` 1), with `motion_blur_r` (`BlurMapping` 2), white and short. Every frame the pose is
+/// recomputed 10 times along the last stretch of animation (`PlaySpeed`) so the trail is continuous.
 fn weapon_blur(entity: Entity, p: &Player, s: &Skinned, terrain: Option<&LoadedTerrain>, world: &mut crate::fx::FxWorld, frame: u64) {
     use crate::fx::core::PLAYER_ATTACK_SKILL_SWORD1;
     let (Some(fps), Some(_)) = (p.casting, &s.weapon) else { return };
@@ -631,11 +631,11 @@ fn weapon_blur(entity: Entity, p: &Player, s: &Skinned, terrain: Option<&LoadedT
     }
 }
 
-/// Hueso de la espalda donde van las armas en zona segura (`backBone` de `PlanAttachments`).
+/// Back bone where weapons go in a safe zone (`backBone` of `PlanAttachments`).
 const BACK_BONE: usize = 47;
 
-/// ¿Va el arma a la espalda? En zona segura, salvo mientras se lanza una habilidad (en el original
-/// no se pueden usar en zona segura; aquí se deja para poder probarlas en la ciudad).
+/// Does the weapon go on the back? In a safe zone, except while casting a skill (the original
+/// does not allow them in a safe zone; here it is allowed so they can be tested in town).
 fn weapon_on_back(p: &Player, terrain: Option<&LoadedTerrain>) -> bool {
     let safe = terrain.is_some_and(|t| {
         let (x, y) = (p.pos.x as usize, p.pos.y as usize);
@@ -644,7 +644,7 @@ fn weapon_on_back(p: &Player, terrain: Option<&LoadedTerrain>) -> bool {
     safe && p.casting.is_none()
 }
 
-/// Foto del personaje para el motor de efectos (posición en MU, giro, huesos, arma).
+/// Character snapshot for the effects engine (MU position, rotation, bones, weapon).
 fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>) -> crate::fx::ActorState {
     let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
     crate::fx::ActorState(crate::fx::Actor {
@@ -661,8 +661,8 @@ fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>
     })
 }
 
-/// `--walk-to`: orden de caminar sin ratón. En modo captura se da 1 s antes de capturar,
-/// para que la foto pille al personaje caminando.
+/// `--walk-to`: walk order without the mouse. In capture mode it is given 1 s before capturing,
+/// so the shot catches the character walking.
 fn scripted_walk(
     args: Res<Args>,
     time: Res<Time<Real>>,
@@ -686,7 +686,7 @@ fn scripted_walk(
 
 pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> crate::model_light::ModelMaterial {
     let tex = texture::load(dir, &bmd::texture_file_name(texture_name)).ok();
-    // Igual que los objetos: prueba de alfa y profundidad, como el original.
+    // Like objects: alpha test and depth, as in the original.
     let alpha_mode = match tex.as_ref().map(|t| t.alpha_kind()) {
         Some(AlphaKind::Cutout | AlphaKind::Blend) => AlphaMode::Mask(crate::objects::ALPHA_REF),
         _ => AlphaMode::Opaque,
@@ -701,13 +701,13 @@ pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<
     crate::model_light::model_material(base, crate::model_light::ModelLight::lit([1.0; 3]))
 }
 
-/// Materiales del cuerpo y del arma, para darles la luz del sitio donde está el personaje.
+/// Body and weapon materials, to give them the light of the character's location.
 #[derive(Component)]
 pub(crate) struct BodyMaterials(pub(crate) Vec<Handle<crate::model_light::ModelMaterial>>);
 
-/// `c->Light` del héroe en el juego: `AbilityLight` = (1, 1, 1), sin la luz del terreno
-/// (ZzzCharacter.cpp:8967-8993; las habilidades que la tiñen aún no existen). Los demás
-/// personajes sí llevan la del terreno (remote.rs).
+/// The hero's in-game `c->Light`: `AbilityLight` = (1, 1, 1), without the terrain light
+/// (ZzzCharacter.cpp:8967-8993; the skills that tint it do not exist yet). Other
+/// characters do get the terrain light (remote.rs).
 fn light_body(
     players: Query<&BodyMaterials, With<Player>>,
     mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
@@ -726,32 +726,32 @@ fn light_body(
     }
 }
 
-/// `MouseUpdateTime` / `MouseUpdateTimeMax` / `MouseLButtonPush` del original, en ticks de 25 Hz.
+/// The original `MouseUpdateTime` / `MouseUpdateTimeMax` / `MouseLButtonPush`, in 25 Hz ticks.
 #[derive(Default)]
 struct MouseTimer {
     time: u32,
     max: u32,
-    /// `MouseLButtonPush`: clic sin atender (se pierde al soltar el botón).
+    /// `MouseLButtonPush`: unhandled click (lost when the button is released).
     push: bool,
-    /// El botón se apretó en la zona de juego (no sobre la barra o una ventana).
+    /// The button was pressed in the game area (not over the bar or a window).
     held: bool,
-    /// Fracción de tick acumulada.
+    /// Accumulated tick fraction.
     acc: f32,
 }
 
-/// `PathFinding2` → `GetPath`: el camino se corta a `MAX_PATH_FIND` (15) casillas contando la de
-/// salida; con el botón apretado se vuelve a pedir y sigue.
+/// `PathFinding2` → `GetPath`: the path is cut to `MAX_PATH_FIND` (15) tiles counting the starting
+/// one; with the button held it is requested again and continues.
 const MAX_PATH_FIND: usize = 15;
 
-/// Camino de `from` a `to` (con la casilla de salida), si hay y tiene más de una casilla.
+/// Path from `from` to `to` (including the start tile), if one exists and has more than one tile.
 fn hero_path(t: &mu_data::terrain::Terrain, from: (usize, usize), to: (usize, usize)) -> Option<Vec<(usize, usize)>> {
     let mut p = path::find_path(from, to, |x, y| t.walkable(x, y), 20_000)?;
     p.truncate(MAX_PATH_FIND);
     (p.len() > 1).then_some(p)
 }
 
-/// `SendMove`: el tiempo hasta atender otro clic depende de lo largo del camino; el camino va al
-/// servidor (`SendCharacterMove`: casilla de salida, dirección y un paso por casilla).
+/// `SendMove`: the time until another click is handled depends on the path length; the path goes to
+/// the server (`SendCharacterMove`: start tile, direction and one step per tile).
 fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTimer, net: &mut crate::net::Net) {
     timer.max = match path.len() {
         0..=2 => 0,
@@ -769,19 +769,19 @@ fn send_move(player: &mut Player, path: Vec<(usize, usize)>, timer: &mut MouseTi
     player.path = path.into_iter().skip(1).collect();
 }
 
-/// Ángulo de MU (el de `Player::facing`) de una dirección de paso (0..7).
+/// MU angle (that of `Player::facing`) of a step direction (0..7).
 pub fn direction_facing(direction: u8) -> f32 {
     let (dx, dy) = mu_protocol::game::DIRECTIONS[(direction & 7) as usize];
     (dx as f32).atan2(-(dy as f32))
 }
 
-/// El ratón en el juego (`MoveHero`, ZzzInterface.cpp ≈7340-7636), una vez por tick:
-/// - Cada vez que `MouseUpdateTime` llega a `MouseUpdateTimeMax`, el clic (o el botón mantenido)
-///   vuelve a mandar al personaje hacia donde apunta el ratón: mantener el botón lo hace seguir
-///   al ratón.
-/// - Sobre un objeto de sentarse (y quieto), va hasta él (`MOVEMENT_OPERATE`).
-/// - En el suelo, `DontMove` (cursor `CursorDontMove`) si la casilla no tiene suelo, es agua...
-///   (atributo ≥ `TW_NOGROUND` sin `TW_ACTION` ni `TW_HEIGHT`).
+/// The mouse in game (`MoveHero`, ZzzInterface.cpp ≈7340-7636), once per tick:
+/// - Each time `MouseUpdateTime` reaches `MouseUpdateTimeMax`, the click (or the held button)
+///   sends the character toward the mouse again: holding the button makes it follow
+///   the mouse.
+/// - Over a sitting object (and standing still), it walks to it (`MOVEMENT_OPERATE`).
+/// - On the ground, `DontMove` (cursor `CursorDontMove`) if the tile has no ground, is water...
+///   (attribute ≥ `TW_NOGROUND` without `TW_ACTION` or `TW_HEIGHT`).
 fn hero_input(
     time: Res<Time>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -813,7 +813,7 @@ fn hero_input(
     });
 
     timer.acc += time.delta_secs() * crate::fx::sim::TICKS_PER_SECOND;
-    // Tras un parón no se recuperan más de unos pocos ticks.
+    // After a stall, no more than a few ticks are caught up.
     timer.acc = timer.acc.min(3.0);
     while timer.acc >= 1.0 {
         timer.acc -= 1.0;
@@ -827,14 +827,14 @@ fn hero_input(
                 success = true;
             }
         }
-        // Ni sobre la interfaz (`MouseOnWindow`), ni mientras hace una habilidad, ni cruzando una
-        // puerta (`LoadingWorld > 30`, ZzzInterface.cpp:7192-7195).
+        // Not over the UI (`MouseOnWindow`), nor while casting a skill, nor while crossing a
+        // gate (`LoadingWorld > 30`, ZzzInterface.cpp:7192-7195).
         if success && !over_ui.0 && player.casting.is_none() && !gate.blocks_input() {
             timer.time = 0;
             let here = (player.pos.x as usize, player.pos.y as usize);
             let moving = !player.path.is_empty();
             if let Some((i, op)) = pointer.operate.and_then(|i| operates.0.get(i).map(|o| (i, o))) {
-                // `wall == TW_HEIGHT || wall < TW_CHARACTER`, y solo estando quieto.
+                // `wall == TW_HEIGHT || wall < TW_CHARACTER`, and only while standing still.
                 let (tx, ty) = op.tile();
                 let wall = t.0.attribute(tx.max(0) as usize, ty.max(0) as usize);
                 if (wall == attr::HEIGHT || wall < attr::CHARACTER) && !moving {
@@ -858,11 +858,11 @@ fn hero_input(
     }
 }
 
-/// `Action` con `MOVEMENT_OPERATE` (ZzzInterface.cpp:3587-3737): a una casilla o menos del objeto
-/// se sienta, se apoya o se cura (las mujeres, con las suyas), mirando hacia donde mira el objeto si
-/// toca, y lo dice al servidor (`SendRequestAction`) para que lo vean los demás. Salvo al curarse,
-/// antes le dice que está en la casilla del objeto (`SendCharacterMove` de una casilla, sin pasos) y
-/// suena `SOUND_DROP_ITEM01`.
+/// `Action` with `MOVEMENT_OPERATE` (ZzzInterface.cpp:3587-3737): within one tile of the object
+/// it sits, leans or heals (women with their own animations), facing the object's direction if
+/// needed, and tells the server (`SendRequestAction`) so others see it. Except when healing,
+/// it first reports being on the object's tile (single-tile `SendCharacterMove`, no steps) and
+/// `SOUND_DROP_ITEM01` plays.
 fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crate::sound::SoundQueue, net: &mut crate::net::Net) {
     use crate::operate::Act;
     use mu_protocol::game::{ClientMessage, action as at};
@@ -900,9 +900,9 @@ fn operate_action(p: &mut Player, op: &crate::operate::Operate, sound: &mut crat
     }
 }
 
-/// Un gesto del chat (`SetActionClass` + `SendRequestAction` de `CheckChatText`,
-/// ZzzInterface.cpp:4416-4547): la animación solo si está parado, y el aviso al servidor dos veces
-/// si la pone (una en `SetActionClass` y otra después, como el original) o una si no.
+/// A chat emote (`SetActionClass` + `SendRequestAction` from `CheckChatText`,
+/// ZzzInterface.cpp:4416-4547): the animation only while standing, and the server notice twice
+/// if it is applied (once in `SetActionClass` and once after, like the original) or once if not.
 pub fn chat_emote(p: &mut Player, at: u8, net: &mut crate::net::Net) {
     use mu_protocol::game::ClientMessage;
     let dir = facing_direction(p.facing);
@@ -921,7 +921,7 @@ pub fn chat_emote(p: &mut Player, at: u8, net: &mut crate::net::Net) {
     }
 }
 
-/// Punto del terreno (en casillas de MU) bajo un rayo de la cámara.
+/// Terrain point (in MU tiles) under a camera ray.
 fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Option<Vec2> {
     let ground = |p: Vec3| t.height_at(p.x, -p.z) / MU_SCALE;
     let mut prev = 0.0;
@@ -929,7 +929,7 @@ fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Option<Vec2> {
     while d < 400.0 {
         let p = ray.get_point(d);
         if p.y <= ground(p) {
-            // Afinar entre el paso anterior y este.
+            // Refine between the previous step and this one.
             let (mut a, mut b) = (prev, d);
             for _ in 0..12 {
                 let m = (a + b) / 2.0;
@@ -961,7 +961,7 @@ fn walk(
             let delta = target - p.pos;
             let dist = delta.length();
             if dist > 1e-4 {
-                // MU: ángulo 0 = mirando hacia -Y; crece en sentido antihorario.
+                // MU: angle 0 = facing -Y; grows counterclockwise.
                 p.facing = delta.x.atan2(-delta.y);
             }
             if dist <= budget {
@@ -973,7 +973,7 @@ fn walk(
                 budget = 0.0;
             }
         }
-        // Sentado o apoyado sigue así hasta que vuelve a caminar; un gesto, hasta que acaba (`animate`).
+        // Sitting or leaning stays until walking again; an emote, until it ends (`animate`).
         let action = if !p.path.is_empty() {
             p.walk
         } else if action::resting(p.action) || action::emote(p.action) {
@@ -985,7 +985,7 @@ fn walk(
             p.action = action;
             p.frame = 0.0;
         }
-        // Llegó al objeto de sentarse (`MovePath` acaba → `Action`).
+        // Reached the sitting object (`MovePath` ends → `Action`).
         if had_path && p.path.is_empty() && p.casting.is_none() {
             if let Some(op) = p.operate.take().and_then(|i| operates.0.get(i)) {
                 operate_action(&mut p, op, &mut sound, &mut net);
@@ -1010,7 +1010,7 @@ fn animate(
     for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
-        // `SetPlayerWalk`: el Rage Fighter camina a 0.32 en vez de 0.33.
+        // `SetPlayerWalk`: the Rage Fighter walks at 0.32 instead of 0.33.
         let fps = if p.class == crate::account::Class::Fighter && p.action == p.walk {
             0.32 * crate::fx::sim::TICKS_PER_SECOND
         } else {
@@ -1020,7 +1020,7 @@ fn animate(
         if p.action == p.walk {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
         }
-        // La habilidad termina al acabar su animación: vuelve a estar quieto. Un gesto también
+        // The skill ends when its animation ends: back to standing. So does an emote
         // (`PlayerStopAnimationSetting`).
         if p.casting.is_some() || action::emote(p.action) {
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
@@ -1043,10 +1043,10 @@ fn animate(
     }
 }
 
-/// Pasos (`PlayWalkSound`): al pasar los fotogramas 1.5 y 4.5 de la animación de caminar.
+/// Footsteps (`PlayWalkSound`): when passing frames 1.5 and 4.5 of the walk animation.
 fn footsteps(p: &Player, before: f32, s: &Skinned, terrain: Option<&LoadedTerrain>, world: i32, sound: &mut crate::sound::SoundQueue) {
     let Some(act) = s.skeleton.actions.get(p.action) else { return };
-    // Las animaciones de caminar repiten el primer fotograma al final.
+    // Walk animations repeat the first frame at the end.
     let n = if act.lock_positions.is_some() { act.frames.saturating_sub(1).max(1) } else { act.frames.max(1) } as f32;
     let (a, b) = (before.rem_euclid(n), p.frame.rem_euclid(n));
     let crossed = |k: f32| if b >= a { a < k && b >= k } else { a < k || b >= k };
@@ -1063,7 +1063,7 @@ fn footsteps(p: &Player, before: f32, s: &Skinned, terrain: Option<&LoadedTerrai
     }
 }
 
-/// Transformación del personaje: posición sobre el terreno y giro hacia donde mira.
+/// Character transform: position on the terrain and rotation toward its facing.
 pub fn player_transform(p: &Player, terrain: Option<&LoadedTerrain>) -> Transform {
     let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
     let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
@@ -1097,10 +1097,10 @@ mod tests {
 
     #[test]
     fn direccion_de_ida_y_vuelta() {
-        // La que se manda es la que el otro gira con `(dirección - 1) * 45`.
+        // The direction sent is the one the receiver turns by `(direction - 1) * 45`.
         for d in 0..8u8 {
             assert_eq!(facing_direction(direction_facing(d)), d);
-            // Hasta 22.5° de más o de menos sigue siendo la misma.
+            // Up to 22.5° either way it is still the same one.
             assert_eq!(facing_direction(direction_facing(d) + 0.39), d);
             assert_eq!(facing_direction(direction_facing(d) - 0.39), d);
         }

@@ -1,10 +1,10 @@
-//! Ventanas de la selección de personaje en el gestor de login_ui.rs (`CUIMng::CreateCharacterScene`,
-//! UIMng.cpp:255): crear personaje (`CCharMakeWin`), los mensajes de crear y borrar (`CMsgWin`), el
-//! menú de sistema con "Select Server" y las opciones. La barra de abajo, los globos y el 3D son de
-//! charselect.rs; se cuentan lo necesario por `CharSceneLink`.
+//! Character-selection windows in the login_ui.rs manager (`CUIMng::CreateCharacterScene`,
+//! UIMng.cpp:255): character creation (`CCharMakeWin`), the create and delete messages (`CMsgWin`), the
+//! system menu with "Select Server" and the options. The bottom bar, the balloons and the 3D belong to
+//! charselect.rs; the two share what they need through `CharSceneLink`.
 //!
-//! Crear y borrar van al servidor; mientras contesta sale "Please wait" (`MESSAGE_WAIT`). Para borrar,
-//! el código es la contraseña de la cuenta.
+//! Create and delete go to the server; while it answers "Please wait" is shown (`MESSAGE_WAIT`). For
+//! deleting, the code is the account password.
 
 use bevy::ui::UiScale;
 
@@ -12,15 +12,15 @@ use super::*;
 use crate::account::{self, Class};
 use crate::charselect::{CharSceneLink, SceneEvent, UiRequest};
 
-/// `CCharMakeWin`: `m_winBack` de 454×406, centrado (UIMng.cpp).
+/// `CCharMakeWin`: 454×406 `m_winBack`, centered (UIMng.cpp).
 const CMW_W: i32 = 454;
 const CMW_H: i32 = 406;
-/// La vista previa: `BeginOpengl(m_winBack, 410, 335)`.
+/// The preview: `BeginOpengl(m_winBack, 410, 335)`.
 const PREVIEW_W: i32 = 410;
 const PREVIEW_H: i32 = 335;
 const JOB_W: i32 = 108;
 const JOB_H: i32 = 26;
-/// `CLRDW_GRAY`: texto de los botones de clase deshabilitados.
+/// `CLRDW_GRAY`: text of disabled class buttons.
 #[allow(dead_code)]
 const GRAY: [u8; 3] = [128, 128, 128];
 
@@ -28,8 +28,8 @@ fn cmw_origin(s: Screen) -> IVec2 {
     IVec2::new((s.w - CMW_W) / 2, (s.h - CMW_H) / 2)
 }
 
-/// `CCharMakeWin::SetPosition` con `PBG_ADD_NEWCHAR_MONK`: Dark Wizard, Dark Knight y Elf desde
-/// y + 131 y la Summoner debajo; el Rage Fighter en y + 246 y debajo Magic Gladiator y Dark Lord.
+/// `CCharMakeWin::SetPosition` with `PBG_ADD_NEWCHAR_MONK`: Dark Wizard, Dark Knight and Elf from
+/// y + 131 with the Summoner below; the Rage Fighter at y + 246 with Magic Gladiator and Dark Lord below.
 fn job_rect(s: Screen, class: Class) -> IRect {
     let o = cmw_origin(s);
     let x = o.x + 346;
@@ -43,7 +43,7 @@ fn job_rect(s: Screen, class: Class) -> IRect {
     IRect::new(x, y, JOB_W, JOB_H)
 }
 
-/// `GlobalText` 1705-1709, 1690 y 3152.
+/// `GlobalText` 1705-1709, 1690 and 3152.
 fn description(class: Class) -> &'static str {
     match class {
         Class::Wizard => "Kingdom of wizards, descendant of Arka. He has a inferior physical condition but has a enormous power and can command attacking spells freely.",
@@ -56,8 +56,8 @@ fn description(class: Class) -> &'static str {
     }
 }
 
-/// `SeparateTextIntoLines` con `max_lines` líneas de `row` − 1 caracteres: corta por espacios y
-/// lo que no cabe se pierde.
+/// `SeparateTextIntoLines` with `max_lines` lines of `row` − 1 characters: breaks at spaces and
+/// whatever does not fit is lost.
 fn wrap(text: &str, row: usize, max_lines: usize) -> Vec<String> {
     let mut lines: Vec<String> = vec![String::new()];
     for word in text.split(' ') {
@@ -77,19 +77,19 @@ fn wrap(text: &str, row: usize, max_lines: usize) -> Vec<String> {
     lines
 }
 
-/// `CheckName` (ZzzScene.cpp:267) sin los filtros de palabras: espacios, puntos y los nombres de
-/// la casa (`GlobalText` 457 y 458).
+/// `CheckName` (ZzzScene.cpp:267) without the word filters: spaces, dots and the in-house
+/// names (`GlobalText` 457 and 458).
 fn forbidden_name(name: &str) -> bool {
     ["Webzen", "WebZen", "webzen", "WEBZEN", "Operation", " ", "."].iter().any(|w| name.contains(w))
 }
 
-/// `CheckSpecialText` (Local.cpp:7): solo letras y números ASCII.
+/// `CheckSpecialText` (Local.cpp:7): ASCII letters and digits only.
 fn special_text(name: &str) -> bool {
     name.chars().any(|c| !c.is_ascii_alphanumeric())
 }
 
 impl LoginUi {
-    /// El gestor en la selección de personaje: sin la barra del login ni la lista de servidores.
+    /// The manager in character selection: without the login bar or the server list.
     fn new_character_scene(account: String, count: usize) -> Self {
         let mut ui = LoginUi::new("", Vec::new());
         ui.scene = UiScene::Character;
@@ -100,24 +100,24 @@ impl LoginUi {
         ui.focus = None;
         ui.account = account;
         ui.char_count = count;
-        // Hasta que llegue la lista del servidor (`ReceiveCharacterList` → `UpdateDisplay`).
+        // Until the server list arrives (`ReceiveCharacterList` → `UpdateDisplay`).
         ui.net_out.clear();
         ui
     }
 
-    /// Lo que llega del servidor en esta pantalla.
+    /// What arrives from the server on this screen.
     pub(super) fn char_net_message(&mut self, msg: &mu_protocol::game::ServerMessage) {
         use mu_protocol::game::{self, ServerMessage};
         match msg {
             ServerMessage::CharacterList { unlock_flags, characters, .. } => {
                 self.class_unlock = *unlock_flags;
                 self.char_count = characters.len();
-                // `CCharSelMainWin::UpdateDisplay`: sin personajes, directamente a crear uno.
+                // `CCharSelMainWin::UpdateDisplay`: no characters, go straight to creating one.
                 self.char_display();
             }
             ServerMessage::CharacterClassCreationUnlock { flags } => self.class_unlock = *flags,
             ServerMessage::CharacterCreated { name, slot, level, class } => {
-                // `ReceiveCreateCharacter` con éxito: `CloseMsgWin` y el personaje en su hueco.
+                // Successful `ReceiveCreateCharacter`: `CloseMsgWin` and the character in its slot.
                 self.close_wait();
                 self.scene_events.push(SceneEvent::Created(account::StoredCharacter {
                     slot: *slot as usize,
@@ -139,7 +139,7 @@ impl LoginUi {
                         let Some((_, name, _)) = self.char_selected.take() else { return };
                         self.scene_events.push(SceneEvent::Deleted(name));
                         self.char_count = self.char_count.saturating_sub(1);
-                        // `MESSAGE_DELETE_CHARACTER_SUCCESS`: `SelectedHero = -1` y `UpdateDisplay`.
+                        // `MESSAGE_DELETE_CHARACTER_SUCCESS`: `SelectedHero = -1` and `UpdateDisplay`.
                         self.char_display();
                         self.popup(MsgCode::DeleteSuccess);
                     }
@@ -151,15 +151,15 @@ impl LoginUi {
         }
     }
 
-    /// `CloseMsgWin` del "Please wait".
+    /// `CloseMsgWin` of the "Please wait".
     fn close_wait(&mut self) {
         if self.is_shown(Win::Msg) && self.msg.code == Some(MsgCode::Wait) {
             self.hide_win(Win::Msg);
         }
     }
 
-    /// ¿Se puede crear esta clase? (`g_CharCardEnable` con las banderas del servidor: Magic
-    /// Gladiator, Dark Lord y Summoner necesitan su carta; el Rage Fighter, la suya.)
+    /// Can this class be created? (`g_CharCardEnable` with the server flags: Magic
+    /// Gladiator, Dark Lord and Summoner need their card; the Rage Fighter, its own.)
     fn class_enabled(&self, class: Class) -> bool {
         use mu_protocol::game::unlock;
         let bit = match class {
@@ -172,14 +172,14 @@ impl LoginUi {
         self.class_unlock & bit != 0
     }
 
-    /// `ShowWin(&m_CharMakeWin)`: la caja del nombre vacía y con el foco (`CCharMakeWin::Show`).
+    /// `ShowWin(&m_CharMakeWin)`: the name box empty and focused (`CCharMakeWin::Show`).
     pub(super) fn show_char_make(&mut self) {
         self.show_win(Win::CharMake);
         self.char_name = TextBox::new("", account::MAX_NAME, false);
         self.give_focus(Field::CharName, false);
     }
 
-    /// `CCharSelMainWin::UpdateDisplay`: si no queda ningún personaje se abre la ventana de crear.
+    /// `CCharSelMainWin::UpdateDisplay`: if no character is left the create window opens.
     pub(super) fn char_display(&mut self) {
         if self.char_count == 0 {
             self.show_char_make();
@@ -196,18 +196,18 @@ impl LoginUi {
         }
     }
 
-    /// `RequestDeleteCharacter` y su respuesta.
+    /// `RequestDeleteCharacter` and its response.
     pub(super) fn request_delete(&mut self) {
         let Some((_, name, _)) = self.char_selected.clone() else { return };
         self.focus = None;
-        // `SendRequestDeleteCharacter(ID, código)` y `PopUp(MESSAGE_WAIT)`; la respuesta llega en
+        // `SendRequestDeleteCharacter(ID, code)` and `PopUp(MESSAGE_WAIT)`; the response arrives in
         // `char_net_message`.
         let code = self.del_pass.text.clone();
         self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::DeleteCharacter { name, security_code: code }));
         self.popup(MsgCode::Wait);
     }
 
-    /// `CCharMakeWin::RequestCreateCharacter` y `ReceiveCreateCharacter`.
+    /// `CCharMakeWin::RequestCreateCharacter` and `ReceiveCreateCharacter`.
     fn request_create(&mut self) {
         let name = self.char_name.text.clone();
         if name.len() < 4 {
@@ -217,7 +217,7 @@ impl LoginUi {
         } else if special_text(&name) {
             self.popup(MsgCode::SpecialName);
         } else {
-            // `SendRequestCreateCharacter`, `HideWin` y `PopUpMsgWin(MESSAGE_WAIT)`.
+            // `SendRequestCreateCharacter`, `HideWin` and `PopUpMsgWin(MESSAGE_WAIT)`.
             let class = mu_protocol::game::class_number(self.job.index() as u8);
             self.net_out.push(NetOut::Game(mu_protocol::game::ClientMessage::CreateCharacter { name, class }));
             self.hide_win(Win::CharMake);
@@ -226,11 +226,11 @@ impl LoginUi {
         }
     }
 
-    /// Botones de `CCharMakeWin`: las clases (`cha_bt`, 4 fotogramas: normal 0, encima 1, pulsado
-    /// 2 y elegido 3) y OK / Cancel.
+    /// `CCharMakeWin` buttons: the classes (`cha_bt`, 4 frames: normal 0, hover 1, pressed
+    /// 2 and selected 3) and OK / Cancel.
     pub(super) fn char_make_buttons(&self, s: Screen, out: &mut Vec<ButtonDef>) {
         for class in Class::ALL {
-            // Deshabilitado: fotograma 0 y texto gris (`adwJobBtnClr[3]`).
+            // Disabled: frame 0 and gray text (`adwJobBtnClr[3]`).
             let enabled = self.class_enabled(class);
             out.push(ButtonDef {
                 id: Btn::Job(class),
@@ -253,7 +253,7 @@ impl LoginUi {
             if let Btn::Job(class) = c {
                 if self.job != class && self.class_enabled(class) {
                     self.job = class;
-                    // `UpdateDisplay` → `SelectCreateCharacter`: la cara nueva, desde la acción 1.
+                    // `UpdateDisplay` → `SelectCreateCharacter`: the new face, from action 1.
                     self.job_picks += 1;
                 }
                 return;
@@ -275,10 +275,10 @@ impl LoginUi {
         }
     }
 
-    /// `CCharMakeWin::RenderControls`: la cara, el fondo del nombre, las cajas negras de las
-    /// estadísticas y la descripción, los botones y los textos.
+    /// `CCharMakeWin::RenderControls`: the face, the name background, the black boxes of the
+    /// stats and the description, the buttons and the texts.
     pub(super) fn push_char_make(&self, s: Screen, out: &mut Vec<Item>) {
-        // `CWin` de toda la pantalla: negro al 50 %.
+        // Full-screen `CWin`: 50 % black.
         out.push(Item::Fill { x: 0.0, y: 0.0, w: s.w as f32, h: s.h as f32, color: [0, 0, 0, 128] });
         let o = cmw_origin(s);
         out.push(image(Tex::Preview, IRect::new(o.x, o.y, PREVIEW_W, PREVIEW_H)));
@@ -298,7 +298,7 @@ impl LoginUi {
             text: text.to_string(),
             color,
         };
-        // `GlobalText` 1701-1704 y 1738, con el valor en naranja 54 más a la derecha.
+        // `GlobalText` 1701-1704 and 1738, with the value in orange 54 further right.
         let labels = ["Strength", "Agility", "Vitality", "Energy", "Command"];
         let values: Vec<&str> = stats.iter().copied().chain(command).collect();
         for (i, value) in values.iter().enumerate() {
@@ -313,8 +313,8 @@ impl LoginUi {
     }
 }
 
-/// `CUIMng::CreateCharacterScene`: el gestor y su capa de ventanas, por encima de la barra y los
-/// globos de charselect.rs.
+/// `CUIMng::CreateCharacterScene`: the manager and its window layer, above the bar and the
+/// balloons of charselect.rs.
 pub(super) fn spawn_character_ui(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets<Image>>) {
     commands.insert_resource(LoginUi::new_character_scene(account::current_account(), 0));
     let textures: HashMap<Tex, Handle<Image>> = Tex::ALL
@@ -337,7 +337,7 @@ pub(super) fn spawn_character_ui(mut commands: Commands, args: Res<Args>, mut im
         });
 }
 
-/// Antes de la pasada del gestor: lo que cuenta charselect.rs y los botones de su barra.
+/// Before the manager pass: what charselect.rs shares and its bar buttons.
 pub(super) fn before_update(
     ui: Option<ResMut<LoginUi>>,
     link: Option<ResMut<CharSceneLink>>,
@@ -365,7 +365,7 @@ pub(super) fn before_update(
     }
 }
 
-/// Después: si alguna ventana tapa la pantalla, lo creado o borrado, y la vista previa.
+/// After: whether any window covers the screen, what was created or deleted, and the preview.
 pub(super) fn after_update(
     ui: Option<ResMut<LoginUi>>,
     link: Option<ResMut<CharSceneLink>>,
@@ -379,7 +379,7 @@ pub(super) fn after_update(
     }
     link.to_scene.append(&mut ui.scene_events);
     link.preview = ui.is_shown(Win::CharMake).then_some((ui.job, ui.job_picks));
-    // Píxeles reales de la ventana para la imagen de la vista previa.
+    // Real window pixels for the preview image.
     let px_per_ref = K * scale.0 * windows.single().map_or(1.0, |w| w.resolution.scale_factor());
     let size = UVec2::new((PREVIEW_W as f32 * px_per_ref).round() as u32, (PREVIEW_H as f32 * px_per_ref).round() as u32);
     if link.preview_size != size {

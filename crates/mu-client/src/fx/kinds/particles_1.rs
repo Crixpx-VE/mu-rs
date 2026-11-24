@@ -1,14 +1,14 @@
-//! Partículas (1): efecto de entrada, flores, destellos azules, burbujas, rayos, fuegos, llamas y
-//! círculos de lluvia. Traducido de `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` y
+//! Particles (1): entry effect, flowers, blue flares, bubbles, lightning, fires, flames and
+//! rain circles. Translated from `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` and
 //! `DescribeParticle`).
 
 use bevy::math::Vec3;
 
 use crate::fx::core::*;
 
-/// `FPS_ANIMATION_FACTOR` del original a 25 ticks/s.
+/// The original `FPS_ANIMATION_FACTOR` at 25 ticks/s.
 const FPS: f32 = 1.0;
-/// `REFERENCE_FRAME_STEP`: ticks de referencia por tick (1 a 25 ticks/s).
+/// `REFERENCE_FRAME_STEP`: reference ticks per tick (1 at 25 ticks/s).
 const REFERENCE_FRAME_STEP: i32 = 1;
 /// `WD_34CRYWOLF_1ST`.
 const WD_34CRYWOLF_1ST: i32 = 34;
@@ -51,14 +51,14 @@ pub fn register(r: &mut Registry) {
     }
 }
 
-// --- Utilidades -------------------------------------------------------------------------------------
+// --- Helpers ----------------------------------------------------------------------------------------
 
-/// `rand() % n` como `f32`.
+/// `rand() % n` as `f32`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `o->Target->Position` y `o->Target->Live` (None si no hay objetivo).
+/// `o->Target->Position` and `o->Target->Live` (None if there is no target).
 fn target_state(ctx: &Ctx, t: Option<Target>) -> Option<(Vec3, bool)> {
     match t? {
         Target::Actor(_) => ctx.actor(t).map(|a| (a.position, a.live)),
@@ -66,13 +66,13 @@ fn target_state(ctx: &Ctx, t: Option<Target>) -> Option<(Vec3, bool)> {
     }
 }
 
-/// `o->Frame = (a - o->LifeTime) / b` (float truncado a int).
+/// `o->Frame = (a - o->LifeTime) / b` (float truncated to int).
 fn frame_of(a: f32, life: f32, b: f32) -> i32 {
     ((a - life) / b) as i32
 }
 
-/// `Sprite(tex, pos, W, H, Light, Rot, u, v, uw, vh)` con la mezcla de `RenderParticles`
-/// (JPG → suma; TGA → prueba de alfa) o la que fije el caso.
+/// `Sprite(tex, pos, W, H, Light, Rot, u, v, uw, vh)` with the `RenderParticles` blending
+/// (JPG → additive; TGA → alpha test) or the one set by the case.
 #[allow(clippy::too_many_arguments)]
 fn sprite(
     out: &mut DrawList,
@@ -134,8 +134,8 @@ fn create_effect(p: &mut Particle, ctx: &mut Ctx) {
     p.position.z += (rf(ctx, 200) - 100.0) + 250.0;
 
     match p.sub_type {
-        // Rayo del personaje seleccionado: la rama `PJH_NEW_SERVER_SELECT_MAP` del Main 5.2 (S6),
-        // con ×1.3 (ZzzEffectParticle.cpp:104-116).
+        // Selected character's lightning: the `PJH_NEW_SERVER_SELECT_MAP` branch of Main 5.2 (S6),
+        // with ×1.3 (ZzzEffectParticle.cpp:104-116).
         4 => {
             p.gravity = 0.0;
             p.scale = (rf(ctx, 5) + 20.0) * 0.1 * 1.3;
@@ -197,7 +197,7 @@ fn step_flower(p: &mut Particle, ctx: &mut Ctx) {
             p.velocity.y += (rf(ctx, 8) - 4.0) * 0.05 * FPS;
             p.velocity.z -= rf(ctx, 8) * 0.05 * FPS;
         }
-        // VectorAddScaled: avance extra sin girar (además del MovePosition común).
+        // VectorAddScaled: extra unrotated advance (on top of the common MovePosition).
         p.position += p.velocity * FPS;
     }
     let height = ctx.terrain_height(p.position.x, p.position.y);
@@ -232,11 +232,11 @@ fn step_flare_blue(p: &mut Particle, _ctx: &mut Ctx) {
         p.velocity.z += 0.4 * FPS;
         p.velocity.z = (8.0 * FPS).min(p.velocity.z);
         if p.life_time < 5.0 {
-            // Tal cual el original: 0.98 + (0.02·1 − FPS_ANIMATION_FACTOR) (= 0 a 25 ticks/s).
+            // As in the original: 0.98 + (0.02·1 − FPS_ANIMATION_FACTOR) (= 0 at 25 ticks/s).
             p.light *= 0.98 + (0.02 * 1.0 - FPS);
         }
     } else if p.sub_type == 1 {
-        // Tal cual el original: 0.99 + (0.01·1 − FPS_ANIMATION_FACTOR) (= 0 a 25 ticks/s).
+        // As in the original: 0.99 + (0.01·1 − FPS_ANIMATION_FACTOR) (= 0 at 25 ticks/s).
         p.light.x *= 0.99 + (0.01 * 1.0 - FPS);
         p.light.y *= 1.0 / 1.1;
         p.light.z *= 1.0 / 1.1;
@@ -400,7 +400,7 @@ fn create_lightning1(p: &mut Particle, _ctx: &mut Ctx) {
 }
 
 fn step_lightning1(p: &mut Particle, ctx: &mut Ctx) {
-    // std::max<int>(0, LifeTime): vida truncada a entero.
+    // std::max<int>(0, LifeTime): life truncated to an integer.
     let life = (p.life_time as i32).max(0) as f32 * FPS;
     p.rotation = ((ctx.world_time as i32) % 1000) as f32 * 0.001;
     let lum = life / 10.0;
@@ -562,7 +562,7 @@ fn create_cursedlich(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Aparece (alfa sube 0.2-0.3 por tick) y se apaga por debajo de `fade_life` (subtipos 4-8).
+/// Fades in (alpha rises 0.2-0.3 per tick) and fades out below `fade_life` (subtypes 4-8).
 fn cursedlich_alpha(p: &mut Particle, ctx: &mut Ctx, fade_life: f32, fade: f32) {
     if p.life_time < fade_life {
         p.alpha -= FPS * fade;
@@ -665,7 +665,7 @@ fn step_cursedlich(p: &mut Particle, ctx: &mut Ctx) {
             if p.life_time < 3.0 {
                 p.scale += (10.0 - p.life_time) * 0.02 * FPS;
             }
-            // Avanza 8 unidades por su −Y local.
+            // Moves 8 units along its local −Y.
             p.position += rotate(p.angle, Vec3::new(0.0, -1.0, 0.0)) * 8.0;
             if let Some((tp, _)) = target_state(ctx, p.target) {
                 p.position = p.position - p.start_position + tp;
@@ -738,7 +738,7 @@ fn create_fire(p: &mut Particle, ctx: &mut Ctx) {
             p.life_time = 24.0;
             p.velocity = Vec3::new(0.0, -(rf(ctx, 16) + 32.0) * 0.1, 0.0);
             let range = ctx.rand() % 60 - 30;
-            // StartPosition = desplazamiento respecto al objetivo.
+            // StartPosition = offset from the target.
             p.start_position = Vec3::new(range as f32, range as f32, 190.0 - range.abs() as f32 * 1.5);
             p.rotation = rf(ctx, 360);
         }
@@ -831,7 +831,7 @@ fn step_fire(p: &mut Particle, ctx: &mut Ctx) {
             if let Some((tp, _)) = target_state(ctx, p.target) {
                 p.position = tp + p.start_position;
             }
-            // División entera del original: suma 0 o 1.
+            // The original's integer division: adds 0 or 1.
             p.gravity += ((ctx.rand() % 60 + 60) / 100) as f32 * FPS;
             p.scale -= p.gravity * FPS / 90.0;
             p.frame = frame_of(23.0, p.life_time, 6.0);
@@ -1011,7 +1011,7 @@ fn step_fire1(p: &mut Particle, _ctx: &mut Ctx) {
             p.scale -= 0.002 * FPS;
         }
         5 => {
-            // cos/sin de Angle[2] en radianes, tal cual el original.
+            // cos/sin of Angle[2] in radians, as in the original.
             p.position.x += p.angle.z.cos() * 20.0 * FPS;
             p.position.y += p.angle.z.sin() * 20.0 * FPS;
             p.position.z += p.gravity * FPS;
@@ -1077,7 +1077,7 @@ fn create_flame(p: &mut Particle, ctx: &mut Ctx) {
             p.scale += (rf(ctx, 32) + 32.0) * 0.01;
             let mut inter = light.x * rf(ctx, 80) / 100.0;
             p.velocity = Vec3::new(0.0, inter, 0.0);
-            // MovePosition: un salto inicial en su dirección.
+            // MovePosition: an initial jump in its direction.
             p.position += rotate(p.angle, p.velocity);
             inter = (light.x - inter) / 15.0;
             p.velocity = Vec3::new(0.0, inter, 0.0);
@@ -1175,7 +1175,7 @@ fn step_flame(p: &mut Particle, ctx: &mut Ctx) {
                 p.position.z += tp.z - p.start_position.z + p.gravity * FPS;
                 p.start_position = tp;
             } else {
-                // Sin objetivo: solo la subida por gravedad.
+                // No target: only the rise from gravity.
                 p.position.z += p.gravity * FPS;
             }
             p.gravity += 0.1 * FPS;
@@ -1222,7 +1222,7 @@ fn step_flame(p: &mut Particle, ctx: &mut Ctx) {
             p.light *= 1.0 / 1.008;
         }
         10 => {
-            // VectorAddScaled: avance extra sin girar.
+            // VectorAddScaled: extra unrotated advance.
             p.position += p.velocity * FPS;
             p.velocity.x *= 0.95;
             p.velocity.y *= 0.95;

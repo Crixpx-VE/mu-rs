@@ -1,15 +1,15 @@
-//! Clases: estadísticas al crear, mapa de inicio y fórmulas de vida, maná, AG y escudo.
+//! Classes: starting stats, home map and formulas for health, mana, AG and shield.
 //!
-//! Todo sale de OpenMU (`Persistence/Initialization/CharacterClasses/Class*.cs`, licencia MIT):
-//! `BaseAttributeValues` (constantes) más `AttributeCombinations` (relaciones lineales con nivel y
-//! estadísticas). El escudo además suma `nivel² / 30` y la defensa (0 sin equipo).
+//! Everything comes from OpenMU (`Persistence/Initialization/CharacterClasses/Class*.cs`, MIT license):
+//! `BaseAttributeValues` (constants) plus `AttributeCombinations` (linear relations with level and
+//! stats). The shield also adds `level² / 30` and the defense (0 without equipment).
 
-/// Índice de clase del cliente (`CLASS_*`): 0 Dark Wizard ... 6 Rage Fighter.
+/// Client class index (`CLASS_*`): 0 Dark Wizard ... 6 Rage Fighter.
 pub type ClassIndex = u8;
 
 pub const MAX_CLASS: ClassIndex = 7;
 
-/// Fuerza, agilidad, vitalidad, energía y mando (solo el Dark Lord).
+/// Strength, agility, vitality, energy and command (Dark Lord only).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 pub struct Stats {
     pub strength: u16,
@@ -19,15 +19,15 @@ pub struct Stats {
     pub leadership: u16,
 }
 
-/// Lo de cada clase al crear un personaje.
+/// Per-class values when creating a character.
 pub struct ClassInfo {
     pub stats: Stats,
-    /// `CurrentHealth` / `CurrentMana` al crear.
+    /// `CurrentHealth` / `CurrentMana` at creation.
     pub health: u16,
     pub mana: u16,
     /// `HomeMap`: 0 Lorencia, 3 Noria, 51 Elbeland.
     pub home_map: u8,
-    /// Puntos por nivel (para cuando se suba de nivel).
+    /// Points per level (for when leveling up).
     #[allow(dead_code)]
     pub points_per_level: u16,
 }
@@ -45,7 +45,7 @@ pub fn info(class: ClassIndex) -> ClassInfo {
     }
 }
 
-/// Máximos de vida, maná, escudo y AG para un nivel y unas estadísticas.
+/// Max health, mana, shield and AG for a level and a set of stats.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Maximums {
     pub health: u16,
@@ -57,7 +57,7 @@ pub struct Maximums {
 pub fn maximums(class: ClassIndex, level: u16, st: &Stats) -> Maximums {
     let (l, s, a, v, e, c) =
         (level as f32, st.strength as f32, st.agility as f32, st.vitality as f32, st.energy as f32, st.leadership as f32);
-    // (constante de vida, × nivel, × vitalidad), (constante de maná, × energía, × nivel), AG (× energía, × vitalidad, × agilidad, × fuerza, × mando).
+    // (health constant, × level, × vitality), (mana constant, × energy, × level), AG (× energy, × vitality, × agility, × strength, × command).
     let (hp, mp, ag) = match class {
         0 => ((30.0, 1.0, 2.0), (0.0, 2.0, 2.0), (0.2, 0.3, 0.4, 0.2, 0.0)),
         1 => ((35.0, 2.0, 3.0), (10.0, 1.0, 0.5), (1.0, 0.3, 0.2, 0.15, 0.0)),
@@ -75,8 +75,8 @@ pub fn maximums(class: ClassIndex, level: u16, st: &Stats) -> Maximums {
     Maximums { health: u(health), mana: u(mana), shield: u(shield), ability: u(ability) }
 }
 
-/// Experiencia para pasar de `level` al siguiente (`GetExperienceForLevel` de OpenMU, S6:
-/// `(nivel + 9) · nivel² · 10`, y desde el 256 se añade la parte extra).
+/// Experience to go from `level` to the next one (OpenMU `GetExperienceForLevel`, S6:
+/// `(level + 9) · level² · 10`, plus the extra part from 256 on).
 pub fn experience_for_level(level: u16) -> u64 {
     let l = level as u64;
     let mut exp = (l + 9) * l * l * 10;
@@ -95,7 +95,7 @@ mod tests {
     fn dark_knight_nivel_1() {
         let i = info(1);
         let m = maximums(1, 1, &i.stats);
-        // 35 + 2 + 75 = 112 de vida; 10 + 10 + 0.5 = 20 de maná.
+        // 35 + 2 + 75 = 112 health; 10 + 10 + 0.5 = 20 mana.
         assert_eq!((m.health, m.mana), (112, 20));
     }
 

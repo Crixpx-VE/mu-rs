@@ -1,11 +1,11 @@
-//! Connect Server de MU en Rust.
+//! MU Connect Server in Rust.
 //!
-//! Es el primer servidor al que habla el cliente:
-//! 1. Al conectar, le saluda (`Hello`).
-//! 2. El cliente pide la lista de Game Servers y su carga.
-//! 3. El cliente elige uno y pide su IP y puerto; luego se conecta allí.
+//! It is the first server the client talks to:
+//! 1. On connect, it greets the client (`Hello`).
+//! 2. The client asks for the list of Game Servers and their load.
+//! 3. The client picks one and asks for its IP and port, then connects there.
 //!
-//! No necesita base de datos: la lista de servidores viene de la configuración.
+//! No database needed: the server list comes from the configuration.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,11 +15,11 @@ use mu_protocol::packet::PacketBuffer;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
-/// Un Game Server al que el Connect Server puede mandar jugadores.
+/// A Game Server the Connect Server can send players to.
 #[derive(Debug, Clone)]
 pub struct GameServer {
     pub id: u16,
-    /// IP que se le da al cliente (la que él debe usar para llegar al Game Server).
+    /// IP handed to the client (the one it must use to reach the Game Server).
     pub ip: String,
     pub port: u16,
     pub load: u8,
@@ -28,21 +28,21 @@ pub struct GameServer {
 #[derive(Debug, Clone)]
 pub struct Config {
     pub servers: Vec<GameServer>,
-    /// Se corta la conexión si el cliente no manda nada en este tiempo.
+    /// The connection is dropped if the client sends nothing for this long.
     pub idle_timeout: Duration,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
-            // Game Server de OpenMU en local (su puerto por defecto).
+            // Local OpenMU Game Server (its default port).
             servers: vec![GameServer { id: 0, ip: "127.0.0.1".into(), port: 55901, load: 0 }],
             idle_timeout: Duration::from_secs(120),
         }
     }
 }
 
-/// Acepta conexiones para siempre.
+/// Accepts connections forever.
 pub async fn serve(listener: TcpListener, config: Config) -> std::io::Result<()> {
     let config = Arc::new(config);
     loop {
@@ -86,7 +86,7 @@ async fn handle_client(mut socket: TcpStream, config: &Config) -> std::io::Resul
     }
 }
 
-/// Lógica pura del Connect Server: qué contestar a cada mensaje.
+/// Pure Connect Server logic: what to answer to each message.
 pub fn respond(msg: &ClientMessage, config: &Config) -> Option<ServerMessage> {
     match msg {
         ClientMessage::ServerListRequest => Some(ServerMessage::ServerList(

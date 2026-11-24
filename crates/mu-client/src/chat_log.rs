@@ -1,24 +1,24 @@
-//! Lo que guarda y decide el chat, sin dibujar nada (lo dibuja y lo conecta chat.rs):
+//! What the chat stores and decides, without drawing anything (chat.rs draws and wires it):
 //!
-//! - [`ChatLog`]: `SEASON3B::CNewUIChatLogWindow` (NewUIChatLogWindow.cpp): los mensajes por tipo,
-//!   hasta 200 por lista, partidos en dos líneas si no caben (`SeparateText`), la línea del final que
-//!   se ve, el desplazamiento automático, el tamaño (3 a 15 líneas, de 3 en 3), la transparencia
-//!   del fondo, los filtros de `/filter` y el ratón (rueda, barra, cambiar de tamaño, clic derecho en
-//!   un nombre).
-//! - [`SystemLog`]: la ventana de mensajes del sistema de arriba a la izquierda del S6
-//!   (`CSystemLogWindow` de MuMain, que el Main 5.2 aún no tiene: allí van al chat), 6 líneas.
-//! - [`ChatInput`]: `SEASON3B::CNewUIChatInputBox` (NewUIChatInputBox.cpp): las dos cajas de texto,
-//!   el historial, el tipo de mensaje y lo que pasa al pulsar Enter (`UpdateKeyEvent`, :464-552,
-//!   con `CheckCommand`, `SendChat` y `SendChatWhisper`).
+//! - [`ChatLog`]: `SEASON3B::CNewUIChatLogWindow` (NewUIChatLogWindow.cpp): messages by type,
+//!   up to 200 per list, split into two lines if they do not fit (`SeparateText`), the visible
+//!   last line, auto-scroll, the size (3 to 15 lines, in steps of 3), the background
+//!   transparency, the `/filter` filters and the mouse (wheel, bar, resizing, right-click on
+//!   a name).
+//! - [`SystemLog`]: the S6 system message window at the top left
+//!   (MuMain `CSystemLogWindow`, which Main 5.2 does not have yet: there they go to the chat), 6 lines.
+//! - [`ChatInput`]: `SEASON3B::CNewUIChatInputBox` (NewUIChatInputBox.cpp): the two text boxes,
+//!   the history, the message type and what happens on Enter (`UpdateKeyEvent`, :464-552,
+//!   with `CheckCommand`, `SendChat` and `SendChatWhisper`).
 //!
-//! **S6:** la barra del chat de los datos (`newui_chat_back`) mide 281 y trae el botón de Gens,
-//! como el `CChatInputBox` de MuMain ("modernizado para el Season 6 Episodio 3"); el Main 5.2
-//! tiene la de 254. Se siguen las medidas de MuMain (`CHATBOX_WIDTH` = 281, `CLIENT_WIDTH` =
-//! 281 − 7·2 − 4·2) y su ventana de mensajes del sistema; el resto es el Main 5.2.
+//! **S6:** the chat bar in the data (`newui_chat_back`) is 281 wide and has the Gens button,
+//! like MuMain's `CChatInputBox` ("modernized for Season 6 Episode 3"); Main 5.2
+//! has the 254 one. MuMain's measurements are followed (`CHATBOX_WIDTH` = 281, `CLIENT_WIDTH` =
+//! 281 − 7·2 − 4·2) along with its system message window; the rest is Main 5.2.
 //!
-//! Las medidas de texto son de la pantalla de 640×480 (la letra de `g_hFont` a 1024×768).
+//! Text measurements are in the 640×480 screen (the `g_hFont` font at 1024×768).
 
-/// `MESSAGE_TYPE` (NewUIChatLogWindow.h:18-32, con `TYPE_GENS_MESSAGE` de MuMain).
+/// `MESSAGE_TYPE` (NewUIChatLogWindow.h:18-32, with MuMain's `TYPE_GENS_MESSAGE`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum MsgType {
     All = 0,
@@ -30,7 +30,7 @@ pub enum MsgType {
     Guild,
     Union,
     Gens,
-    /// Sin GMs todavía (`ReceiveChat` los reconoce por `eBuff_GMEffect` o `CtlCode`).
+    /// No GMs yet (`ReceiveChat` recognizes them by `eBuff_GMEffect` or `CtlCode`).
     #[allow(dead_code)]
     Gm,
 }
@@ -38,21 +38,21 @@ pub enum MsgType {
 const NUMBER_OF_TYPES: usize = 10;
 
 impl MsgType {
-    /// Los que tienen un nombre al que se puede susurrar con el botón derecho
+    /// Types with a name that can be whispered with the right button
     /// (`UpdateMouseEvent`, NewUIChatLogWindow.cpp:707-713).
     fn has_sender(self) -> bool {
         matches!(self, MsgType::Whisper | MsgType::Chat | MsgType::Party | MsgType::Guild | MsgType::Union | MsgType::Gens | MsgType::Gm)
     }
 }
 
-/// Colores de una línea: fondo RGBA, letra RGBA y si va en negrita (`RenderMessages`,
-/// NewUIChatLogWindow.cpp:115-164; Gens de chat_log.rcss de MuMain). `None` = no se dibuja.
+/// Line colors: RGBA background, RGBA text and whether it is bold (`RenderMessages`,
+/// NewUIChatLogWindow.cpp:115-164; Gens from MuMain's chat_log.rcss). `None` = not drawn.
 pub fn line_colors(kind: MsgType, frame: bool, pointed: bool) -> Option<([u8; 4], [u8; 4], bool)> {
     let (bg, text, bold) = match kind {
         MsgType::Whisper => ([255, 200, 50, 150], [0, 0, 0, 255], false),
         MsgType::System => ([0, 0, 0, 150], [100, 150, 255, 255], false),
         MsgType::Error => ([0, 0, 0, 150], [255, 30, 0, 255], false),
-        // Con el fondo puesto, el negro de las líneas baja de 150 a 100.
+        // With the background on, the line black drops from 150 to 100.
         MsgType::Chat => ([0, 0, 0, if frame { 100 } else { 150 }], [205, 220, 239, 255], false),
         MsgType::Party => ([0, 200, 255, 150], [0, 0, 0, 255], false),
         MsgType::Guild => ([0, 255, 150, 200], [0, 0, 0, 255], false),
@@ -61,14 +61,14 @@ pub fn line_colors(kind: MsgType, frame: bool, pointed: bool) -> Option<([u8; 4]
         MsgType::Gm => ([30, 30, 30, 200], [250, 200, 50, 255], true),
         MsgType::All => return None,
     };
-    // La línea bajo el ratón (`m_bPointedMessage`), solo si tiene nombre (lo mira quien llama).
+    // The line under the mouse (`m_bPointedMessage`), only if it has a name (checked by the caller).
     if pointed {
         return Some(([30, 30, 30, 180], [255, 128, 255, 255], bold));
     }
     Some((bg, text, bold))
 }
 
-/// Una línea del chat (`CMessageText`).
+/// A chat line (`CMessageText`).
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Line {
     pub id: String,
@@ -77,15 +77,15 @@ pub struct Line {
 }
 
 impl Line {
-    /// Lo que se escribe: `ID : texto` o solo el texto.
+    /// What gets written: `ID : text` or just the text.
     pub fn shown(&self) -> String {
         if self.id.is_empty() { self.text.clone() } else { format!("{} : {}", self.id, self.text) }
     }
 }
 
-// --- Medidas de la ventana del chat (pantalla de 640×480) --------------------------------------
+// --- Chat window measurements (640×480 screen) --------------------------------------
 
-/// `CChatInputBox::CHATBOX_WIDTH` de MuMain (la barra del S6).
+/// MuMain `CChatInputBox::CHATBOX_WIDTH` (the S6 bar).
 pub const WND_WIDTH: i32 = 281;
 pub const FONT_LEADING: i32 = 4;
 pub const WND_TOP_BOTTOM_EDGE: i32 = 2;
@@ -96,10 +96,10 @@ pub const SCROLL_TOP_BOTTOM_PART_HEIGHT: i32 = 3;
 pub const SCROLL_MIDDLE_PART_HEIGHT: i32 = 15;
 pub const SCROLL_BTN_WIDTH: i32 = 15;
 pub const SCROLL_BTN_HEIGHT: i32 = 30;
-/// Ancho del texto (`CLIENT_WIDTH` de MuMain).
+/// Text width (MuMain `CLIENT_WIDTH`).
 pub const CLIENT_WIDTH: f32 = (WND_WIDTH - SCROLL_BAR_WIDTH * 2 - WND_LEFT_RIGHT_EDGE * 2) as f32;
 const MAX_NUMBER_OF_LINES: usize = 200;
-/// `Create(m_pNewUIMng, 0, 480-50-47, 6)` (NewUISystem.cpp:104): `m_WndPos` es la esquina de abajo.
+/// `Create(m_pNewUIMng, 0, 480-50-47, 6)` (NewUISystem.cpp:104): `m_WndPos` is the bottom corner.
 pub const LOG_X: i32 = 0;
 pub const LOG_BOTTOM: i32 = 480 - 50 - 47;
 
@@ -108,10 +108,10 @@ fn inside(m: (i32, i32), x: i32, y: i32, w: i32, h: i32) -> bool {
     m.0 >= x && m.0 < x + w && m.1 >= y && m.1 < y + h
 }
 
-/// `SeparateText` (NewUIChatLogWindow.cpp:910-938): la primera línea, que cabe en `CLIENT_WIDTH`
-/// menos `ID : `, y el resto. Se corta en el último espacio que deje caber la primera (el espacio
-/// pasa a la segunda); sin espacios, letra a letra. Si con espacios ninguno sirve, el original lee
-/// fuera de la cadena: aquí se corta letra a letra.
+/// `SeparateText` (NewUIChatLogWindow.cpp:910-938): the first line, which fits in `CLIENT_WIDTH`
+/// minus `ID : `, and the rest. Cut at the last space that lets the first line fit (the space
+/// moves to the second); with no spaces, letter by letter. If there are spaces but none works, the
+/// original reads past the string: here it cuts letter by letter.
 pub fn separate_text(id: &str, text: &str, measure: &dyn Fn(&str) -> f32) -> (String, String) {
     let max_first = CLIENT_WIDTH - measure(&format!("{id} : "));
     let chars: Vec<char> = text.chars().collect();
@@ -139,7 +139,7 @@ pub fn separate_text(id: &str, text: &str, measure: &dyn Fn(&str) -> f32) -> (St
     split(at)
 }
 
-/// `m_EventState` de la ventana del chat.
+/// The chat window's `m_EventState`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum LogEvent {
     #[default]
@@ -150,28 +150,28 @@ pub enum LogEvent {
     ResizeDown,
 }
 
-/// El ratón en un fotograma (pantalla de 640×480, en enteros como `MouseX`/`MouseY`).
+/// The mouse in one frame (640×480 screen, in integers like `MouseX`/`MouseY`).
 #[derive(Clone, Copy, Default, Debug)]
 pub struct MouseIn {
     pub pos: Option<(i32, i32)>,
-    /// `MouseLButtonPush`: el botón izquierdo está abajo.
+    /// `MouseLButtonPush`: the left button is down.
     pub held: bool,
     /// `IsRelease(VK_LBUTTON)`.
     pub release: bool,
     /// `IsPress(VK_RBUTTON)`.
     pub right_press: bool,
-    /// `MouseWheel`: > 0 hacia arriba.
+    /// `MouseWheel`: > 0 is up.
     pub wheel: f32,
 }
 
-/// Lo que ha hecho el ratón en la ventana del chat.
+/// What the mouse did in the chat window.
 #[derive(Clone, Default, Debug, PartialEq)]
 pub struct MouseOut {
-    /// `UpdateMouseEvent` devolvió falso: el clic no llega al juego.
+    /// `UpdateMouseEvent` returned false: the click does not reach the game.
     pub consumed: bool,
-    /// La rueda era suya (`MouseWheel = 0`).
+    /// The wheel was ours (`MouseWheel = 0`).
     pub wheel_used: bool,
-    /// Clic derecho en una línea con nombre: susurrarle.
+    /// Right-click on a line with a name: whisper to them.
     pub whisper_to: Option<String>,
 }
 
@@ -189,7 +189,7 @@ pub struct ChatLog {
     show_log: bool,
     filters: Vec<String>,
     pub event: LogEvent,
-    /// `m_ScrollBtnPos.y` y `m_iGrapRelativePosY`.
+    /// `m_ScrollBtnPos.y` and `m_iGrapRelativePosY`.
     scroll_btn_y: i32,
     grab_y: i32,
     /// `m_bPointedMessage` / `m_iPointedMessageIndex`.
@@ -254,9 +254,9 @@ impl ChatLog {
         self.pointed
     }
 
-    /// `AddText`: `err` es la otra lista a la que va también un error (`TYPE_WHISPER_MESSAGE` para
-    /// "No users"). Devuelve si suena el aviso de susurro porque pasó el filtro de `/filter` (con
-    /// la opción puesta, lo decide quien llama).
+    /// `AddText`: `err` is the other list an error also goes to (`TYPE_WHISPER_MESSAGE` for
+    /// "No users"). Returns whether the whisper alert sounds because it passed the `/filter` filter
+    /// (when that option is on, the caller decides).
     pub fn add_text(&mut self, id: &str, text: &str, kind: MsgType, err: MsgType, measure: &dyn Fn(&str) -> f32) -> bool {
         if id.is_empty() && text.is_empty() {
             return false;
@@ -298,7 +298,7 @@ impl ChatLog {
                 scroll_lines += 1;
             }
         }
-        // Desplazamiento automático (con la resta en `size_t` del original: si sale negativa, no).
+        // Auto-scroll (with the original's `size_t` subtraction: if it goes negative, no).
         let size = self.lines(self.current) as i64;
         let diff = size - (self.end_line as i64 + 1) - scroll_lines;
         if scroll_lines > 0 && (0..3).contains(&diff) || !self.show_frame {
@@ -317,7 +317,7 @@ impl ChatLog {
         }
     }
 
-    /// `Scrolling`: la línea del final que se ve, sin pasarse.
+    /// `Scrolling`: the visible last line, clamped.
     pub fn scrolling(&mut self, end: i32) {
         let size = self.lines(self.current) as i32;
         self.end_line = if size <= self.showing {
@@ -331,7 +331,7 @@ impl ChatLog {
         };
     }
 
-    /// `SetNumberOfShowingLines`: de 3 en 3, de 3 a 15 (y al pasarse de 15, otra vez 3).
+    /// `SetNumberOfShowingLines`: in steps of 3, from 3 to 15 (past 15, back to 3).
     pub fn set_showing_lines(&mut self, n: i32) {
         self.showing = (n / 3) * 3;
         if self.showing < 3 || self.showing > 15 {
@@ -343,12 +343,12 @@ impl ChatLog {
         self.update_scroll_pos();
     }
 
-    /// `SetSizeAuto` (F4 y el botón de tamaño).
+    /// `SetSizeAuto` (F4 and the size button).
     pub fn size_auto(&mut self) {
         self.set_showing_lines(self.showing + 3);
     }
 
-    /// `SetBackAlphaAuto`: 0.2, 0.4 ... hasta pasar de 0.9.
+    /// `SetBackAlphaAuto`: 0.2, 0.4 ... until past 0.9.
     pub fn back_alpha_auto(&mut self) {
         self.back_alpha += 0.2;
         if self.back_alpha > 0.9 {
@@ -356,7 +356,7 @@ impl ChatLog {
         }
     }
 
-    /// `ChangeMessage` (F2 y el botón del sistema del Main 5.2).
+    /// `ChangeMessage` (F2 and the Main 5.2 system button).
     pub fn change_message(&mut self, t: MsgType) {
         self.current = t;
         self.end_line = self.lines(t) as i32 - 1;
@@ -376,13 +376,13 @@ impl ChatLog {
         SCROLL_MIDDLE_PART_HEIGHT * self.showing + SCROLL_TOP_BOTTOM_PART_HEIGHT * 2 + WND_TOP_BOTTOM_EDGE * 2
     }
 
-    /// Arriba de la ventana.
+    /// Top of the window.
     pub fn wnd_top(&self) -> i32 {
         LOG_BOTTOM - self.wnd_height()
     }
 
-    /// Las líneas que se ven: (índice en la lista actual, la línea, y de arriba)
-    /// (`RenderMessages`, NewUIChatLogWindow.cpp:80-106; también lo que mira el ratón).
+    /// The visible lines: (index in the current list, the line, top y)
+    /// (`RenderMessages`, NewUIChatLogWindow.cpp:80-106; also what the mouse checks).
     pub fn visible(&self) -> Vec<(usize, &Line, i32)> {
         let mut y0 = self.wnd_top() + SCROLL_TOP_BOTTOM_PART_HEIGHT;
         let mut start = 0;
@@ -406,7 +406,7 @@ impl ChatLog {
         (LOG_X + WND_WIDTH - SCROLL_BAR_WIDTH - WND_LEFT_RIGHT_EDGE - 4, self.scroll_btn_y)
     }
 
-    /// `UpdateScrollPos` (cada fotograma en `Update`, salvo mientras se arrastra el botón).
+    /// `UpdateScrollPos` (every frame in `Update`, except while dragging the button).
     pub fn update_scroll_pos(&mut self) {
         let total = self.lines(self.current) as i32;
         let mut rate = 1.0;
@@ -423,13 +423,13 @@ impl ChatLog {
         }
     }
 
-    /// La barra para cambiar de tamaño (`ptResizingBtn`), encima de la ventana.
+    /// The resize bar (`ptResizingBtn`), above the window.
     pub fn resize_bar_y(&self) -> i32 {
         self.wnd_top() - RESIZING_BTN_HEIGHT
     }
 
-    /// El ratón está sobre algo de la ventana que se queda el clic (con el fondo puesto: la barra
-    /// de tamaño y el botón de la barra de desplazamiento), o los está arrastrando.
+    /// The mouse is over something in the window that captures the click (with the background on: the
+    /// resize bar and the scroll bar button), or is dragging them.
     pub fn blocks(&self, m: (i32, i32)) -> bool {
         if !self.show_frame {
             return false;
@@ -543,7 +543,7 @@ impl ChatLog {
         out
     }
 
-    /// Las franjas de 3 líneas por encima y por debajo de la barra de tamaño mientras se arrastra
+    /// The 3-line bands above and below the resize bar while dragging
     /// (NewUIChatLogWindow.cpp:807-838).
     fn resize_to(&mut self, my: i32, ry: i32) {
         let band = |y: i32, h: i32| my >= y && my < y + h;
@@ -571,19 +571,19 @@ impl ChatLog {
         }
     }
 
-    /// `SetFilterText` (`/filter palabra...`, NewUIChatLogWindow.cpp:551-586): hasta 5 palabras
-    /// tras el comando; sin ninguna, se quita el filtro. Devuelve el aviso (`GlobalText[755/756]`),
-    /// que va al chat como mensaje del sistema.
+    /// `SetFilterText` (`/filter word...`, NewUIChatLogWindow.cpp:551-586): up to 5 words
+    /// after the command; with none, the filter is removed. Returns the notice (`GlobalText[755/756]`),
+    /// which goes to the chat as a system message.
     pub fn set_filter_text(&mut self, text: &str, measure: &dyn Fn(&str) -> f32) {
         self.filters.clear();
-        // `MAX_CHAT_BUFFER_SIZE`: los 60 primeros.
+        // `MAX_CHAT_BUFFER_SIZE`: the first 60.
         let text: String = text.chars().take(60).collect();
         let mut tokens = text.split(' ').filter(|t| !t.is_empty()).skip(1).peekable();
         let message = if tokens.peek().is_none() {
             TEXT_FILTER_OFF
         } else {
             for t in tokens.take(5) {
-                // `AddFilterWord`: sin repetir y no más de 6.
+                // `AddFilterWord`: no repeats and no more than 6.
                 if self.filters.len() <= 5 && !self.filters.iter().any(|f| f == t) {
                     self.filters.push(t.to_string());
                 }
@@ -593,17 +593,17 @@ impl ChatLog {
         self.add_text("", message, MsgType::System, MsgType::All, measure);
     }
 
-    /// `CheckFilterText` con `FindText` (está dentro).
+    /// `CheckFilterText` with `FindText` (substring match).
     fn check_filter(&self, s: &str) -> bool {
         self.filters.iter().any(|f| s.contains(f.as_str()))
     }
 }
 
-/// `GlobalText[755]` y `[756]`.
+/// `GlobalText[755]` and `[756]`.
 const TEXT_FILTER_ON: &str = "Filtering has been activated";
 const TEXT_FILTER_OFF: &str = "Filtering has been canceled";
 
-/// `CSystemLogWindow` de MuMain: los últimos 6 mensajes del sistema y de error.
+/// MuMain `CSystemLogWindow`: the last 6 system and error messages.
 #[derive(Clone, Debug, Default)]
 pub struct SystemLog {
     lines: Vec<Line>,
@@ -626,24 +626,24 @@ impl SystemLog {
         &self.lines
     }
 
-    /// Azul los del sistema y rojo todo lo demás (`RebuildLineModel` de MuMain).
+    /// Blue for system ones and red for everything else (MuMain `RebuildLineModel`).
     pub fn color(kind: MsgType) -> [u8; 3] {
         if kind == MsgType::System { [100, 150, 255] } else { [255, 30, 0] }
     }
 }
 
-// --- Cajas de texto ---------------------------------------------------------------------------
+// --- Text boxes ---------------------------------------------------------------------------
 
-/// Una caja de texto (`CUITextInputBox`, un `edit` de Windows de una línea).
+/// A text box (`CUITextInputBox`, a single-line Windows `edit`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TextBox {
     pub text: String,
-    /// Posición del cursor, en letras.
+    /// Caret position, in characters.
     pub caret: usize,
-    /// Todo seleccionado (`GiveFocus(TRUE)`): lo siguiente que se escriba lo sustituye.
+    /// Everything selected (`GiveFocus(TRUE)`): the next typed text replaces it.
     pub select_all: bool,
     pub max: usize,
-    /// Desplazamiento del texto (`ES_AUTOHSCROLL`), en unidades de la pantalla de 640.
+    /// Text scroll (`ES_AUTOHSCROLL`), in 640-screen units.
     pub scroll: f32,
 }
 
@@ -660,7 +660,7 @@ impl TextBox {
         self.text.char_indices().nth(i).map_or(self.text.len(), |(b, _)| b)
     }
 
-    /// `SetText`: el cursor al final.
+    /// `SetText`: caret at the end.
     pub fn set(&mut self, text: &str) {
         self.text = text.chars().take(self.max).collect();
         self.caret = self.len();
@@ -688,7 +688,7 @@ impl TextBox {
         self.caret += 1;
     }
 
-    /// Ctrl+V: el texto del portapapeles en el cursor (hasta llenar la caja).
+    /// Ctrl+V: the clipboard text at the caret (until the box is full).
     pub fn paste(&mut self, text: &str) {
         self.take_selection();
         for c in crate::clipboard::paste_text(text) {
@@ -696,12 +696,12 @@ impl TextBox {
         }
     }
 
-    /// Ctrl+C: lo seleccionado o, sin selección, todo (la caja solo sabe seleccionar todo).
+    /// Ctrl+C: the selection or, with none, everything (the box can only select all).
     pub fn copy_text(&self) -> &str {
         &self.text
     }
 
-    /// Ctrl+X: lo copia y deja la caja vacía.
+    /// Ctrl+X: copies it and leaves the box empty.
     pub fn cut(&mut self) -> String {
         self.select_all = false;
         self.caret = 0;
@@ -745,12 +745,12 @@ impl TextBox {
         self.move_to(c);
     }
 
-    /// Lo que hay antes y después del cursor.
+    /// What is before and after the caret.
     pub fn split(&self) -> (&str, &str) {
         self.text.split_at(self.byte_at(self.caret))
     }
 
-    /// `ES_AUTOHSCROLL`: mueve el texto para que se vea el cursor en una caja de `width`.
+    /// `ES_AUTOHSCROLL`: scrolls the text so the caret is visible in a box of `width`.
     pub fn follow_caret(&mut self, width: f32, measure: &dyn Fn(&str) -> f32) {
         let x = measure(self.split().0);
         if x - self.scroll > width - 2.0 {
@@ -766,8 +766,8 @@ impl TextBox {
     }
 }
 
-/// `AddChatHistory` / `AddWhsprIDHistory`: sin repetir (el repetido pasa al final) y, si no
-/// estaba, quitando el más viejo cuando ya hay más de `max`.
+/// `AddChatHistory` / `AddWhsprIDHistory`: no repeats (a repeated one moves to the end) and, if it
+/// was not there, dropping the oldest once there are more than `max`.
 pub fn add_history(v: &mut Vec<String>, s: &str, max: usize) {
     if let Some(i) = v.iter().position(|h| h == s) {
         v.remove(i);
@@ -777,7 +777,7 @@ pub fn add_history(v: &mut Vec<String>, s: &str, max: usize) {
     v.push(s.to_string());
 }
 
-/// Flechas del historial (NewUIChatInputBox.cpp:555-599): `up` resta, `down` suma, dando la vuelta.
+/// History arrows (NewUIChatInputBox.cpp:555-599): `up` decrements, `down` increments, wrapping.
 pub fn step_history(cur: &mut i32, len: usize, up: bool) {
     *cur += if up { -1 } else { 1 };
     if *cur < 0 {
@@ -788,9 +788,9 @@ pub fn step_history(cur: &mut i32, len: usize, up: bool) {
     }
 }
 
-// --- Enviar -------------------------------------------------------------------------------------
+// --- Sending -------------------------------------------------------------------------------------
 
-/// `INPUT_MESSAGE_TYPE`: los botones de tipo (con el de Gens del S6).
+/// `INPUT_MESSAGE_TYPE`: the type buttons (with the S6 Gens one).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum InputType {
     #[default]
@@ -803,7 +803,7 @@ pub enum InputType {
 impl InputType {
     pub const ALL: [InputType; 4] = [InputType::Normal, InputType::Party, InputType::Guild, InputType::Gens];
 
-    /// El prefijo del canal (NewUIChatInputBox.cpp:480-489; `$` de MuMain).
+    /// The channel prefix (NewUIChatInputBox.cpp:480-489; `$` from MuMain).
     fn prefix(self) -> &'static str {
         match self {
             InputType::Normal => "",
@@ -814,19 +814,19 @@ impl InputType {
     }
 }
 
-/// `GlobalText[260]`, `[264]`, `[265]`, `[267]`, `[268]` y `[263]`.
+/// `GlobalText[260]`, `[264]`, `[265]`, `[267]`, `[268]` and `[263]`.
 pub const TEXT_WARP: &str = "/warp";
 const TEXT_WHISPER_OFF: &str = "/whisper off";
 const TEXT_WHISPER_ON: &str = "/whisper on";
 const TEXT_WHISPER_IS_OFF: &str = "Whisper function is now off";
 const TEXT_WHISPER_IS_ON: &str = "Whisper function is now on";
 pub const TEXT_ICARUS_NEEDS_WINGS: &str = "You can enter Icarus only with wings, dinorant, fenrirr";
-/// `GlobalText[482]`: el susurro no llegó.
+/// `GlobalText[482]`: the whisper did not arrive.
 pub const TEXT_NO_USERS: &str = "No users";
 /// `GlobalText[55]`: Icarus.
 const ICARUS: &str = "Icarus";
 
-/// Un destino de la ventana de mover (`MOVEREQINFO`): índice, nombre y subnombre.
+/// A move-window destination (`MOVEREQINFO`): index, name and subname.
 #[derive(Clone, Debug)]
 pub struct WarpName {
     pub index: i32,
@@ -834,31 +834,31 @@ pub struct WarpName {
     pub sub_name: String,
 }
 
-/// `GetMapIndexFromMovereq`: el índice por nombre o subnombre (`stricmp`); −1 si no está.
+/// `GetMapIndexFromMovereq`: the index by name or subname (`stricmp`); −1 if missing.
 pub fn map_index_from_movereq(list: &[WarpName], name: &str) -> i32 {
     list.iter()
         .find(|w| w.name.eq_ignore_ascii_case(name) || w.sub_name.eq_ignore_ascii_case(name))
         .map_or(-1, |w| w.index)
 }
 
-/// `IsIllegalMovementByUsingMsg` (ZzzInterface.cpp:9226-9307) sin equipo: si el texto pide
-/// moverse ("/MOVE" en mayúsculas; el `/warp` del `GlobalText[260]` se busca en el texto ya en
-/// mayúsculas, así que nunca se encuentra) a Icarus, no se puede volar sin alas. Devuelve el aviso.
+/// `IsIllegalMovementByUsingMsg` (ZzzInterface.cpp:9226-9307) without equipment: if the text asks to
+/// move ("/MOVE" in uppercase; the `/warp` of `GlobalText[260]` is searched in the already
+/// uppercased text, so it is never found) to Icarus, flying without wings is not allowed. Returns the notice.
 fn illegal_movement(text: &str, list: &[WarpName]) -> Option<&'static str> {
     let upper = text.to_uppercase();
     if !upper.contains("/MOVE") && !upper.contains(TEXT_WARP) {
         return None;
     }
     let w = list.iter().find(|w| text.contains(w.name.as_str()) || upper.contains(&w.sub_name.to_uppercase()))?;
-    // Atlans solo se niega montando una Uniria o Dinorant (sin equipo, nunca).
+    // Atlans is only refused when riding a Uniria or Dinorant (without equipment, never).
     (w.name.eq_ignore_ascii_case(ICARUS)).then_some(TEXT_ICARUS_NEEDS_WINGS)
 }
 
-/// `CheckChatText` (ZzzInterface.cpp:4434-4547): el gesto (`AT_*`) del primer grupo de palabras que
-/// sale en el texto (`FindText`: en cualquier sitio, mirando mayúsculas), con las de Text_eng.bmd
-/// (`GlobalText[270..=348]` y `[783]`) y las que van escritas tal cual. Las que el original escribe
-/// en coreano no se pueden escribir con el inglés y no están. "the forehead" (`[2228]`) y `[2243]`
-/// piden anillos de transformación: sin equipo no hacen nada.
+/// `CheckChatText` (ZzzInterface.cpp:4434-4547): the emote (`AT_*`) of the first word group that
+/// appears in the text (`FindText`: anywhere, case-sensitive), with the Text_eng.bmd words
+/// (`GlobalText[270..=348]` and `[783]`) and the hardcoded ones. Those the original writes
+/// in Korean cannot be typed with the English client and are missing. "the forehead" (`[2228]`) and `[2243]`
+/// require transformation rings: without equipment they do nothing.
 pub fn chat_emote(text: &str) -> Option<u8> {
     use mu_protocol::game::action as at;
     const TABLE: &[(&[&str], u8)] = &[
@@ -882,31 +882,31 @@ pub fn chat_emote(text: &str) -> Option<u8> {
         (&["Rush", "Go go"], at::RUSH1),
         (&["Hustle", "hustle"], at::HUSTLE),
         (&["come on"], at::PROVOCATION),
-        // `GlobalText[317]` es "Great", que ya ha cogido `AT_CHEER1`: como en el original, no sale nunca.
+        // `GlobalText[317]` is "Great", already taken by `AT_CHEER1`: like in the original, it never triggers.
         (&["Great"], at::CHEERS),
         (&["Look around"], at::LOOK_AROUND),
     ];
     TABLE.iter().find(|(words, _)| words.iter().any(|w| text.contains(w))).map(|&(_, a)| a)
 }
 
-/// Lo que sale de pulsar Enter con texto.
+/// What pressing Enter with text produces.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Outgoing {
-    /// El gesto de `CheckChatText` (`AT_*`), antes de `SendChat` (y aunque `SendChat` no lo mande).
+    /// The `CheckChatText` emote (`AT_*`), before `SendChat` (even if `SendChat` does not send it).
     Emote(u8),
     /// `SendChat`.
     Chat(String),
-    /// `SendChatWhisper(destinatario, texto)`.
+    /// `SendChatWhisper(recipient, text)`.
     Whisper(String, String),
-    /// `SendRequestMoveMap(GetMoveCommandKey(), índice)` (−1 si el nombre no está, como el original).
+    /// `SendRequestMoveMap(GetMoveCommandKey(), index)` (−1 if the name is missing, like the original).
     Warp(i32),
 }
 
-/// `SEASON3B::CNewUIChatInputBox`: lo que no es dibujo.
+/// `SEASON3B::CNewUIChatInputBox`: the non-drawing part.
 #[derive(Clone, Debug)]
 pub struct ChatInput {
     pub open: bool,
-    /// La caja del nombre tiene el foco (si no, la del texto).
+    /// The name box has focus (otherwise the text box).
     pub whisper_focus: bool,
     pub chat: TextBox,
     pub whisper: TextBox,
@@ -916,21 +916,21 @@ pub struct ChatInput {
     pub cur_whisper: i32,
     pub msg_type: InputType,
     pub block_whisper: bool,
-    /// Ventana de mensajes del sistema a la vista (el botón "System message pop-up" del S6).
+    /// System message window visible (the S6 "System message pop-up" button).
     pub show_system: bool,
     pub show_chat_log: bool,
-    /// `m_bWhisperSend`: la caja del nombre está puesta (F3).
+    /// `m_bWhisperSend`: the name box is shown (F3).
     pub whisper_send: bool,
-    /// `m_bShowMessageElseNormal` (F2): solo los susurros.
+    /// `m_bShowMessageElseNormal` (F2): whispers only.
     pub whisper_only: bool,
-    /// `ChatTime` y `ChatText` de `SendChat` (en ticks de 25 por segundo).
+    /// `ChatTime` and `ChatText` of `SendChat` (in ticks of 25 per second).
     pub chat_time: i32,
     pub last_chat: String,
-    /// `ChatWhisperID`: a quién fue el último susurro.
+    /// `ChatWhisperID`: who the last whisper went to.
     pub whisper_id: String,
 }
 
-/// `MAX_CHAT_SIZE_UTF16 − 1` (90 / 2 − 1 con el inglés, NewUIChatInputBox.cpp:14, :86).
+/// `MAX_CHAT_SIZE_UTF16 − 1` (90 / 2 − 1 for English, NewUIChatInputBox.cpp:14, :86).
 pub const MAX_CHAT_CHARS: usize = 44;
 /// `m_pWhsprIDInputBox->Init(g_hWnd, 50, 14, 10)`.
 pub const MAX_ID_CHARS: usize = 10;
@@ -960,25 +960,25 @@ impl Default for ChatInput {
 }
 
 impl ChatInput {
-    /// `OpenningProcess`: el foco al texto, vacío.
+    /// `OpenningProcess`: focus to the text box, empty.
     pub fn open(&mut self) {
         self.open = true;
         self.whisper_focus = false;
         self.chat.set("");
     }
 
-    /// `ClosingProcess` (y `Hide`); quien llama quita el fondo del chat.
+    /// `ClosingProcess` (and `Hide`); the caller removes the chat background.
     pub fn close(&mut self) {
         self.open = false;
         self.whisper_focus = false;
     }
 
-    /// La caja con el foco.
+    /// The focused box.
     pub fn focused(&mut self) -> &mut TextBox {
         if self.whisper_focus { &mut self.whisper } else { &mut self.chat }
     }
 
-    /// Tab (`SetTabTarget`): a la otra caja si se ve, con todo seleccionado.
+    /// Tab (`SetTabTarget`): to the other box if visible, with everything selected.
     pub fn tab(&mut self) {
         if self.whisper_focus {
             self.whisper_focus = false;
@@ -992,8 +992,8 @@ impl ChatInput {
         b.caret = b.len();
     }
 
-    /// Enter con la caja abierta (NewUIChatInputBox.cpp:464-552): lo que hay que mandar; los
-    /// mensajes van a `log` (chat) y `system` (ventana del sistema). Cierra la caja.
+    /// Enter with the box open (NewUIChatInputBox.cpp:464-552): what must be sent; the
+    /// messages go to `log` (chat) and `system` (system window). Closes the box.
     pub fn submit(
         &mut self,
         hero: &str,
@@ -1005,7 +1005,7 @@ impl ChatInput {
         let mut out = Vec::new();
         let typed = self.chat.text.clone();
         let whisper_id = self.whisper.text.clone();
-        // El prefijo del canal, salvo los comandos.
+        // The channel prefix, except for commands.
         let text = if typed.starts_with('/') { typed.clone() } else { format!("{}{typed}", self.msg_type.prefix()) };
         if !typed.is_empty() && !self.check_command(&text, warps, log, system, measure) {
             if self.whisper_send && !whisper_id.is_empty() {
@@ -1014,11 +1014,11 @@ impl ChatInput {
                 log.add_text(hero, &text, MsgType::Whisper, MsgType::All, measure);
                 add_history(&mut self.whisper_history, &whisper_id, 5);
             } else if let Some(rest) = text.strip_prefix(TEXT_WARP) {
-                // `szChatText + strlen(GlobalText[260]) + 1`: lo que va tras el espacio.
+                // `szChatText + strlen(GlobalText[260]) + 1`: what comes after the space.
                 let name: String = rest.chars().skip(1).collect();
                 out.push(Outgoing::Warp(map_index_from_movereq(warps, &name)));
             } else {
-                // `CheckChatText` (sin montura: siempre), antes de `SendChat`.
+                // `CheckChatText` (not mounted: always), before `SendChat`.
                 if let Some(emote) = chat_emote(&text) {
                     out.push(Outgoing::Emote(emote));
                 }
@@ -1035,10 +1035,10 @@ impl ChatInput {
         out
     }
 
-    /// `CheckCommand` (ZzzInterface.cpp:3853-4359): de lo que no es solo del servidor, `/filter`
-    /// (que además se manda) y el aviso de Icarus. Devuelve si se ha quedado el texto.
+    /// `CheckCommand` (ZzzInterface.cpp:3853-4359): of the non-server-only ones, `/filter`
+    /// (which is also sent) and the Icarus notice. Returns whether the text was consumed.
     fn check_command(&self, text: &str, warps: &[WarpName], log: &mut ChatLog, system: &mut SystemLog, measure: &dyn Fn(&str) -> f32) -> bool {
-        // `GlobalText[753]` y "/filter".
+        // `GlobalText[753]` and "/filter".
         if text.starts_with("/filter") {
             log.set_filter_text(text, measure);
         }
@@ -1051,8 +1051,8 @@ impl ChatInput {
         }
     }
 
-    /// `SendChat` (wsclientinline.h:328-387): no más de uno cada 0.8 s ni el mismo en 2.8 s, y
-    /// `/whisper off|on` se queda aquí.
+    /// `SendChat` (wsclientinline.h:328-387): no more than one every 0.8 s nor the same one within 2.8 s, and
+    /// `/whisper off|on` stays here.
     fn send_chat(&mut self, text: &str, system: &mut SystemLog) -> Option<String> {
         if self.chat_time > 50 || (self.chat_time > 0 && self.last_chat == text) {
             return None;
@@ -1074,7 +1074,7 @@ impl ChatInput {
         Some(text.to_string())
     }
 
-    /// Un tick (`ChatTime--`, ZzzScene.cpp:2313).
+    /// One tick (`ChatTime--`, ZzzScene.cpp:2313).
     pub fn tick(&mut self) {
         if self.chat_time > 0 {
             self.chat_time -= 1;
@@ -1082,16 +1082,16 @@ impl ChatInput {
     }
 }
 
-// --- Bocadillos -----------------------------------------------------------------------------------
+// --- Speech bubbles -----------------------------------------------------------------------------------
 
-/// `CutText` (ZzzInterface.cpp:594-615) con `GetClosestBlankFromCenter` (MultiLanguage.cpp:159-189):
-/// (lo de después del corte, lo de antes con el espacio). El bocadillo pone primero lo de antes.
+/// `CutText` (ZzzInterface.cpp:594-615) with `GetClosestBlankFromCenter` (MultiLanguage.cpp:159-189):
+/// (what comes after the cut, what comes before with the space). The bubble shows the "before" part first.
 pub fn cut_text(text: &str) -> (String, String) {
     let chars: Vec<char> = text.chars().collect();
     let len = chars.len() as i32;
     let half = len / 2;
     let last_first = chars[..half as usize].iter().rposition(|&c| c == ' ').map_or(-1, |p| p as i32);
-    // `find_first_of(L" ", 1)` en la segunda mitad.
+    // `find_first_of(L" ", 1)` in the second half.
     let first_second = chars[half as usize..].iter().enumerate().skip(1).find(|(_, c)| **c == ' ').map_or(-1, |(p, _)| p as i32);
     let blank = if last_first < 0 && first_second < 0 {
         half
@@ -1108,10 +1108,10 @@ pub fn cut_text(text: &str) -> (String, String) {
     (chars[at..].iter().collect(), chars[..at].iter().collect())
 }
 
-// --- Nombres de los mapas ---------------------------------------------------------------------------
+// --- Map names ---------------------------------------------------------------------------
 
-/// `GetMapName` (MapManager.cpp:1745-1884) para `WorldActive`, con los textos de Text_eng.bmd.
-/// Los que caen en `GlobalText[30 + mapa]` sin ser nombres de mapa salen igual que en el original.
+/// `GetMapName` (MapManager.cpp:1745-1884) for `WorldActive`, with the Text_eng.bmd texts.
+/// Those that fall into `GlobalText[30 + map]` without being map names come out as in the original.
 pub fn map_name(map: u16) -> &'static str {
     match map {
         34 => "Crywolf Fortress",
@@ -1165,8 +1165,8 @@ pub fn map_name(map: u16) -> &'static str {
     }
 }
 
-/// `GlobalText[484]` + el nombre (WSclient.cpp:984-991 al entrar y 1805-1812 al cambiar de mapa);
-/// en los Doppelganger, nada.
+/// `GlobalText[484]` + the name (WSclient.cpp:984-991 on entering and 1805-1812 on map change);
+/// nothing in Doppelganger.
 pub fn welcome_text(map: u16) -> Option<String> {
     (!(65..=68).contains(&map)).then(|| format!("Welcome to {}", map_name(map)))
 }
@@ -1175,23 +1175,23 @@ pub fn welcome_text(map: u16) -> Option<String> {
 mod tests {
     use super::*;
 
-    /// Letra de ancho fijo: 5 por letra.
+    /// Fixed-width font: 5 per character.
     fn fixed(s: &str) -> f32 {
         s.chars().count() as f32 * 5.0
     }
 
     #[test]
     fn partir_lineas_largas() {
-        // 259 de ancho: con "Pepe : " (7 letras = 35) caben 224 / 5 = 44 letras en la primera.
+        // Width 259: with "Pepe : " (7 chars = 35), 224 / 5 = 44 chars fit on the first line.
         let text = "palabra ".repeat(8);
         let (a, b) = separate_text("Pepe", &text, &fixed);
         assert!(fixed(&a) <= CLIENT_WIDTH - 35.0);
         assert_eq!(format!("{a}{b}"), text, "no se pierde nada");
         assert!(b.starts_with(' '), "el espacio pasa a la segunda: {b:?}");
-        // Sin espacios, letra a letra (sin nombre también se descuenta " : ", como el original).
+        // No spaces: letter by letter (without a name " : " is still subtracted, like the original).
         let (a, b) = separate_text("", &"x".repeat(60), &fixed);
         assert_eq!((a.len(), b.len()), (48, 12));
-        // Si cabe, entera.
+        // If it fits, whole.
         assert_eq!(separate_text("Pepe", "hola", &fixed), ("hola".into(), String::new()));
     }
 
@@ -1207,15 +1207,15 @@ mod tests {
         let v = log.visible();
         assert_eq!(v.len(), 6);
         assert_eq!(v[0].1.text, "hola 4");
-        // La primera, en y = 383 − 100 + 3 + 4.
+        // The first one at y = 383 − 100 + 3 + 4.
         assert_eq!(v[0].2, 290);
         assert_eq!(v[5].2, 290 + 75);
-        // Con pocas, abajo del todo: la única va donde iría la sexta (con el `FONT_LEADING` doble).
+        // With few lines, at the very bottom: the only one goes where the sixth would (with the double `FONT_LEADING`).
         let mut corto = ChatLog::default();
         corto.add_text("", "Welcome to Lorencia", MsgType::System, MsgType::All, &fixed);
         assert_eq!(corto.visible()[0].2, 283 + 3 + 4 + 75 + 4);
 
-        // La rueda: con el ratón encima (el primer fotograma solo entra).
+        // The wheel: with the mouse over it (the first frame only enters).
         let at = MouseIn { pos: Some((10, 300)), ..Default::default() };
         assert!(log.update_mouse(&at).consumed);
         let up = MouseIn { wheel: 1.0, ..at };
@@ -1225,11 +1225,11 @@ mod tests {
             log.update_mouse(&up);
         }
         assert_eq!(log.end_line(), 5, "no sube más allá de la primera pantalla");
-        // Con el fondo y lejos del final, lo nuevo no mueve la vista.
+        // With the background on and far from the end, new lines do not move the view.
         log.set_frame(true);
         log.add_text("Pepe", "nuevo", MsgType::Chat, MsgType::All, &fixed);
         assert_eq!(log.end_line(), 5);
-        // Cerca del final sí.
+        // Near the end they do.
         log.scrolling(9);
         log.add_text("Pepe", "otro", MsgType::Chat, MsgType::All, &fixed);
         assert_eq!(log.end_line(), 11);
@@ -1246,7 +1246,7 @@ mod tests {
         log.change_message(MsgType::Whisper);
         assert_eq!(log.end_line(), 1);
         assert_eq!(log.visible()[1].1.kind, MsgType::Error);
-        // 200 como mucho.
+        // 200 at most.
         let mut lleno = ChatLog::default();
         for i in 0..250 {
             lleno.add_text("", &format!("{i}"), MsgType::System, MsgType::All, &fixed);
@@ -1337,7 +1337,7 @@ mod tests {
         let mut input = ChatInput::default();
         assert_eq!(enter(&mut input, "hola", &mut log, &mut system), [Outgoing::Chat("hola".into())]);
         assert!(!input.open);
-        // Antes de 0.8 s no se manda otro; el mismo, tampoco antes de 2.8 s.
+        // Within 0.8 s no other is sent; the same one, not within 2.8 s.
         assert!(enter(&mut input, "otra", &mut log, &mut system).is_empty());
         for _ in 0..25 {
             input.tick();
@@ -1351,7 +1351,7 @@ mod tests {
         for _ in 0..70 {
             input.tick();
         }
-        // Al grupo, con su prefijo; los comandos, sin él.
+        // To the party, with its prefix; commands without it.
         input.msg_type = InputType::Party;
         assert_eq!(enter(&mut input, "vamos", &mut log, &mut system), [Outgoing::Chat("~vamos".into())]);
         for _ in 0..70 {
@@ -1359,17 +1359,17 @@ mod tests {
         }
         assert_eq!(enter(&mut input, "/warp Lorencia", &mut log, &mut system), [Outgoing::Warp(2)]);
         assert_eq!(enter(&mut input, "/warp Nada", &mut log, &mut system), [Outgoing::Warp(-1)]);
-        // "/move Icarus": sin alas se queda en el cliente.
+        // "/move Icarus": without wings it stays in the client.
         assert!(enter(&mut input, "/move Icarus", &mut log, &mut system).is_empty());
         assert_eq!(system.lines().last().unwrap().text, TEXT_ICARUS_NEEDS_WINGS);
-        // "/whisper off" se queda y avisa.
+        // "/whisper off" stays and notifies.
         input.msg_type = InputType::Normal;
         for _ in 0..70 {
             input.tick();
         }
         assert!(enter(&mut input, "/whisper off", &mut log, &mut system).is_empty());
         assert!(input.block_whisper);
-        // Vacío: nada.
+        // Empty: nothing.
         assert!(enter(&mut input, "", &mut log, &mut system).is_empty());
     }
 
@@ -1384,12 +1384,12 @@ mod tests {
         assert_eq!(chat_emote("come on"), Some(at::PROVOCATION));
         assert_eq!(chat_emote("Look around"), Some(at::LOOK_AROUND));
         assert_eq!(chat_emote("Thanks; Sorry"), Some(at::GREETING1), "por orden de grupos, no de texto");
-        // Va antes del chat y aunque el chat no salga.
+        // Goes before the chat, even if the chat is not sent.
         let (mut log, mut system) = (ChatLog::default(), SystemLog::default());
         let mut input = ChatInput::default();
         assert_eq!(enter(&mut input, "Hi", &mut log, &mut system), [Outgoing::Emote(at::GREETING1), Outgoing::Chat("Hi".into())]);
         assert_eq!(enter(&mut input, "Hi", &mut log, &mut system), [Outgoing::Emote(at::GREETING1)]);
-        // Susurrando, no.
+        // Not while whispering.
         input.whisper.set("Elfa");
         for _ in 0..70 {
             input.tick();
@@ -1406,10 +1406,10 @@ mod tests {
         assert_eq!(log.visible()[0].1, &Line { id: "Heroe".into(), text: "psst".into(), kind: MsgType::Whisper });
         assert_eq!(input.whisper_id, "Elfa");
         assert_eq!(input.whisper_history, ["Elfa"]);
-        // Con F3 (sin la caja del nombre) va al chat normal.
+        // With F3 (no name box) it goes to normal chat.
         input.whisper_send = false;
         assert_eq!(enter(&mut input, "hola", &mut log, &mut system), [Outgoing::Chat("hola".into())]);
-        // Tab no va a la caja escondida.
+        // Tab does not go to the hidden box.
         input.tab();
         assert!(!input.whisper_focus);
         input.whisper_send = true;
@@ -1430,7 +1430,7 @@ mod tests {
         b.select_all = true;
         b.insert('x');
         assert_eq!(b.text, "x");
-        // El texto se mueve para que se vea el cursor.
+        // The text scrolls so the caret is visible.
         let mut b = TextBox::new(44);
         b.set(&"m".repeat(40));
         b.follow_caret(100.0, &fixed);
@@ -1442,7 +1442,7 @@ mod tests {
 
     #[test]
     fn partir_bocadillo() {
-        // El espacio más cercano al centro: el de antes de "tal".
+        // The space closest to the center: the one before "tal".
         let (despues, antes) = cut_text("hola que tal estas hoy");
         assert_eq!(antes, "hola que tal ");
         assert_eq!(despues, "estas hoy");

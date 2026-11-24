@@ -1,10 +1,10 @@
-//! Texturas: `.OZJ` (JPEG con cabecera) y `.OZT` (TGA con cabecera).
+//! Textures: `.OZJ` (JPEG with a header) and `.OZT` (TGA with a header).
 
 use std::path::Path;
 
 use crate::{Error, Result, fs};
 
-/// Imagen decodificada en RGBA8, fila 0 = arriba.
+/// Decoded RGBA8 image, row 0 = top.
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub width: u32,
@@ -12,14 +12,14 @@ pub struct Texture {
     pub rgba: Vec<u8>,
 }
 
-/// Cómo usa una textura su canal alfa.
+/// How a texture uses its alpha channel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AlphaKind {
-    /// Sin transparencia.
+    /// No transparency.
     Opaque,
-    /// Alfa "todo o nada" (hojas, rejas): se recorta.
+    /// All-or-nothing alpha (leaves, grates): cut out.
     Cutout,
-    /// Alfa con degradados (sombras, humo, cristales): se mezcla.
+    /// Gradient alpha (shadows, smoke, glass): blended.
     Blend,
 }
 
@@ -45,8 +45,8 @@ impl Texture {
     }
 }
 
-/// `.OZJ`: 24 bytes de cabecera propia y luego un JPEG normal.
-/// El byte 17 indica si las filas van de arriba abajo; si no, hay que voltearla.
+/// `.OZJ`: 24-byte custom header followed by a plain JPEG.
+/// Byte 17 says whether rows go top to bottom; if not, the image must be flipped.
 pub fn read_ozj(buf: &[u8]) -> Result<Texture> {
     if buf.len() < 24 {
         return Err(Error::Format("OZJ demasiado corto".into()));
@@ -63,8 +63,8 @@ pub fn read_ozj(buf: &[u8]) -> Result<Texture> {
     Ok(tex)
 }
 
-/// `.OZT`: 4 bytes de cabecera propia y luego un TGA de 32 bits sin comprimir
-/// (12 bytes de cabecera TGA, ancho, alto, profundidad, descriptor y los píxeles BGRA de abajo arriba).
+/// `.OZT`: 4-byte custom header followed by an uncompressed 32-bit TGA
+/// (12-byte TGA header, width, height, depth, descriptor and BGRA pixels bottom to top).
 pub fn read_ozt(buf: &[u8]) -> Result<Texture> {
     const HEADER: usize = 16;
     let bad = || Error::Format("OZT inválido".into());
@@ -88,7 +88,7 @@ pub fn read_ozt(buf: &[u8]) -> Result<Texture> {
     Ok(Texture { width: w, height: h, rgba })
 }
 
-/// Carga una textura según su extensión (`.ozj`/`.jpg` o `.ozt`/`.tga`).
+/// Loads a texture by its extension (`.ozj`/`.jpg` or `.ozt`/`.tga`).
 pub fn load(dir: &Path, name: &str) -> Result<Texture> {
     let buf = fs::read(dir, name)?;
     let ext = name.rsplit('.').next().unwrap_or("").to_ascii_lowercase();

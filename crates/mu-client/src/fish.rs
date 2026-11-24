@@ -1,20 +1,20 @@
-//! Bichos del suelo y del agua alrededor del personaje (`MoveFishs` / `RenderFishs`,
-//! GOBoid.cpp:1615-1888): 10 huecos en Atlans, Tarkan, Kalima y Crywolf; 3 en el resto.
+//! Ground and water critters around the character (`MoveFishs` / `RenderFishs`,
+//! GOBoid.cpp:1615-1888): 10 slots in Atlans, Tarkan, Kalima and Crywolf; 3 elsewhere.
 //!
-//! - Lorencia: peces (`Object1/Fish01`) en las casillas de agua (`TerrainMappingLayer1 == 5`),
-//!   casi transparentes (alfa 0.2 o 0.3: con la prueba de alfa del original los de 0.2 no se ven,
-//!   solo su sombra).
-//! - Dungeon: ratas (`Object2/Rat01`) con su chillido. Arena: bichos (`Object7/Bug01`).
-//! - Tarkan y Aida: luciérnagas (`Object9/Bug02`) con estela `BITMAP_JOINT_ENERGY` 4.
-//! - Crywolf (fuera de la zona segura): escorpiones (`Object35/scorpion`) con su cola
-//!   `BITMAP_SCOLPION_TAIL`.
-//! - Atlans: peces (`Object8/Fish04-07`) en la mitad sur; en la norte, los que brillan
-//!   (`Fish08-09`, malla 0 sumando y sin sombra).
-//! - Kalima: sin modelo, solo destellos `BITMAP_FLARE+1` 8 que corren sobre las nubes.
+//! - Lorencia: fish (`Object1/Fish01`) on water tiles (`TerrainMappingLayer1 == 5`),
+//!   almost transparent (alpha 0.2 or 0.3: with the original's alpha test the 0.2 ones are
+//!   invisible, only their shadow shows).
+//! - Dungeon: rats (`Object2/Rat01`) with their squeak. Arena: bugs (`Object7/Bug01`).
+//! - Tarkan and Aida: fireflies (`Object9/Bug02`) with a `BITMAP_JOINT_ENERGY` 4 trail.
+//! - Crywolf (outside the safe zone): scorpions (`Object35/scorpion`) with their
+//!   `BITMAP_SCOLPION_TAIL` tail.
+//! - Atlans: fish (`Object8/Fish04-07`) in the southern half; in the northern half, the glowing
+//!   ones (`Fish08-09`, mesh 0 additive and no shadow).
+//! - Kalima: no model, only `BITMAP_FLARE+1` 8 sparkles running over the clouds.
 //!
-//! Andan en grupo como los pájaros (`MoveBoid`), pegados al suelo, y dan media vuelta al llegar a
-//! donde no deben estar; a la segunda se van. Los que no son peces se paran al acabar su `LifeTime`
-//! y 1 de cada 64 ticks vuelven a andar.
+//! They move in flocks like the birds (`MoveBoid`), stuck to the ground, and turn around when they
+//! reach a place they must not be; the second time they leave. Non-fish stop when their `LifeTime`
+//! ends and walk again 1 tick out of 64.
 
 use bevy::prelude::*;
 use mu_data::terrain::{Terrain, attr};
@@ -39,7 +39,7 @@ impl Plugin for FishPlugin {
 
 /// `MAX_FISHS` (_define.h:127).
 const MAX_FISHS: usize = 10;
-/// Textura de agua en la capa 1 del suelo de Lorencia.
+/// Water texture on layer 1 of the Lorencia ground.
 const WATER_TILE: u8 = 5;
 
 #[derive(Resource)]
@@ -57,12 +57,12 @@ impl Fishes {
     }
 }
 
-/// Huecos que usa cada mapa (GOBoid.cpp:1655-1662).
+/// Slots used by each map (GOBoid.cpp:1655-1662).
 fn fish_slots(wa: i32) -> usize {
     if matches!(wa, 7 | 8 | 34 | 67) || boids::in_hellas(wa) { MAX_FISHS } else { 3 }
 }
 
-/// `M33Aida::IsInAida` (Aida o su selección de personaje).
+/// `M33Aida::IsInAida` (Aida or its character selection).
 fn in_aida(wa: i32) -> bool {
     wa == 33 || wa == 54
 }
@@ -88,7 +88,7 @@ fn setup_fish(
     };
     let models = files.iter().map(|(d, f)| boids::load_model(&args.data, d, f, &mut images)).collect();
     let list = (0..MAX_FISHS).map(|_| Obj::new(crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material))).collect();
-    // Otra secuencia que la de `Boids` (mismo generador, desplazado).
+    // A different sequence from `Boids` (same generator, offset).
     let mut rng = Rng::default();
     for _ in 0..97 {
         rng.rand();
@@ -122,12 +122,12 @@ fn step_fish(
     }
 }
 
-/// La casilla `(x, y)` es de agua en la capa 1 (`TerrainMappingLayer1[Index] == 5`).
+/// Tile `(x, y)` is water on layer 1 (`TerrainMappingLayer1[Index] == 5`).
 fn water_at(t: &Terrain, p: Vec3) -> bool {
     t.mapping.layer1.get(boids::tile_index(p.x, p.y)) == Some(&WATER_TILE)
 }
 
-/// La creación de `MoveFishs` (GOBoid.cpp:1665-1777).
+/// The creation part of `MoveFishs` (GOBoid.cpp:1665-1777).
 fn create_fish(f: &mut Fishes, i: usize, hero: &Hero, t: &Terrain, fx: &mut FxWorld) {
     let wa = f.wa;
     let (rx, ry) = (f.rand() % 1024 - 512, f.rand() % 1024 - 512);
@@ -242,14 +242,14 @@ fn create_fish(f: &mut Fishes, i: usize, hero: &Hero, t: &Terrain, fx: &mut FxWo
         o.life = 70;
         boids::joint_on(o, fx, fxc::BITMAP_FLARE + 1, 8, 50.0);
     }
-    // Sin su modelo el original no lo crearía (`Models[o->Type]` vacío).
+    // Without its model the original would not create it (empty `Models[o->Type]`).
     let o = &mut f.list[i];
     if o.model.is_some_and(|m| f.models.get(m).is_none_or(Option::is_none)) {
         o.live = false;
     }
 }
 
-/// Lo que hace cada hueco vivo en `MoveFishs` (GOBoid.cpp:1779-1886).
+/// What each live slot does in `MoveFishs` (GOBoid.cpp:1779-1886).
 fn move_fish(f: &mut Fishes, i: usize, hero: &Hero, t: &Terrain, sound: &mut crate::sound::SoundQueue) {
     let wa = f.wa;
     let kind = f.list[i].kind;
@@ -268,8 +268,8 @@ fn move_fish(f: &mut Fishes, i: usize, hero: &Hero, t: &Terrain, sound: &mut cra
         let o = &mut f.list[i];
         let d = fxc::rotate(o.angle, Vec3::new(o.velocity * r as f32, 0.0, 0.0));
         o.pos += d;
-        // El original pone esta condición siempre verdadera (`!=7 || !InHellas || !=67`): todos,
-        // también los peces de Atlans, van a la altura del suelo.
+        // The original's condition here is always true (`!=7 || !InHellas || !=67`): all of them,
+        // Atlans fish included, sit at ground height.
         o.pos.z = boids::ground(t, o.pos);
         o.dir.x = o.pos.x + 3.0 * d.x;
         o.dir.y = o.pos.y + 3.0 * d.y;

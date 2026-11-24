@@ -1,18 +1,18 @@
-//! Sonido y música, como el original (`DSPlaySound.cpp`, `MiniAudioBackend.cpp`,
+//! Sound and music, like the original (`DSPlaySound.cpp`, `MiniAudioBackend.cpp`,
 //! `SceneManager.cpp`).
 //!
-//! - **Efectos** (`PlayBuffer`): la tabla `Data/Audio/SoundFiles.json` da el archivo y los canales
-//!   (1 a 4) de cada `SOUND_*`. Suenan en 2D. Los canales se usan por turnos. Un sonido de un solo
-//!   canal, ligado a un objeto o en bucle no vuelve a empezar mientras ya suena alguno de sus canales.
-//! - **Ambiente** por mapa (`PlayWorldAmbientSounds`): viento, mazmorra, torre, agua, desierto...
-//! - **Música** por mapa (`ManageBackgroundMusic`): una pista en bucle; pedir otra cambia la que suena.
-//! - **Pasos** (`PlayWalkSound`): `Data/Audio/SoundEvents.json` elige el sonido según el mapa y la casilla.
+//! - **Effects** (`PlayBuffer`): the `Data/Audio/SoundFiles.json` table gives the file and the channels
+//!   (1 to 4) of each `SOUND_*`. They play in 2D. Channels are used in turns. A sound with a single
+//!   channel, bound to an object or looping does not restart while any of its channels is playing.
+//! - **Ambience** per map (`PlayWorldAmbientSounds`): wind, dungeon, tower, water, desert...
+//! - **Music** per map (`ManageBackgroundMusic`): one looping track; requesting another switches it.
+//! - **Footsteps** (`PlayWalkSound`): `Data/Audio/SoundEvents.json` picks the sound by map and tile.
 //!
-//! Volumen de 0 a 10 (por defecto 5, como el original): `volumen_sonido=` y `volumen_musica=` en
-//! `mu-launcher.txt`. Las ventanas de opciones lo leen con [`volumes`] y lo cambian con [`SoundQueue::set_sfx_volume`] y
+//! Volume from 0 to 10 (default 5, like the original): `volumen_sonido=` and `volumen_musica=` in
+//! `mu-launcher.txt`. The options windows read it with [`volumes`] and change it with [`SoundQueue::set_sfx_volume`] and
 //! [`SoundQueue::set_music_volume`].
 //!
-//! El resto del juego pide sonidos con [`SoundQueue`] (y el motor de efectos con `Ctx::play_sound`).
+//! The rest of the game requests sounds through [`SoundQueue`] (and the effects engine through `Ctx::play_sound`).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,43 +34,43 @@ impl Plugin for SoundPlugin {
         app.init_resource::<SoundQueue>()
             .add_systems(Startup, setup)
             .add_systems(Update, world_sounds)
-            // Al final del fotograma, cuando ya se ha pedido todo.
+            // At the end of the frame, once everything has been requested.
             .add_systems(PostUpdate, (take_fx_sounds, apply_volume, play_queue).chain().in_set(SoundSystems));
     }
 }
 
-/// Donde se atienden las peticiones del fotograma (en `PostUpdate`): lo que quiera pisar una
-/// petición de otro sistema (p. ej. la música de los créditos) va antes.
+/// Where the frame's requests are handled (in `PostUpdate`): anything that wants to override another
+/// system's request (e.g. the credits music) goes before.
 #[derive(SystemSet, Clone, PartialEq, Eq, Hash, Debug)]
 pub struct SoundSystems;
 
-/// Máximo de canales por sonido (`MAX_CHANNEL`).
+/// Max channels per sound (`MAX_CHANNEL`).
 const MAX_CHANNEL: usize = 4;
 /// `DefaultVolumeLevel` / `MaxVolumeLevel`.
 const DEFAULT_VOLUME: u8 = 5;
 const MAX_VOLUME: u8 = 10;
 
-/// Cómo se pide un sonido.
+/// How a sound is requested.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum PlayKind {
     /// `PlayBuffer(id)`.
     Once,
-    /// `PlayBuffer(id, objeto)`: no vuelve a empezar mientras suena.
+    /// `PlayBuffer(id, object)`: does not restart while playing.
     Object,
-    /// `PlayBuffer(id, NULL, true)`: en bucle hasta `stop`.
+    /// `PlayBuffer(id, NULL, true)`: loops until `stop`.
     Loop,
 }
 
-/// Peticiones de sonido de este fotograma.
+/// Sound requests of this frame.
 #[derive(Resource, Default)]
 pub struct SoundQueue {
     plays: Vec<(String, PlayKind)>,
     stops: Vec<String>,
-    /// `PlayMp3`: pista pedida este fotograma (nombre en `Data/Music`, sin `.mp3`).
+    /// `PlayMp3`: track requested this frame (name in `Data/Music`, without `.mp3`).
     music: Option<String>,
-    /// `StopMp3`: cortar la música.
+    /// `StopMp3`: stop the music.
     stop_music: bool,
-    /// Volumen nuevo de los efectos y de la música (la ventana de opciones).
+    /// New effects and music volume (from the options window).
     set_sfx: Option<u8>,
     set_music: Option<u8>,
 }
@@ -89,7 +89,7 @@ impl SoundQueue {
     pub fn stop(&mut self, id: &str) {
         self.stops.push(id.to_string());
     }
-    /// `PlayMp3(nombre)`: si ya suena, nada; si suena otra, se cambia.
+    /// `PlayMp3(name)`: if already playing, nothing; if another is playing, switch.
     pub fn music(&mut self, name: &str) {
         self.music = Some(name.to_string());
     }
@@ -97,23 +97,23 @@ impl SoundQueue {
     pub fn stop_music(&mut self) {
         self.stop_music = true;
     }
-    /// `SetEffectVolumeLevel`: volumen de los efectos (0 a 10). Se guarda en `mu-launcher.txt`.
+    /// `SetEffectVolumeLevel`: effects volume (0 to 10). Saved in `mu-launcher.txt`.
     pub fn set_sfx_volume(&mut self, level: u8) {
         self.set_sfx = Some(level.min(MAX_VOLUME));
     }
-    /// Volumen de la música (0 a 10). Se guarda en `mu-launcher.txt`.
+    /// Music volume (0 to 10). Saved in `mu-launcher.txt`.
     pub fn set_music_volume(&mut self, level: u8) {
         self.set_music = Some(level.min(MAX_VOLUME));
     }
 }
 
-/// Volumen de los efectos y de la música (0 a 10), contando lo pedido en este fotograma.
+/// Effects and music volume (0 to 10), counting what was requested this frame.
 pub fn volumes(audio: Option<&Audio>, queue: &SoundQueue) -> (u8, u8) {
     let (sfx, music) = audio.map_or((DEFAULT_VOLUME, DEFAULT_VOLUME), |a| (a.sfx_volume, a.music_volume));
     (queue.set_sfx.unwrap_or(sfx), queue.set_music.unwrap_or(music))
 }
 
-// --- Tablas ----------------------------------------------------------------------------------------
+// --- Tables ----------------------------------------------------------------------------------------
 
 #[derive(Deserialize)]
 struct SoundFiles {
@@ -139,7 +139,7 @@ struct SoundEvent {
     rules: Vec<EventRule>,
 }
 
-/// Una regla de `SoundEvents.json`: la primera que encaja elige el sonido.
+/// A `SoundEvents.json` rule: the first one that matches picks the sound.
 #[derive(Deserialize, Clone)]
 struct EventRule {
     #[serde(default)]
@@ -159,19 +159,19 @@ struct Channels {
 #[derive(Resource)]
 pub struct Audio {
     data: PathBuf,
-    /// `SOUND_*` → (archivo relativo a `Data`, canales).
+    /// `SOUND_*` → (file relative to `Data`, channels).
     table: HashMap<String, (String, usize)>,
     sources: HashMap<String, Option<Handle<AudioSource>>>,
     channels: HashMap<String, Channels>,
     sfx_volume: u8,
     music_volume: u8,
-    /// Pista que suena y su entidad.
+    /// Playing track and its entity.
     music: Option<(String, Entity)>,
-    /// Efectos en bucle que suenan (para cambiarles el volumen).
+    /// Looping effects currently playing (to change their volume).
     loops: Vec<Entity>,
 }
 
-/// Marca de las entidades de música (para cambiarles el volumen).
+/// Marker for music entities (to change their volume).
 #[derive(Component)]
 struct Music;
 
@@ -187,12 +187,12 @@ fn setup(mut commands: Commands, args: Res<Args>) {
         .map(|e| e.rules)
         .unwrap_or_default();
     let _ = FOOTSTEP.set(footstep);
-    // Los sonidos de los monstruos están en sus propios datos en MuMain (`MonsterSetup`): el del
-    // dragón de la invasión (`Monster32`, el toro de la tabla original) va aquí.
+    // Monster sounds live in their own data in MuMain (`MonsterSetup`): the one for the
+    // invasion dragon (`Monster32`, the bull in the original table) goes here.
     table.entry("SOUND_MONSTER_BULLATTACK1".into()).or_insert(("Data/Sound/mBullAttack1.wav".into(), 2));
-    // Las cascadas de Kalima (`MapManager.cpp`: `LoadWaveFile(SOUND_KALIMA_WATER_FALL, ..., 3)`), que la
-    // tabla de MuMain no trae. Un canal: `PlayBuffer` (DSplaysound.cpp:422-454) nunca pasa del canal 0,
-    // así que pedirlo en cada tick mientras suena no lo vuelve a empezar.
+    // The Kalima waterfalls (`MapManager.cpp`: `LoadWaveFile(SOUND_KALIMA_WATER_FALL, ..., 3)`), missing from
+    // the MuMain table. One channel: `PlayBuffer` (DSplaysound.cpp:422-454) never goes past channel 0,
+    // so requesting it every tick while playing does not restart it.
     table.entry("SOUND_KALIMA_WATER_FALL".into()).or_insert(("Data/Sound/aKalimaWaterFall.wav".into(), 1));
     let level = |key: &str| {
         crate::settings::saved_value(key).and_then(|v| v.parse::<u8>().ok()).filter(|v| *v <= MAX_VOLUME).unwrap_or(DEFAULT_VOLUME)
@@ -211,7 +211,7 @@ fn setup(mut commands: Commands, args: Res<Args>) {
     commands.insert_resource(audio);
 }
 
-/// `Data/Sound/w37/a.wav` → la ruta real dentro de `data` (sin distinguir mayúsculas).
+/// `Data/Sound/w37/a.wav` → the real path inside `data` (case-insensitive).
 fn resolve(data: &Path, file: &str) -> Option<PathBuf> {
     let mut parts: Vec<&str> = file.split(['/', '\\']).filter(|p| !p.is_empty()).collect();
     if parts.first().is_some_and(|p| p.eq_ignore_ascii_case("data")) {
@@ -232,7 +232,7 @@ impl Audio {
         let loaded = self.table.get(id).and_then(|(file, _)| {
             let path = resolve(&self.data, file);
             match path.as_ref().map(std::fs::read) {
-                // El decodificador de Bevy cierra el juego si no puede con el archivo: solo PCM.
+                // Bevy's decoder crashes the game if it cannot handle the file: PCM only.
                 Some(Ok(bytes)) if !wav_is_pcm(&bytes) => {
                     warn!("sonido {id}: {file} no es PCM (no se puede reproducir)");
                     None
@@ -253,7 +253,7 @@ impl Audio {
     }
 }
 
-/// `RIFF....WAVE` con su bloque `fmt ` en PCM (1) o en coma flotante (3).
+/// `RIFF....WAVE` with its `fmt ` chunk in PCM (1) or floating point (3).
 fn wav_is_pcm(b: &[u8]) -> bool {
     if b.len() < 12 || &b[0..4] != b"RIFF" || &b[8..12] != b"WAVE" {
         return false;
@@ -273,7 +273,7 @@ fn volume(level: u8) -> Volume {
     Volume::Linear(level as f32 / MAX_VOLUME as f32)
 }
 
-/// Lo que pidió el motor de efectos en sus ticks.
+/// What the effects engine requested during its ticks.
 fn take_fx_sounds(mut world: ResMut<crate::fx::FxWorld>, mut queue: ResMut<SoundQueue>) {
     for id in world.sounds.drain(..) {
         queue.play(id);
@@ -317,7 +317,7 @@ fn play_queue(
         let sfx = audio.sfx_volume;
         let ch = audio.channels.entry(id.clone()).or_insert_with(|| Channels { entities: vec![None; count], next: 0 });
         let playing = |e: &Option<Entity>| e.is_some_and(|e| alive.contains(e));
-        // Un canal, ligado a un objeto o en bucle: si ya suena, nada.
+        // Single channel, bound to an object or looping: if already playing, nothing.
         if (count == 1 || kind != PlayKind::Once) && ch.entities.iter().any(playing) {
             continue;
         }
@@ -338,7 +338,7 @@ fn play_queue(
     audio.loops.retain(|e| alive.contains(*e));
 }
 
-/// Al cambiar de mapa: se cortan los efectos y bucles del anterior (`StopInactiveAmbientSounds`).
+/// On map change: effects and loops of the previous map are stopped (`StopInactiveAmbientSounds`).
 pub fn reset(mut commands: Commands, audio: Option<ResMut<Audio>>) {
     let Some(mut audio) = audio else { return };
     for (_, ch) in audio.channels.drain() {
@@ -349,7 +349,7 @@ pub fn reset(mut commands: Commands, audio: Option<ResMut<Audio>>) {
     audio.loops.clear();
 }
 
-/// `PlayMp3(nombre)`: si ya suena esa pista, nada; si suena otra, se cambia.
+/// `PlayMp3(name)`: if that track is already playing, nothing; if another is playing, switch.
 fn play_music(commands: &mut Commands, audio: &mut Audio, sources: &mut Assets<AudioSource>, name: &str) {
     if audio.music.as_ref().is_some_and(|(n, _)| n == name) {
         return;
@@ -371,7 +371,7 @@ fn play_music(commands: &mut Commands, audio: &mut Audio, sources: &mut Assets<A
     audio.music = Some((name.to_string(), e));
 }
 
-/// `StopMp3(nombre)` (o cualquiera si `None`).
+/// `StopMp3(name)` (or any if `None`).
 fn stop_music(commands: &mut Commands, audio: &mut Audio, name: Option<&str>) {
     if let Some((n, e)) = &audio.music
         && name.is_none_or(|name| name == n)
@@ -383,7 +383,7 @@ fn stop_music(commands: &mut Commands, audio: &mut Audio, name: Option<&str>) {
     }
 }
 
-/// Ambiente y música del mapa según dónde está el personaje (cada fotograma, como el original).
+/// Map ambience and music depending on where the character is (every frame, like the original).
 fn world_sounds(
     mut commands: Commands,
     args: Res<Args>,
@@ -413,7 +413,7 @@ fn world_sounds(
                 queue.stop("SOUND_RAIN01");
             } else {
                 queue.play_loop("SOUND_WIND01");
-                // `RainCurrent > 0`: la lluvia de leaves.rs (la manda el servidor con el tiempo).
+                // `RainCurrent > 0`: the rain from leaves.rs (sent by the server with the weather).
                 if leaves.as_ref().is_some_and(|l| l.rain_current > 0) {
                     queue.play_loop("SOUND_RAIN01");
                 }
@@ -429,7 +429,7 @@ fn world_sounds(
         }
         3 => {
             queue.play_loop("SOUND_WIND01");
-            // `rand_fps_check(512)` por tick: aquí por fotograma, a 25 ticks por segundo.
+            // `rand_fps_check(512)` per tick: here per frame, at 25 ticks per second.
             if chance(512 * 60 / 25) {
                 queue.play("SOUND_FOREST01");
             }
@@ -438,9 +438,9 @@ fn world_sounds(
         7 => queue.play_loop("SOUND_WATER01"),
         8 => queue.play_loop("SOUND_DESERT01"),
         10 => queue.play_loop("SOUND_HEAVEN01"),
-        // Raklion (sala del jefe).
+        // Raklion (boss room).
         58 => queue.play_loop("SOUND_WIND01"),
-        // Loren Market: viento y lluvia siempre.
+        // Loren Market: wind and rain always.
         79 => {
             queue.play_loop("SOUND_WIND01");
             queue.play_loop("SOUND_RAIN01");
@@ -471,8 +471,8 @@ fn world_sounds(
         8 => Some("tarkan"),
         4 => Some("lost_tower_a"),
         24..=29 | 36 => Some("kalima"),
-        // Los `PlayBGM` de cada mapa (ZzzScene.cpp:2697-2754), en su estado de siempre (sin
-        // eventos del servidor: Crywolf y Kanturu 3 antes de la batalla, Illusion Temple esperando).
+        // The `PlayBGM` of each map (ZzzScene.cpp:2697-2754), in their default state (no
+        // server events: Crywolf and Kanturu 3 before the battle, Illusion Temple waiting).
         31 => Some("huntingground"),
         33 => Some("Aida"),
         34 => Some("crywolf1st"),
@@ -499,7 +499,7 @@ fn world_sounds(
     }
 }
 
-/// `PlayWalkSound`: el paso según el mapa, la casilla y la zona segura.
+/// `PlayWalkSound`: the footstep by map, tile and safe zone.
 pub fn footstep(world: i32, tile: u8, safe_zone: bool) -> Option<String> {
     FOOTSTEP.get().and_then(|rules| {
         rules
@@ -515,7 +515,7 @@ pub fn footstep(world: i32, tile: u8, safe_zone: bool) -> Option<String> {
 
 static FOOTSTEP: std::sync::OnceLock<Vec<EventRule>> = std::sync::OnceLock::new();
 
-/// Aplica el volumen pedido a lo que ya suena y lo guarda.
+/// Applies the requested volume to what is already playing and saves it.
 fn apply_volume(
     audio: Option<ResMut<Audio>>,
     mut queue: ResMut<SoundQueue>,

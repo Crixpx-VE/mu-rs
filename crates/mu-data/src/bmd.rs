@@ -1,14 +1,14 @@
-//! Modelos 3D `.bmd` (objetos del mapa, personajes, monstruos, items).
+//! `.bmd` 3D models (map objects, characters, monsters, items).
 //!
-//! Estructura del archivo:
-//! - `"BMD"` + versión (10 = sin cifrar, 12 = cifrado con `map_file_decrypt`)
-//! - nombre, número de mallas, huesos y animaciones
-//! - por cada malla: vértices, normales, coordenadas UV, triángulos y nombre de textura
-//! - por cada animación: número de fotogramas
-//! - por cada hueso: padre y, por animación y fotograma, posición + rotación
+//! File layout:
+//! - `"BMD"` + version (10 = plain, 12 = encrypted with `map_file_decrypt`)
+//! - name, number of meshes, bones and animations
+//! - per mesh: vertices, normals, UV coordinates, triangles and texture name
+//! - per animation: number of frames
+//! - per bone: parent and, per animation and frame, position + rotation
 //!
-//! Los vértices están en el espacio de su hueso, así que para dibujar el modelo
-//! hay que aplicar la pose de un fotograma (`Bmd::pose`).
+//! Vertices are in their bone's space, so drawing the model requires
+//! applying a frame's pose (`Bmd::pose`).
 
 use crate::reader::Reader;
 use crate::{Error, Result, crypt};
@@ -27,7 +27,7 @@ pub struct Normal {
 
 #[derive(Debug, Clone)]
 pub struct Triangle {
-    /// 3 = triángulo, 4 = cuadrilátero.
+    /// 3 = triangle, 4 = quad.
     pub polygon: u8,
     pub vertex: [i16; 4],
     pub normal: [i16; 4],
@@ -41,26 +41,26 @@ pub struct Mesh {
     pub uvs: Vec<[f32; 2]>,
     pub triangles: Vec<Triangle>,
     pub texture_index: i16,
-    /// Nombre del archivo de textura tal como lo guarda el modelo (p. ej. `tree_01.jpg`).
+    /// Texture file name as stored by the model (e.g. `tree_01.jpg`).
     pub texture: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct Action {
     pub frames: usize,
-    /// Desplazamiento del modelo por fotograma (animaciones de caminar, etc.).
+    /// Model displacement per frame (walk animations, etc.).
     pub lock_positions: Option<Vec<[f32; 3]>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Bone {
     pub name: String,
-    /// `-1` = hueso raíz. Los huesos "dummy" no tienen datos.
+    /// `-1` = root bone. "Dummy" bones have no data.
     pub parent: i16,
     pub dummy: bool,
-    /// `[animación][fotograma]`: posición relativa al padre.
+    /// `[animation][frame]`: position relative to the parent.
     pub positions: Vec<Vec<[f32; 3]>>,
-    /// `[animación][fotograma]`: rotación en radianes (x, y, z).
+    /// `[animation][frame]`: rotation in radians (x, y, z).
     pub rotations: Vec<Vec<[f32; 3]>>,
 }
 
@@ -102,7 +102,7 @@ pub fn read(buf: &[u8]) -> Result<Bmd> {
         let ntri = r.i16()?.max(0) as usize;
         let texture_index = r.i16()?;
 
-        // En disco cada estructura va alineada a 4 bytes (como el struct de C original).
+        // On disk each struct is 4-byte aligned (like the original C struct).
         let mut vertices = Vec::with_capacity(nv);
         for _ in 0..nv {
             let bone = r.i16()?;
@@ -114,7 +114,7 @@ pub fn read(buf: &[u8]) -> Result<Bmd> {
             let bone = r.i16()?;
             r.skip(2)?;
             let normal = r.vec3()?;
-            r.skip(4)?; // vértice asociado + relleno
+            r.skip(4)?; // associated vertex + padding
             normals.push(Normal { bone, normal });
         }
         let mut uvs = Vec::with_capacity(nt);
@@ -123,7 +123,7 @@ pub fn read(buf: &[u8]) -> Result<Bmd> {
         }
         let mut triangles = Vec::with_capacity(ntri);
         for _ in 0..ntri {
-            // 64 bytes: polígono(1) + relleno(1) + 3×[i16;4] + relleno(2) + lightmap(32) + índice(2) + relleno(2)
+            // 64 bytes: polygon(1) + padding(1) + 3×[i16;4] + padding(2) + lightmap(32) + index(2) + padding(2)
             let polygon = r.u8()?;
             r.skip(1)?;
             let mut idx = [[0i16; 4]; 3];
@@ -177,13 +177,13 @@ pub fn read(buf: &[u8]) -> Result<Bmd> {
     Ok(Bmd { version, name, meshes, actions, bones })
 }
 
-/// Matriz afín 3x4 (filas): rotación + traslación, como `float[3][4]` del original.
+/// 3x4 affine matrix (rows): rotation + translation, like the original `float[3][4]`.
 pub type Mat34 = [[f32; 4]; 3];
 
 pub const IDENTITY: Mat34 = [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0]];
 
-/// Rotación de ángulos de Euler (radianes) igual que `AngleMatrix` del original:
-/// primero X, luego Y, luego Z (R = Rz · Ry · Rx).
+/// Euler-angle rotation (radians) matching the original `AngleMatrix`:
+/// X first, then Y, then Z (R = Rz · Ry · Rx).
 pub fn angle_matrix(a: [f32; 3]) -> Mat34 {
     let (sr, cr) = a[0].sin_cos();
     let (sp, cp) = a[1].sin_cos();
@@ -216,7 +216,7 @@ pub fn rotate_vector(m: &Mat34, v: [f32; 3]) -> [f32; 3] {
     [f(0), f(1), f(2)]
 }
 
-/// Cuaternión `[x, y, z, w]` equivalente a [`angle_matrix`] (`AngleQuaternion` del original).
+/// Quaternion `[x, y, z, w]` equivalent to [`angle_matrix`] (original `AngleQuaternion`).
 pub fn angle_quaternion(a: [f32; 3]) -> [f32; 4] {
     let (sx, cx) = (a[0] * 0.5).sin_cos();
     let (sy, cy) = (a[1] * 0.5).sin_cos();
@@ -229,7 +229,7 @@ pub fn angle_quaternion(a: [f32; 3]) -> [f32; 4] {
     ]
 }
 
-/// Interpolación esférica entre dos rotaciones (por el camino corto).
+/// Spherical interpolation between two rotations (along the short path).
 pub fn quat_slerp(a: [f32; 4], mut b: [f32; 4], t: f32) -> [f32; 4] {
     let mut dot = a[0] * b[0] + a[1] * b[1] + a[2] * b[2] + a[3] * b[3];
     if dot < 0.0 {
@@ -257,7 +257,7 @@ pub fn quat_matrix(q: [f32; 4]) -> Mat34 {
     ]
 }
 
-/// Malla lista para dibujar: triángulos sueltos (3 vértices cada uno), ya posados.
+/// Mesh ready to draw: loose triangles (3 vertices each), already posed.
 #[derive(Debug, Clone, Default)]
 pub struct PosedMesh {
     pub positions: Vec<[f32; 3]>,
@@ -266,7 +266,7 @@ pub struct PosedMesh {
 }
 
 impl Bmd {
-    /// Matriz de cada hueso en el fotograma `frame` de la animación `action`.
+    /// Matrix of each bone at frame `frame` of animation `action`.
     pub fn bone_matrices(&self, action: usize, frame: usize) -> Vec<Mat34> {
         let mut out: Vec<Mat34> = vec![IDENTITY; self.bones.len()];
         for (i, b) in self.bones.iter().enumerate() {
@@ -281,7 +281,7 @@ impl Bmd {
             local[0][3] = p[0];
             local[1][3] = p[1];
             local[2][3] = p[2];
-            // Los padres siempre van antes que los hijos en el archivo.
+            // Parents always come before children in the file.
             out[i] = match usize::try_from(b.parent).ok().filter(|&pi| pi < i) {
                 Some(pi) => concat(&out[pi], &local),
                 None => local,
@@ -290,12 +290,12 @@ impl Bmd {
         out
     }
 
-    /// Como [`Bmd::bone_matrices`] pero en un instante intermedio: `frame` 2.25 mezcla
-    /// el fotograma 2 (75 %) con el 3 (25 %). Al llegar al final vuelve al primero.
+    /// Like [`Bmd::bone_matrices`] but at an in-between instant: `frame` 2.25 blends
+    /// frame 2 (75 %) with frame 3 (25 %). At the end it wraps to the first one.
     ///
-    /// En las animaciones con `lock_positions` (caminar, correr...) el hueso raíz se queda
-    /// en la X/Y del primer fotograma: el desplazamiento lo pone el juego, no la animación.
-    /// Además su último fotograma repite el primero, así que el bucle tiene uno menos.
+    /// In animations with `lock_positions` (walk, run...) the root bone stays at the
+    /// X/Y of the first frame: the game applies the displacement, not the animation.
+    /// Also their last frame repeats the first, so the loop has one frame less.
     pub fn bone_matrices_at(&self, action: usize, frame: f32) -> Vec<Mat34> {
         let Some(act) = self.actions.get(action).filter(|a| a.frames > 0) else {
             return self.bone_matrices(action, 0);
@@ -336,13 +336,13 @@ impl Bmd {
         out
     }
 
-    /// Geometría de la malla `mesh` en la pose (animación, fotograma) indicada.
+    /// Geometry of mesh `mesh` in the given pose (animation, frame).
     pub fn pose(&self, mesh: usize, action: usize, frame: usize) -> PosedMesh {
         self.pose_with(mesh, &self.bone_matrices(action, frame))
     }
 
-    /// Geometría de la malla `mesh` con huesos dados. Sirve para piezas de armadura,
-    /// que no tienen animaciones propias y usan el esqueleto de `player.bmd`.
+    /// Geometry of mesh `mesh` with the given bones. Used for armor pieces,
+    /// which have no animations of their own and use the `player.bmd` skeleton.
     pub fn pose_with(&self, mesh: usize, bones: &[Mat34]) -> PosedMesh {
         let m = &self.meshes[mesh];
         let bone = |b: i16| bones.get(b as usize).unwrap_or(&IDENTITY);
@@ -363,7 +363,7 @@ impl Bmd {
                 out.uvs.push(*uv);
             }
         }
-        // Por si algún índice era inválido: dejamos solo triángulos completos.
+        // In case some index was invalid: keep only complete triangles.
         let n = out.positions.len() / 3 * 3;
         out.positions.truncate(n);
         out.normals.truncate(n);
@@ -389,7 +389,7 @@ mod tests {
         }
     }
 
-    /// BMD v15 (LEA) de un cliente S20 sacado a `MU_S20_DIR`: el mismo modelo que el v10 del S6.
+    /// BMD v15 (LEA) from an S20 client extracted to `MU_S20_DIR`: the same model as the S6 v10.
     #[test]
     fn bmd_lea_v15() {
         let Ok(dir) = std::env::var("MU_S20_DIR") else { return };
@@ -417,7 +417,7 @@ mod tests {
         let Ok(buf) = crate::fs::read(&data, "player.bmd") else { return };
         let m = read(&buf).expect("player.bmd");
         eprintln!("player.bmd: {} huesos, {} animaciones", m.bones.len(), m.actions.len());
-        // Sin bloqueo de raíz (animación 0) el fotograma exacto debe coincidir.
+        // Without root locking (animation 0) the exact frame must match.
         let a = m.bone_matrices(0, 0);
         let b = m.bone_matrices_at(0, 0.0);
         for (x, y) in a.iter().zip(&b) {
@@ -428,7 +428,7 @@ mod tests {
             }
         }
 
-        // Quieto y caminando: la armadura debe quedar en un tamaño humano (~2 m = 200 unidades).
+        // Idle and walking: the armor must end up human-sized (~2 m = 200 units).
         let armor = read(&crate::fs::read(&data, "ArmorClass02.bmd").unwrap()).unwrap();
         for action in [1usize, 15] {
             eprintln!("acción {action}: {} fotogramas, lock={}", m.actions[action].frames, m.actions[action].lock_positions.is_some());
@@ -444,34 +444,34 @@ mod tests {
     }
 }
 
-/// Guion de textura (`TextureScript.h`): letras tras el primer `_` del nombre de la textura de una
-/// malla (`ju01_R.jpg`, `test12_H.jpg`...) que cambian cómo se dibuja esa malla.
+/// Texture script (`TextureScript.h`): letters after the first `_` of a mesh's texture name
+/// (`ju01_R.jpg`, `test12_H.jpg`...) that change how that mesh is drawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct TextureScript {
-    /// `R` (`getBright`): en `RenderBody` la malla es su propia `BlendMesh` (suma su color).
+    /// `R` (`getBright`): in `RenderBody` the mesh is its own `BlendMesh` (adds its color).
     pub bright: bool,
-    /// `H` (`getHiddenMesh`): `RenderBody` no la dibuja.
+    /// `H` (`getHiddenMesh`): `RenderBody` does not draw it.
     pub hidden: bool,
-    /// `S` (`getStreamMesh`): su textura se desplaza con `BlendMeshTexCoordU/V` (como `StreamMesh`,
-    /// pero sigue iluminada).
+    /// `S` (`getStreamMesh`): its texture scrolls with `BlendMeshTexCoordU/V` (like `StreamMesh`,
+    /// but still lit).
     pub stream: bool,
-    /// `N` (`getNoneBlendMesh`): las pasadas de cromado (`RENDER_CHROME*`, `METAL`, `OIL`) no la dibujan.
+    /// `N` (`getNoneBlendMesh`): the chrome passes (`RENDER_CHROME*`, `METAL`, `OIL`) do not draw it.
     pub none_blend: bool,
 }
 
-/// `TextureScriptParsing::parsingTScript` (`TextureScript.cpp:16`) con el nombre de textura del modelo
-/// (los 32 bytes de `Textures[i].FileName`).
+/// `TextureScriptParsing::parsingTScript` (`TextureScript.cpp:16`) with the model's texture name
+/// (the 32 bytes of `Textures[i].FileName`).
 ///
-/// Desde el primer `_` hasta el primer `.`, se miran como mucho 4 letras tras el `_`: cada `R`, `H`,
-/// `S` o `N` activa su opción; cualquier otra (`tree_01`, `_RX`...) anula el guion entero (devuelve
-/// `None` aunque ya hubiera opciones: `m_bBeScript = false`). Distingue mayúsculas. Los casos `'DC'` y
-/// `'DT'` del original son constantes de dos letras que nunca coinciden con una letra: no hacen nada.
+/// From the first `_` to the first `.`, at most 4 letters after the `_` are checked: each `R`, `H`,
+/// `S` or `N` enables its option; any other (`tree_01`, `_RX`...) cancels the whole script (returns
+/// `None` even if options were already set: `m_bBeScript = false`). Case-sensitive. The original's
+/// `'DC'` and `'DT'` cases are two-letter constants that never match a single letter: no effect.
 pub fn texture_script(name: &str) -> Option<TextureScript> {
     let bytes = name.as_bytes();
     let bytes = &bytes[..bytes.len().min(32)];
     let bytes = &bytes[..bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len())];
     let start = bytes.iter().position(|&b| b == b'_')?;
-    // `strtok(strTokenFile, ".")`: empieza en el `_` (que no es `.`) y acaba en el primer `.`.
+    // `strtok(strTokenFile, ".")`: starts at the `_` (which is not `.`) and ends at the first `.`.
     let token = &bytes[start..];
     let token = &token[..token.iter().position(|&b| b == b'.').unwrap_or(token.len())];
     let length = token.len().min(5);
@@ -502,24 +502,24 @@ mod script_tests {
         assert_eq!(texture_script("water_S.tga"), s(false, false, true, false));
         assert_eq!(texture_script("rock_N.jpg"), s(false, false, false, true));
         assert_eq!(texture_script("glow_RS.jpg"), s(true, false, true, false));
-        // Solo se miran 4 letras tras el `_`.
+        // Only 4 letters after the `_` are checked.
         assert_eq!(texture_script("x_RHSNQ.jpg"), s(true, true, true, true));
-        // Cualquier otra letra anula el guion, aunque antes hubiera alguna válida.
+        // Any other letter cancels the script, even if a valid one came before.
         assert_eq!(texture_script("tree_01.jpg"), None);
         assert_eq!(texture_script("bridge_shadow01.tga"), None);
         assert_eq!(texture_script("a_RX.jpg"), None);
         assert_eq!(texture_script("a_r.jpg"), None);
-        // Solo cuenta el primer `_`.
+        // Only the first `_` counts.
         assert_eq!(texture_script("tile_wood_R.jpg"), None);
-        // Sin letras tras el `_`, o sin `_`.
+        // No letters after the `_`, or no `_`.
         assert_eq!(texture_script("a_.jpg"), None);
         assert_eq!(texture_script("plain.jpg"), None);
-        // Sin extensión: hasta el final.
+        // No extension: up to the end.
         assert_eq!(texture_script("Kinglight_R"), s(true, false, false, false));
     }
 }
 
-/// Nombre del archivo de textura en disco: `.jpg` → `.OZJ`, `.tga` → `.OZT`.
+/// Texture file name on disk: `.jpg` → `.OZJ`, `.tga` → `.OZT`.
 pub fn texture_file_name(texture: &str) -> String {
     let file = texture.rsplit(['\\', '/']).next().unwrap_or(texture);
     match file.rsplit_once('.') {

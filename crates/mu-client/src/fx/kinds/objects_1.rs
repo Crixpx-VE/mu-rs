@@ -1,16 +1,16 @@
-//! Objetos del mapa con efectos (1): Lorencia, Dungeon, Devias, Noria y Lost Tower.
+//! Map objects with effects (1): Lorencia, Dungeon, Devias, Noria and Lost Tower.
 //!
-//! Traducido de `ZzzObject.cpp`: `MoveObject` (≈4746-4990), `UpdateObjectVisual` (≈3608-3790) y
-//! lo que `CreateObject` (≈5550-5728) crea una sola vez (los portales). `CreateFire` viene de
-//! `ZzzEffectFireLeave.cpp` (≈66-97). Aquí solo está lo que crea efectos o luces: los
-//! parpadeos, desplazamientos de UV y mallas ocultas los hace `objects.rs`.
+//! Translated from `ZzzObject.cpp`: `MoveObject` (≈4746-4990), `UpdateObjectVisual` (≈3608-3790) and
+//! what `CreateObject` (≈5550-5728) creates only once (the portals). `CreateFire` comes from
+//! `ZzzEffectFireLeave.cpp` (≈66-97). Only what creates effects or lights is here: the
+//! flickering, UV scrolling and hidden meshes are done by `objects.rs`.
 //!
-//! También van aquí los efectos que solo usan estos objetos y no existían en el motor:
-//! `MODEL_DUNGEON_STONE01` (piedras del Dungeon), `MODEL_WARP/WARP2/WARP3` (portales de Devias y
-//! Noria) y el efecto `BITMAP_FLAME` (llamas de Lost Tower; también lo usan habilidades).
-//! Traducidos de `ZzzEffect.cpp` (`CreateEffect` ≈535-547, ≈822-851, ≈2405-2414; cola común
-//! ≈7646-7711; dibujo de `BITMAP_FLAME` ≈9305), `Behaviors/MoveHandlers.cpp` (`Move_MODEL_WARP3`,
-//! `Move_BITMAP_FLAME`, `Move_MODEL_DUNGEON_STONE01`) y `EffectTypes.json` (`warp3`).
+//! Also here are the effects used only by these objects that did not exist in the engine:
+//! `MODEL_DUNGEON_STONE01` (Dungeon stones), `MODEL_WARP/WARP2/WARP3` (Devias and Noria
+//! portals) and the `BITMAP_FLAME` effect (Lost Tower flames; also used by skills).
+//! Translated from `ZzzEffect.cpp` (`CreateEffect` ≈535-547, ≈822-851, ≈2405-2414; common tail
+//! ≈7646-7711; `BITMAP_FLAME` drawing ≈9305), `Behaviors/MoveHandlers.cpp` (`Move_MODEL_WARP3`,
+//! `Move_BITMAP_FLAME`, `Move_MODEL_DUNGEON_STONE01`) and `EffectTypes.json` (`warp3`).
 
 use bevy::math::{Vec2, Vec3};
 
@@ -63,9 +63,9 @@ pub fn register(r: &mut Registry) {
     r.object(WD_4LOSTTOWER, 20, losttower_19_20);
     r.object(WD_4LOSTTOWER, 24, losttower_24);
     r.object(WD_4LOSTTOWER, 40, losttower_40);
-    // TODO(original): 38/39 CheckSkull (las calaveras se mueven al pisarlas; no crea efectos).
+    // TODO(original): 38/39 CheckSkull (skulls move when stepped on; creates no effects).
 
-    // --- Efectos que solo usan estos objetos ---
+    // --- Effects used only by these objects ---
     r.effect(MODEL_DUNGEON_STONE01, EffectKind { create: Some(dungeon_stone_create), step: Some(dungeon_stone_step), draw: None });
     r.effect(MODEL_WARP, EffectKind { create: Some(warp_create), step: Some(warp_step), draw: None });
     r.effect(MODEL_WARP2, EffectKind { create: Some(warp_create), step: Some(warp_step), draw: None });
@@ -73,14 +73,14 @@ pub fn register(r: &mut Registry) {
     r.effect(BITMAP_FLAME, EffectKind { create: Some(flame_create), step: Some(flame_step), draw: Some(flame_draw) });
 }
 
-// --- Común -------------------------------------------------------------------------------------------
+// --- Common ------------------------------------------------------------------------------------------
 
-/// `rand() % n` como `f32`.
+/// `rand() % n` as `f32`.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `Luminosity` del principio de `UpdateObjectVisual` (gasta un `rand()` siempre).
+/// `Luminosity` at the start of `UpdateObjectVisual` (always consumes one `rand()`).
 fn visual_luminosity(ctx: &mut Ctx) -> f32 {
     (ctx.rand() % 30 + 70) as f32 * 0.01
 }
@@ -90,7 +90,7 @@ fn time_rotation(ctx: &Ctx) -> f32 {
     ((ctx.world_time * 0.1) as i32 % 360) as f32
 }
 
-/// `CreateFire(Type, o, x, y, z)`: llama (0), humo (1) o humo oscuro (2) en un punto del objeto.
+/// `CreateFire(Type, o, x, y, z)`: flame (0), smoke (1) or dark smoke (2) at a point of the object.
 fn create_fire(ty: i32, o: &MapObject, ctx: &mut Ctx, x: f32, y: f32, z: f32) {
     let mut position = rotate(o.angle, Vec3::new(x, y, z)) + o.position;
     position.x += ctx.range_f(-8.0, 7.0);
@@ -120,7 +120,7 @@ fn create_fire(ty: i32, o: &MapObject, ctx: &mut Ctx, x: f32, y: f32, z: f32) {
     }
 }
 
-/// Sprite en un hueso del objeto (`b->TransformPosition(bones()[i], p, Position)` + `CreateSprite`).
+/// Sprite on an object bone (`b->TransformPosition(bones()[i], p, Position)` + `CreateSprite`).
 fn bone_sprite(o: &MapObject, ctx: &mut Ctx, bone: usize, p: Vec3, ty: i32, scale: f32, light: Vec3, rotation: f32) {
     let pos = o.bone_world(bone, p);
     ctx.create_sprite(ty, pos, scale, light, rotation, 0);
@@ -161,7 +161,7 @@ fn lorencia_fire_light02(o: &mut MapObject, ctx: &mut Ctx) {
     create_fire(0, o, ctx, 0.0, -30.0, 60.0);
 }
 
-/// Farola: luz cálida de radio 3 que tiembla un poco.
+/// Street lamp: warm radius-3 light that flickers a bit.
 fn lorencia_street_light(o: &mut MapObject, ctx: &mut Ctx) {
     let l = (ctx.rand() % 2 + 6) as f32 * 0.1;
     let light = Vec3::new(l, l * 0.8, l * 0.6);
@@ -170,11 +170,11 @@ fn lorencia_street_light(o: &mut MapObject, ctx: &mut Ctx) {
 
 fn lorencia_bonfire(o: &mut MapObject, ctx: &mut Ctx) {
     create_fire(0, o, ctx, 0.0, 0.0, 60.0);
-    // BlendMeshLight = (rand()%6+4)*0.1: lo dibuja objects.rs; aquí solo se gasta el rand().
+    // BlendMeshLight = (rand()%6+4)*0.1: drawn by objects.rs; here only the rand() is consumed.
     let _ = ctx.rand();
 }
 
-/// Vela: luz anaranjada de radio 3.
+/// Candle: orange radius-3 light.
 fn lorencia_candle(o: &mut MapObject, ctx: &mut Ctx) {
     let l = (ctx.rand() % 4 + 3) as f32 * 0.1;
     let light = Vec3::new(l, l * 0.6, l * 0.2);
@@ -183,7 +183,7 @@ fn lorencia_candle(o: &mut MapObject, ctx: &mut Ctx) {
 
 // --- Lorencia (UpdateObjectVisual) -------------------------------------------------------------------
 
-/// Fuente: salpicaduras de humo en los huesos 1 y 4 del chorro.
+/// Fountain: smoke splashes on bones 1 and 4 of the jet.
 fn lorencia_waterspout(o: &mut MapObject, ctx: &mut Ctx) {
     let _lum = visual_luminosity(ctx);
     if ctx.rand_fps_check(2) {
@@ -198,19 +198,19 @@ fn lorencia_waterspout(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// Animal del mercader: dos luces en los huesos 48 y 57.
+/// Merchant's animal: two lights on bones 48 and 57.
 fn lorencia_merchant_animal(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let scale = lum * 5.0;
     let light = Vec3::new(lum * 0.6, lum * 0.3, lum * 0.1);
-    // El original pasa `Position` sin inicializar como desplazamiento: se toma (0, 0, 0).
+    // The original passes an uninitialized `Position` as offset: taken as (0, 0, 0).
     bone_sprite(o, ctx, 48, Vec3::ZERO, BITMAP_LIGHT, scale, light, 0.0);
     bone_sprite(o, ctx, 57, Vec3::ZERO, BITMAP_LIGHT, scale, light, 0.0);
 }
 
 // --- Dungeon -------------------------------------------------------------------------------------------
 
-/// Piedras que caen del techo.
+/// Stones falling from the ceiling.
 fn dungeon_52(o: &mut MapObject, ctx: &mut Ctx) {
     if ctx.rand_fps_check(3) {
         ctx.create_effect(MODEL_DUNGEON_STONE01, o.position, o.angle, o.light, 0, None, -1, 0, 0, 0.0);
@@ -228,7 +228,7 @@ fn dungeon_42(o: &mut MapObject, ctx: &mut Ctx) {
 
 // --- Devias --------------------------------------------------------------------------------------------
 
-/// Brasero: fuego de verdad y humo a 160 de altura.
+/// Brazier: real fire and smoke at height 160.
 fn devias_30(o: &mut MapObject, ctx: &mut Ctx) {
     let position = Vec3::new(o.position.x, o.position.y, o.position.z + 160.0);
     ctx.create_particle(BITMAP_TRUE_FIRE, position, o.angle, o.light, 0, o.scale, None);
@@ -240,7 +240,7 @@ fn devias_66(o: &mut MapObject, ctx: &mut Ctx) {
     create_fire(0, o, ctx, 0.0, 0.0, 50.0);
 }
 
-/// Dos rayos girando en sentidos contrarios a 150 sobre el hueso 0 (objeto oculto).
+/// Two beams spinning in opposite directions 150 above bone 0 (hidden object).
 fn devias_100(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let light = Vec3::splat(lum);
@@ -250,12 +250,12 @@ fn devias_100(o: &mut MapObject, ctx: &mut Ctx) {
     ctx.create_sprite(BITMAP_LIGHTNING + 1, pos, 2.5, light, -rotation, 0);
 }
 
-/// Portal de Devias (`CreateObject`): tres anillos a 360 de altura, SubType 1.
+/// Devias portal (`CreateObject`): three rings at height 360, SubType 1.
 fn devias_warp(o: &mut MapObject, ctx: &mut Ctx) {
     if o.created {
         return;
     }
-    // En `CreateObject` la luz del objeto aún es (0, 0, 0); el efecto la pone cada tick.
+    // In `CreateObject` the object light is still (0, 0, 0); the effect sets it every tick.
     let light = Vec3::ZERO;
     let p = o.position;
     ctx.create_effect(MODEL_WARP, Vec3::new(p.x, p.y, p.z + 360.0), o.angle, light, 1, None, -1, 0, 0, 0.0);
@@ -265,7 +265,7 @@ fn devias_warp(o: &mut MapObject, ctx: &mut Ctx) {
 
 // --- Noria ---------------------------------------------------------------------------------------------
 
-/// Portal de Noria: cinco anillos al cargar (`CreateObject`) y chispas cada tick (`MoveObject`).
+/// Noria portal: five rings on load (`CreateObject`) and sparks every tick (`MoveObject`).
 fn noria_warp(o: &mut MapObject, ctx: &mut Ctx) {
     let p = o.position;
     if !o.created {
@@ -280,7 +280,7 @@ fn noria_warp(o: &mut MapObject, ctx: &mut Ctx) {
     ctx.create_particle(BITMAP_SPARK + 1, position, o.angle, Vec3::splat(0.5), 9, 1.4, None);
 }
 
-/// Luz azulada de las flores/lámparas de Noria.
+/// Bluish light of the Noria flowers/lamps.
 fn noria_light(lum: f32) -> Vec3 {
     Vec3::new(lum * 0.4, lum * 0.7, lum * 1.0)
 }
@@ -309,7 +309,7 @@ fn noria_17(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// El gran árbol/fuente de Noria: rayos girando, luces con brillos y chispas que saltan.
+/// The big Noria tree/fountain: spinning beams, lights with flares and jumping sparks.
 fn noria_39(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let light = Vec3::new(lum * 0.4, lum * 0.8, lum * 1.0);
@@ -341,7 +341,7 @@ fn noria_39(o: &mut MapObject, ctx: &mut Ctx) {
 
 // --- Lost Tower ------------------------------------------------------------------------------------------
 
-/// Orbes de las estatuas: rojo (19, `BITMAP_MAGIC+1`) o azul (20, `BITMAP_LIGHTNING+1`).
+/// Statue orbs: red (19, `BITMAP_MAGIC+1`) or blue (20, `BITMAP_LIGHTNING+1`).
 fn losttower_19_20(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let (bitmap, light) = if o.ty == 19 {
@@ -355,10 +355,10 @@ fn losttower_19_20(o: &mut MapObject, ctx: &mut Ctx) {
         ctx.create_sprite(bitmap, pos, scale, light, rotation, 0);
         ctx.create_sprite(bitmap, pos, scale, light, -rotation, 0);
     }
-    // (sin `break` en el original: sigue en el `switch` de Stadium, que no tiene estos tipos)
+    // (no `break` in the original: falls into the Stadium `switch`, which has none of these types)
 }
 
-/// Rayos girando a 260 sobre el objeto.
+/// Beams spinning 260 above the object.
 fn losttower_40(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let light = Vec3::splat(lum);
@@ -368,17 +368,17 @@ fn losttower_40(o: &mut MapObject, ctx: &mut Ctx) {
     ctx.create_sprite(BITMAP_LIGHTNING + 1, pos, 2.5, light, -rotation, 0);
 }
 
-/// El `case WD_4LOSTTOWER` no tiene `break` y cae en el de Stadium: el tipo 9 enciende una luz
-/// en su hueso 1 (como la antorcha de Stadium).
+/// `case WD_4LOSTTOWER` has no `break` and falls into Stadium's: type 9 lights a light
+/// on its bone 1 (like the Stadium torch).
 fn losttower_9(o: &mut MapObject, ctx: &mut Ctx) {
     let lum = visual_luminosity(ctx);
     let scale = lum * 5.0;
     let light = Vec3::new(lum * 0.6, lum * 0.3, lum * 0.1);
-    // `Position` sin inicializar como desplazamiento en el original: (0, 0, 0).
+    // Uninitialized `Position` as offset in the original: (0, 0, 0).
     bone_sprite(o, ctx, 1, Vec3::ZERO, BITMAP_LIGHT, scale, light, 0.0);
 }
 
-/// Llamas del suelo (objeto oculto): de vez en cuando un `BITMAP_FLAME`.
+/// Ground flames (hidden object): a `BITMAP_FLAME` every now and then.
 fn losttower_24(o: &mut MapObject, ctx: &mut Ctx) {
     o.hidden_mesh = -2;
     if ctx.rand_fps_check(64) {
@@ -386,9 +386,9 @@ fn losttower_24(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-// --- Efectos: común ------------------------------------------------------------------------------------
+// --- Effects: common ------------------------------------------------------------------------------------
 
-/// `Luminosity` del principio de `MoveEffect` (gasta un `rand()` siempre).
+/// `Luminosity` at the start of `MoveEffect` (always consumes one `rand()`).
 fn effect_luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
     if e.life_time < 5.0 {
@@ -400,7 +400,7 @@ fn effect_luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     l
 }
 
-/// Cola común de `MoveEffect`: `PlayAnimation` (avanzar el fotograma, solo modelos) y
+/// Common tail of `MoveEffect`: `PlayAnimation` (advance the frame, models only) and
 /// `MoveParticle(o, true)`.
 fn move_tail(e: &mut Effect) {
     if e.ty >= MODEL_BIRD01 && e.ty < MODEL_SKILL_END {
@@ -409,7 +409,7 @@ fn move_tail(e: &mut Effect) {
     e.position += rotate(e.angle, e.direction);
 }
 
-/// `Random::DrawRand(o, salt)`: azar fijo por fotograma, efecto y sal (no toca el `rand()` de la lógica).
+/// `Random::DrawRand(o, salt)`: fixed randomness per frame, effect and salt (does not touch the logic `rand()`).
 fn draw_rand(ctx: &DrawCtx, e: &Effect, salt: u32) -> i32 {
     let frame = (ctx.world_time / 40.0) as u64;
     let mut x = frame ^ ((salt as u64) << 32) ^ (e.id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -419,7 +419,7 @@ fn draw_rand(ctx: &DrawCtx, e: &Effect, salt: u32) -> i32 {
     (x & 0x7fff) as i32
 }
 
-// --- MODEL_DUNGEON_STONE01: piedras que caen en el Dungeon ---------------------------------------------
+// --- MODEL_DUNGEON_STONE01: stones falling in the Dungeon ---------------------------------------------
 
 fn dungeon_stone_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = (ctx.rand() % 16 + 24) as f32;
@@ -445,10 +445,10 @@ fn dungeon_stone_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-// --- MODEL_WARP / WARP2 / WARP3: anillos de los portales -----------------------------------------------
+// --- MODEL_WARP / WARP2 / WARP3: portal rings -----------------------------------------------
 
 fn warp_create(e: &mut Effect, ctx: &mut Ctx) {
-    // (el original pone a cero el argumento `Light`, no `o->Light`: no hace nada)
+    // (the original zeroes the `Light` argument, not `o->Light`: no effect)
     e.blend_mesh = -2;
     e.life_time = 0xffffff as f32;
     e.scale = 1.3 + rf(ctx, 50) / 100.0;
@@ -456,16 +456,16 @@ fn warp_create(e: &mut Effect, ctx: &mut Ctx) {
     e.velocity = rf(ctx, 100) / 1000.0 + 0.01;
 }
 
-/// Creación desde `EffectTypes.json` ("warp3").
+/// Creation from `EffectTypes.json` ("warp3").
 fn warp3_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 16_777_215.0;
     e.scale = 0.6;
     e.blend_mesh = -2;
-    // `Gravity` no se inicializa en el original (queda lo del efecto anterior del hueco): 0.
+    // `Gravity` is not initialized in the original (left over from the slot's previous effect): 0.
     e.gravity = 0.0;
 }
 
-/// `Move_MODEL_WARP3`: color que oscila y giro sobre Y.
+/// `Move_MODEL_WARP3`: oscillating color and rotation about Y.
 fn warp_step(e: &mut Effect, ctx: &mut Ctx) {
     let _lum = effect_luminosity(e, ctx);
     let t = ctx.world_time;
@@ -483,13 +483,13 @@ fn warp_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-// --- BITMAP_FLAME (efecto): suelo en llamas ------------------------------------------------------------
+// --- BITMAP_FLAME (effect): burning ground ------------------------------------------------------------
 
 fn flame_create(e: &mut Effect, _ctx: &mut Ctx) {
     match e.sub_type {
         0 => {
             e.life_time = 40.0;
-            // TODO(original): o->Weapon = CharacterMachine->PacketSerial (red).
+            // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
         }
         1 | 2 => {
             e.life_time = 10.0;
@@ -522,8 +522,8 @@ fn flame_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_effect(ty, e.position, e.angle, e.light, 0, None, -1, 0, 0, 0.0);
             let light = Vec3::new(lum * 1.0, lum * 0.4, lum * 0.0);
             ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-            // TODO(original): si Owner == Hero y (int)LifeTime % 20 == 0 → LifeTime = (LifeTime/20)·19.9
-            // y AttackCharacterRange(Skill, Position, 150, Weapon, PKKey) (red).
+            // TODO(original): if Owner == Hero and (int)LifeTime % 20 == 0 → LifeTime = (LifeTime/20)·19.9
+            // and AttackCharacterRange(Skill, Position, 150, Weapon, PKKey) (network).
         }
         1 | 2 => {
             for j in 0..18 {
@@ -590,14 +590,14 @@ fn flame_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e);
 }
 
-/// Marca de fuego en el suelo (2×2 casillas) salvo en los subtipos 3 y 6.
+/// Fire mark on the ground (2×2 tiles) except in subtypes 3 and 6.
 fn flame_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type == 3 || e.sub_type == 6 {
         return;
     }
     let l = (draw_rand(ctx, e, 2) % 4 + 8) as f32 * 0.1;
-    // Decal(BITMAP_FLAME, x, y, 2, 2, Light, -Angle[2]): tamaño en casillas (×100). El original
-    // gira la UV con -Angle[2], es decir, la imagen +Angle[2].
+    // Decal(BITMAP_FLAME, x, y, 2, 2, Light, -Angle[2]): size in tiles (×100). The original
+    // rotates the UV by -Angle[2], i.e. the image by +Angle[2].
     out.decals.push(DecalDraw {
         texture: BITMAP_FLAME,
         center: Vec2::new(e.position.x, e.position.y),

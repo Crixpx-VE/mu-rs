@@ -1,8 +1,8 @@
-//! Cuentas y personajes en un archivo JSON (`cuentas.json` en la carpeta de datos del servidor).
+//! Accounts and characters in a JSON file (`cuentas.json` in the server data folder).
 //!
-//! De momento basta: pocos jugadores y todo en memoria; se escribe entero en cada cambio (primero
-//! a un archivo temporal y luego se renombra, para no dejarlo a medias). Las contraseñas se guardan
-//! como SHA-256 de `cuenta:contraseña`.
+//! Enough for now: few players and everything in memory; the whole file is rewritten on every
+//! change (to a temp file first, then renamed, so it is never left half-written). Passwords are
+//! stored as SHA-256 of `account:password`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::classes::{self, ClassIndex, Stats};
 
-/// Huecos de personaje por cuenta.
+/// Character slots per account.
 pub const MAX_SLOTS: u8 = 5;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -31,7 +31,7 @@ pub struct Character {
     pub x: u8,
     pub y: u8,
     pub direction: u8,
-    /// `GuildStatus` (255 = sin gremio).
+    /// `GuildStatus` (255 = no guild).
     #[serde(default = "no_guild")]
     pub guild_status: u8,
 }
@@ -45,8 +45,8 @@ pub struct Account {
     pub password_hash: String,
     #[serde(default)]
     pub characters: Vec<Character>,
-    /// Game Master (`CharacterStatus.GameMaster` de OpenMU): puede usar los comandos de GM. Se
-    /// pone a mano en `cuentas.json` (`"game_master": true`).
+    /// Game Master (OpenMU `CharacterStatus.GameMaster`): may use GM commands. Set by hand in
+    /// `cuentas.json` (`"game_master": true`).
     #[serde(default)]
     pub game_master: bool,
 }
@@ -67,17 +67,17 @@ pub fn hash_password(account: &str, password: &str) -> String {
     digest.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// Por qué no se pudo crear un personaje.
+/// Why a character could not be created.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CreateError {
-    /// Nombre inválido o ya usado.
+    /// Invalid or already used name.
     BadName,
-    /// No queda hueco.
+    /// No free slot.
     Full,
 }
 
-/// `CheckName` y `CheckSpecialText` del cliente: de 4 a 10 letras o números ASCII, sin los nombres
-/// de la casa.
+/// Client `CheckName` and `CheckSpecialText`: 4 to 10 ASCII letters or digits, excluding the
+/// in-house names (webzen, operation).
 pub fn valid_name(name: &str) -> bool {
     (4..=10).contains(&name.len())
         && name.chars().all(|c| c.is_ascii_alphanumeric())
@@ -109,7 +109,7 @@ impl Db {
         self.store.accounts.get(name)
     }
 
-    /// Crea la cuenta (cuando entra por primera vez).
+    /// Creates the account (on first login).
     pub fn create_account(&mut self, name: &str, password: &str) {
         self.store
             .accounts
@@ -139,7 +139,7 @@ impl Db {
         self.store.accounts.values().flat_map(|a| &a.characters).any(|c| c.name.eq_ignore_ascii_case(name))
     }
 
-    /// Un personaje nuevo de nivel 1 en el primer hueco libre, en `spawn` de su mapa de inicio.
+    /// A new level 1 character in the first free slot, at the `spawn` of its home map.
     pub fn create_character(
         &mut self,
         account: &str,
@@ -187,7 +187,7 @@ impl Db {
         deleted
     }
 
-    /// Guarda dónde está un personaje (al salir del mundo).
+    /// Saves where a character is (when leaving the world).
     pub fn update_position(&mut self, account: &str, name: &str, map: u8, x: u8, y: u8, direction: u8) {
         let Some(c) = self.store.accounts.get_mut(account).and_then(|a| a.characters.iter_mut().find(|c| c.name == name))
         else {
@@ -197,7 +197,7 @@ impl Db {
         self.save();
     }
 
-    /// Guarda el zen de un personaje (al pagar un viaje).
+    /// Saves a character's zen (when paying for a trip).
     pub fn set_money(&mut self, account: &str, name: &str, money: u32) {
         let Some(c) = self.store.accounts.get_mut(account).and_then(|a| a.characters.iter_mut().find(|c| c.name == name))
         else {
@@ -233,7 +233,7 @@ mod tests {
         let c = db.create_character("pepe", "Guerrero", 1, |_| (130, 130)).unwrap();
         assert_eq!(c.slot, 0);
         assert_eq!(db.create_character("pepe", "guerrero", 0, |_| (130, 130)).unwrap_err(), CreateError::BadName);
-        // Se guarda y se vuelve a leer.
+        // Saved and read back.
         let db2 = Db::open(&path).unwrap();
         assert_eq!(db2.characters("pepe").len(), 1);
         let mut db = db2;

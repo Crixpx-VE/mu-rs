@@ -1,8 +1,8 @@
-//! Uso:
-//!   cargo run -p mu-connect -- [--listen 127.0.0.1:44405] [--server id=ip:puerto ...]
+//! Usage:
+//!   cargo run -p mu-connect -- [--listen 127.0.0.1:44405] [--server id=ip:port ...]
 //!
-//! Por defecto escucha solo en local y anuncia el Game Server de OpenMU en 127.0.0.1:55901.
-//! Para que entren jugadores de fuera: `--listen 0.0.0.0:44405` y la IP pública en `--server`.
+//! By default it listens only locally and announces the OpenMU Game Server at 127.0.0.1:55901.
+//! To let outside players in: `--listen 0.0.0.0:44405` and the public IP in `--server`.
 
 use mu_connect::{Config, GameServer};
 

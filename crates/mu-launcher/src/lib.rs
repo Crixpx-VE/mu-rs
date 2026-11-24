@@ -1,21 +1,21 @@
-//! Actualizaciones del cliente.
+//! Client updates.
 //!
-//! El servidor (`mu-update-server`) publica una lista con la huella SHA-256 de cada archivo
-//! de la carpeta del cliente. El lanzador (`mu-launcher`) compara esa lista con lo que tiene,
-//! descarga solo lo que cambió, comprueba la huella de cada descarga y arranca el juego.
+//! The server (`mu-update-server`) publishes a list with the SHA-256 hash of every file
+//! in the client folder. The launcher (`mu-launcher`) compares that list with what it has,
+//! downloads only what changed, verifies the hash of each download and starts the game.
 //!
-//! Protocolo (HTTP público, como el launcher de cualquier servidor de MU):
+//! Protocol (public HTTP, like the launcher of any MU server):
 //!
 //! ```text
-//! GET /manifest        → una línea por archivo: <sha256>\t<tamaño>\t<ruta con '/'>
-//! GET /file/<ruta>     → el archivo (la ruta va codificada con %XX); solo si está en la lista
-//! GET /manifest2       → igual, con el tamaño comprimido: <sha256>\t<tamaño>\t<comprimido>\t<ruta>
-//! GET /z/<sha256>      → el archivo comprimido con zstd (si <comprimido> no es 0)
+//! GET /manifest        → one line per file: <sha256>\t<size>\t<path with '/'>
+//! GET /file/<path>     → the file (path encoded with %XX); only if it is in the list
+//! GET /manifest2       → same, with the compressed size: <sha256>\t<size>\t<packed>\t<path>
+//! GET /z/<sha256>      → the file compressed with zstd (if <packed> is not 0)
 //! ```
 //!
-//! Los lanzadores viejos siguen usando `/manifest` y `/file`.
+//! Old launchers still use `/manifest` and `/file`.
 //!
-//! La carpeta que se publica debe contener solo el juego: todo lo que haya dentro se puede descargar.
+//! The published folder must contain only the game: everything inside it can be downloaded.
 
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
@@ -23,25 +23,25 @@ use std::time::SystemTime;
 
 use sha2::{Digest, Sha256};
 
-/// Puerto por defecto del servidor de actualizaciones.
+/// Default port of the update server.
 pub const DEFAULT_PORT: u16 = 44480;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Entry {
-    /// Ruta relativa con `/` (p. ej. `Data/World1/EncTerrain1.map`).
+    /// Relative path with `/` (e.g. `Data/World1/EncTerrain1.map`).
     pub path: String,
     pub size: u64,
     pub sha256: String,
-    /// Tamaño comprimido con zstd (`/z/<sha256>`); 0 si no se sirve comprimido.
+    /// Size compressed with zstd (`/z/<sha256>`); 0 if not served compressed.
     pub packed: u64,
 }
 
-/// ¿Es una huella SHA-256 en hexadecimal?
+/// Is it a hexadecimal SHA-256 hash?
 pub fn is_sha256(s: &str) -> bool {
     s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit())
 }
 
-/// Huella SHA-256 de un archivo, en hexadecimal.
+/// SHA-256 hash of a file, in hexadecimal.
 pub fn hash_file(path: &Path) -> io::Result<String> {
     let mut f = std::fs::File::open(path)?;
     let mut h = Sha256::new();
@@ -64,7 +64,7 @@ pub fn format_manifest(entries: &[Entry]) -> String {
     entries.iter().map(|e| format!("{}\t{}\t{}\n", e.sha256, e.size, e.path)).collect()
 }
 
-/// Lee la lista. Rechaza la lista entera si alguna ruta no es segura.
+/// Reads the list. Rejects the whole list if any path is unsafe.
 pub fn parse_manifest(text: &str) -> Option<Vec<Entry>> {
     text.lines()
         .filter(|l| !l.is_empty())
@@ -78,7 +78,7 @@ pub fn parse_manifest(text: &str) -> Option<Vec<Entry>> {
         .collect()
 }
 
-/// Lista con el tamaño comprimido (`/manifest2`).
+/// List with the compressed size (`/manifest2`).
 pub fn format_manifest2(entries: &[Entry]) -> String {
     entries.iter().map(|e| format!("{}\t{}\t{}\t{}\n", e.sha256, e.size, e.packed, e.path)).collect()
 }
@@ -97,8 +97,8 @@ pub fn parse_manifest2(text: &str) -> Option<Vec<Entry>> {
         .collect()
 }
 
-/// Ruta relativa sin trucos: nada de `..`, rutas absolutas, unidades (`C:`), `\` ni partes vacías.
-/// Así ni el servidor entrega archivos de fuera de su carpeta ni el lanzador escribe fuera de la suya.
+/// Relative path with no tricks: no `..`, absolute paths, drives (`C:`), `\` or empty parts.
+/// That way the server never serves files outside its folder and the launcher never writes outside its own.
 pub fn is_safe_path(p: &str) -> bool {
     !p.is_empty()
         && p.len() < 1024
@@ -110,7 +110,7 @@ pub fn to_local(base: &Path, rel: &str) -> PathBuf {
     rel.split('/').fold(base.to_path_buf(), |p, part| p.join(part))
 }
 
-/// Archivos que no se publican ni se tocan: registros, descargas a medias y la configuración local.
+/// Files that are never published or touched: logs, partial downloads and the local config.
 pub fn excluded(rel: &str) -> bool {
     let name = rel.rsplit('/').next().unwrap_or(rel).to_ascii_lowercase();
     name.ends_with(".log")
@@ -121,7 +121,7 @@ pub fn excluded(rel: &str) -> bool {
         || name == ".mu-launcher-state"
 }
 
-/// Un archivo encontrado al recorrer una carpeta.
+/// A file found while walking a folder.
 pub struct Found {
     pub rel: String,
     pub path: PathBuf,
@@ -129,7 +129,7 @@ pub struct Found {
     pub modified: SystemTime,
 }
 
-/// Todos los archivos de `dir` (recursivo), menos los excluidos.
+/// All files in `dir` (recursive), except the excluded ones.
 pub fn scan(dir: &Path) -> io::Result<Vec<Found>> {
     fn walk(base: &Path, dir: &Path, prefix: &str, out: &mut Vec<Found>) -> io::Result<()> {
         for e in std::fs::read_dir(dir)? {
@@ -152,7 +152,7 @@ pub fn scan(dir: &Path) -> io::Result<Vec<Found>> {
     Ok(out)
 }
 
-/// Codifica una ruta para la URL (`%XX` todo lo que no sea letra, número, `-_.~/`).
+/// Encodes a path for the URL (`%XX` for everything except letters, digits and `-_.~/`).
 pub fn encode_path(p: &str) -> String {
     p.bytes()
         .map(|b| match b {

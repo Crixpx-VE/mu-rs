@@ -1,4 +1,4 @@
-//! Prueba de punta a punta: un cliente TCP real habla con el Connect Server.
+//! End-to-end test: a real TCP client talks to the Connect Server.
 
 use std::time::Duration;
 
@@ -44,7 +44,7 @@ async fn lista_de_servidores_y_conexion() {
         ServerMessage::ServerList(vec![ServerLoad { id: 0, load: 10 }, ServerLoad { id: 1, load: 80 }])
     );
 
-    // Dos peticiones pegadas en un mismo envío: el servidor debe separarlas.
+    // Two requests glued into one send: the server must split them.
     let mut both = ClientMessage::ConnectionInfoRequest { server_id: 1 }.encode();
     both.extend(ClientMessage::ConnectionInfoRequest { server_id: 0 }.encode());
     sock.write_all(&both).await.unwrap();

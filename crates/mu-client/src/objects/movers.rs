@@ -1,16 +1,16 @@
-//! Objetos del mapa que se mueven por su cuenta y sombras de `RenderBodyShadow`.
+//! Map objects that move on their own, and `RenderBodyShadow` shadows.
 //!
-//! - Puertas de Devias 20, 65, 88 (giran) y 86 (se desliza) al acercarse el personaje:
-//!   `CreateObject` (`ZzzObject.cpp:4793-4800`) y `MoveObject` (4004-4047).
-//! - Calaveras de Lost Tower 38/39 que salen despedidas al pisarlas: `CheckSkull`
+//! - Devias doors 20, 65, 88 (swing) and 86 (slide) when the character approaches:
+//!   `CreateObject` (`ZzzObject.cpp:4793-4800`) and `MoveObject` (4004-4047).
+//! - Lost Tower skulls 38/39 that get kicked away when stepped on: `CheckSkull`
 //!   (`ZzzEffectFireLeave.cpp:88-116`).
-//! - Sombra negra en el suelo de Blood Castle 28/29: `RenderObject` (`ZzzObject.cpp:1059-1076`) +
+//! - Black ground shadow in Blood Castle 28/29: `RenderObject` (`ZzzObject.cpp:1059-1076`) +
 //!   `BMD::RenderBodyShadow` (`ZzzBMD.cpp:2190-2241`).
-//! - Hierba que flota en el mar de Kalima (15, 29, 32): `CheckGrass` y la altura del agua
-//!   (`RenderHellasVisual`, `GMHellas.cpp:452-466`; ver `water_terrain.rs`).
-//! - Land of Trials 27, que sube y baja (`MoveHuntingGroundObject`, `GMHuntingGround.cpp:91-96`).
+//! - Grass floating on the Kalima sea (15, 29, 32): `CheckGrass` and the water height
+//!   (`RenderHellasVisual`, `GMHellas.cpp:452-466`; see `water_terrain.rs`).
+//! - Land of Trials 27, which bobs up and down (`MoveHuntingGroundObject`, `GMHuntingGround.cpp:91-96`).
 //!
-//! Lo de `MoveObject` va a 25 ticks por segundo; al dibujar se interpola entre los dos últimos.
+//! `MoveObject` logic runs at 25 ticks per second; drawing interpolates between the last two.
 
 use std::sync::Arc;
 
@@ -25,21 +25,21 @@ use crate::fx::material::{Blend, FxMaterial};
 use crate::fx::tables::ids;
 use crate::terrain::MU_SCALE;
 
-/// Objetos que se mueven (sus entidades comparten posición y giro).
+/// Moving objects (their entities share position and rotation).
 #[derive(Resource, Default)]
 pub struct Movers(pub Vec<Mover>, f32);
 
 pub struct Mover {
     motion: Motion,
-    /// `o->HeadTargetAngle`: la posición inicial (las puertas vuelven a ella).
+    /// `o->HeadTargetAngle`: the initial position (doors return to it).
     home: Vec3,
-    /// `o->HeadAngle`: en las puertas, el giro inicial; en las calaveras, lo que gira cada tick.
+    /// `o->HeadAngle`: for doors, the initial rotation; for skulls, the rotation per tick.
     head_angle: Vec3,
-    /// `o->Direction` (calaveras).
+    /// `o->Direction` (skulls).
     direction: Vec3,
     position: Vec3,
     angle: Vec3,
-    /// Estado del tick anterior, para interpolar.
+    /// Previous tick state, for interpolation.
     prev_position: Vec3,
     prev_angle: Vec3,
     scale: f32,
@@ -49,7 +49,7 @@ pub struct Mover {
 }
 
 impl Mover {
-    /// Con el `o->Timer` que le dio `CreateObject`.
+    /// With the `o->Timer` given by `CreateObject`.
     pub fn with_timer(mut self, timer: f32) -> Self {
         self.timer = timer;
         self
@@ -80,7 +80,7 @@ impl Mover {
     }
 }
 
-/// Un tick de la hierba de Kalima: `CheckGrass` (x, y; la altura va en cada fotograma).
+/// One tick of the Kalima grass: `CheckGrass` (x, y; the height is set every frame).
 fn kalima_float_tick(m: &mut Mover, hero: Option<Vec2>, action: usize) {
     let Some(hero) = hero else { return };
     let mut direction = m.direction.truncate();
@@ -90,7 +90,7 @@ fn kalima_float_tick(m: &mut Mover, hero: Option<Vec2>, action: usize) {
     m.position = position.extend(m.position.z);
 }
 
-/// `TurnAngle2(angle, a, d)` (`ZzzAI.cpp:75-97`): gira `angle` hacia `a` de `d` en `d` grados.
+/// `TurnAngle2(angle, a, d)` (`ZzzAI.cpp:75-97`): turns `angle` toward `a` in steps of `d` degrees.
 pub fn turn_angle2(mut angle: f32, mut a: f32, d: f32) -> f32 {
     if angle < 0.0 {
         angle += 360.0;
@@ -124,7 +124,7 @@ pub fn turn_angle2(mut angle: f32, mut a: f32, d: f32) -> f32 {
     angle
 }
 
-/// Un tick de una puerta (`MoveObject`, `ZzzObject.cpp:4008-4046`). Devuelve el sonido que pide.
+/// One door tick (`MoveObject`, `ZzzObject.cpp:4008-4046`). Returns the sound it requests.
 fn door_tick(m: &mut Mover, hero: Option<Vec2>) -> Option<&'static str> {
     let distance = hero.map(|h| (h - m.home.truncate()).length());
     match distance {
@@ -171,7 +171,7 @@ fn door_tick(m: &mut Mover, hero: Option<Vec2>) -> Option<&'static str> {
     }
 }
 
-/// `CheckSkull` (`ZzzEffectFireLeave.cpp:88-116`): `walking` = el personaje camina o corre.
+/// `CheckSkull` (`ZzzEffectFireLeave.cpp:88-116`): `walking` = the character walks or runs.
 fn skull_tick(m: &mut Mover, hero: Option<Vec2>, walking: bool) -> Option<&'static str> {
     let mut sound = None;
     if let Some(h) = hero
@@ -193,8 +193,8 @@ fn skull_tick(m: &mut Mover, hero: Option<Vec2>, walking: bool) -> Option<&'stat
     sound
 }
 
-/// `Hero->Object.CurrentAction` entre `PLAYER_WALK_MALE` y `PLAYER_RUN_RIDE_WEAPON` (o las carreras del
-/// Rage Fighter).
+/// `Hero->Object.CurrentAction` between `PLAYER_WALK_MALE` and `PLAYER_RUN_RIDE_WEAPON` (or the Rage
+/// Fighter runs).
 fn is_walking(action: usize) -> bool {
     let a = action as i32;
     (ids::PLAYER_WALK_MALE..=ids::PLAYER_RUN_RIDE_WEAPON).contains(&a)
@@ -254,10 +254,10 @@ pub fn move_objects(
         if m.motion == Motion::KalimaFloat
             && let Some(h) = crate::water_terrain::height_at(position.x, position.y, world_time)
         {
-            // `o->Position[2] = GetWaterTerrain(x, y) + 180` en cada fotograma.
+            // `o->Position[2] = GetWaterTerrain(x, y) + 180` every frame.
             position.z = h + 180.0;
         }
-        // Las puertas giran por el camino corto (`TurnAngle2` da la vuelta por 0/360).
+        // Doors turn along the short path (`TurnAngle2` wraps through 0/360).
         let dz = (m.angle.z - m.prev_angle.z + 540.0).rem_euclid(360.0) - 180.0;
         let mut angle = m.prev_angle.lerp(m.angle, between);
         angle.z = m.prev_angle.z + dz * between;
@@ -270,20 +270,20 @@ pub fn move_objects(
     }
 }
 
-// --- Sombras ------------------------------------------------------------------------------------------
+// --- Shadows -------------------------------------------------------------------------------------------
 
-/// `RenderBodyShadow` de un objeto: lo que hace falta para rehacerla con su animación.
+/// An object's `RenderBodyShadow`: what is needed to rebuild it with its animation.
 pub struct ShadowSource {
     pub model: Arc<bmd::Bmd>,
-    /// Grupo de animación (`AnimatedModels`) si está animado.
+    /// Animation group (`AnimatedModels`) if animated.
     pub group: Option<usize>,
-    /// Mallas que proyecta.
+    /// Meshes it casts.
     pub meshes: Vec<usize>,
-    /// Posición (MU), giro y escala del objeto.
+    /// Object position (MU), rotation and scale.
     pub position: Vec3,
     pub rotation: Quat,
     pub scale: f32,
-    /// Altura del terreno bajo el objeto (`RequestTerrainHeight`).
+    /// Terrain height under the object (`RequestTerrainHeight`).
     pub ground: f32,
 }
 
@@ -301,7 +301,7 @@ impl BodyShadows {
         materials: &mut Assets<FxMaterial>,
         source: ShadowSource,
     ) {
-        // `EnableAlphaTest` + `glColor4f(0, 0, 0, 1)`, sin textura ni escribir profundidad.
+        // `EnableAlphaTest` + `glColor4f(0, 0, 0, 1)`, no texture and no depth write.
         let material = self
             .material
             .get_or_insert_with(|| {
@@ -317,7 +317,7 @@ impl BodyShadows {
             MeshMaterial3d(material),
             Transform::default(),
             crate::scene::WorldEntity,
-            // La malla cambia con la animación: su caja inicial no vale.
+            // The mesh changes with the animation: its initial bounding box is useless.
             NoFrustumCulling,
         ));
         self.shadows.push((source, mesh, false));
@@ -332,8 +332,8 @@ fn shadow_mesh(positions: Vec<[f32; 3]>) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, vec![[0.0, 0.0]; n])
 }
 
-/// Un vértice ya transformado (MU) proyectado como `RenderBodyShadow` con `BodyOrigin` en el suelo:
-/// `x += z·(x + 2000)/(z − 4000)` relativo al origen, y `z = 5` sobre él.
+/// An already transformed vertex (MU) projected like `RenderBodyShadow` with `BodyOrigin` on the ground:
+/// `x += z·(x + 2000)/(z − 4000)` relative to the origin, and `z = 5` above it.
 pub fn project_shadow(v: Vec3, origin: Vec3) -> Vec3 {
     let mut p = v - origin;
     p.x += p.z * (p.x + 2000.0) / (p.z - 4000.0);
@@ -378,15 +378,15 @@ mod tests {
 
     #[test]
     fn turn_angle2_como_el_original() {
-        // Gira de 10 en 10 hacia el objetivo por el lado corto.
+        // Turns toward the target in steps of 10 along the short side.
         assert_eq!(turn_angle2(30.0, 90.0, 10.0), 40.0);
         assert_eq!(turn_angle2(90.0, 30.0, 10.0), 80.0);
-        // Cerca del objetivo, salta a él.
+        // Near the target, snaps to it.
         assert_eq!(turn_angle2(85.0, 90.0, 10.0), 90.0);
-        // Por 0/360.
+        // Through 0/360.
         assert_eq!(turn_angle2(5.0, 330.0, 10.0), 355.0);
         assert_eq!(turn_angle2(350.0, 20.0, 10.0), 0.0);
-        // Ángulos negativos: se pasan a 0..360.
+        // Negative angles are mapped to 0..360.
         assert_eq!(turn_angle2(-70.0, 90.0, 10.0), 300.0);
     }
 
@@ -397,13 +397,13 @@ mod tests {
 
     #[test]
     fn puertas() {
-        // Ángulo truncado como `(int)Angle % 360`.
+        // Angle truncated like `(int)Angle % 360`.
         assert_eq!(mover(Motion::SwingDoor, 450.7).angle.z, 90.0);
         let mut m = mover(Motion::SwingDoor, 90.0);
-        // A 100 del personaje: 30 - (200 - 100)·0.5 = -20.
+        // 100 away from the character: 30 - (200 - 100)·0.5 = -20.
         assert_eq!(door_tick(&mut m, Some(Vec2::new(1100.0, 1000.0))), Some("SOUND_DOOR01"));
         assert_eq!(m.angle.z, -20.0);
-        // Lejos vuelve con `TurnAngle2` (-20 → 340 → hacia 90 por el lado corto: 350).
+        // Far away it returns with `TurnAngle2` (-20 → 340 → toward 90 along the short side: 350).
         assert_eq!(door_tick(&mut m, None), None);
         assert_eq!(m.angle.z, 350.0);
         let mut s = mover(Motion::SlidingDoor, 0.0);
@@ -416,9 +416,9 @@ mod tests {
     #[test]
     fn calavera() {
         let mut m = mover(Motion::Skull, 0.0);
-        // Quieto: nada.
+        // Standing still: nothing.
         assert_eq!(skull_tick(&mut m, Some(Vec2::new(1010.0, 1000.0)), false), None);
-        // Caminando encima: sale despedida hacia el otro lado.
+        // Walking on top: it gets kicked to the other side.
         assert_eq!(skull_tick(&mut m, Some(Vec2::new(1010.0, 1000.0)), true), Some("SOUND_BONE2"));
         assert!((m.position.x - (1000.0 - 4.0 * 0.6)).abs() < 1e-4);
         assert!((m.angle.y - (-40.0 * 0.6)).abs() < 1e-4);
@@ -426,7 +426,7 @@ mod tests {
 
     #[test]
     fn sombra() {
-        // A ras de suelo no se inclina; a 100 de altura se va hacia -X y queda a 5 del suelo.
+        // At ground level it does not tilt; at height 100 it shifts toward -X and ends up 5 above the ground.
         let o = Vec3::new(0.0, 0.0, 50.0);
         assert_eq!(project_shadow(Vec3::new(10.0, 0.0, 50.0), o), Vec3::new(10.0, 0.0, 55.0));
         let p = project_shadow(Vec3::new(0.0, 0.0, 150.0), o);
