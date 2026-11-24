@@ -20,9 +20,9 @@
 //! while it stays visible). As in Heaven (`objects_2.rs`): an [`FX_MAP_ANCHOR`] marker acts as
 //! `o->Target` and they are recreated when the object moves again after a gap.
 //!
-//! Also here is `MODEL_FENRIR_THUNDER` (subtypes 1 and 2), which only these maps use; it is only
-//! registered if nobody else did. `MODEL_GHOST` is in `effects_wizard.rs` and the `BITMAP_MAGIC`
-//! effect in `effects_bitmaps1.rs`. The butterflies (`MODEL_BUTTERFLY01`) are those of
+//! The effects these objects create live in their kind files: `MODEL_FENRIR_THUNDER` in
+//! `effects_dl_mg1.rs`, `MODEL_GHOST` in `effects_wizard.rs` and the `BITMAP_MAGIC` effect in
+//! `effects_bitmaps1.rs`. The butterflies (`MODEL_BUTTERFLY01`) are those of
 //! `objects_kalima.rs` and the `BITMAP_TWINTAIL_WATER` water the one of `particles_2.rs`.
 //!
 //! Sounds: those of Kanturu 1 and 2 (`SOUND_KANTURU_1ST_*`, `SOUND_KANTURU_2ND_*`) are not in
@@ -72,11 +72,6 @@ pub fn register(r: &mut Registry) {
     for ty in 0..=74 {
         r.object(WD_39KANTURU_3RD, ty, kanturu3);
     }
-
-    let mut effect = |ty: i32, kind: EffectKind| {
-        r.effects.entry(ty).or_insert(kind);
-    };
-    effect(MODEL_FENRIR_THUNDER, EffectKind { create: Some(fenrir_thunder_create), step: Some(fenrir_thunder_step), draw: None });
 }
 
 // --- Common --------------------------------------------------------------------------------------
@@ -696,83 +691,6 @@ fn kanturu3(o: &mut MapObject, ctx: &mut Ctx) {
         }
         _ => {}
     }
-}
-
-// --- Effects: common ------------------------------------------------------------------------------
-
-/// `Luminosity` at the start of `MoveEffect` (`ZzzEffect.cpp:6923-6928`; always consumes a `rand()`).
-fn effect_luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
-    let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
-    if e.life_time < 5.0 {
-        l -= (5.0 - e.life_time) * 0.2;
-        if l < 0.0 {
-            l = 0.0;
-        }
-    }
-    l
-}
-
-/// Common tail of `MoveEffect` (`ZzzEffect.cpp:18072-18123`): `PlayAnimation` (models only) and
-/// `MoveParticle(o, true)`.
-fn move_tail(e: &mut Effect) {
-    if e.ty >= MODEL_BIRD01 && e.ty < MODEL_SKILL_END {
-        e.animation_frame += e.velocity;
-    }
-    e.position += rotate(e.angle, e.direction);
-}
-
-// --- MODEL_FENRIR_THUNDER ---------------------------------------------------------------------------
-
-/// `m_iAnimation` (0 = appearing, 1 = fading out).
-const SLOT_ANIMATION: usize = 0;
-
-/// `CreateEffect` (`ZzzEffect.cpp:4555-4600`): subtypes 1 and 2, which do not use the owner.
-/// TODO(original): 0 and 3 (the Fenrir's lightning, on its owner's bones).
-fn fenrir_thunder_create(e: &mut Effect, ctx: &mut Ctx) {
-    match e.sub_type {
-        1 | 2 => {
-            e.life_time = if e.sub_type == 1 { 100.0 } else { 4.0 };
-            let base = if e.sub_type == 1 { 0.3 } else { 0.1 };
-            e.scale = base + rf(ctx, 100) * 0.002;
-            e.alpha = 1.0;
-            e.user[SLOT_ANIMATION] = 0.0;
-            e.angle.x = rf(ctx, 360);
-            e.angle.y = rf(ctx, 360);
-            e.angle.z = rf(ctx, 360);
-            e.position.x += rf(ctx, 40) - 20.0;
-            e.position.y += rf(ctx, 40) - 20.0;
-            e.position.z += rf(ctx, 40) - 20.0;
-            let light = e.light - Vec3::splat(0.3);
-            ctx.create_sprite(BITMAP_LIGHT, e.position, 2.0, light, 0.0, 0);
-        }
-        _ => e.live = false,
-    }
-}
-
-/// `MoveEffect` (`ZzzEffect.cpp:14277-14342`): appears (+0.3 alpha per tick) and fades out (-0.3).
-/// Drawn with `RenderBody(RENDER_TEXTURE)` and `BodyLight = o->Light` (`ZzzObject.cpp:1701-1713`).
-fn fenrir_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
-    let _ = effect_luminosity(e, ctx);
-    if e.sub_type == 1 && e.live {
-        if e.user[SLOT_ANIMATION] == 0.0 {
-            e.alpha += 0.3;
-            if e.alpha >= 1.0 {
-                e.user[SLOT_ANIMATION] = 1.0;
-                e.alpha = 1.0;
-            }
-            if e.alpha < 0.0 {
-                e.alpha = 1.0;
-            }
-        } else {
-            e.alpha -= 0.3;
-            if e.alpha <= 0.0 {
-                e.alpha = 0.0;
-                e.live = false;
-            }
-        }
-        e.angle += Vec3::splat(0.15);
-    }
-    move_tail(e);
 }
 
 #[cfg(test)]

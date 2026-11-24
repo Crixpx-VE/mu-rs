@@ -4,21 +4,21 @@
 //! `MODEL_PIER_PART`), the earthquake stones (`MODEL_GROUND_STONE`, `MODEL_GROUND_STONE2`),
 //! `MODEL_SKILL_JAVELIN`, `MODEL_SWORD_FORCE`, `MODEL_STUN_STONE`, `MODEL_SKIN_SHELL`,
 //! `MODEL_MANA_RUNE`, `MODEL_AIR_FORCE`, `MODEL_WAVES`, `MODEL_COMBO`, `MODEL_FALL_STONE_EFFECT`,
-//! the Fenrir/Twintail ground marks (`MODEL_FENRIR_FOOT_THUNDER`, `MODEL_TWINTAIL_EFFECT`),
-//! `MODEL_FENRIR_SKILL_DAMAGE` and `MODEL_PROTECTGUILD`.
+//! the Fenrir lightning (`MODEL_FENRIR_THUNDER`, all subtypes: the Fenrir's body, Kanturu 2 and
+//! the Illusion Temple sparks), the Fenrir/Twintail ground marks (`MODEL_FENRIR_FOOT_THUNDER`,
+//! `MODEL_TWINTAIL_EFFECT`), `MODEL_FENRIR_SKILL_DAMAGE` and `MODEL_PROTECTGUILD`.
 //!
 //! Translated from Main 5.2 `ZzzEffect.cpp` (`CreateEffect`, `MoveEffect` and its common tail
 //! 18060-18124, `CheckClientArrow` 6758, `RenderEffects`) and the type-specific branches of
 //! `Draw_RenderObject` (`ZzzObject.cpp` 399-2680), which is what `RenderObject(o)` runs for them.
 //!
 //! Notes:
-//! - `MODEL_FENRIR_THUNDER` is in this batch but is already registered by `objects_kanturu.rs`;
-//!   it is not registered here.
-//! - `RenderObject` passes with `RENDER_CHROME` (environment-mapped `BITMAP_CHROME`) and texture
-//!   overrides (`RenderBody(..., Texture)`) cannot be expressed with `ModelDraw`: TODOs.
+//! - `HeadAngle` is only applied by `BMD::Animation` to the model's `BoneHead` (ZzzBMD.cpp:95-109),
+//!   which is -1 for every effect model here (ZzzBMD.cpp:2961; it is only set for players,
+//!   monsters, the Dark Horse and the boss head): it does not change how these types are drawn.
 //! - Function arguments that call `rand()` are evaluated left to right (like the other kind files).
 
-use bevy::math::Vec3;
+use bevy::math::{Vec2, Vec3};
 
 use super::common::{self, luminosity, move_particle, move_tail, play_animation, rf};
 use crate::fx::core::*;
@@ -52,6 +52,7 @@ pub fn register(r: &mut Registry) {
     r.effect(MODEL_WAVES, k(waves_create, waves_step, waves_draw));
     r.effect(MODEL_COMBO, k(combo_create, combo_step, draw_plain));
     r.effect(MODEL_FALL_STONE_EFFECT, k(fall_stone_create, fall_stone_step, draw_plain));
+    r.effect(MODEL_FENRIR_THUNDER, k(fenrir_thunder_create, fenrir_thunder_step, draw_plain));
     r.effect(MODEL_FENRIR_FOOT_THUNDER, k(foot_thunder_create, foot_thunder_step, foot_thunder_draw));
     r.effect(MODEL_TWINTAIL_EFFECT, k(twintail_create, twintail_step, twintail_draw));
     r.effect(MODEL_FENRIR_SKILL_DAMAGE, k(skill_damage_create, skill_damage_step, common::draw_default));
@@ -111,24 +112,68 @@ fn owner_life_time(e: &Effect) -> f32 {
     }
 }
 
-/// `CheckClientArrow(o)` (ZzzEffect.cpp:6758) for `MODEL_DARK_SCREAM`.
+/// `AT_SKILL_PARALYZE` / `AT_SKILL_PIERCING` (`SkillManager.h:43-44`; not in ids.rs).
+const AT_SKILL_PARALYZE: i32 = 51;
+const AT_SKILL_PIERCING: i32 = 52;
+
+/// `SOUND_ATTACK01+5 .. +8` (`DSPlaySound.h:67`: `SOUND_ATTACK01` = 70, so 75-78, the missile hits
+/// of `SoundFiles.json`).
+const SOUND_ATTACK01_5: [&str; 4] = ["SOUND_ATTACK_MISSILE_HIT1", "SOUND_ATTACK_MISSILE_HIT2", "SOUND_ATTACK_MISSILE_HIT3", "SOUND_ATTACK_MISSILE_HIT4"];
+
+/// `CheckClientArrow(o)` (ZzzEffect.cpp:6758-6911) for `MODEL_DARK_SCREAM`. The branches for
+/// `MODEL_ARROW_BOMB` / `MODEL_ARROW_HOLY` never apply to this type and are left out.
 fn check_client_arrow(e: &mut Effect, ctx: &mut Ctx) {
     // TODO(original): during Castle Siege (`battleCastle::IsBattleCastleStart()`), inside a
-    // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 2 and return.
+    // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 2 and return
+    // (ZzzEffect.cpp:6761-6771). There is no siege state yet.
+
     // TODO(original): MODEL_DARK_SCREAM: AttackCharacterRange(Hero->CurrentSkill, Position, 100,
-    // Hero->Object.Weapon, PKKey, AttackPoint[0]) (ZzzEffect.cpp:6773-6779).
+    // Hero->Object.Weapon, PKKey, AttackPoint[0]) (ZzzEffect.cpp:6773-6779; the result is unused).
+    // `Ctx` has neither the hero's selected skill slot (`Hero->CurrentSkill`) nor its
+    // `Object.Weapon`, so the request cannot be built; the call consumes no rand().
+
     if e.kind == 0 || e.sub_type == 99 {
-        // TODO(original): CheckCharacterRange(o, 100, PKKey); on a hit, by the hero's skill
-        // (CharacterAttribute->Skill[o->Skill]): AT_SKILL_PIERCING with SubType 2 →
-        // CreateJoint(BITMAP_FLARE, Position, Position, Angle, 6, o, 30); otherwise Live = false
-        // (+ CreateBomb for AT_SKILL_PIERCING).
-    } else {
-        // `if (rand()%2 == 0)` is always evaluated.
-        let _ = ctx.rand();
-        // TODO(original): if Owner == Hero: AttackPoint countdown for AT_SKILL_PIERCING, else
-        // AttackCharacterRange(o->Skill, Position, 100/200, Weapon, PKKey); on a hit: Piercing
-        // SubType 2 → AttackPoint = 2 and CreateJoint(BITMAP_FLARE, ..., 6, o, 30); otherwise
-        // Live = false and PlayBuffer(SOUND_ATTACK01 + 5 + rand()%4). (PJH_FIX_4_BUGFIX_7 is off.)
+        // ZzzEffect.cpp:6781-6823 (`CheckCharacterRange`'s `Kind` defaults to 0).
+        if ctx.check_character_range(e.position, e.owner, 100.0, 0) {
+            match ctx.hero_skill(e.skill) {
+                AT_SKILL_PIERCING => {
+                    if e.sub_type == 2 {
+                        ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 6, me(e), 30.0);
+                    } else {
+                        e.live = false;
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                // AT_SKILL_PARALYZE and the default only bomb for the arrows.
+                _ => e.live = false,
+            }
+        }
+    } else if ctx.rand() % 2 == 0 && ctx.hero.is_some_and(|h| e.owner == Some(Target::Actor(h))) {
+        // ZzzEffect.cpp:6826-6904 (`o->Owner == &Hero->Object`); PJH_FIX_4_BUGFIX_7 is off.
+        let range = 100.0;
+        let skill = ctx.hero_skill(e.skill);
+        if skill == AT_SKILL_PIERCING && e.user[SLOT_ATTACK_POINT] > 0.0 {
+            // `range = 200` is never used afterwards.
+            e.user[SLOT_ATTACK_POINT] -= 1.0;
+        } else if ctx.attack_character_range(e.skill, e.position, range, e.weapon, e.pk_key) {
+            match skill {
+                AT_SKILL_PIERCING => {
+                    if e.sub_type == 2 {
+                        e.user[SLOT_ATTACK_POINT] = 2.0;
+                        ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 6, me(e), 30.0);
+                    } else {
+                        e.live = false;
+                        common::create_bomb(ctx, e.position, true, 0);
+                    }
+                }
+                AT_SKILL_PARALYZE => e.live = false,
+                _ => {
+                    e.live = false;
+                    let i = (ctx.rand() % 4) as usize;
+                    ctx.play_sound(SOUND_ATTACK01_5[i]);
+                }
+            }
+        }
     }
 }
 
@@ -145,8 +190,8 @@ fn interpolate(segments: &[(f32, f32, Vec3, Vec3)], rate: f32) -> Option<Vec3> {
 
 /// `RenderObject(o)` with `o`'s state: nothing when `Alpha < 0.01` (`Calc_RenderObject`,
 /// ZzzObject.cpp:245). `BodyLight(o,b)` adds the terrain light to `o->Light`.
-/// TODO(original): no terrain light at draw time (only `o->Light` is used, like the other kinds);
-/// `HeadAngle` (passed to `b->Animation`) is not applied.
+/// TODO(original): no terrain light at draw time (only `o->Light` is used, like the other kinds).
+/// `HeadAngle` has no effect on these models (see the file header).
 fn object_draw(e: &Effect) -> Option<ModelDraw> {
     if e.alpha < 0.01 {
         return None;
@@ -218,11 +263,14 @@ fn scream_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:1537-1544: `RenderBody` with `BlendMeshLight` 1; the fire is `RENDER_BRIGHT`.
+/// ZzzObject.cpp:1537-1544: `RenderBody` with `BlendMeshLight` 1; the fire is
+/// `RENDER_TEXTURE|RENDER_BRIGHT`.
 fn scream_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
     d.blend_mesh_light = 1.0;
-    d.bright = e.ty == MODEL_DARK_SCREAM_FIRE;
+    if e.ty == MODEL_DARK_SCREAM_FIRE {
+        d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    }
     out.models.push(d);
 }
 
@@ -324,7 +372,7 @@ fn deasuler_create(e: &mut Effect, ctx: &mut Ctx) {
     e.hidden_mesh = 1;
     e.distance = 0.0;
     e.alpha = 1.0;
-    // TODO(original): o->ChromeEnable = false (no such field).
+    // `o->ChromeEnable = false`: only read by another type's render (ZzzEffect.cpp:18915).
     e.head_angle = e.angle;
     e.start_position = e.position;
     e.direction = e.light - e.position;
@@ -366,6 +414,9 @@ fn deasuler_create(e: &mut Effect, ctx: &mut Ctx) {
 fn deasuler_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     e.visible = true;
+    // `Models[MODEL_DEASULER].BodyOrigin`: set by the type's last `RenderObject`, i.e. where the
+    // effect was drawn on the previous frame (its position before this tick's update).
+    let body_origin = e.position;
     let ext = e.user[SLOT_EXT_STATE];
     let lt = life(e) as f32;
     let current_rate = 1.0 - lt / ext;
@@ -387,26 +438,35 @@ fn deasuler_step(e: &mut Effect, ctx: &mut Ctx) {
         let pre_rate = (1.0 - (lt + 1.0) / ext).clamp(0.0, 1.0);
         if pre_rate < current_rate {
             const ACCESS: i32 = 20;
+            // `b->AnimationTransformOnlySelf(arrEachBonePos, v3CurBlurAngle, v3CurBlurPos, fScale)`
+            // (ZzzBMD.cpp:610-680) with no reference object runs `Animation(..., frame 0, action 0,
+            // v3CurBlurAngle, ..., Translate = true)`: its `v3Position`/`fScale` are copied to locals
+            // that are never used, so the root sits at the model's `BodyOrigin` scaled by `BodyScale`
+            // (ZzzBMD.cpp:147-166) = `o->Scale`. Only `arrEachBonePos[1]` is read here: its point in
+            // model space at frame 0 (a pose with no angle, position or scale).
+            let mut pose = e.clone();
+            pose.position = Vec3::ZERO;
+            pose.angle = Vec3::ZERO;
+            pose.scale = 1.0;
+            pose.current_action = 0;
+            pose.animation_frame = 0.0;
+            let bone1 = ctx.effect_bone_world(&pose, 1, Vec3::ZERO);
             for _loop_bk in 0..2 {
                 let start_rate = (1.0 - (lt + 2.0) / ext).clamp(0.0, 1.0);
                 let end_rate = (1.0 - (lt + 1.0) / ext).clamp(0.0, 1.0);
                 let unit = (end_rate - start_rate) / ACCESS as f32;
                 let mut rate_unit = start_rate;
-                // Uninitialized in the original if no segment matches; the effect's state is used.
-                let mut blur_pos = e.position;
                 for _ in 0..ACCESS {
                     rate_unit += unit;
-                    if let Some(p) = deasuler_pos(e, rate_unit).filter(|_| filled) {
-                        blur_pos = p;
-                    }
-                    // TODO(original): b->AnimationTransformOnlySelf(arrEachBonePos, angle at
-                    // rate_unit + HeadAngle, blur_pos, Scale) and CreateObjectBlur(o, bone 4/5,
-                    // bone 2/1, (1,1,1), 10, false, 113/114, 20): needs the effect model's bones and
-                    // object blurs, which the engine does not have.
+                    // `GetAngleCurrent` + HeadAngle (uninitialized in the original if no segment
+                    // matches; the effect's angle is used then).
+                    let blur_angle = deasuler_angle(e, rate_unit).filter(|_| filled).map_or(e.angle, |a| a + e.head_angle);
+                    // TODO(original): CreateObjectBlur(o, arrEachBonePos[4/5], arrEachBonePos[2/1],
+                    // (1,1,1), 10, false, 113/114, 20): the engine has no object blurs.
                     if ctx.rand() % 10 == 0 {
-                        // `arrEachBonePos[1]`. TODO(original): the effect model's bone 1; the
-                        // interpolated model origin is used instead.
-                        let position = blur_pos;
+                        // `arrEachBonePos[1]`. Without the model file (or with fewer bones: the
+                        // original leaves the array uninitialized) the body origin is used.
+                        let position = bone1.map_or(body_origin, |b| body_origin + rotate(blur_angle, b * e.scale));
                         let rand_distance = rf(ctx, 100) + 100.0;
                         let random_dir = Vec3::new(0.0, rand_distance, 0.0);
                         // `o->Light` holds the target position here, as in the original.
@@ -424,19 +484,23 @@ fn deasuler_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:528-533: mesh 0 textured with `BodyLight(o,b)`, mesh 1 `RENDER_BRIGHT` with
-/// (0.3, 0.4, 1). `RenderMesh` ignores `HiddenMesh`. Meshes are assumed to use texture = mesh index.
+/// ZzzObject.cpp:528-533: `RenderMesh(0, RENDER_TEXTURE)` with `BodyLight(o,b)`, then
+/// `RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT)` with (0.3, 0.4, 1). `RenderMesh` ignores
+/// `HiddenMesh`.
 fn deasuler_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(base) = object_draw(e) else { return };
     let mut mesh0 = base;
-    mesh0.hidden_mesh = 1;
+    mesh0.mesh = 0;
+    mesh0.hidden_mesh = -1;
+    mesh0.render_flags = RENDER_TEXTURE;
     // `o->Light` is the target position: `glColor` clamps the body light to [0, 1].
     mesh0.light = e.light.clamp(Vec3::ZERO, Vec3::ONE);
     out.models.push(mesh0);
     let mut mesh1 = base;
-    mesh1.hidden_mesh = 0;
+    mesh1.mesh = 1;
+    mesh1.hidden_mesh = -1;
+    mesh1.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
     mesh1.light = Vec3::new(0.3, 0.4, 1.0);
-    mesh1.bright = true;
     out.models.push(mesh1);
 }
 
@@ -681,11 +745,14 @@ fn javelin_step(e: &mut Effect, ctx: &mut Ctx) {
     play_animation(e, ctx);
 }
 
-/// ZzzObject.cpp:1595-1600: body light (1, 0.6, 0.3), textured.
-/// TODO(original): second pass `RENDER_BRIGHT|RENDER_CHROME` with HiddenMesh 1 (chrome mapping).
+/// ZzzObject.cpp:1595-1600: body light (1, 0.6, 0.3), `RENDER_TEXTURE`, then
+/// `RENDER_BRIGHT|RENDER_CHROME` with HiddenMesh 1.
 fn javelin_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
     d.light = Vec3::new(1.0, 0.6, 0.3);
+    out.models.push(d);
+    d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
+    d.hidden_mesh = 1;
     out.models.push(d);
 }
 
@@ -741,16 +808,22 @@ fn sword_force_step(e: &mut Effect, ctx: &mut Ctx) {
         e.alpha = e.blend_mesh_light;
         e.light = Vec3::splat(e.alpha);
     }
-    // TODO(original): the second PlayAnimation runs even when CurrentAction == 255.
     play_animation(e, ctx);
-    e.animation_frame += e.velocity;
+    // The type's own `b->PlayAnimation` runs even when CurrentAction == 255; the original then
+    // reads `Actions[255]` (out of range): here an action the model does not have leaves the
+    // frame as is. The result is not checked.
+    let speed = e.velocity;
+    let _ = common::play_model_animation(e, ctx, speed);
     move_particle(e, true);
 }
 
-/// ZzzObject.cpp:2600-2610.
-/// TODO(original): subtypes 2/3 render with the texture `BITMAP_KNIGHTST_BLUE` instead of the model's.
-fn sword_force_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    draw_plain(e, ctx, out);
+/// ZzzObject.cpp:2600-2610: subtypes 2/3 render with the texture `BITMAP_KNIGHTST_BLUE`.
+fn sword_force_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e) else { return };
+    if e.sub_type == 2 || e.sub_type == 3 {
+        d.texture = BITMAP_KNIGHTST_BLUE;
+    }
+    out.models.push(d);
 }
 
 // --- MODEL_STUN_STONE ----------------------------------------------------------------------------------
@@ -814,11 +887,19 @@ fn stun_stone_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:746-752: textured with `BodyLight(o,b)`.
-/// TODO(original): second pass `RENDER_CHROME` (alpha 0.5, body light 1, `BITMAP_CHROME`, UV ×5/×2);
-/// the spin is in `HeadAngle`, which `ModelDraw` does not apply.
-fn stun_stone_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    draw_plain(e, ctx, out);
+/// ZzzObject.cpp:746-752: `RENDER_TEXTURE` with `BodyLight(o,b)`, then `RENDER_CHROME` with alpha
+/// 0.5, body light 1, `BITMAP_CHROME`, UV offset ×5/×2 and no hidden mesh. The spin written to
+/// `HeadAngle` is not visible (see the file header), as in the original.
+fn stun_stone_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e) else { return };
+    out.models.push(d);
+    d.render_flags = RENDER_CHROME;
+    d.alpha = 0.5;
+    d.light = Vec3::ONE;
+    d.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x * 5.0, e.blend_mesh_tex_coord.y * 2.0);
+    d.hidden_mesh = -1;
+    d.texture = BITMAP_CHROME;
+    out.models.push(d);
 }
 
 // --- MODEL_SKIN_SHELL ----------------------------------------------------------------------------------
@@ -865,16 +946,17 @@ fn skin_shell_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:733-745: subtype 0 with `BodyLight = o->Light`, subtype 1 `RENDER_BRIGHT` with
-/// (0.1, 0.5, 1); other subtypes draw nothing.
-/// TODO(original): both render with the texture `BITMAP_CHROME` instead of the model's.
+/// ZzzObject.cpp:733-745: subtype 0 `RENDER_TEXTURE` with `BodyLight = o->Light`, subtype 1
+/// `RENDER_TEXTURE|RENDER_BRIGHT` with (0.1, 0.5, 1), both with the texture `BITMAP_CHROME`; other
+/// subtypes draw nothing.
 fn skin_shell_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
+    d.texture = BITMAP_CHROME;
     match e.sub_type {
         0 => out.models.push(d),
         1 => {
             d.light = Vec3::new(0.1, 0.5, 1.0);
-            d.bright = true;
+            d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
             out.models.push(d);
         }
         _ => {}
@@ -938,12 +1020,14 @@ fn mana_rune_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:1589-1594: subtype 0 textured with body light (0.3, 0.6, 1); the rest generic.
-/// TODO(original): subtype 0's second pass `RENDER_BRIGHT|RENDER_CHROME` (chrome mapping).
+/// ZzzObject.cpp:1589-1594: subtype 0 `RENDER_TEXTURE` then `RENDER_BRIGHT|RENDER_CHROME`, both
+/// with body light (0.3, 0.6, 1); the rest generic.
 fn mana_rune_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
     if e.sub_type == 0 {
         d.light = Vec3::new(0.3, 0.6, 1.0);
+        out.models.push(d);
+        d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
     }
     out.models.push(d);
 }
@@ -1099,12 +1183,13 @@ fn waves_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// ZzzObject.cpp:1567-1575: subtypes 3-5 render with HiddenMesh -1.
-/// TODO(original): subtypes 3-5 use the texture `BITMAP_PINK_WAVE` instead of the model's.
+/// ZzzObject.cpp:1567-1575: subtypes 3-5 render with HiddenMesh -1 and the texture
+/// `BITMAP_PINK_WAVE`.
 fn waves_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
     if matches!(e.sub_type, 3..=5) {
         d.hidden_mesh = -1;
+        d.texture = BITMAP_PINK_WAVE;
     }
     out.models.push(d);
 }
@@ -1195,6 +1280,116 @@ fn fall_stone_step(e: &mut Effect, ctx: &mut Ctx) {
             }
         }
         _ => {}
+    }
+    move_tail(e, ctx);
+}
+
+// --- MODEL_FENRIR_THUNDER ------------------------------------------------------------------------------
+
+/// `user` slot: `o->m_iAnimation` (0 = appearing, 1 = fading out).
+const SLOT_THUNDER_ANIMATION: usize = 0;
+
+/// `p_b->TransformPosition(BoneTransform[bone], (0,0,0), o->Position, false)` (subtype 0): the
+/// global `BoneTransform` holds the owner's bones posed in world space (the Fenrir creates this
+/// subtype while it is rendered, ZzzObject.cpp:904-905), i.e. [`Actor::bone_world`]. A missing
+/// owner would crash the original (`o->Owner->Type`); here the position is left as is.
+fn thunder_on_owner_bone(e: &mut Effect, ctx: &Ctx, bone: usize) {
+    if let Some(owner) = ctx.actor(e.owner) {
+        e.position = owner.bone_world(bone, Vec3::ZERO);
+    }
+}
+
+/// ZzzEffect.cpp:4490-4625. `o->Light` is the `Light` argument (already copied).
+fn fenrir_thunder_create(e: &mut Effect, ctx: &mut Ctx) {
+    // (LifeTime, base scale, position jitter) of subtypes 1-3 (ZzzEffect.cpp:4555-4623).
+    let simple = match e.sub_type {
+        1 => Some((100.0, 0.3, 40)),
+        2 => Some((4.0, 0.1, 40)),
+        3 => Some((4.0, 0.5, 160)),
+        _ => None,
+    };
+    if e.sub_type == 0 {
+        // ZzzEffect.cpp:4492-4553: on one of the Fenrir's bones, or around its back.
+        e.life_time = 100.0;
+        e.scale = 0.3 + rf(ctx, 100) * 0.002;
+        e.user[SLOT_THUNDER_ANIMATION] = 0.0;
+        e.alpha = 0.7;
+        e.angle.x = rf(ctx, 360);
+        e.angle.y = rf(ctx, 360);
+        e.angle.z = rf(ctx, 360);
+        let irandom = ctx.rand() % 30;
+        match irandom {
+            1..=2 => thunder_on_owner_bone(e, ctx, 10),
+            3 => {
+                e.scale -= 0.2;
+                thunder_on_owner_bone(e, ctx, 14);
+            }
+            4..=5 => thunder_on_owner_bone(e, ctx, 2),
+            6..=7 => {
+                e.scale -= 0.2;
+                let bone = if ctx.rand() % 2 == 0 { 50 } else { 51 };
+                thunder_on_owner_bone(e, ctx, bone);
+            }
+            8 => {
+                e.scale -= 0.2;
+                thunder_on_owner_bone(e, ctx, 53);
+            }
+            9..=10 => {
+                e.live = false;
+                e.alpha = 0.0;
+            }
+            _ => {
+                e.scale += 0.1;
+                e.position.x += rf(ctx, 240) - 120.0;
+                e.position.y += rf(ctx, 10) - 5.0;
+                e.position.z += 110.0;
+            }
+        }
+    } else if let Some((life_time, base, jitter)) = simple {
+        e.life_time = life_time;
+        e.scale = base + rf(ctx, 100) * 0.002;
+        e.alpha = 1.0;
+        e.user[SLOT_THUNDER_ANIMATION] = 0.0;
+        e.angle.x = rf(ctx, 360);
+        e.angle.y = rf(ctx, 360);
+        e.angle.z = rf(ctx, 360);
+        let half = (jitter / 2) as f32;
+        e.position.x += rf(ctx, jitter) - half;
+        e.position.y += rf(ctx, jitter) - half;
+        e.position.z += rf(ctx, jitter) - half;
+    } else {
+        // Other subtypes set nothing (LifeTime stays 0: the effect dies on its first tick).
+        return;
+    }
+    // Every subtype 0-3 (even a subtype 0 that just died).
+    let light = e.light - Vec3::splat(0.3);
+    ctx.create_sprite(BITMAP_LIGHT, e.position, 2.0, light, 0.0, 0);
+}
+
+/// ZzzEffect.cpp:14277-14342 (subtypes 0 and 1: appear +0.3 alpha per tick, then fade -0.3),
+/// then the common tail. Drawn with `RenderObject` (RenderEffects 18598); ZzzObject.cpp:1701-1713
+/// renders `RENDER_TEXTURE` with `BodyLight = o->Light` (subtype 1) or `BodyLight(o,b)` (the
+/// others), i.e. [`draw_plain`].
+fn fenrir_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
+    let _ = luminosity(e, ctx);
+    if (e.sub_type == 0 || e.sub_type == 1) && e.live {
+        if e.user[SLOT_THUNDER_ANIMATION] == 0.0 {
+            e.alpha += 0.3;
+            if e.alpha >= 1.0 {
+                e.user[SLOT_THUNDER_ANIMATION] = 1.0;
+                e.alpha = 1.0;
+            }
+            if e.alpha < 0.0 {
+                e.alpha = 1.0;
+            }
+        } else if e.user[SLOT_THUNDER_ANIMATION] == 1.0 {
+            e.alpha -= 0.3;
+            if e.alpha <= 0.0 {
+                e.alpha = 0.0;
+                e.live = false;
+            }
+        }
+        e.angle += Vec3::splat(0.15);
     }
     move_tail(e, ctx);
 }
@@ -1445,12 +1640,10 @@ fn protect_guild_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// ZzzObject.cpp:1576-1581: two `RENDER_BRIGHT|RENDER_CHROME` passes with body light (0.4, 0.6, 1).
-/// TODO(original): `RENDER_CHROME` replaces the texture with environment-mapped `BITMAP_CHROME`;
-/// the model's own texture is used for both additive passes.
 fn protect_guild_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let Some(mut d) = object_draw(e) else { return };
     d.light = Vec3::new(0.4, 0.6, 1.0);
-    d.bright = true;
+    d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
     out.models.push(d);
     out.models.push(d);
 }
