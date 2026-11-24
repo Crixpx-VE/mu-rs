@@ -55,6 +55,7 @@ fn collect(mut from: MessageReader<crate::net::FromServer>, mut inbox: ResMut<In
                 | ServerMessage::ObjectWalked { .. }
                 | ServerMessage::MapObjectOutOfScope(_)
                 | ServerMessage::ObjectAnimation { .. }
+                | ServerMessage::ObjectMoved { .. }
         ) {
             inbox.0.push(m.0.clone());
         }
@@ -224,6 +225,16 @@ fn apply(
                     None => debug!("{}: acción {action} sin animación", r.name),
                 }
             }
+            // `ReceiveMovePosition`: tile and target at once, then the body glides (`JumpTime`).
+            ServerMessage::ObjectMoved { id, x, y } => {
+                let id = id & game::OBJECT_ID_MASK;
+                let Some((e, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == id) else { continue };
+                let tile = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+                commands.entity(e).insert(crate::character::Jump::new(r.pos - tile));
+                r.pos = tile;
+                r.target = (x, y);
+                r.path.clear();
+            }
             ServerMessage::MapObjectOutOfScope(ids) => {
                 for (e, r, shadow) in &remotes {
                     if ids.contains(&r.id) {
@@ -252,9 +263,29 @@ fn remote_transform(r: &RemotePlayer, terrain: &LoadedTerrain) -> Transform {
     }
 }
 
-fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut RemotePlayer, &mut Transform)>) {
+fn walk(
+    time: Res<Time>,
+    terrain: Option<Res<LoadedTerrain>>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut RemotePlayer, &mut Transform, Option<&mut crate::character::Jump>)>,
+) {
     let Some(terrain) = terrain else { return };
-    for (mut r, mut tf) in &mut q {
+    for (entity, mut r, mut tf, jump) in &mut q {
+        // A new walk ends the glide (it starts from the tile).
+        if let Some(mut j) = jump {
+            match j.advance(time.delta_secs()).filter(|_| r.path.is_empty()) {
+                Some(offset) => {
+                    let tile = r.pos;
+                    r.pos = tile + offset;
+                    *tf = remote_transform(&r, &terrain);
+                    r.pos = tile;
+                    continue;
+                }
+                None => {
+                    commands.entity(entity).remove::<crate::character::Jump>();
+                }
+            }
+        }
         let mut budget = WALK_SPEED * time.delta_secs();
         while budget > 0.0 {
             let Some(&(nx, ny)) = r.path.front() else { break };

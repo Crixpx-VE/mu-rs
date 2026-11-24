@@ -165,7 +165,10 @@ impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CurrentSkill>()
             .add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
-            .add_systems(Update, (scripted_walk, hero_input.in_set(HeroInput), cast_skill, walk, animate, light_body).chain());
+            .add_systems(
+                Update,
+                (scripted_walk, server_moves, hero_input.in_set(HeroInput), cast_skill, walk, animate, light_body).chain(),
+            );
     }
 }
 
@@ -187,6 +190,66 @@ pub struct Player {
     /// Stand and walk animations of its class.
     pub stop: usize,
     pub walk: usize,
+}
+
+/// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
+/// (`PositionX/Y` and `TargetX/Y`), and the body glides there, `Position += (Target - Position) · 0.2`
+/// per tick for 16 ticks (`PushingCharacter`, ZzzCharacter.cpp:2933-2972). `offset` is where the body
+/// is drawn relative to the tile when the glide starts.
+#[derive(Component)]
+pub struct Jump {
+    offset: Vec2,
+    elapsed: f32,
+}
+
+/// `JumpTime > 15` ends the glide.
+const JUMP_TICKS: f32 = 16.0;
+/// `Speed = 0.2f`.
+const JUMP_SPEED: f32 = 0.2;
+
+impl Jump {
+    pub fn new(offset: Vec2) -> Self {
+        Self { offset, elapsed: 0.0 }
+    }
+
+    /// Advances the glide by `dt` seconds and returns the drawn offset, or `None` when it is over.
+    pub fn advance(&mut self, dt: f32) -> Option<Vec2> {
+        self.elapsed += dt;
+        (!self.done()).then(|| self.offset_now())
+    }
+
+    /// The drawn offset after `elapsed` seconds: the per-tick `× (1 - 0.2)` at any frame rate.
+    fn offset_now(&self) -> Vec2 {
+        self.offset * (1.0 - JUMP_SPEED).powf(self.elapsed * crate::fx::sim::TICKS_PER_SECOND)
+    }
+
+    fn done(&self) -> bool {
+        self.elapsed * crate::fx::sim::TICKS_PER_SECOND >= JUMP_TICKS
+    }
+}
+
+/// `ReceiveMovePosition` for the hero: the server moved us (a teleport, or OpenMU pulling the client
+/// back after rejecting a walk, `ResynchronizeClientAsync`). The current walk stops.
+fn server_moves(
+    mut commands: Commands,
+    mut from: MessageReader<crate::net::FromServer>,
+    hero_key: Res<crate::remote::HeroKey>,
+    mut q: Query<(Entity, &mut Player)>,
+) {
+    for m in from.read() {
+        let mu_protocol::game::ServerMessage::ObjectMoved { id, x, y } = m.0 else { continue };
+        if id & mu_protocol::game::OBJECT_ID_MASK != hero_key.0 {
+            continue;
+        }
+        for (e, mut p) in &mut q {
+            let tile = Vec2::new(x as f32 + 0.5, y as f32 + 0.5);
+            info!("the server moved the hero from ({:.1}, {:.1}) to ({x}, {y})", p.pos.x, p.pos.y);
+            commands.entity(e).insert(Jump::new(p.pos - tile));
+            p.pos = tile;
+            p.path.clear();
+            p.operate = None;
+        }
+    }
 }
 
 /// Dark Knight skills on the keys (no server yet: cast in place):
@@ -950,9 +1013,15 @@ fn walk(
     operates: Res<crate::operate::Operates>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut net: ResMut<crate::net::Net>,
-    mut q: Query<(&mut Player, &mut Transform)>,
+    mut commands: Commands,
+    mut q: Query<(Entity, &mut Player, &mut Transform, Option<&mut Jump>)>,
 ) {
-    for (mut p, mut tf) in &mut q {
+    for (entity, mut p, mut tf, mut jump) in &mut q {
+        // A new walk ends the glide: the walk starts from the tile.
+        if jump.is_some() && !p.path.is_empty() {
+            commands.entity(entity).remove::<Jump>();
+            jump = None;
+        }
         let had_path = !p.path.is_empty();
         let mut budget = WALK_SPEED * time.delta_secs();
         while budget > 0.0 {
@@ -992,6 +1061,20 @@ fn walk(
             }
         }
         *tf = player_transform(&p, terrain.as_deref());
+        if let Some(j) = jump.as_deref_mut() {
+            match j.advance(time.delta_secs()) {
+                None => {
+                    commands.entity(entity).remove::<Jump>();
+                }
+                Some(offset) => {
+                    // Drawn where the glide is (the terrain height follows, `RequestTerrainHeight`).
+                    let tile = p.pos;
+                    p.pos = tile + offset;
+                    *tf = player_transform(&p, terrain.as_deref());
+                    p.pos = tile;
+                }
+            }
+        }
     }
 }
 
@@ -1092,6 +1175,23 @@ fn nearest_walkable(t: &mu_data::terrain::Terrain, p: Vec2) -> Option<Vec2> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `PushingCharacter`: 20% of the remaining distance per tick, over after 16 ticks.
+    #[test]
+    fn server_move_glide() {
+        let tick = 1.0 / crate::fx::sim::TICKS_PER_SECOND;
+        let mut j = Jump::new(Vec2::new(10.0, 0.0));
+        let first = j.advance(tick).unwrap();
+        assert!((first.x - 8.0).abs() < 1e-4, "{first}");
+        // The same at 60 fps: two half-ticks equal one tick.
+        let mut k = Jump::new(Vec2::new(10.0, 0.0));
+        k.advance(tick / 2.0);
+        assert!((k.advance(tick / 2.0).unwrap().x - 8.0).abs() < 1e-4);
+        for _ in 1..15 {
+            assert!(j.advance(tick).is_some());
+        }
+        assert!(j.advance(tick).is_none(), "JumpTime > 15 ends it");
+    }
     use crate::fx::tables::ids;
     use mu_protocol::game::action as at;
 

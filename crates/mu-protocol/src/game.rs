@@ -628,6 +628,9 @@ pub enum ServerMessage {
     /// Someone plays an animation (`ReceiveAction`): `direction` as in `MapChanged`, `action` an
     /// `AT_*` (see [`action`]) and `target` the target id (0 if none).
     ObjectAnimation { id: u16, direction: u8, action: u8, target: u16 },
+    /// An object in view (the own player included) moved instantly (`ReceiveMovePosition`, C1 15,
+    /// WSclient.cpp:1673): OpenMU also sends it to pull the client back when it rejects a walk.
+    ObjectMoved { id: u16, x: u8, y: u8 },
     /// The whole inventory after entering the world (`ReceiveInventory`, C4 F3 10): slot and the 12
     /// item bytes of each item (equipment 0-11, grid 12-75, personal shop 204+).
     InventoryList(Vec<(u8, [u8; 12])>),
@@ -1244,6 +1247,11 @@ impl ServerMessage {
                 let [th, tl] = target.to_be_bytes();
                 c1(&[0x18, ih, il, *direction, *action, th, tl])
             }
+            // OpenMU `ObjectMoved`: 8 bytes, the last one unused.
+            Self::ObjectMoved { id, x, y } => {
+                let [h, l] = id.to_be_bytes();
+                c1(&[0x15, h, l, *x, *y, 0])
+            }
             // OpenMU `CharacterInventory`: C4 F3 10 <n> n × {slot, item}.
             Self::InventoryList(items) => {
                 let mut body = vec![0xF3, 0x10];
@@ -1352,6 +1360,11 @@ impl ServerMessage {
                     action: *d.get(6)?,
                     target: get_u16_be(d, 7).unwrap_or(0),
                 });
+            }
+            // `PRECEIVE_MOVE_POSITION`: `KeyH`, `KeyL`, `PositionX`, `PositionY`.
+            0x15 => {
+                let d = short_header(&p)?;
+                return Some(Self::ObjectMoved { id: get_u16_be(d, 3)?, x: *d.get(5)?, y: *d.get(6)? });
             }
             0xF3 if long_header(&p).is_some() => {
                 let d = long_header(&p)?;
@@ -1972,6 +1985,12 @@ mod tests {
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::BuyItem { slot: 16 }), [0xC3, 4, 0x32, 16]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::SellItem { slot: 20 }), [0xC3, 4, 0x33, 20]);
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::RepairItem { slot: 0xFF, self_repair: true }), [0xC3, 5, 0x34, 0xFF, 1]);
+    }
+
+    #[test]
+    fn object_moved() {
+        // OpenMU `ObjectMoved` (C1 08 15): id big endian, x, y and one unused byte.
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ObjectMoved { id: 0x0200, x: 125, y: 124 }), [0xC1, 8, 0x15, 2, 0, 125, 124, 0]);
     }
 
     #[test]
