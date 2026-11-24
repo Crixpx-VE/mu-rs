@@ -4,6 +4,7 @@ description = "Lanzador que actualiza el cliente al abrirse, y el servidor de ac
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [[bin]]
 name = "mu-launcher"

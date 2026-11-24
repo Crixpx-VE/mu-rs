@@ -15,7 +15,7 @@
 //! personaje (van con las piezas de clase), los efectos propios de cada monstruo (`MoveMonsterVisual`,
 //! huesos con nombre, `CreateJoint`...), los sonidos y el giro de la cabeza (`BoneHead`).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::f32::consts::FRAC_PI_2;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -65,6 +65,19 @@ pub enum MonsterOrder {
     /// Que mire hacia esta dirección (0..7).
     Turn { key: u16, direction: u8 },
     Despawn { key: u16 },
+}
+
+impl MonsterOrder {
+    fn key(&self) -> u16 {
+        match self {
+            Self::Spawn { key, .. }
+            | Self::Action { key, .. }
+            | Self::WalkTo { key, .. }
+            | Self::Walk { key, .. }
+            | Self::Turn { key, .. }
+            | Self::Despawn { key } => *key,
+        }
+    }
 }
 
 /// Acciones de un monstruo. Los de forma de personaje (`MODEL_PLAYER`) las traducen a las suyas como
@@ -670,15 +683,30 @@ fn apply(
 ) {
     let Some(terrain) = terrain else { return };
     let world_active = args.world as i32 - 1;
+    // Commands only take effect after this system, so within one batch the query still shows the
+    // monsters despawned here (`gone`) and does not show the ones spawned here (`fresh`). OpenMU
+    // sends "out of scope" and "in scope" for the same key in one packet, and a monster that enters
+    // the view already walking comes with a WalkTo right after its Spawn.
+    let mut gone: HashSet<Entity> = HashSet::new();
+    let mut fresh: HashMap<u16, [Entity; 2]> = HashMap::new();
+    // Orders for a monster spawned in this batch wait for the next frame, when it exists.
+    let mut later = Vec::new();
     for order in std::mem::take(&mut pending.0) {
+        if !matches!(order, MonsterOrder::Spawn { .. } | MonsterOrder::Despawn { .. }) && fresh.contains_key(&order.key()) {
+            later.push(order);
+            continue;
+        }
         match order {
             MonsterOrder::Spawn { key, number, x, y, direction } => {
                 // Si ya estaba, se quita y se crea otra vez (`CreateCharacter` reutiliza el de su `Key`).
                 for (e, m, shadow) in &monsters {
-                    if m.key == key {
+                    if m.key == key && gone.insert(e) {
                         commands.entity(e).despawn();
                         commands.entity(shadow.1).despawn();
                     }
+                }
+                if let Some(old) = fresh.remove(&key) {
+                    old.into_iter().for_each(|e| commands.entity(e).despawn());
                 }
                 let variants = data::defs(number, world_active);
                 let def = &variants[(next_rand(&mut rng) as usize) % variants.len()];
@@ -727,6 +755,7 @@ fn apply(
                 }
                 info!("aparece {} ({number}, {:?}) en ({x}, {y})", def.display_name(), def.model);
                 let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
+                let shadow_entity = shadow.1;
                 let transform = monster_transform(&m, &terrain);
                 let mut e = commands.spawn((
                     Name::new(format!("Monstruo {number} {}", def.display_name())),
@@ -752,13 +781,15 @@ fn apply(
                     e.with_child(child);
                 }
                 e.insert(m);
+                fresh.insert(key, [e.id(), shadow_entity]);
             }
             MonsterOrder::Action { key, action } => {
                 for (e, mut m, shadow) in &mut monsters {
-                    if m.key != key {
+                    if m.key != key || gone.contains(&e) {
                         continue;
                     }
                     if action == MonsterAction::Die && vanishes_on_death(m.def) {
+                        gone.insert(e);
                         commands.entity(e).despawn();
                         commands.entity(shadow.1).despawn();
                         continue;
@@ -802,15 +833,19 @@ fn apply(
             }
             MonsterOrder::Despawn { key } => {
                 for (e, m, shadow) in &monsters {
-                    if m.key == key {
+                    if m.key == key && gone.insert(e) {
                         info!("desaparece {} ({})", m.def.display_name(), m.number);
                         commands.entity(e).despawn();
                         commands.entity(shadow.1).despawn();
                     }
                 }
+                if let Some(new) = fresh.remove(&key) {
+                    new.into_iter().for_each(|e| commands.entity(e).despawn());
+                }
             }
         }
     }
+    pending.0.extend(later);
 }
 
 /// Caja de selección (`BoundingBoxMin/Max` de `CreateCharacterPointer`, ZzzCharacter.cpp:11397-11502,

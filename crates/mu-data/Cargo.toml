@@ -4,6 +4,7 @@ description = "Lectores de los archivos del cliente de MU (BMD, OZJ, OZT, terren
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
 image.workspace = true

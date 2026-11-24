@@ -4,5 +4,6 @@ description = "Paquetes y cifrado del protocolo de MU Online, compartido por cli
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
 
 [dependencies]
