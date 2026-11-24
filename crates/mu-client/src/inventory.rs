@@ -11,13 +11,18 @@
 //!   (item_view.rs) on top; tooltips on top of everything.
 //! - **Mouse**: pick up an item on button release over it (`CNewUIInventoryCtrl::UpdateMouseEvent`) and
 //!   drop it on release over a cell where it fits (`InventoryProcess`) or over a free equipment slot
-//!   where it can be worn (`EquipmentWindowProcess` + `IsEquipable`). The original asks the server
-//!   (`SendRequestEquipmentItem`) and applies it on reply; here it is applied immediately. Items are
-//!   not dropped on the ground (the server does that too): with one held, a click in the game does
+//!   where it can be worn (`EquipmentWindowProcess` + `IsEquipable`). Picking up is local only: the
+//!   server still has the item in its slot. Dropping sends `SendRequestEquipmentItem` (C3 24) and the
+//!   item stays on the mouse until the server answers (`EquipmentItem` flag: one request at a time,
+//!   `BackupPickedItem` does nothing meanwhile): `ItemMoved` puts it where the server says,
+//!   `ItemMoveFailed` sends it back (`ReceiveEquipmentItem`, WSclient.cpp:5693-5797). The server is the
+//!   only authority over items (AGENTS.md); only without a connection (`--inventario-prueba`) are moves
+//!   applied locally. Items are not dropped on the ground yet: with one held, a click in the game does
 //!   nothing.
-//! - **Contents**: `--inventario-prueba` sets up a test inventory (+0 to +15, excellent and one
-//!   ancient). [`Inventory::set_items`] is the entry point for the S6 inventory packet (`F3 10`: slot
-//!   and the 12 bytes of each item) from the server.
+//! - **Contents**: the server sends the whole inventory after entering the world (`ReceiveInventory`,
+//!   C4 F3 10, WSclient.cpp:1270-1320), removes items (`ReceiveDeleteInventory`, 0x28) and changes
+//!   durability or stack size (`ReceiveDurability`, 0x2A). `--inventario-prueba` sets up a test
+//!   inventory (+0 to +15, excellent and one ancient) when there is no server.
 //!
 //! Missing: repair, personal store, the window's ancient sets and sockets, potion hotkeys, item
 //! stacking (jewels on items, `IsOverlayItem`) and the grid's durability colors.
@@ -26,6 +31,8 @@ use bevy::prelude::*;
 use bevy::text::{FontSize, FontSmoothing, FontWeight, LineHeight};
 use mu_data::items::info::{HeroView, TipLine, item_info};
 use mu_data::items::{Item, group, slot};
+
+use mu_protocol::game::{ClientMessage, FIRST_GRID_SLOT, ServerMessage, storage};
 
 use crate::Args;
 use crate::item_view::{ItemData, ItemView, ItemViewSet, ItemViews};
@@ -40,8 +47,13 @@ impl Plugin for InventoryPlugin {
             .add_systems(OnEnter(GameScene::Game), (spawn_root, fill_test_inventory))
             .add_systems(
                 OnExit(GameScene::Game),
-                (crate::scene::despawn::<InventoryRoot>, |mut inv: ResMut<Inventory>| inv.close()),
+                (crate::scene::despawn::<InventoryRoot>, |mut inv: ResMut<Inventory>| {
+                    // No answer will come for a pending move: the server keeps the item in its slot.
+                    inv.pending = false;
+                    inv.close();
+                }),
             )
+            .add_systems(PreUpdate, from_server.after(crate::net::NetSystems))
             .add_systems(
                 PreUpdate,
                 keys.after(bevy::input::InputSystems).after(crate::chat::ChatKeys).run_if(in_state(GameScene::Game)),
@@ -50,6 +62,35 @@ impl Plugin for InventoryPlugin {
                 Update,
                 (follow_char_info, update_mouse, request_views, draw).chain().before(ItemViewSet).run_if(in_state(GameScene::Game)),
             );
+    }
+}
+
+/// Grid cell of an inventory slot (12-75: `MAX_EQUIPMENT_INDEX` + y · 8 + x).
+fn grid_cell(slot: u8) -> Option<(u8, u8)> {
+    let i = slot.checked_sub(FIRST_GRID_SLOT)? as usize;
+    (i < COLUMNS * ROWS).then_some(((i % COLUMNS) as u8, (i / COLUMNS) as u8))
+}
+
+/// Inventory slot of a grid cell.
+fn grid_slot(x: u8, y: u8) -> u8 {
+    FIRST_GRID_SLOT + y * COLUMNS as u8 + x
+}
+
+/// Inventory slot the held item came from (`MAX_EQUIPMENT_INDEX + GetSourceLinealPos()` or the
+/// equipment `lineal_pos`).
+fn source_slot(from: Source) -> u8 {
+    match from {
+        Source::Grid { x, y } => grid_slot(x, y),
+        Source::Equipment(s) => s,
+    }
+}
+
+/// Inventory packets from the server.
+fn from_server(mut from: MessageReader<crate::net::FromServer>, mut inv: ResMut<Inventory>, mut sound: ResMut<SoundQueue>) {
+    for m in from.read() {
+        if let Some(s) = inv.apply(&m.0) {
+            sound.play(s);
+        }
     }
 }
 
@@ -165,6 +206,8 @@ pub struct Inventory {
     pub picked: Option<Picked>,
     /// Bumped whenever the equipment changes (to re-dress the character).
     pub equipment_rev: u32,
+    /// `EquipmentItem`: a move was sent and its answer has not arrived yet.
+    pending: bool,
     event: CtrlEvent,
     /// `m_iPointedSquareIndex` and `m_iPointedSlot`.
     pointed_square: Option<usize>,
@@ -222,28 +265,114 @@ impl Inventory {
         }
     }
 
-    /// The inventory sent by the server (`F3 10`): slot (0-11 equipment, 12-75 grid) and the item's
-    /// 12 bytes (`Item::from_bytes`).
-    #[allow(dead_code)]
+    /// The inventory sent by the server (`ReceiveInventory`): slot (0-11 equipment, 12-75 grid, the
+    /// rest is the personal store, not shown yet) and the item's 12 bytes (`Item::from_bytes`).
     pub fn set_items(&mut self, list: &[(u8, [u8; 12])]) {
         self.grid.clear();
         self.equipment = [None; slot::COUNT];
         self.picked = None;
+        self.pending = false;
+        self.event = CtrlEvent::None;
+        self.tooltip = None;
         for (s, bytes) in list {
-            let Some(item) = Item::from_bytes(bytes) else { continue };
-            let s = *s as usize;
-            if s < slot::COUNT {
-                self.equipment[s] = Some(item);
-            } else if s - slot::COUNT < COLUMNS * ROWS {
-                let i = s - slot::COUNT;
-                self.grid.push(GridItem { x: (i % COLUMNS) as u8, y: (i / COLUMNS) as u8, item });
+            if let Some(item) = Item::from_bytes(bytes) {
+                self.place(*s, item);
             }
         }
         self.equipment_rev += 1;
     }
 
-    /// `BackupPickedItem`: the held item returns to its place.
+    /// `EquipItem` / `InsertItem`: puts `item` in inventory slot `slot` (0-11 equipment, 12-75 grid by
+    /// its top-left cell). Other slots are ignored.
+    fn place(&mut self, slot: u8, item: Item) {
+        let s = slot as usize;
+        if s < slot::COUNT {
+            self.equipment[s] = Some(item);
+            self.equipment_rev += 1;
+        } else if let Some((x, y)) = grid_cell(slot) {
+            self.grid.retain(|g| (g.x, g.y) != (x, y));
+            self.grid.push(GridItem { x, y, item });
+        }
+    }
+
+    /// The item in inventory slot `slot` (a grid item by its top-left cell).
+    fn item_in(&mut self, slot: u8) -> Option<&mut Item> {
+        let s = slot as usize;
+        if s < slot::COUNT {
+            return self.equipment[s].as_mut();
+        }
+        let (x, y) = grid_cell(slot)?;
+        self.grid.iter_mut().find(|g| (g.x, g.y) == (x, y)).map(|g| &mut g.item)
+    }
+
+    /// `ReceiveDeleteInventory` (`UnequipItem` / `DeleteItem`).
+    fn remove(&mut self, slot: u8) {
+        let s = slot as usize;
+        if s < slot::COUNT {
+            if self.equipment[s].take().is_some() {
+                self.equipment_rev += 1;
+            }
+        } else if let Some((x, y)) = grid_cell(slot) {
+            self.grid.retain(|g| (g.x, g.y) != (x, y));
+        }
+        self.tooltip = None;
+    }
+
+    /// Applies what the server says about the inventory. Returns the sound to play, if any.
+    pub fn apply(&mut self, msg: &ServerMessage) -> Option<&'static str> {
+        match msg {
+            ServerMessage::InventoryList(list) => self.set_items(list),
+            ServerMessage::ItemMoved { storage: to, slot, item } => {
+                // `DeletePickedItem` and then `EquipItem` / `InsertItem` at the server's slot.
+                self.pending = false;
+                self.picked = None;
+                self.event = CtrlEvent::None;
+                if *to == storage::INVENTORY
+                    && let Some(item) = Item::from_bytes(item)
+                {
+                    self.place(*slot, item);
+                }
+                return Some("SOUND_GET_ITEM01");
+            }
+            ServerMessage::ItemMoveFailed => {
+                self.pending = false;
+                self.backup_picked();
+            }
+            ServerMessage::ItemRemoved { slot } => self.remove(*slot),
+            ServerMessage::ItemDurability { slot, durability, .. } => {
+                if let Some(item) = self.item_in(*slot) {
+                    item.durability = *durability;
+                }
+            }
+            _ => {}
+        }
+        None
+    }
+
+    /// `SendRequestEquipmentItem(REQUEST_EQUIPMENT_INVENTORY, source, item, REQUEST_EQUIPMENT_INVENTORY,
+    /// target)`: asks to move the held item to inventory slot `to`. Ignored while another move is
+    /// pending (`if(EquipmentItem ...) return false`).
+    fn request_move(&mut self, net: &mut crate::net::Net, to: u8) {
+        let Some(p) = self.picked else { return };
+        if self.pending {
+            return;
+        }
+        net.send(ClientMessage::ItemMove {
+            from_storage: storage::INVENTORY,
+            from_slot: source_slot(p.from),
+            item: p.item.to_bytes(),
+            to_storage: storage::INVENTORY,
+            to_slot: to,
+        });
+        self.pending = true;
+    }
+
+    /// `BackupPickedItem`: the held item returns to its place. Not while a move waits for its answer
+    /// (`if(ms_pPickedItem && EquipmentItem == false)`, NewUIInventoryCtrl.cpp:1481).
     fn backup_picked(&mut self) {
+        if self.pending {
+            return;
+        }
         let Some(p) = self.picked.take() else { return };
         match p.from {
             Source::Grid { x, y } => self.grid.push(GridItem { x, y, item: p.item }),
@@ -449,10 +578,12 @@ fn update_mouse(
     info: Option<Res<crate::account::HeroInfo>>,
     mut inv: ResMut<Inventory>,
     mut sound: ResMut<SoundQueue>,
+    mut net: ResMut<crate::net::Net>,
 ) {
     if !inv.open {
         return;
     }
+    let online = net.connected();
     let Some(m) = windows.single().ok().and_then(crate::mainframe::cursor_virtual).filter(|_| !game_ui.modal()) else {
         return;
     };
@@ -503,7 +634,8 @@ fn update_mouse(
                     match p.from {
                         // Same slot: put it back (`BackupPickedItem`).
                         Source::Equipment(from) if from as usize == s => inv.backup_picked(),
-                        // `SendRequestEquipmentItem`: what the server reply would do.
+                        _ if online => inv.request_move(&mut net, s as u8),
+                        // No server (`--inventario-prueba`): what its reply would do.
                         _ => {
                             inv.equipment[s] = Some(p.item);
                             inv.picked = None;
@@ -538,6 +670,8 @@ fn update_mouse(
             if inv.fits(&data, x as i32, y as i32, w, h) {
                 if p.from == (Source::Grid { x, y }) {
                     inv.backup_picked();
+                } else if online {
+                    inv.request_move(&mut net, grid_slot(x, y));
                 } else {
                     inv.grid.push(GridItem { x, y, item: p.item });
                     inv.picked = None;
@@ -1274,5 +1408,72 @@ mod tests {
         assert!(inv.picked.is_none());
         assert_eq!(inv.grid, vec![GridItem { x: 3, y: 2, item: it }]);
         assert!(!inv.open);
+    }
+
+    fn kris(level: u8) -> Item {
+        Item { level, durability: 30, ..Item::new(group::SWORD, 1) }
+    }
+
+    #[test]
+    fn slots_and_cells() {
+        assert_eq!(grid_cell(12), Some((0, 0)));
+        assert_eq!(grid_cell(12 + 8 * 2 + 3), Some((3, 2)));
+        assert_eq!(grid_cell(75), Some((7, 7)));
+        assert_eq!(grid_cell(76), None);
+        assert_eq!(grid_cell(11), None);
+        assert_eq!(grid_slot(3, 2), 31);
+        assert_eq!(source_slot(Source::Grid { x: 3, y: 2 }), 31);
+        assert_eq!(source_slot(Source::Equipment(0)), 0);
+    }
+
+    #[test]
+    fn inventory_from_the_server() {
+        let mut inv = Inventory::default();
+        inv.grid.push(GridItem { x: 0, y: 0, item: kris(0) }); // leftover from a test inventory
+        let rev = inv.equipment_rev;
+        inv.apply(&ServerMessage::InventoryList(vec![(0, kris(9).to_bytes()), (31, kris(3).to_bytes()), (204, kris(1).to_bytes())]));
+        assert_eq!(inv.equipment[0], Some(kris(9)));
+        // Slot 204 is the personal store: not in the grid.
+        assert_eq!(inv.grid, vec![GridItem { x: 3, y: 2, item: kris(3) }]);
+        assert!(inv.equipment_rev > rev, "the hero is re-dressed");
+    }
+
+    /// A move waits for the server: the item stays on the mouse and cannot go back meanwhile.
+    #[test]
+    fn move_waits_for_the_server() {
+        let mut inv = Inventory { open: true, ..Default::default() };
+        inv.picked = Some(Picked { item: kris(5), from: Source::Grid { x: 0, y: 0 } });
+        inv.pending = true; // `request_move` sent C3 24
+        inv.close();
+        assert!(inv.picked.is_some(), "BackupPickedItem does nothing while EquipmentItem");
+        assert!(inv.grid.is_empty());
+
+        // Accepted: the item goes where the server says (equipment slot 0).
+        assert_eq!(inv.apply(&ServerMessage::ItemMoved { storage: storage::INVENTORY, slot: 0, item: kris(5).to_bytes() }), Some("SOUND_GET_ITEM01"));
+        assert!(inv.picked.is_none() && !inv.pending);
+        assert_eq!(inv.equipment[0], Some(kris(5)));
+        assert!(inv.grid.is_empty());
+    }
+
+    #[test]
+    fn refused_move_goes_back() {
+        let mut inv = Inventory::default();
+        inv.picked = Some(Picked { item: kris(5), from: Source::Grid { x: 4, y: 1 } });
+        inv.pending = true;
+        inv.apply(&ServerMessage::ItemMoveFailed);
+        assert!(inv.picked.is_none() && !inv.pending);
+        assert_eq!(inv.grid, vec![GridItem { x: 4, y: 1, item: kris(5) }]);
+    }
+
+    #[test]
+    fn removed_and_durability() {
+        let mut inv = Inventory::default();
+        inv.apply(&ServerMessage::InventoryList(vec![(2, kris(0).to_bytes()), (13, kris(1).to_bytes())]));
+        inv.apply(&ServerMessage::ItemDurability { slot: 13, durability: 7, by_consumption: true });
+        assert_eq!(inv.grid[0].item.durability, 7);
+        inv.apply(&ServerMessage::ItemRemoved { slot: 13 });
+        assert!(inv.grid.is_empty());
+        inv.apply(&ServerMessage::ItemRemoved { slot: 2 });
+        assert_eq!(inv.equipment[2], None);
     }
 }
