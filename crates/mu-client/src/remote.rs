@@ -396,6 +396,7 @@ fn walk(
 }
 
 /// Animation, shadow and the terrain light where it stands.
+#[allow(clippy::type_complexity)]
 pub(crate) fn animate(
     time: Res<Time>,
     terrain: Option<Res<LoadedTerrain>>,
