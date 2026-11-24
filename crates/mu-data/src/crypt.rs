@@ -1,11 +1,11 @@
-//! Cifrados de archivos del cliente.
+//! Client file ciphers.
 
 const MAP_XOR_KEY: [u8; 16] = [
     0xD1, 0x73, 0x52, 0xF6, 0xD2, 0x9A, 0xCB, 0x27, 0x3E, 0xAF, 0x59, 0x31, 0x37, 0xB3, 0xE7, 0xA2,
 ];
 
-/// LEA-256 en modo ECB de los BMD versión 15 (clientes Season 12+; clave de
-/// `xulek-muonline/Client.Data/LEACrypto.cs`). Lo que no llena un bloque de 16 queda igual.
+/// LEA-256 in ECB mode for version 15 BMD files (Season 12+ clients; key from
+/// `xulek-muonline/Client.Data/LEACrypto.cs`). A trailing partial 16-byte block is left as is.
 pub fn lea_decrypt(src: &[u8]) -> Vec<u8> {
     use lea::Lea256;
     use lea::prelude::*;
@@ -21,10 +21,10 @@ pub fn lea_decrypt(src: &[u8]) -> Vec<u8> {
     out
 }
 
-/// Descifra los archivos `EncTerrain*.map`, `*.att` y `*.obj` (el "MapFileDecrypt" del cliente original).
+/// Decrypts `EncTerrain*.map`, `*.att` and `*.obj` files (the original client's "MapFileDecrypt").
 ///
-/// Cada byte se hace XOR con una clave de 16 bytes y se le resta una clave que
-/// va cambiando según el byte cifrado anterior.
+/// Each byte is XORed with a 16-byte key and then a key that changes with the
+/// previous encrypted byte is subtracted.
 pub fn map_file_decrypt(src: &[u8]) -> Vec<u8> {
     let mut key: u8 = 0x5E;
     src.iter()
@@ -41,7 +41,7 @@ pub fn map_file_decrypt(src: &[u8]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    /// Cifrado inverso, solo para comprobar que el descifrado es correcto.
+    /// Inverse cipher, only to check that decryption is correct.
     fn map_file_encrypt(src: &[u8]) -> Vec<u8> {
         let mut key: u8 = 0x5E;
         src.iter()

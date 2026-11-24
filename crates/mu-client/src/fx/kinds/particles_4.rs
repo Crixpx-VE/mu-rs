@@ -1,6 +1,6 @@
-//! Partículas de `ZzzEffectParticle.cpp` (familia 4): chispas de explosión, explosiones animadas,
-//! brillos de arma (`BITMAP_SHINY*`, `BITMAP_FLARE_RED`), flores de cerezo, nieve, sangre,
-//! fuegos artificiales, fuerza de espada y nubes (`BITMAP_CLOUD`, todos sus subtipos).
+//! Particles from `ZzzEffectParticle.cpp` (family 4): explosion sparks, animated explosions,
+//! weapon shines (`BITMAP_SHINY*`, `BITMAP_FLARE_RED`), cherry blossoms, snow, blood,
+//! fireworks, sword force and clouds (`BITMAP_CLOUD`, all its subtypes).
 
 use std::f32::consts::PI;
 
@@ -51,15 +51,15 @@ pub fn register(r: &mut Registry) {
     r.particle(BITMAP_CLOUD, k(create_cloud, step_cloud, Some(draw_cloud)));
 }
 
-// --- Utilidades ------------------------------------------------------------------------------------
+// --- Helpers ---------------------------------------------------------------------------------------
 
-/// `rand() % n` como float.
+/// `rand() % n` as a float.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `VectorRotate(v, Matrix, v)` con entrada y salida iguales: el original reutiliza las
-/// componentes ya giradas (aliasing), así que se calcula componente a componente.
+/// `VectorRotate(v, Matrix, v)` with the same input and output: the original reuses the
+/// already-rotated components (aliasing), so it is computed component by component.
 fn rotate_in_place(angle: Vec3, v: Vec3) -> Vec3 {
     let m = angle_matrix(angle);
     let mut o = v;
@@ -69,17 +69,17 @@ fn rotate_in_place(angle: Vec3, v: Vec3) -> Vec3 {
     o
 }
 
-/// `HandPosition`: coloca la partícula en el hueso del arma de su dueño.
+/// `HandPosition`: places the particle on its owner's weapon bone.
 fn hand_position(p: &mut Particle, ctx: &Ctx) {
     let offset = if p.ty == BITMAP_FLARE_RED || p.ty == SHINY_2 { Vec3::new(0.0, -120.0, 0.0) } else { Vec3::ZERO };
     if let Some(a) = ctx.actor(p.target) {
-        // TODO(original): usa `Hero->Weapon[SubType % 2].LinkBone` (mano derecha o izquierda);
-        // aquí solo hay un hueso de arma.
+        // TODO(original): uses `Hero->Weapon[SubType % 2].LinkBone` (right or left hand);
+        // there is only one weapon bone here.
         p.position = a.bone_world(a.weapon_bone, offset);
     }
 }
 
-/// `CreateBomb(p, Exp, 0)` de `ZzzEffect.cpp` (solo el subtipo 0, el único que se usa aquí).
+/// `CreateBomb(p, Exp, 0)` from `ZzzEffect.cpp` (only subtype 0, the only one used here).
 fn create_bomb(ctx: &mut Ctx, p: Vec3, exp: bool) {
     let mut position = p;
     position.z += 80.0;
@@ -96,7 +96,7 @@ fn create_bomb(ctx: &mut Ctx, p: Vec3, exp: bool) {
     }
 }
 
-/// Un sprite de `RenderSprite`: alfa 1 si la textura es JPG (o `BITMAP_BLOOD + 1`), si no `Light[0]`.
+/// A `RenderSprite` sprite: alpha 1 if the texture is a JPG (or `BITMAP_BLOOD + 1`), otherwise `Light[0]`.
 #[allow(clippy::too_many_arguments)]
 fn sprite(out: &mut DrawList, ctx: &DrawCtx, tex: i32, pos: Vec3, w: f32, h: f32, light: Vec3, rot: f32, uv: [f32; 4], blend: Blend) {
     let Some(t) = ctx.tex(tex) else { return };
@@ -113,7 +113,7 @@ fn sprite(out: &mut DrawList, ctx: &DrawCtx, tex: i32, pos: Vec3, w: f32, h: f32
     });
 }
 
-/// Width/Height y mezcla de `RenderParticles` (tamaño de `TexType` × escala).
+/// Width/Height and blend from `RenderParticles` (`TexType` size × scale).
 fn size(p: &Particle, ctx: &DrawCtx) -> Option<(f32, f32, Blend)> {
     let t = ctx.tex(p.tex_type)?;
     Some((t.width * p.scale, t.height * p.scale, default_blend(t)))
@@ -155,7 +155,7 @@ fn step_spark2(p: &mut Particle, ctx: &mut Ctx) {
         }
     } else if (p.sub_type == 2 || p.sub_type == 3) && p.target.is_some() {
         p.frame = ((16.0 - p.life_time) / 4.0) as i32;
-        // Mano izquierda (37) o derecha (28) del jugador.
+        // Player's left (37) or right (28) hand.
         let bone = if p.sub_type == 2 { 37 } else { 28 };
         if let Some(a) = ctx.actor(p.target) {
             p.position = a.bone_world(bone, Vec3::ZERO);
@@ -178,11 +178,11 @@ fn create_explotion(p: &mut Particle, ctx: &mut Ctx) {
     if p.sub_type == 2 {
         p.life_time = 30.0;
     }
-    // (En la escena de login no suena; aquí no hay.)
+    // (Silent in the login scene; there is none here.)
     ctx.play_sound(if p.sub_type == 10 { "SOUND_MOONRABBIT_EXPLOSION" } else { "SOUND_EXPLOTION01" });
 }
 
-/// Anillo de 18 humos + explosiones a `dist` del centro (subtipo 2).
+/// Ring of 18 smokes + explosions at `dist` from the center (subtype 2).
 fn explotion_ring(p: &Particle, ctx: &mut Ctx, dist: f32, smoke_light: Vec3, exp_light: Vec3) {
     for j in 0..18 {
         let pos = rotate(Vec3::new(0.0, 0.0, j as f32 * 20.0), Vec3::new(0.0, dist, 0.0)) + p.position;
@@ -214,7 +214,7 @@ fn step_explotion(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Atlas 4×4 (`BITMAP_EXPLOTION*`, `BITMAP_SUMMON_SAHAMUTT_EXPLOSION`).
+/// 4×4 atlas (`BITMAP_EXPLOTION*`, `BITMAP_SUMMON_SAHAMUTT_EXPLOSION`).
 fn draw_explotion(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some((w, h, blend)) = size(p, ctx) else { return };
     let uv = [
@@ -355,7 +355,7 @@ fn create_shiny(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Parte común de los subtipos 6, 8 y 9: se apaga, parpadea y cae.
+/// Shared by subtypes 6, 8 and 9: fades out, flickers and falls.
 fn shiny_fade_fall(p: &mut Particle, ctx: &mut Ctx) {
     p.light *= 1.0 / 1.01;
     if p.light.x < 0.2 {
@@ -485,8 +485,8 @@ fn step_petal(p: &mut Particle, ctx: &mut Ctx) {
 
 fn create_flower(p: &mut Particle, ctx: &mut Ctx) {
     if p.sub_type == 0 {
-        // vSpeed: el original lo calcula y lo copia a Velocity, pero luego lo pisa el giro de abajo
-        // (se consumen igual los rand()).
+        // vSpeed: the original computes it and copies it to Velocity, but the rotation below overwrites it
+        // (the rand() calls are still consumed).
         let _ = (ctx.rand(), ctx.rand(), ctx.rand());
         p.alpha = 1.0;
         p.life_time = (ctx.rand() % 30 + 20) as f32;
@@ -630,7 +630,7 @@ fn create_shiny6(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// `fLight = rand() % 10 / 100 - 0.05` sumado a los tres canales.
+/// `fLight = rand() % 10 / 100 - 0.05` added to all three channels.
 fn flicker_light(p: &mut Particle, ctx: &mut Ctx) {
     let f = rf(ctx, 10) / 100.0 - 0.05;
     p.light += Vec3::splat(f);
@@ -652,7 +652,7 @@ fn step_shiny6(p: &mut Particle, ctx: &mut Ctx) {
     }
 }
 
-/// Su textura y encima `BITMAP_LIGHT` del mismo tamaño (con la mezcla de la primera).
+/// Its texture plus a same-size `BITMAP_LIGHT` on top (with the first one's blend).
 fn draw_shiny6(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some((w, h, blend)) = size(p, ctx) else { return };
     sprite(out, ctx, p.tex_type, p.position, w, h, p.light, p.rotation, FULL_UV, blend);
@@ -685,7 +685,7 @@ fn step_pin_light(p: &mut Particle, ctx: &mut Ctx) {
         p.live = false;
     }
     if p.sub_type == 1 {
-        // El original gira la propia posición con su ángulo (VectorRotate(Position, M, Position)).
+        // The original rotates its own position by its angle (VectorRotate(Position, M, Position)).
         p.position = rotate_in_place(p.angle, p.position);
     } else {
         p.position.z -= p.gravity;
@@ -705,7 +705,7 @@ fn create_orora(p: &mut Particle, _ctx: &mut Ctx) {
 }
 
 fn step_orora(p: &mut Particle, ctx: &mut Ctx) {
-    // Mano izquierda (37) o derecha (28) del dueño.
+    // Owner's left (37) or right (28) hand.
     let (fscale, flight, bone) = match p.sub_type {
         0 => {
             p.rotation += 5.0;
@@ -771,7 +771,7 @@ fn create_ds_effect(p: &mut Particle, ctx: &mut Ctx) {
 fn step_ds_effect(p: &mut Particle, ctx: &mut Ctx) {
     p.rotation += 10.0;
     if p.target.is_some() {
-        // Si el dueño ya no existe se trata como si hubiera cambiado de acción.
+        // If the owner no longer exists, treat it as if it had changed action.
         let santa = ctx.actor(p.target).is_some_and(|a| a.action as i32 == PLAYER_SANTA_2);
         if !santa {
             p.live = false;
@@ -782,7 +782,7 @@ fn step_ds_effect(p: &mut Particle, ctx: &mut Ctx) {
 // --- BITMAP_BLOOD / BITMAP_BLOOD + 1 ---------------------------------------------------------------
 
 fn create_blood(p: &mut Particle, ctx: &mut Ctx) {
-    // `AngleMatrix(Angle)` usa el ángulo recibido, no el ya modificado.
+    // `AngleMatrix(Angle)` uses the received angle, not the modified one.
     let angle = p.angle;
     p.life_time = 12.0;
     p.scale = (ctx.rand() % 4 + 8) as f32 * 0.05;
@@ -823,8 +823,8 @@ fn create_firecracker(p: &mut Particle, ctx: &mut Ctx) {
         p.life_time = 50.0;
         p.scale = 0.10;
     }
-    // `frame` (no lo usa este tipo) guarda el equivalente de `i % 8` (índice de la ranura del
-    // original), que decide la longitud de la estela al dibujar.
+    // `frame` (unused by this kind) stores the equivalent of `i % 8` (the original's slot
+    // index), which decides the trail length when drawing.
     p.frame = ctx.rand() % 8;
 }
 
@@ -832,7 +832,7 @@ fn step_firecracker(p: &mut Particle, _ctx: &mut Ctx) {
     p.velocity.z -= 0.5;
 }
 
-/// Estela de `iCount` sprites hacia atrás con el color que va rotando entre canales.
+/// Trail of `iCount` sprites backwards, with the color rotating between channels.
 fn draw_firecracker(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     let Some((w, h, blend)) = size(p, ctx) else { return };
     let count = p.frame.rem_euclid(8) + 22;
@@ -950,7 +950,7 @@ fn create_cloud(p: &mut Particle, ctx: &mut Ctx) {
             p.gravity = (ctx.rand() % 50 - 25) as f32 / 10.0;
         }
         14 => {
-            // El original pone a cero el `Light` local (argumento), no `o->Light`: sin efecto.
+            // The original zeroes the local `Light` (argument), not `o->Light`: no effect.
             p.life_time = (25 + ctx.rand() % 5) as f32;
             p.rotation = rf(ctx, 360);
             p.scale = scale * 0.2;
@@ -968,7 +968,7 @@ fn create_cloud(p: &mut Particle, ctx: &mut Ctx) {
             p.scale = (ctx.rand() % 15 + 15) as f32 / 30.0 + scale;
             let t = (ctx.rand() % 10 + 5) as f32 * 0.08;
             p.velocity = Vec3::new(t, t, 0.0);
-            // TurningForce guarda el color final; la luz empieza apagada.
+            // TurningForce holds the final color; the light starts off.
             p.turning_force = p.light;
             p.light = Vec3::ZERO;
         }
@@ -1083,12 +1083,12 @@ fn create_cloud(p: &mut Particle, ctx: &mut Ctx) {
             p.velocity = Vec3::ZERO;
         }
     }
-    // `frame` (no lo usa este tipo) guarda la paridad de la ranura del original (`i % 2`), que
-    // decide el sentido de giro al dibujar los subtipos 0, 3, 8 y 18.
+    // `frame` (unused by this kind) stores the parity of the original's slot (`i % 2`), which
+    // decides the spin direction when drawing subtypes 0, 3, 8 and 18.
     p.frame = ctx.rand() % 2;
 }
 
-/// Subtipos 6 y 14: humo que sube y se apaga.
+/// Subtypes 6 and 14: smoke that rises and fades out.
 fn cloud_smoke(p: &mut Particle, ctx: &mut Ctx) {
     p.position += p.velocity;
     p.velocity.x *= 0.95;
@@ -1102,7 +1102,7 @@ fn cloud_smoke(p: &mut Particle, ctx: &mut Ctx) {
     p.rotation += (1 + ctx.rand() % 2) as f32;
 }
 
-/// Subtipos 8, 9, 20 y 21: aparece subiendo y luego baja desvaneciéndose.
+/// Subtypes 8, 9, 20 and 21: appears rising, then sinks while fading.
 fn cloud_fade(p: &mut Particle, limit: f32, up: f32, fade: f32, down: f32) {
     if p.life_time <= 0.0 {
         p.live = false;
@@ -1119,7 +1119,7 @@ fn cloud_fade(p: &mut Particle, limit: f32, up: f32, fade: f32, down: f32) {
     }
 }
 
-/// Encendido gradual hacia `TurningForce` (subtipos 15 y 17).
+/// Gradual fade-in toward `TurningForce` (subtypes 15 and 17).
 fn cloud_light_in(p: &mut Particle, k: f32) {
     let tf = p.turning_force.to_array();
     let mut l = p.light.to_array();
@@ -1297,8 +1297,8 @@ fn step_cloud(p: &mut Particle, ctx: &mut Ctx) {
             p.rotation += p.turning_force.x * 5.0;
         }
         _ => {
-            // TODO(original): `o->Target->Visible` (objeto visible en pantalla). Aquí se toma como
-            // visible si lo que sigue sigue existiendo.
+            // TODO(original): `o->Target->Visible` (object visible on screen). Here it counts as
+            // visible if the followed target still exists.
             if ctx.target_position(p.target).is_some() {
                 p.life_time = 50.0;
             }
@@ -1322,7 +1322,7 @@ fn draw_cloud(p: &Particle, ctx: &DrawCtx, out: &mut DrawList) {
     match p.sub_type {
         10 | 12 | 7 | 14 | 16 => blend = Blend::Subtract,
         0 | 8 | 3 | 18 => {
-            // Paridad de la ranura guardada en `frame` (ver `create_cloud`).
+            // Slot parity stored in `frame` (see `create_cloud`).
             let dir = if p.frame % 2 == 0 { 0.02 } else { -0.02 };
             rotation = ctx.world_time * dir * p.turning_force.x + p.start_position.y;
         }

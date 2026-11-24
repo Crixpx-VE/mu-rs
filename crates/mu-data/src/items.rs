@@ -1,18 +1,18 @@
-//! Objetos (items) del S6: lo que el original sabe de cada tipo (`ITEM_ATTRIBUTE`) y de cada objeto
-//! concreto (`ITEM`).
+//! S6 items: what the original knows about each type (`ITEM_ATTRIBUTE`) and each concrete
+//! item (`ITEM`).
 //!
-//! - [`ItemTable`]: `Data\Local\Eng\item_eng.bmd`, como lo lee `OpenItemScript` (ZzzInfomation.cpp:386-420,
-//!   ruta de ZzzOpenData.cpp:5421): `MAX_ITEM` (16 × 512) registros de `sizeof(ITEM_ATTRIBUTE)` = 84 bytes
-//!   (`_struct.h:150-182` con `MAX_CLASS` = 6), cada uno con `BuxConvert` (XOR `FC CF AB`), y un `DWORD`
-//!   de suma de control al final. La suma no se comprueba: `GenerateCheckSum2` no está en el código.
-//!   Los datos de `dist` son los de MuMain, que no trae ese archivo: sin él se leen sus
-//!   `Items/GroupNN_*.json` (mismos valores, otro formato).
-//! - [`Item`]: un objeto concreto (tipo, nivel, opciones) y sus 12 bytes del paquete del S6
-//!   (`ConvertItemType` y `ItemConvert`, ZzzInfomation.cpp:379-384 y 566-1573).
-//! - [`ItemStats`]: lo que calcula `ItemConvert` (daño, defensa, requisitos y opciones con su valor).
-//! - [`model`]: qué modelo dibuja cada objeto y cómo se coloca en una casilla del inventario.
-//! - [`glow`]: las pasadas de brillo por nivel, excelente y antiguo (`RenderPartObjectEffect`).
-//! - [`info`]: las líneas del cuadro de información (`RenderItemInfo`).
+//! - [`ItemTable`]: `Data\Local\Eng\item_eng.bmd`, as read by `OpenItemScript` (ZzzInfomation.cpp:386-420,
+//!   path from ZzzOpenData.cpp:5421): `MAX_ITEM` (16 × 512) records of `sizeof(ITEM_ATTRIBUTE)` = 84 bytes
+//!   (`_struct.h:150-182` with `MAX_CLASS` = 6), each with `BuxConvert` (XOR `FC CF AB`), and a checksum
+//!   `DWORD` at the end. The checksum is not verified: `GenerateCheckSum2` is not in the source.
+//!   The `dist` data is MuMain's, which does not ship that file: without it, its
+//!   `Items/GroupNN_*.json` are read (same values, different format).
+//! - [`Item`]: a concrete item (type, level, options) and its 12 bytes in the S6 packet
+//!   (`ConvertItemType` and `ItemConvert`, ZzzInfomation.cpp:379-384 and 566-1573).
+//! - [`ItemStats`]: what `ItemConvert` computes (damage, defense, requirements and options with their value).
+//! - [`model`]: which model each item draws and how it sits in an inventory cell.
+//! - [`glow`]: the level, excellent and ancient glow passes (`RenderPartObjectEffect`).
+//! - [`info`]: the lines of the info tooltip (`RenderItemInfo`).
 
 pub mod glow;
 pub mod info;
@@ -23,16 +23,16 @@ use std::path::Path;
 use crate::warps::bux_convert;
 use crate::{Error, Result, fs};
 
-/// `MAX_ITEM_INDEX` (_define.h:342): objetos por grupo.
+/// `MAX_ITEM_INDEX` (_define.h:342): items per group.
 pub const MAX_ITEM_INDEX: usize = 512;
-/// `MAX_ITEM_TYPE` (_define.h:339): grupos.
+/// `MAX_ITEM_TYPE` (_define.h:339): groups.
 pub const MAX_ITEM_TYPE: usize = 16;
 /// `MAX_ITEM` (_define.h:344).
 pub const MAX_ITEM: usize = MAX_ITEM_TYPE * MAX_ITEM_INDEX;
-/// `sizeof(ITEM_ATTRIBUTE)` del `item_eng.bmd` del S6.
+/// `sizeof(ITEM_ATTRIBUTE)` of the S6 `item_eng.bmd`.
 pub const RECORD_LEN: usize = 84;
 
-/// Grupos (`ITEM_SWORD`... de _define.h; el tipo es `grupo · 512 + índice`).
+/// Groups (`ITEM_SWORD`... from _define.h; the type is `group · 512 + index`).
 pub mod group {
     pub const SWORD: u8 = 0;
     pub const AXE: u8 = 1;
@@ -52,7 +52,7 @@ pub mod group {
     pub const ETC: u8 = 15;
 }
 
-/// Huecos del equipo (`EQUIPMENT_*`, _define.h:197-208).
+/// Equipment slots (`EQUIPMENT_*`, _define.h:197-208).
 pub mod slot {
     pub const WEAPON_RIGHT: u8 = 0;
     pub const WEAPON_LEFT: u8 = 1;
@@ -70,7 +70,7 @@ pub mod slot {
     pub const COUNT: usize = 12;
 }
 
-/// Tipo del original (`ITEM_SWORD + índice`...): `grupo · MAX_ITEM_INDEX + índice`.
+/// Original type (`ITEM_SWORD + index`...): `group · MAX_ITEM_INDEX + index`.
 pub const fn kind(group: u8, index: u16) -> usize {
     group as usize * MAX_ITEM_INDEX + index as usize
 }
@@ -80,13 +80,13 @@ pub const fn kind(group: u8, index: u16) -> usize {
 pub struct ItemAttribute {
     pub name: String,
     pub two_hand: bool,
-    /// Nivel del objeto (para la caída y las fórmulas de requisitos).
+    /// Item level (for drops and the requirement formulas).
     pub level: u16,
-    /// `m_byItemSlot`: hueco del equipo donde va (`None` = 255, no se equipa).
+    /// `m_byItemSlot`: equipment slot it goes into (`None` = 255, not equippable).
     pub slot: Option<u8>,
-    /// `m_bySkillIndex`: la habilidad que da con la opción de habilidad.
+    /// `m_bySkillIndex`: the skill granted by the skill option.
     pub skill: u16,
-    /// Casillas que ocupa en el inventario.
+    /// Inventory cells it occupies.
     pub width: u8,
     pub height: u8,
     pub damage_min: u8,
@@ -108,12 +108,12 @@ pub struct ItemAttribute {
     pub value: u16,
     pub zen: i32,
     pub attack_type: u8,
-    /// `RequireClass[CLASS_*]`: 0 = no puede; 1, 2 o 3 = desde la 1.ª, 2.ª o 3.ª clase.
+    /// `RequireClass[CLASS_*]`: 0 = cannot; 1, 2 or 3 = from the 1st, 2nd or 3rd class.
     pub require_class: [u8; 7],
     pub resistance: [u8; 8],
 }
 
-/// Los `MAX_ITEM` tipos (`ItemAttribute[]`); los que no existen, `None`.
+/// The `MAX_ITEM` types (`ItemAttribute[]`); nonexistent ones are `None`.
 #[derive(Debug, Clone)]
 pub struct ItemTable {
     items: Vec<Option<ItemAttribute>>,
@@ -134,13 +134,13 @@ impl ItemTable {
         self.items.get(kind).and_then(|i| i.as_ref())
     }
 
-    /// Cuántos tipos tienen nombre.
+    /// How many types have a name.
     pub fn count(&self) -> usize {
         self.items.iter().filter(|i| i.is_some()).count()
     }
 }
 
-/// Lee `item_eng.bmd`. Los registros sin nombre (`Name[0] == 0`, como mira `PrintItem`) quedan vacíos.
+/// Reads `item_eng.bmd`. Records without a name (`Name[0] == 0`, as `PrintItem` checks) are left empty.
 pub fn read_item_bmd(buf: &[u8]) -> Result<ItemTable> {
     if buf.len() < MAX_ITEM * RECORD_LEN {
         return Err(Error::Format(format!("item.bmd: {} bytes, se esperaban {}", buf.len(), MAX_ITEM * RECORD_LEN + 4)));
@@ -160,7 +160,7 @@ pub fn read_item_bmd(buf: &[u8]) -> Result<ItemTable> {
         let mut resistance = [0u8; 8];
         resistance.copy_from_slice(&r[76..84]);
         table.items[i] = Some(ItemAttribute {
-            // Windows-1252 (los nombres en inglés son ASCII).
+            // Windows-1252 (English names are ASCII).
             name: r[..end].iter().map(|&b| b as char).collect(),
             two_hand: w(30) != 0,
             level: w(32),
@@ -194,7 +194,7 @@ pub fn read_item_bmd(buf: &[u8]) -> Result<ItemTable> {
     Ok(table)
 }
 
-/// Lee los `Items/GroupNN_*.json` de MuMain (uno por grupo: `{"group": N, "items": [...]}`).
+/// Reads MuMain's `Items/GroupNN_*.json` (one per group: `{"group": N, "items": [...]}`).
 pub fn read_items_json(files: &[String]) -> Result<ItemTable> {
     let mut table = ItemTable::default();
     for text in files {
@@ -206,7 +206,7 @@ pub fn read_items_json(files: &[String]) -> Result<ItemTable> {
             let req = |k: &str| it["requirements"][k].as_u64().unwrap_or(0) as u16;
             let class = |k: &str| it["classRequirements"][k].as_u64().unwrap_or(0) as u8;
             let name = it["name"]["en"].as_str().or_else(|| it["name"].as_str()).unwrap_or("").to_string();
-            // `m_byItemSlot`: los nombres de MuMain para los `EQUIPMENT_*`.
+            // `m_byItemSlot`: MuMain's names for the `EQUIPMENT_*` values.
             let slot = match it["slot"].as_str().unwrap_or("") {
                 "mainHand" => Some(slot::WEAPON_RIGHT),
                 "offHand" => Some(slot::WEAPON_LEFT),
@@ -264,8 +264,8 @@ pub fn read_items_json(files: &[String]) -> Result<ItemTable> {
     Ok(table)
 }
 
-/// La tabla de la carpeta `Data`: `Local/Eng/item_eng.bmd` (la del original) o, si no está, los
-/// `Items/GroupNN_*.json` de MuMain.
+/// The table from the `Data` folder: `Local/Eng/item_eng.bmd` (the original's) or, if missing,
+/// MuMain's `Items/GroupNN_*.json`.
 pub fn load(data: &Path) -> Result<ItemTable> {
     match fs::read(&data.join("Local").join("Eng"), "item_eng.bmd") {
         Ok(b) => read_item_bmd(&b),
@@ -291,11 +291,11 @@ pub fn load(data: &Path) -> Result<ItemTable> {
     }
 }
 
-/// Maná de cada habilidad (`SkillAttribute[i].Mana`): `Skill.bmd`, `MAX_SKILLS` (600) registros de
-/// `sizeof(SKILL_ATTRIBUTE)` = 80 bytes (_struct.h) con `BuxConvert`; el maná, el `WORD` en 36.
+/// Mana of each skill (`SkillAttribute[i].Mana`): `Skill.bmd`, `MAX_SKILLS` (600) records of
+/// `sizeof(SKILL_ATTRIBUTE)` = 80 bytes (_struct.h) with `BuxConvert`; mana is the `WORD` at 36.
 pub fn read_skill_mana(buf: &[u8]) -> Result<Vec<(String, u16)>> {
     const LEN: usize = 80;
-    // Los `skill*.bmd` de MuMain tienen otro formato (otro tamaño de registro).
+    // MuMain's `skill*.bmd` files have another format (another record size).
     if buf.len() != 600 * LEN + 4 {
         return Err(Error::Format(format!("skill.bmd: {} bytes, se esperaban {}", buf.len(), 600 * LEN + 4)));
     }
@@ -311,8 +311,8 @@ pub fn read_skill_mana(buf: &[u8]) -> Result<Vec<(String, u16)>> {
         })
         .collect::<Vec<(String, u16)>>())
     .and_then(|list| {
-        // Un nombre de 32 letras sin el cero del final es que el cifrado no era `BuxConvert` (el
-        // `Local/Skill.bmd` de MuMain tiene el mismo tamaño pero otro cifrado).
+        // A 32-letter name without the trailing zero means the cipher was not `BuxConvert` (MuMain's
+        // `Local/Skill.bmd` has the same size but another cipher).
         if list.iter().take(64).any(|(n, _)| n.len() >= 32) {
             Err(Error::Format("skill.bmd: no es el formato del S6".into()))
         } else {
@@ -321,36 +321,36 @@ pub fn read_skill_mana(buf: &[u8]) -> Result<Vec<(String, u16)>> {
     })
 }
 
-/// `Local/Eng/skill_eng.bmd` (el del original) o `Local/Skill.bmd` (el de MuMain).
+/// `Local/Eng/skill_eng.bmd` (the original's) or `Local/Skill.bmd` (MuMain's).
 pub fn load_skill_mana(data: &Path) -> Result<Vec<(String, u16)>> {
     let local = data.join("Local");
     let eng = fs::read(&local.join("Eng"), "skill_eng.bmd").and_then(|b| read_skill_mana(&b));
     eng.or_else(|_| fs::read(&local, "Skill.bmd").and_then(|b| read_skill_mana(&b)))
 }
 
-// --- Un objeto -------------------------------------------------------------------------------------
+// --- One item --------------------------------------------------------------------------------------
 
-/// `EXT_A_SET_OPTION` y `EXT_B_SET_OPTION` (`ExtOption % 4`): objeto de set (antiguo).
+/// `EXT_A_SET_OPTION` and `EXT_B_SET_OPTION` (`ExtOption % 4`): set (ancient) item.
 pub const EXT_A_SET_OPTION: u8 = 1;
 pub const EXT_B_SET_OPTION: u8 = 2;
 
-/// Un objeto concreto (`ITEM`): tipo, nivel y opciones, como llegan en los 12 bytes del S6.
+/// A concrete item (`ITEM`): type, level and options, as they arrive in the S6's 12 bytes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Hash)]
 pub struct Item {
     pub group: u8,
     pub index: u16,
-    /// +0 a +15 (`(Level >> 3) & 15`).
+    /// +0 to +15 (`(Level >> 3) & 15`).
     pub level: u8,
     pub durability: u8,
-    /// Opción de habilidad (`Level & 128`).
+    /// Skill option (`Level & 128`).
     pub skill: bool,
-    /// Suerte (`Level & 4`).
+    /// Luck (`Level & 4`).
     pub luck: bool,
-    /// Opción adicional, 0 a 7 (`(Level & 3) + (Option1 & 64) / 64 · 4`).
+    /// Additional option, 0 to 7 (`(Level & 3) + (Option1 & 64) / 64 · 4`).
     pub option: u8,
-    /// Opciones excelentes (`Option1 & 63`).
+    /// Excellent options (`Option1 & 63`).
     pub excellent: u8,
-    /// `ExtOption`: set antiguo (`% 4` = 1 o 2) y su nivel de bonificación.
+    /// `ExtOption`: ancient set (`% 4` = 1 or 2) and its bonus level.
     pub ancient: u8,
 }
 
@@ -359,29 +359,29 @@ impl Item {
         Self { group, index, ..Default::default() }
     }
 
-    /// Tipo del original (`ITEM_*`).
+    /// Original type (`ITEM_*`).
     pub fn kind(&self) -> usize {
         kind(self.group, self.index)
     }
 
-    /// `ip->Level` tal cual va en el paquete (`Attribute1`).
+    /// `ip->Level` exactly as it goes in the packet (`Attribute1`).
     pub fn level_byte(&self) -> u8 {
         (self.skill as u8) << 7 | (self.level & 15) << 3 | (self.luck as u8) << 2 | (self.option & 3)
     }
 
-    /// `ip->Option1` (`Attribute2`): excelentes, el bit alto de la opción y el bit 8 del índice.
+    /// `ip->Option1` (`Attribute2`): excellent options, the option's high bit and bit 8 of the index.
     pub fn option1(&self) -> u8 {
         (self.excellent & 63) | ((self.option >> 2) & 1) << 6 | (((self.index >> 8) & 1) as u8) << 7
     }
 
-    /// Objeto de set (`(ExtOption % 4) == EXT_A/B_SET_OPTION`).
+    /// Set item (`(ExtOption % 4) == EXT_A/B_SET_OPTION`).
     pub fn is_ancient(&self) -> bool {
         matches!(self.ancient % 4, EXT_A_SET_OPTION | EXT_B_SET_OPTION)
     }
 
-    /// Los bytes de un objeto en los paquetes del S6 (`ConvertItemType`, ZzzInfomation.cpp:379-384:
-    /// `Item[0] + (Item[3] & 128) · 2 + (Item[5] & 240) · 32`; el resto, `ItemConvert(ip, Item[1],
-    /// Item[3], Item[4])` y `Item[2]` = durabilidad). Hacen falta al menos 6.
+    /// An item's bytes in S6 packets (`ConvertItemType`, ZzzInfomation.cpp:379-384:
+    /// `Item[0] + (Item[3] & 128) · 2 + (Item[5] & 240) · 32`; the rest, `ItemConvert(ip, Item[1],
+    /// Item[3], Item[4])` and `Item[2]` = durability). Needs at least 6.
     pub fn from_bytes(b: &[u8]) -> Option<Self> {
         if b.len() < 6 || (b[0] == 0xFF && b[5] >> 4 == 0xF) {
             return None;
@@ -400,7 +400,7 @@ impl Item {
         })
     }
 
-    /// Los 12 bytes del S6 (`ItemSerializer` de OpenMU); armonía y zócalos a cero.
+    /// The S6's 12 bytes (OpenMU's `ItemSerializer`); harmony and sockets zeroed.
     pub fn to_bytes(&self) -> [u8; 12] {
         let mut b = [0u8; 12];
         b[0] = (self.index & 0xFF) as u8;
@@ -413,10 +413,10 @@ impl Item {
     }
 }
 
-/// Opciones que calcula `ItemConvert` (`ip->Special[]`, los `AT_*` de SkillManager.h).
+/// Options computed by `ItemConvert` (`ip->Special[]`, the `AT_*` from SkillManager.h).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Special {
-    /// La habilidad del objeto (`m_bySkillIndex`).
+    /// The item's skill (`m_bySkillIndex`).
     Skill(u16),
     Luck,
     ImproveDamage,
@@ -427,14 +427,14 @@ pub enum Special {
     LifeRegeneration,
     ImproveMaxMana,
     ImproveMaxAg,
-    // Excelentes de armaduras y escudos.
+    // Excellent options for armor and shields.
     ImproveLife,
     ImproveMana,
     DecreaseDamage,
     ReflectionDamage,
     ImproveBlockingPercent,
     ImproveGainGold,
-    // Excelentes de armas.
+    // Excellent options for weapons.
     ExcellentDamage,
     ImproveDamageLevel,
     ImproveDamagePercent,
@@ -443,14 +443,14 @@ pub enum Special {
     ImproveAttackSpeed,
     ImproveGainLife,
     ImproveGainMana,
-    // Alas de 2.ª.
+    // 2nd-class wings.
     ImproveHpMax,
     ImproveMpMax,
     OnePercentDamage,
     ImproveAgMax,
 }
 
-/// Lo que deja `ItemConvert` en el `ITEM` (ZzzInfomation.cpp:566-1573).
+/// What `ItemConvert` leaves in the `ITEM` (ZzzInfomation.cpp:566-1573).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ItemStats {
     pub damage_min: u32,
@@ -465,23 +465,23 @@ pub struct ItemStats {
     pub require_energy: u32,
     pub require_vitality: u32,
     pub require_charisma: u32,
-    /// `Special[i]` y `SpecialValue[i]`, en el orden del original.
+    /// `Special[i]` and `SpecialValue[i]`, in the original's order.
     pub specials: Vec<(Special, u32)>,
 }
 
 impl ItemStats {
-    /// `SpecialNum` (cuenta para el color del nombre).
+    /// `SpecialNum` (counts for the name color).
     pub fn special_count(&self) -> usize {
         self.specials.len()
     }
 }
 
-/// `(min(9, nivel) · 3)` más el extra de +10 a +15 (`switch (Level - 9)`, 4 a 9).
+/// `(min(9, level) · 3)` plus the +10 to +15 extra (`switch (Level - 9)`, 4 to 9).
 fn level_bonus(level: u32) -> u32 {
     level.min(9) * 3 + if level >= 10 { level - 9 + 3 } else { 0 }
 }
 
-/// `ItemConvert` sin la armonía, los zócalos ni las mascotas. `hero_level` es el de `+nivel/20`.
+/// `ItemConvert` without harmony, sockets or pets. `hero_level` is the one for `+level/20`.
 pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats {
     use group::*;
     let (g, i) = (item.group, item.index);
@@ -490,7 +490,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     let level = item.level.min(15) as u32;
     let mut excel = item.excellent as u32 & 63;
     let excel_wing = excel;
-    // Las alas de 2.ª, la capa del Dark Lord y las armas de Blood Castle no suben por excelente.
+    // 2nd-class wings, the Dark Lord cape and the Blood Castle weapons do not increase from excellent.
     let wing2 = (k(WING, 3)..=k(WING, 6)).contains(&t)
         || (k(WING, 36)..=k(WING, 40)).contains(&t)
         || (k(WING, 42)..=k(WING, 43)).contains(&t);
@@ -537,7 +537,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     }
     if attr.damage_max > 0 {
         if excel > 0 && p_level > 0 {
-            // El original suma también aquí `DamageMin · 25 / Level + 5`.
+            // The original also adds `DamageMin · 25 / Level + 5` here.
             s.damage_max += excel_damage(attr.damage_min as u32);
         }
         if ext_option {
@@ -554,7 +554,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
         }
         s.magic_power += level_bonus(level);
         s.magic_power /= 2;
-        // `IsCepterItem`: los cetros del Dark Lord (mazas 8 a 15 y la 17) no suman `Level · 2`.
+        // `IsCepterItem`: Dark Lord scepters (maces 8 to 15 and 17) do not add `Level · 2`.
         let cepter = g == MACE && ((8..=15).contains(&i) || i == 17);
         if !cepter {
             s.magic_power += level * 2;
@@ -594,7 +594,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     }
     if attr.magic_defense > 0 {
         s.magic_defense += level.min(9) * 3;
-        // El `switch` del original no tiene `break` ni `case 5`: suma de ahí para abajo.
+        // The original's `switch` has no `break` and no `case 5`: it falls through downward.
         let extra = match level {
             15 => 9 + 7 + 6 + 5 + 4,
             13 => 7 + 6 + 5 + 4,
@@ -642,7 +642,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     } else {
         req(attr.require_energy, 100, 4)
     };
-    // `RequireCharisma`: la fórmula se pisa justo después con el valor tal cual (o el del cuervo).
+    // `RequireCharisma`: the formula is overwritten right after with the raw value (or the raven's).
     s.require_charisma = if attr.require_charisma == 0 {
         0
     } else if t == k(HELPER, 5) {
@@ -653,7 +653,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     if t == k(HELPER, 10) {
         s.require_level = if level <= 2 { 20 } else { 50 };
     }
-    // Los sets de Kundun, las armas de Blood Castle 3.ª... no llevan excelente para el nivel.
+    // The Kundun sets, the 3rd Blood Castle weapons... carry no excellent bonus for the level.
     if (k(HELM, 29)..=k(HELM, 33)).contains(&t)
         || (k(ARMOR, 29)..=k(ARMOR, 33)).contains(&t)
         || (k(PANTS, 29)..=k(PANTS, 33)).contains(&t)
@@ -669,7 +669,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
     }
 
     let sp = &mut s.specials;
-    // Alas de 2.ª: sus excelentes van primero.
+    // 2nd-class wings: their excellent options come first.
     if (k(WING, 3)..=k(WING, 6)).contains(&t) || t == k(WING, 42) {
         let bits = [
             (Special::ImproveHpMax, 50 + level * 5),
@@ -745,7 +745,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
         }
     }
     let bit = |n: u32| (item.excellent as u32 >> n) & 1 != 0;
-    // Excelentes de defensa: escudos y armaduras, anillos de las 4 opciones y los de 8-9.
+    // Defensive excellent options: shields and armor, the 4-option rings and those of 8-9.
     if (SHIELD..=BOOTS).contains(&g) || (g == HELPER && ((8..=9).contains(&i) || (21..=24).contains(&i))) {
         let defs = [
             (5, Special::ImproveLife),
@@ -761,7 +761,7 @@ pub fn convert(attr: &ItemAttribute, item: &Item, hero_level: u32) -> ItemStats 
             }
         }
     }
-    // Excelentes de ataque: armas y collares.
+    // Offensive excellent options: weapons and necklaces.
     if g <= STAFF || (g == HELPER && ((12..=13).contains(&i) || (25..=28).contains(&i))) {
         if bit(5) {
             sp.push((Special::ExcellentDamage, 0));
@@ -839,7 +839,7 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data")
     }
 
-    /// Algunos objetos conocidos de la tabla, sea cual sea el formato.
+    /// Some known items from the table, whatever the format.
     fn check_known(t: &ItemTable) {
         let kris = t.get(group::SWORD, 0).unwrap();
         assert_eq!(kris.name, "Kris");
@@ -863,7 +863,7 @@ mod tests {
         assert!(t.count() > 500, "{} objetos", t.count());
     }
 
-    /// El `item_eng.bmd` del Main 5.2 (si está en las referencias).
+    /// The Main 5.2 `item_eng.bmd` (if present in the references).
     #[test]
     fn item_bmd_del_main52() {
         let Ok(buf) = std::fs::read(main52_data().join("Local/Eng/item_eng.bmd")) else {
@@ -876,7 +876,7 @@ mod tests {
         assert!(read_item_bmd(&buf[..1000]).is_err());
     }
 
-    /// Los `Items/GroupNN_*.json` de MuMain (los que lee el cliente de `dist`).
+    /// MuMain's `Items/GroupNN_*.json` (the ones the `dist` client reads).
     #[test]
     fn items_json_de_mumain() {
         let Ok(t) = load(&mumain_data()) else {
@@ -886,14 +886,14 @@ mod tests {
         check_known(&t);
     }
 
-    /// Las dos tablas dicen lo mismo en lo que lee el cliente.
+    /// Both tables agree on what the client reads.
     #[test]
     fn bmd_y_json_coinciden() {
         let (Ok(buf), Ok(json)) = (std::fs::read(main52_data().join("Local/Eng/item_eng.bmd")), load(&mumain_data())) else {
             return;
         };
         let bmd = read_item_bmd(&buf).unwrap();
-        // (Las alas del cielo, 12,1, las tiene MuMain de 5×3 y el S6 de 5×2: no se comparan.)
+        // (The wings of heaven, 12,1, are 5×3 in MuMain and 5×2 in S6: not compared.)
         for (g, i) in [(0, 0), (0, 5), (1, 0), (4, 8), (5, 0), (6, 4), (7, 1), (8, 5), (9, 10), (11, 3), (12, 0), (13, 12)] {
             let (a, b) = (bmd.get(g, i).unwrap(), json.get(g, i).unwrap());
             assert_eq!((a.width, a.height, a.slot, a.defense, a.damage_min), (b.width, b.height, b.slot, b.defense, b.damage_min), "{g},{i}");
@@ -905,13 +905,13 @@ mod tests {
     fn bytes_del_paquete_ida_y_vuelta() {
         let item = Item { group: 13, index: 300, level: 13, durability: 77, skill: true, luck: true, option: 5, excellent: 0b101001, ancient: 5 };
         let b = item.to_bytes();
-        // `ConvertItemType`: 300 = 44 + 256 (bit 7 del byte 3), grupo en el byte 5.
+        // `ConvertItemType`: 300 = 44 + 256 (bit 7 of byte 3), group in byte 5.
         assert_eq!((b[0], b[3] & 0x80, b[5]), (44, 0x80, 13 << 4));
-        // Nivel 13 << 3 | habilidad | suerte | opción & 3.
+        // Level 13 << 3 | skill | luck | option & 3.
         assert_eq!(b[1], 0x80 | 13 << 3 | 4 | 1);
         assert_eq!(b[3] & 0x40, 0x40);
         assert_eq!(Item::from_bytes(&b), Some(item));
-        // Hueco vacío (0xFF ... grupo 15 con el bit 8): nada.
+        // Empty slot (0xFF ... group 15 with bit 8): nothing.
         assert_eq!(Item::from_bytes(&[0xFF, 0, 0, 0xFF, 0, 0xFF]), None);
     }
 
@@ -926,18 +926,18 @@ mod tests {
             require_dexterity: 40,
             ..Default::default()
         };
-        // +0: los valores de la tabla y `20 + 40 · 6 · 3 / 100` = 27.
+        // +0: the table values and `20 + 40 · 6 · 3 / 100` = 27.
         let s = convert(&attr, &Item::new(0, 0), 1);
         assert_eq!((s.damage_min, s.damage_max, s.require_strength), (6, 11, 27));
-        // +13: 9 · 3 y el 7 de case 4 = 34 más.
+        // +13: 9 · 3 and the 7 from case 4 = 34 more.
         let s = convert(&attr, &Item { level: 13, ..Item::new(0, 0) }, 1);
         assert_eq!((s.damage_min, s.damage_max), (6 + 34, 11 + 34));
-        // Excelente: `DamageMin · 25 / Level + 5` = 30 a los dos, y el nivel del objeto + 25.
+        // Excellent: `DamageMin · 25 / Level + 5` = 30 to both, and the item level + 25.
         let s = convert(&attr, &Item { excellent: 1, ..Item::new(0, 0) }, 1);
         assert_eq!((s.damage_min, s.damage_max), (36, 41));
         assert_eq!(s.require_strength, 20 + 40 * 31 * 3 / 100);
         assert_eq!(s.specials, vec![(Special::ImproveGainMana, 0)]);
-        // Suerte, opción +8 (que pide 10 de fuerza más) y la habilidad no la tiene.
+        // Luck, option +8 (which requires 10 more strength), and it lacks the skill.
         let s = convert(&attr, &Item { luck: true, option: 2, skill: true, ..Item::new(0, 0) }, 1);
         assert_eq!(s.specials, vec![(Special::Luck, 0), (Special::ImproveDamage, 8)]);
         assert_eq!(s.require_strength, 27 + 10);
@@ -946,7 +946,7 @@ mod tests {
     #[test]
     fn durabilidad_maxima() {
         let attr = ItemAttribute { durability: 20, ..Default::default() };
-        // +4: 4 de 1; +9: 4 + 5 · 2; +15: ... + 3 + 4 + 5 + 6 + 7 + 8.
+        // +4: 4 of 1; +9: 4 + 5 · 2; +15: ... + 3 + 4 + 5 + 6 + 7 + 8.
         assert_eq!(max_durability(&attr, &Item { level: 4, ..Item::new(0, 0) }), 24);
         assert_eq!(max_durability(&attr, &Item { level: 9, ..Item::new(0, 0) }), 34);
         assert_eq!(max_durability(&attr, &Item { level: 15, ..Item::new(0, 0) }), 34 + 3 + 4 + 5 + 6 + 7 + 8);
@@ -956,7 +956,7 @@ mod tests {
     #[test]
     fn mana_de_las_habilidades() {
         let Ok(skills) = load_skill_mana(&main52_data()) else { return };
-        // Los de MuMain son de otro formato: no se leen.
+        // MuMain's are in another format: not read.
         assert!(load_skill_mana(&mumain_data()).is_err());
         assert_eq!(skills.len(), 600);
         // `AT_SKILL_SWORD1` = 19 (SkillManager.h:29).

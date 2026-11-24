@@ -1,6 +1,6 @@
-//! Objetos cerca de un tipo de objeto o de una casilla (depuración).
+//! Objects near an object type or a tile (debugging).
 //!
-//!   cargo run -p mu-data --example near -- <world> <tipo|x,y> [radio_casillas=6] [data]
+//!   cargo run -p mu-data --example near -- <world> <type|x,y> [radius_tiles=6] [data]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -37,7 +37,7 @@ fn main() {
     }
     for (k, v) in by_kind {
         let rel = objects::model_path(world, k).unwrap_or_default();
-        // Caja del modelo en su pose inicial (unidades de MU, sin girar).
+        // Model box in its initial pose (MU units, unrotated).
         let bbox = (|| {
             let dir = data.join(rel.parent()?);
             let b = mu_data::bmd::read(&mu_data::fs::read(&dir, rel.file_name()?.to_str()?).ok()?).ok()?;

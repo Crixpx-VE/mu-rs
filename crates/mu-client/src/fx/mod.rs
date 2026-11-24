@@ -1,13 +1,13 @@
-//! Motor de efectos (partículas, sprites, estelas, efectos con modelo) traducido de MuMain.
+//! Effects engine (particles, sprites, trails, model effects) translated from MuMain.
 //!
-//! - `core.rs`: los objetos del original y el contexto (`Ctx`) con `CreateParticle`, `rand()`...
-//! - `sim.rs`: el tick de 25 Hz (`MoveEffects`, `MoveJoints`, `MoveParticles`).
-//! - `draw.rs` / `models.rs`: el dibujo, interpolado entre ticks.
-//! - `kinds/`: el código de cada tipo (`BITMAP_FIRE`, `MODEL_SKILL_WHEEL1`...), una familia por
-//!   archivo, que registra sus funciones en el [`core::Registry`].
-//! - `tables/`: tablas generadas de MuMain con `tools/gen_fx_tables.py` (constantes, texturas, modelos).
+//! - `core.rs`: the original's objects and the context (`Ctx`) with `CreateParticle`, `rand()`...
+//! - `sim.rs`: the 25 Hz tick (`MoveEffects`, `MoveJoints`, `MoveParticles`).
+//! - `draw.rs` / `models.rs`: drawing, interpolated between ticks.
+//! - `kinds/`: the code for each kind (`BITMAP_FIRE`, `MODEL_SKILL_WHEEL1`...), one family per
+//!   file, which registers its functions in the [`core::Registry`].
+//! - `tables/`: tables generated from MuMain with `tools/gen_fx_tables.py` (constants, textures, models).
 
-// Mucho de lo del original solo lo usan algunos tipos de efecto.
+// Much of the original is only used by some effect kinds.
 #![allow(dead_code, unused_imports, unused_variables, unused_mut, clippy::too_many_arguments)]
 
 pub mod core;
@@ -38,8 +38,8 @@ impl Plugin for FxPlugin {
         let mut registry = core::Registry::default();
         kinds::register_all(&mut registry);
         app.add_plugins(material::FxMaterialPlugin)
-            // La lógica del original va a 25 ticks por segundo (`REFERENCE_FPS`): todo lo que usa
-            // `FixedUpdate` (efectos, habilidades, pájaros...) depende de esto. Bevy trae 64 por defecto.
+            // The original logic runs at 25 ticks per second (`REFERENCE_FPS`): everything using
+            // `FixedUpdate` (effects, skills, birds...) depends on this. Bevy defaults to 64.
             .insert_resource(Time::<Fixed>::from_hz(sim::TICKS_PER_SECOND as f64))
             .insert_resource(registry)
             .init_resource::<sim::FxWorld>()
@@ -62,14 +62,14 @@ impl Plugin for FxPlugin {
     }
 }
 
-/// Al cambiar de mapa: ni efectos, ni objetos del mapa, ni personajes del anterior.
+/// On map change: no effects, map objects or characters from the previous map.
 pub fn reset(mut world: ResMut<FxWorld>, mut actors: ResMut<sim::Actors>) {
     let next_effect_id = world.next_effect_id;
     *world = FxWorld { next_effect_id, ..default() };
     *actors = sim::Actors::default();
 }
 
-/// Pedir un efecto desde fuera del motor (personajes, objetos del mapa): se crea en el próximo tick.
+/// Request an effect from outside the engine (characters, map objects): created on the next tick.
 pub fn request(world: &mut FxWorld, spawn: core::Spawn) {
     world.pending.push(spawn);
 }

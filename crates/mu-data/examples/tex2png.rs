@@ -1,6 +1,6 @@
-//! Convierte texturas de MU (.OZJ/.OZT) a PNG para mirarlas (depuración).
+//! Converts MU textures (.OZJ/.OZT) to PNG for inspection (debugging).
 //!
-//!   cargo run -p mu-data --example tex2png -- <carpeta_salida> <archivo.OZJ|OZT>...
+//!   cargo run -p mu-data --example tex2png -- <output_dir> <file.OZJ|OZT>...
 
 use std::path::Path;
 

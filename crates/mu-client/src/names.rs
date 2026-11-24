@@ -1,52 +1,52 @@
-//! Lo que hay bajo el ratón (jugadores; luego NPC y monstruos), su resaltado y su nombre encima.
+//! What is under the mouse (players; later NPCs and monsters), its highlight and its name above it.
 //!
-//! **Qué se elige** (`SelectObjects`, ZzzInterface.cpp:7847-7987), cada fotograma y solo con el ratón
-//! en la zona de juego (`CheckMouseIn(0, 0, ancho, 429)`) y fuera de las ventanas:
-//! - sin Alt: monstruos, luego jugadores (el elfo y el mago con una habilidad de ayuda elegida, al
-//!   revés), luego NPC, objetos del suelo y por último los de sentarse (`SelectOperate`);
-//! - con Alt (`VK_MENU`): objetos del suelo, NPC, monstruos, jugadores y los de sentarse.
+//! **What gets picked** (`SelectObjects`, ZzzInterface.cpp:7847-7987), every frame and only with the mouse
+//! in the play area (`CheckMouseIn(0, 0, width, 429)`) and outside the windows:
+//! - without Alt: monsters, then players (reversed for the elf and the wizard with a support skill
+//!   selected), then NPCs, ground items and finally the sittable objects (`SelectOperate`);
+//! - with Alt (`VK_MENU`): ground items, NPCs, monsters, players and the sittable objects.
 //!
-//! El primero que encuentra algo corta la cadena: si hay un jugador bajo el ratón, `SelectOperate` ni
-//! se llama (el banco que estuviera iluminado se queda como estaba).
+//! The first one that finds something breaks the chain: if a player is under the mouse, `SelectOperate`
+//! is not even called (a bench that was lit stays as it was).
 //!
-//! `SelectCharacter(Kind)` (7677-7813): primero pone a todos los de ese tipo `o->Light` según
-//! `c->Level` (0.2; −0.4 los asesinos, `PK ≥ PVP_MURDERER2`), que se suma a la luz del terreno para
-//! dibujarlos (`VectorAdd(Light, o->Light, c->Light)`, ZzzCharacter.cpp:8909 y 9651). Luego el rayo del
-//! ratón contra la caja de cada uno (`o->Position + BoundingBoxMin..Max`, sin girar ni escalar:
-//! (−60, −60, 0)..(40, 40, 120) el jugador, ZzzCharacter.cpp:11397-11401) y se queda con el más
-//! cercano a la cámara. Nunca el propio personaje (`Main && c == Hero`). En Devias no se elige a quien
-//! está en suelo 3 (dentro de las casas) si el héroe no pisa un 3 o un 11 (7773-7782; la parte de
-//! Lorencia nunca se cumple).
+//! `SelectCharacter(Kind)` (7677-7813): first sets `o->Light` for everyone of that kind according to
+//! `c->Level` (0.2; −0.4 for murderers, `PK ≥ PVP_MURDERER2`), which is added to the terrain light when
+//! drawing them (`VectorAdd(Light, o->Light, c->Light)`, ZzzCharacter.cpp:8909 and 9651). Then the mouse
+//! ray against each one's box (`o->Position + BoundingBoxMin..Max`, not rotated or scaled:
+//! (−60, −60, 0)..(40, 40, 120) for the player, ZzzCharacter.cpp:11397-11401), keeping the one
+//! closest to the camera. Never the own character (`Main && c == Hero`). In Devias, someone on
+//! floor 3 (inside the houses) is not picked unless the hero stands on a 3 or an 11 (7773-7782; the
+//! Lorencia part never holds).
 //!
-//! **El resaltado** no es más luz: el elegido se dibuja con `RenderCharacter(c, o, true)`
-//! (ZzzCharacter.cpp:11079-11082) y cada pieza del cuerpo (`RenderPartObject` con `Select` = 1,
-//! ZzzObject.cpp:10508-10543) pinta antes dos copias de sí misma infladas desde los huesos
-//! (`BoneScale` = `m_fEdgeScale` = 1.2 y 1.18; `vp = R·v·BoneScale + T`, ZzzBMD.cpp:246-254) de color
-//! plano (0.1, 0.03, 0) y (0.7, 0.2, 0) (los NPC (0.02, 0.1, 0) y (0.16, 0.7, 0)), con
-//! `RENDER_BRIGHT`: sumando, sin textura, sin escribir profundidad y sin quitar caras
-//! (ZzzBMD.cpp:1215-1231, `EnableAlphaBlend`), saltándose las mallas con textura TGA
-//! (`Components == 4`). Después la pieza normal las tapa: queda un halo naranja alrededor de la
-//! silueta. El arma no lo lleva (`RenderLinkObject` no pasa `Select`).
+//! **The highlight** is not extra light: the picked one is drawn with `RenderCharacter(c, o, true)`
+//! (ZzzCharacter.cpp:11079-11082) and each body part (`RenderPartObject` with `Select` = 1,
+//! ZzzObject.cpp:10508-10543) first paints two copies of itself inflated from the bones
+//! (`BoneScale` = `m_fEdgeScale` = 1.2 and 1.18; `vp = R·v·BoneScale + T`, ZzzBMD.cpp:246-254) in flat
+//! color (0.1, 0.03, 0) and (0.7, 0.2, 0) (NPCs (0.02, 0.1, 0) and (0.16, 0.7, 0)), with
+//! `RENDER_BRIGHT`: additive, untextured, no depth write and no face culling
+//! (ZzzBMD.cpp:1215-1231, `EnableAlphaBlend`), skipping meshes with a TGA texture
+//! (`Components == 4`). Then the normal part covers them: an orange halo remains around the
+//! silhouette. The weapon does not get it (`RenderLinkObject` does not pass `Select`).
 //!
-//! **El nombre** (`CNewUINameWindow::RenderName`, NewUINameWindow.cpp:101-184): solo el del que está
-//! bajo el ratón (el de un monstruo va arriba en el centro). Alt no enseña nombres de personajes (solo
-//! los de los objetos del suelo). `CreateChat(c->ID, "", c)` (ZzzInterface.cpp:1106-1169) usa una de
-//! las 120 cajas `CHAT`: la que ya tenía ese personaje (vida 10 ticks) o la primera libre (100); se
-//! llama cada fotograma mientras siga bajo el ratón, así que al quitarlo el nombre dura 10 ticks de
-//! 25 Hz (`MoveChat`, 1239-1263). `RenderBooleans` (8618-8690): la caja se centra sobre
-//! `Projection(o->Position + (0, 0, BoundingBoxMax[2] + 60))`, con el borde de abajo ahí; mide
-//! `FontHeight` × 5 de alto (los 5 `GetTextExtentPoint32` de `SetBooleanPosition` dan TRUE aunque el
-//! texto esté vacío, 736-785) y de ancho el nombre + 3 píxeles (o el gremio, si es más largo); las
-//! que se pisan se apartan arriba o abajo y luego se meten en la pantalla. `RenderBoolean` (805-1017)
-//! escribe arriba la alianza, el gremio y el nombre, cada línea con su fondo. Lo que dice alguien va
-//! en la misma caja, debajo del nombre (`CreateChat` con texto: [`NameBoxes::say`], que llama chat.rs
-//! con `AssignChat`): una o dos líneas que duran 2 ticks por byte + 160 (el héroe también tiene la
-//! suya cuando habla, con su fondo verde).
+//! **The name** (`CNewUINameWindow::RenderName`, NewUINameWindow.cpp:101-184): only the one under
+//! the mouse (a monster's goes at the top center). Alt shows no character names (only
+//! ground items'). `CreateChat(c->ID, "", c)` (ZzzInterface.cpp:1106-1169) uses one of
+//! the 120 `CHAT` boxes: the one that character already had (life 10 ticks) or the first free one (100); it
+//! is called every frame while it stays under the mouse, so after moving away the name lasts 10
+//! 25 Hz ticks (`MoveChat`, 1239-1263). `RenderBooleans` (8618-8690): the box is centered over
+//! `Projection(o->Position + (0, 0, BoundingBoxMax[2] + 60))`, with its bottom edge there; it is
+//! `FontHeight` × 5 tall (the 5 `GetTextExtentPoint32` calls of `SetBooleanPosition` return TRUE even when the
+//! text is empty, 736-785) and as wide as the name + 3 pixels (or the guild, if longer);
+//! overlapping ones move up or down and are then pushed inside the screen. `RenderBoolean` (805-1017)
+//! writes the alliance, guild and name on top, each line with its background. What someone says goes
+//! in the same box, below the name (`CreateChat` with text: [`NameBoxes::say`], which chat.rs calls
+//! with `AssignChat`): one or two lines lasting 2 ticks per byte + 160 (the hero also gets
+//! one when speaking, with its green background).
 //!
-//! Colores del nombre: el fondo, verde (60, 100, 0, 150) el propio, el de alianza (20, 50, 80, 150) si
-//! es del mismo gremio que el héroe —sin gremio los dos, también: `-1 == -1`— y si no según la
-//! relación; las letras, por el `PK` (`SetPlayerColor`, 787-799) o (100, 250, 250) en negrita los GM.
-//! Con el ratón sobre la caja, en zona segura, el fondo y las letras se cambian a ratos
+//! Name colors: the background is green (60, 100, 0, 150) for the own one, alliance (20, 50, 80, 150) if
+//! in the same guild as the hero (also when neither has a guild: `-1 == -1`), otherwise by the
+//! relation; the letters by `PK` (`SetPlayerColor`, 787-799) or bold (100, 250, 250) for GMs.
+//! With the mouse over the box, in a safe zone, background and letters alternate periodically
 //! (`WorldTime % 24 < 12`).
 
 use bevy::asset::RenderAssetUsages;
@@ -88,13 +88,13 @@ impl Plugin for NamesPlugin {
     }
 }
 
-/// `SelectObjects` (para ordenar lo que lee lo que hay bajo el ratón: `SelectOperate`, el clic...).
+/// `SelectObjects` (to order what reads what is under the mouse: `SelectOperate`, the click...).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SelectObjects;
 
-/// `KIND_*` del original.
+/// The original's `KIND_*`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-#[allow(dead_code)] // NPC y monstruos aún no existen.
+#[allow(dead_code)] // NPCs and monsters do not exist yet.
 pub enum Kind {
     Player,
     Npc,
@@ -102,43 +102,43 @@ pub enum Kind {
     Monster,
 }
 
-/// Algo que se puede señalar con el ratón (`CHARACTER` de `CharactersClient`). Va en la entidad raíz
-/// del personaje, junto a su `Transform` (casillas; el suelo, en la altura).
+/// Something the mouse can point at (`CHARACTER` of `CharactersClient`). Lives on the character's root
+/// entity, next to its `Transform` (tiles; the ground, in the height).
 #[derive(Component, Clone, Debug)]
 pub struct Selectable {
     pub kind: Kind,
     /// `c->ID`.
     pub name: String,
-    /// `c->PK` (`CharacterHeroState` del paquete: 0..6, 3 = normal).
+    /// `c->PK` (`CharacterHeroState` from the packet: 0..6, 3 = normal).
     pub pk: u8,
-    /// `c->Level`: el de los jugadores es 1 con `PK ≥ PVP_MURDERER2` (WSclient.cpp:2683, 6250).
+    /// `c->Level`: for players it is 1 with `PK ≥ PVP_MURDERER2` (WSclient.cpp:2683, 6250).
     pub level: u8,
-    /// `CtlCode` `CTLCODE_20OPERATOR`/`CTLCODE_08OPERATOR` o `eBuff_GMEffect`.
+    /// `CtlCode` `CTLCODE_20OPERATOR`/`CTLCODE_08OPERATOR` or `eBuff_GMEffect`.
     pub gm: bool,
-    /// `c->Dead`: los muertos no se eligen.
+    /// `c->Dead`: the dead are not picked.
     pub dead: bool,
-    /// Gremio (`GuildMarkIndex` ≥ 0), con las líneas ya escritas (`AddGuildName`).
+    /// Guild (`GuildMarkIndex` ≥ 0), with the lines already built (`AddGuildName`).
     pub guild: Option<Guild>,
     /// `o->BoundingBoxMin/Max`.
     pub bbox_min: Vec3,
     pub bbox_max: Vec3,
-    /// `o->m_fEdgeScale` (1.2 de `CreateCharacterPointer`, ZzzCharacter.cpp:11312).
+    /// `o->m_fEdgeScale` (1.2 from `CreateCharacterPointer`, ZzzCharacter.cpp:11312).
     pub edge_scale: f32,
-    /// `o->Light`: se suma a la luz del terreno al dibujarlo. 0 hasta la primera vez que el ratón pasa
-    /// por la zona de juego (`CreateCharacterPointer`, ZzzCharacter.cpp:11396).
+    /// `o->Light`: added to the terrain light when drawing. 0 until the mouse first enters
+    /// the play area (`CreateCharacterPointer`, ZzzCharacter.cpp:11396).
     pub light: Vec3,
 }
 
-/// Gremio de un personaje, para su caja de nombre.
+/// A character's guild, for its name box.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Guild {
     /// `GuildMarkIndex`.
     pub mark: i32,
-    /// `GuildRelationShip` con el gremio del héroe (`GR_*`).
+    /// `GuildRelationShip` with the hero's guild (`GR_*`).
     pub relation: u8,
-    /// `"<alianza> cargo"` (`c->Union`), si tiene.
+    /// `"<alliance> rank"` (`c->Union`), if any.
     pub union_line: Option<String>,
-    /// `"[gremio] cargo"` (`c->Guild`).
+    /// `"[guild] rank"` (`c->Guild`).
     pub guild_line: String,
 }
 
@@ -148,14 +148,14 @@ pub const GR_UNION: u8 = 0x01;
 pub const GR_RIVAL: u8 = 0x02;
 pub const GR_RIVALUNION: u8 = 0x08;
 
-/// Caja de `MODEL_PLAYER` (ZzzCharacter.cpp:11397-11401).
+/// `MODEL_PLAYER` box (ZzzCharacter.cpp:11397-11401).
 pub const PLAYER_BOX_MIN: Vec3 = Vec3::new(-60.0, -60.0, 0.0);
 pub const PLAYER_BOX_MAX: Vec3 = Vec3::new(40.0, 40.0, 120.0);
 /// `PVP_MURDERER2`.
 pub const PVP_MURDERER2: u8 = 6;
 
 impl Selectable {
-    /// Otro jugador (`ReceiveCreatePlayerViewport`) con su `PK`.
+    /// Another player (`ReceiveCreatePlayerViewport`) with their `PK`.
     pub fn player(name: String, pk: u8) -> Self {
         Self {
             kind: Kind::Player,
@@ -173,7 +173,7 @@ impl Selectable {
     }
 }
 
-/// `SelectedCharacter` y `SelectedNpc`.
+/// `SelectedCharacter` and `SelectedNpc`.
 #[derive(Resource, Default, Debug, Clone, Copy, PartialEq)]
 pub struct Hovered {
     pub character: Option<Entity>,
@@ -181,16 +181,16 @@ pub struct Hovered {
 }
 
 impl Hovered {
-    /// ¿Hay algún personaje bajo el ratón? (Entonces no se mira lo demás.)
+    /// Is any character under the mouse? (Then nothing else is checked.)
     pub fn any(&self) -> bool {
         self.character.is_some() || self.npc.is_some()
     }
 }
 
-// --- Elegir ----------------------------------------------------------------------------------------
+// --- Picking ---------------------------------------------------------------------------------------
 
-/// `SelectCharacter`, primer bucle: `o->Light` de todos los del tipo según `c->Level`, y −0.4 los
-/// asesinos. `None`: un `Level` sin caso, la luz se queda como estaba.
+/// `SelectCharacter`, first loop: `o->Light` of everyone of the kind by `c->Level`, and −0.4 for
+/// murderers. `None`: a `Level` with no case, the light stays as it was.
 pub fn select_light(level: u8, pk: u8) -> Option<Vec3> {
     if pk >= PVP_MURDERER2 {
         return Some(Vec3::splat(-0.4));
@@ -205,26 +205,26 @@ pub fn select_light(level: u8, pk: u8) -> Option<Vec3> {
     }
 }
 
-/// `bCanTalk` (ZzzInterface.cpp:7772-7782): en Devias, quien pisa suelo 3 solo se elige si el héroe
-/// también pisa un 3 o un 11. (En Lorencia la condición lleva `WorldActive == WD_2DEVIAS` y no se cumple.)
+/// `bCanTalk` (ZzzInterface.cpp:7772-7782): in Devias, someone on floor 3 is only picked if the hero
+/// also stands on a 3 or an 11. (In Lorencia the condition includes `WorldActive == WD_2DEVIAS` and never holds.)
 pub fn can_talk(world: u16, target_tile: u8, hero_tile: u8) -> bool {
-    // `WD_2DEVIAS` = carpeta 3.
+    // `WD_2DEVIAS` = folder 3.
     !(world == 3 && target_tile == 3 && target_tile != hero_tile && hero_tile != 11)
 }
 
-/// `TerrainMappingLayer1` en una posición de MU (`Position / TERRAIN_SCALE`).
+/// `TerrainMappingLayer1` at a MU position (`Position / TERRAIN_SCALE`).
 fn layer1_at(terrain: &mu_data::terrain::Terrain, mu: Vec3) -> u8 {
     let (x, y) = ((mu.x / MU_SCALE) as i32, (mu.y / MU_SCALE) as i32);
     let index = (y * 256 + x).clamp(0, 65535) as usize;
     terrain.mapping.layer1.get(index).copied().unwrap_or(0)
 }
 
-/// Posición en MU de una entidad colocada en casillas (Bevy: x, altura, −y).
+/// MU position of an entity placed in tiles (Bevy: x, height, −y).
 fn mu_position(tf: &Transform) -> Vec3 {
     Vec3::new(tf.translation.x, -tf.translation.z, tf.translation.y) * MU_SCALE
 }
 
-/// Una llamada a `SelectCharacter(Kind)`: luz de todos los de esos tipos y el más cercano bajo el rayo.
+/// One `SelectCharacter(Kind)` call: light for everyone of those kinds and the closest one under the ray.
 fn select_character(
     kinds: &[Kind],
     ray: (Vec3, Vec3),
@@ -275,8 +275,8 @@ fn select_objects(
     mut hovered: ResMut<Hovered>,
     mut q: Query<(Entity, &mut Selectable, &Transform)>,
 ) {
-    // Con el ataque automático, el elegido solo se guarda si es un monstruo al que se ataca; los
-    // jugadores y los NPC se vuelven a buscar cada fotograma.
+    // With auto-attack, the picked one is only kept if it is a monster being attacked; players
+    // and NPCs are searched again every frame.
     let mut now = Hovered::default();
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else {
         hovered.set_if_neq(now);
@@ -298,13 +298,13 @@ fn select_objects(
     let hero_tile = hero.single().ok().zip(terrain).map_or(0, |(h, t)| layer1_at(t, mu_position(h)));
     let mut pick = |kinds: &[Kind]| select_character(kinds, ray, eye, args.world, terrain, hero_tile, &mut q);
     if keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
-        // (Objetos del suelo: aún no hay.)
+        // (Ground items: none yet.)
         now.npc = pick(&[Kind::Npc]);
         if now.npc.is_none() {
             now.character = pick(&[Kind::Monster]).or_else(|| pick(&[Kind::Player]));
         }
     } else {
-        // `CKind_1` = monstruos, `CKind_2` = jugadores (sin habilidades de ayuda del elfo/mago aún).
+        // `CKind_1` = monsters, `CKind_2` = players (no elf/wizard support skills yet).
         now.character = pick(&[Kind::Monster]).or_else(|| pick(&[Kind::Player]));
         if now.character.is_none() {
             now.npc = pick(&[Kind::Npc]);
@@ -313,36 +313,36 @@ fn select_objects(
     hovered.set_if_neq(now);
 }
 
-// --- Nombres ---------------------------------------------------------------------------------------
+// --- Names -----------------------------------------------------------------------------------------
 
 /// `MAX_CHAT`.
 const MAX_CHAT: usize = 120;
-/// `IDLifeTime` de una caja nueva y de la que ya tenía el personaje (ticks de 25 Hz).
+/// `IDLifeTime` of a new box and of the one the character already had (25 Hz ticks).
 const ID_LIFE_NEW: i32 = 100;
 const ID_LIFE_AGAIN: i32 = 10;
-/// Altura de la caja sobre la de elegir (`BoundingBoxMax[2] + 60`, ZzzInterface.cpp:8632).
+/// Height of the box above the picking box (`BoundingBoxMax[2] + 60`, ZzzInterface.cpp:8632).
 const NAME_LIFT: f32 = 60.0;
 
-/// Una caja `CHAT`: el nombre y, si ha hablado, lo que dijo (lo pone el chat con [`NameBoxes::say`]).
+/// A `CHAT` box: the name and, if they spoke, what they said (set by the chat via [`NameBoxes::say`]).
 #[derive(Default)]
 struct NameSlot {
     owner: Option<Entity>,
     /// `IDLifeTime`.
     id_life: i32,
-    /// `Text[2]` y `LifeTime[2]` (`AddChat`, ZzzInterface.cpp:1018-1044).
+    /// `Text[2]` and `LifeTime[2]` (`AddChat`, ZzzInterface.cpp:1018-1044).
     text: [String; 2],
     life: [i32; 2],
     ui: Option<SlotUi>,
 }
 
 impl NameSlot {
-    /// Se dibuja (`IDLifeTime > 0 || LifeTime[0] > 0`).
+    /// Drawn (`IDLifeTime > 0 || LifeTime[0] > 0`).
     fn active(&self) -> bool {
         self.id_life > 0 || self.life[0] > 0
     }
 
-    /// `AddChat`: `Flag` 0 dura 2 ticks por byte + 160; 1 (los `#`), 1000. Con 20 bytes o más se
-    /// parte en dos líneas por el espacio más cercano al centro (`CutText`).
+    /// `AddChat`: `Flag` 0 lasts 2 ticks per byte + 160; 1 (the `#` ones), 1000. With 20 bytes or more it
+    /// is split into two lines at the space closest to the middle (`CutText`).
     fn add_chat(&mut self, text: &str, flag: u8) {
         let time = if flag == 1 { 1000 } else { text.len() as i32 * 2 + 160 };
         if text.len() >= 20 {
@@ -355,7 +355,7 @@ impl NameSlot {
         }
     }
 
-    /// Las líneas de chat que se ven, de arriba a abajo, con su vida (`RenderBoolean`, 988-1001).
+    /// The visible chat lines, top to bottom, with their life (`RenderBoolean`, 988-1001).
     fn chat_lines(&self) -> Vec<(&str, i32)> {
         if self.life[1] > 0 {
             vec![(self.text[1].as_str(), self.life[1]), (self.text[0].as_str(), self.life[0])]
@@ -367,19 +367,19 @@ impl NameSlot {
     }
 }
 
-/// Los nodos de una caja.
+/// The nodes of one box.
 struct SlotUi {
     root: Entity,
-    /// Lo que hay escrito (para rehacerla solo si cambia).
+    /// What is written (to rebuild it only when it changes).
     key: SlotKey,
-    /// (fila, texto) de la alianza, el gremio y el nombre.
+    /// (row, text) of the alliance, guild and name.
     rows: Vec<(Entity, Entity)>,
 }
 
 #[derive(Clone, PartialEq)]
 struct SlotKey {
     lines: Vec<String>,
-    /// Cuántas de las últimas son de chat (debajo del nombre).
+    /// How many of the last ones are chat (below the name).
     chat: usize,
     bold: bool,
     font: f32,
@@ -387,11 +387,11 @@ struct SlotKey {
     pad: f32,
 }
 
-/// Las 120 cajas `Chat[]` y los ticks.
+/// The 120 `Chat[]` boxes and the ticks.
 #[derive(Resource)]
 pub struct NameBoxes {
     slots: Vec<NameSlot>,
-    /// Fracción de tick acumulada.
+    /// Accumulated tick fraction.
     acc: f32,
 }
 
@@ -402,7 +402,7 @@ impl Default for NameBoxes {
 }
 
 impl NameBoxes {
-    /// `CreateChat(ID, "", Owner)`: la caja que ya era suya o la primera libre.
+    /// `CreateChat(ID, "", Owner)`: the box that was already theirs or the first free one.
     fn create(&mut self, owner: Entity) {
         if let Some(s) = self.slots.iter_mut().find(|s| s.owner == Some(owner)) {
             s.id_life = ID_LIFE_AGAIN;
@@ -414,8 +414,8 @@ impl NameBoxes {
         }
     }
 
-    /// `CreateChat(ID, Text, Owner, Flag)` con texto (ZzzInterface.cpp:1106-1169): en la caja que ya
-    /// era suya (lo que decía sube a la segunda línea) o en la primera libre. `false` si no hay caja.
+    /// `CreateChat(ID, Text, Owner, Flag)` with text (ZzzInterface.cpp:1106-1169): in the box that was
+    /// already theirs (the previous text moves to the second line) or the first free one. `false` if no box.
     pub fn say(&mut self, owner: Entity, text: &str, flag: u8) -> bool {
         if text.is_empty() {
             self.create(owner);
@@ -438,7 +438,7 @@ impl NameBoxes {
         false
     }
 
-    /// `MoveChat`: un tick menos; las de personajes que ya no están se apagan.
+    /// `MoveChat`: one tick less; boxes of characters no longer present are switched off.
     fn tick(&mut self, alive: impl Fn(Entity) -> bool) {
         for s in &mut self.slots {
             if s.id_life > 0 {
@@ -457,18 +457,18 @@ impl NameBoxes {
     }
 }
 
-/// Al salir del juego: sin cajas (sus nodos se van con `NamesRoot`).
+/// On leaving the game: no boxes (their nodes go away with `NamesRoot`).
 fn reset(mut boxes: ResMut<NameBoxes>, mut hovered: ResMut<Hovered>) {
     *boxes = NameBoxes::default();
     *hovered = Hovered::default();
 }
 
-/// Mundos de Chaos Castle (`InChaosCastle`: `WD_18CHAOS_CASTLE..END` y `WD_53CAOSCASTLE_MASTER_LEVEL`).
+/// Chaos Castle worlds (`InChaosCastle`: `WD_18CHAOS_CASTLE..END` and `WD_53CAOSCASTLE_MASTER_LEVEL`).
 fn in_chaos_castle(world: u16) -> bool {
     matches!(world, 19..=24 | 54)
 }
 
-/// `MoveChat` en cada tick y `RenderName` (`CreateChat` del señalado) en cada fotograma.
+/// `MoveChat` every tick and `RenderName` (`CreateChat` of the hovered one) every frame.
 #[allow(clippy::too_many_arguments)]
 fn create_names(
     time: Res<Time>,
@@ -479,14 +479,14 @@ fn create_names(
     hero_entity: Query<Entity, With<Player>>,
     mut boxes: ResMut<NameBoxes>,
 ) {
-    // El héroe no lleva `Selectable`, pero sí caja cuando habla.
+    // The hero has no `Selectable`, but gets a box when speaking.
     let hero_e = hero_entity.single().ok();
     boxes.acc += time.delta_secs() * crate::fx::sim::TICKS_PER_SECOND;
     while boxes.acc >= 1.0 {
         boxes.acc -= 1.0;
         boxes.tick(|e| selectables.contains(e) || hero_e == Some(e));
     }
-    // En Chaos Castle no se ven los nombres (salvo los de Webzen, `FindText(Hero->ID, "webzen")`).
+    // In Chaos Castle names are hidden (except Webzen's, `FindText(Hero->ID, "webzen")`).
     if in_chaos_castle(args.world) && !hero.is_some_and(|h| h.name.contains("webzen")) && hovered.any() {
         return;
     }
@@ -495,28 +495,28 @@ fn create_names(
     } else if let Some(c) = hovered.character
         && selectables.get(c).is_ok_and(|s| s.kind != Kind::Monster)
     {
-        // (El de un monstruo va arriba, `MonsterLabel`.)
+        // (A monster's goes at the top, `MonsterLabel`.)
         boxes.create(c);
     }
 }
 
-/// Medidas de la letra para una ventana: `FontHeight` (Winmain.cpp:1456-1462) y lo que sale de él en
-/// unidades de la pantalla virtual (`rate` = píxeles de la ventana por unidad).
+/// Font metrics for a window: `FontHeight` (Winmain.cpp:1456-1462) and what follows from it in
+/// virtual screen units (`rate` = window pixels per unit).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Metrics {
-    /// `g_hFont`: `FontHeight − 1` píxeles.
+    /// `g_hFont`: `FontHeight − 1` pixels.
     pub font: f32,
     /// `iLineHeight = FontHeight / g_fScreenRate_y`.
     pub line: i32,
     /// `c->Height = FontHeight · 5 / g_fScreenRate_y`.
     pub height: i32,
-    /// Los 3 píxeles de más del nombre (`Size[0].cx += 3`).
+    /// The name's 3 extra pixels (`Size[0].cx += 3`).
     pub pad: f32,
 }
 
 impl Metrics {
     pub fn new(window_width: f32, rate: f32) -> Self {
-        // La resolución más cercana de las del `switch (WindowWidth)`.
+        // The closest resolution among those in `switch (WindowWidth)`.
         let font_height = [(640.0, 12.0), (800.0, 13.0), (1024.0, 14.0), (1280.0, 15.0)]
             .into_iter()
             .min_by(|a, b| (a.0 - window_width).abs().total_cmp(&(b.0 - window_width).abs()))
@@ -531,7 +531,7 @@ impl Metrics {
     }
 }
 
-/// `x`, `y`, `Width`, `Height` de una caja en la pantalla virtual.
+/// `x`, `y`, `Width`, `Height` of a box on the virtual screen.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoxRect {
     pub x: i32,
@@ -540,9 +540,9 @@ pub struct BoxRect {
     pub h: i32,
 }
 
-/// `RenderBooleans`: centradas sobre el punto, se apartan las que se pisan (8654-8675) y se meten en
-/// la pantalla (8682-8686). Como el original, el borde derecho y el de abajo se comparan con el tamaño
-/// de la ventana en píxeles (`WindowWidth − Width`), no con el de la pantalla virtual.
+/// `RenderBooleans`: centered over the point, overlapping ones move apart (8654-8675) and are pushed into
+/// the screen (8682-8686). Like the original, the right and bottom edges are compared with the window
+/// size in pixels (`WindowWidth − Width`), not with the virtual screen size.
 pub fn place_boxes(boxes: &mut [BoxRect], window: (i32, i32)) {
     for i in 0..boxes.len() {
         for j in 0..boxes.len() {
@@ -571,10 +571,10 @@ pub fn place_boxes(boxes: &mut [BoxRect], window: (i32, i32)) {
     }
 }
 
-/// Color de la caja como `RGBA` (0..255).
+/// Box color as `RGBA` (0..255).
 pub type Rgba = [u8; 4];
 
-/// `SetPlayerColor` (ZzzInterface.cpp:787-799) con `c->Color` = `PK` (0 los NPC, `CreateChat`).
+/// `SetPlayerColor` (ZzzInterface.cpp:787-799) with `c->Color` = `PK` (0 for NPCs, `CreateChat`).
 pub fn player_color(color: u8) -> Rgba {
     match color {
         0 => [150, 255, 240, 255],
@@ -587,7 +587,7 @@ pub fn player_color(color: u8) -> Rgba {
     }
 }
 
-/// `GetGuildRelationShipTextColor` y `GetGuildRelationShipBGColor` (ZzzCharacter.cpp:12009-12035).
+/// `GetGuildRelationShipTextColor` and `GetGuildRelationShipBGColor` (ZzzCharacter.cpp:12009-12035).
 pub fn relation_colors(relation: u8) -> (Rgba, Rgba) {
     match relation {
         GR_NONE => ([10, 30, 50, 150], [230, 230, 255, 255]),
@@ -596,7 +596,7 @@ pub fn relation_colors(relation: u8) -> (Rgba, Rgba) {
     }
 }
 
-/// Colores de una caja de nombre: (fondo, letras) de las líneas del gremio y del nombre.
+/// Colors of a name box: (background, letters) of the guild and name lines.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoxStyle {
     pub guild: (Rgba, Rgba),
@@ -605,9 +605,9 @@ pub struct BoxStyle {
 }
 
 /// `RenderBoolean` (ZzzInterface.cpp:893-959). `same_guild`: `GuildMarkIndex == Hero->GuildMarkIndex`
-/// (también sin gremio los dos). `swap`: el ratón está sobre la caja y toca cambiar (938-946).
+/// (also when neither has a guild). `swap`: the mouse is over the box and it is time to alternate (938-946).
 pub fn box_style(kind: Kind, is_hero: bool, gm: bool, pk: u8, same_guild: bool, relation: u8, swap: bool) -> BoxStyle {
-    // El fondo gris de los GM (898) lo pisa siempre lo de abajo.
+    // The GM gray background (898) is always overwritten below.
     let guild = if is_hero {
         ([60, 100, 0, 150], [200, 255, 0, 255])
     } else if same_guild {
@@ -621,9 +621,9 @@ pub fn box_style(kind: Kind, is_hero: bool, gm: bool, pk: u8, same_guild: bool, 
     BoxStyle { guild, name, bold: gm }
 }
 
-/// (fondo, letras) de una línea de chat de la caja (`RenderBoolean`, 961-986): el fondo por
-/// `GuildColor` (sin gremios, 0: (10, 30, 50, 150)) y las letras (230, 220, 200), o (250, 200, 50)
-/// los GM, a media transparencia los 10 últimos ticks.
+/// (background, letters) of a chat line in the box (`RenderBoolean`, 961-986): background from
+/// `GuildColor` (no guilds, 0: (10, 30, 50, 150)) and letters (230, 220, 200), or (250, 200, 50)
+/// for GMs, half transparent in the last 10 ticks.
 pub fn chat_colors(gm: bool, life: i32) -> (Rgba, Rgba) {
     let a = if life > 0 && life < 10 { 128 } else { 255 };
     let text = if gm { [250, 200, 50, a] } else { [230, 220, 200, a] };
@@ -634,11 +634,11 @@ fn rgba(c: Rgba) -> Color {
     Color::srgba_u8(c[0], c[1], c[2], c[3])
 }
 
-/// Raíz de las cajas de nombre: `CNewUINameWindow` es la capa más baja (`GetLayerDepth` 1).
+/// Root of the name boxes: `CNewUINameWindow` is the lowest layer (`GetLayerDepth` 1).
 #[derive(Component)]
 struct NamesRoot;
 
-/// El nombre de un monstruo, arriba en el centro, y su texto.
+/// A monster's name, at the top center, and its text.
 #[derive(Component)]
 struct MonsterLabel;
 #[derive(Component)]
@@ -653,7 +653,7 @@ fn spawn_root(mut commands: Commands) {
             GlobalZIndex(-2),
         ))
         .with_children(|r| {
-            // `RenderText(320, 2, c->ID, 0, 0, RT3_WRITE_CENTER)` con (255, 230, 200) sobre (100, 0, 0).
+            // `RenderText(320, 2, c->ID, 0, 0, RT3_WRITE_CENTER)` with (255, 230, 200) on (100, 0, 0).
             r.spawn((
                 MonsterLabel,
                 Node {
@@ -682,14 +682,14 @@ fn spawn_root(mut commands: Commands) {
 fn name_font(px: f32, bold: bool) -> TextFont {
     TextFont {
         font_size: FontSize::Px(px),
-        // `FW_BOLD` (`g_hFontBold`); la Noto Sans de `fonts.rs` no es variable, así que no cambia.
+        // `FW_BOLD` (`g_hFontBold`); the Noto Sans in `fonts.rs` is not variable, so it does not change.
         weight: if bold { FontWeight::BOLD } else { FontWeight::NORMAL },
         font_smoothing: FontSmoothing::AntiAliased,
         ..default()
     }
 }
 
-/// Coloca las cajas y les pone colores (`RenderBooleans` → `RenderBoolean`).
+/// Places the boxes and colors them (`RenderBooleans` → `RenderBoolean`).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn layout_names(
     mut commands: Commands,
@@ -710,11 +710,11 @@ fn layout_names(
     let (Ok(window), Ok(root)) = (windows.single(), root.single()) else { return };
     let rate = scale.0;
     let metrics = Metrics::new(window.width(), rate);
-    // La cámara se mueve en `CameraMoved` (PostUpdate) y no tiene padre: su `Transform` es el de ahora.
+    // The camera moves in `CameraMoved` (PostUpdate) and has no parent: its `Transform` is the current one.
     let camera = cameras.single().ok().map(|(c, tf)| (c, GlobalTransform::from(*tf)));
     let hide_all = in_chaos_castle(args.world) && !hero_name.as_ref().is_some_and(|h| h.name.contains("webzen"));
 
-    // El nombre del monstruo señalado (en Chaos Castle tampoco, como los demás).
+    // The hovered monster's name (hidden in Chaos Castle too, like the rest).
     if let (Ok(mut vis), Ok((mut text, mut font))) = (label.single_mut(), label_text.single_mut()) {
         let monster = hovered
             .character
@@ -737,10 +737,10 @@ fn layout_names(
         }
     }
 
-    // Cursor (`MouseX`, `MouseY`) en la pantalla virtual.
+    // Cursor (`MouseX`, `MouseY`) on the virtual screen.
     let mouse = window.cursor_position().map(|c| ((c.x / rate) as i32, (c.y / rate) as i32));
-    // El héroe como dueño de su caja de chat (`CharactersClient` lo lleva como un jugador más), con el
-    // `PK` de `CharacterInformation`.
+    // The hero as owner of its chat box (`CharactersClient` treats it as just another player), with the
+    // `PK` from `CharacterInformation`.
     let hero_owner = hero.single().ok().map(|(e, tf)| {
         let name = hero_name.as_ref().map_or_else(crate::account::current_account, |h| h.name.clone());
         (e, Selectable::player(name, hero_info.as_ref().map_or(0, |i| i.0.hero_state)), *tf)
@@ -758,7 +758,7 @@ fn layout_names(
     let world_time = (time.elapsed_secs_f64() * 1000.0) as u64;
     let window_px = (window.width() as i32, window.height() as i32);
 
-    // 1) Contenido y medidas de cada caja encendida.
+    // 1) Content and size of each active box.
     let mut active: Vec<(usize, BoxRect)> = Vec::new();
     for (i, slot) in boxes.slots.iter_mut().enumerate() {
         let owner = slot.owner.filter(|_| slot.active()).and_then(owner_of);
@@ -787,10 +787,10 @@ fn layout_names(
             continue;
         }
         let Some(ui) = slot.ui.as_ref() else { continue };
-        // El ancho (`c->Width`) es el que midió la maquetación en el fotograma anterior (0 en una
-        // caja recién hecha: se enseña al siguiente).
+        // The width (`c->Width`) is the one the layout measured in the previous frame (0 for a
+        // freshly made box: shown on the next one).
         let width = computed.get(ui.root).map_or(0.0, |c| c.size().x * c.inverse_scale_factor());
-        // `Projection` del punto sobre la cabeza (detrás de la cámara no hay).
+        // `Projection` of the point above the head (none behind the camera).
         let p = mu_position(&tf) + Vec3::Z * (s.bbox_max.z + NAME_LIFT);
         let px = camera.and_then(|(c, gt)| c.world_to_viewport(&gt, Vec3::new(p.x, p.z, -p.y) / MU_SCALE).ok());
         let Some(px) = px.filter(|_| width > 0.0) else {
@@ -804,22 +804,22 @@ fn layout_names(
         active.push((i, BoxRect { x: sx - w / 2, y: sy - h, w, h }));
     }
 
-    // 2) Que no se pisen y dentro de la pantalla.
+    // 2) No overlaps and inside the screen.
     let mut rects: Vec<BoxRect> = active.iter().map(|(_, r)| *r).collect();
     place_boxes(&mut rects, window_px);
 
-    // 3) Colores y posición.
+    // 3) Colors and position.
     for ((i, _), r) in active.iter().zip(&rects) {
         let slot = &boxes.slots[*i];
         let (Some(ui), Some((s, _, is_hero))) = (slot.ui.as_ref(), slot.owner.and_then(owner_of)) else { continue };
-        // Con el ratón encima, en zona segura y no siendo el propio: fondo y letras cambiados a ratos.
-        // (El ancho y el alto de la prueba se vuelven a escalar, como en el original.)
+        // With the mouse over it, in a safe zone and not the own one: background and letters alternate periodically.
+        // (The test width and height are rescaled, as in the original.)
         let over = mouse.is_some_and(|(mx, my)| {
             r.x <= mx && mx < r.x + r.w * 640 / window_px.0.max(1) && r.y <= my && my < r.y + r.h * 480 / window_px.1.max(1)
         });
-        // (Sobre la propia caja no se cambian: `strcmp(c->ID, Hero->ID) != 0`.)
+        // (Not alternated over the own box: `strcmp(c->ID, Hero->ID) != 0`.)
         let swap = over && hero_safe && world_time % 24 < 12 && !is_hero;
-        // El héroe no tiene `Selectable` (su nombre sale con su chat); sin gremio, `-1 == -1`.
+        // The hero has no `Selectable` (its name appears with its chat); without a guild, `-1 == -1`.
         let hero_guild: Option<i32> = None;
         let mark = s.guild.as_ref().map(|g| g.mark);
         let relation = s.guild.as_ref().map_or(GR_NONE, |g| g.relation);
@@ -853,11 +853,11 @@ fn layout_names(
     }
 }
 
-/// Una caja: columna de filas (alianza, gremio, nombre), cada una con su fondo y tan ancha como la más
-/// ancha (`RenderText(..., c->Width, iLineHeight, RT3_SORT_LEFT)`). Empieza oculta hasta medirla.
+/// A box: column of rows (alliance, guild, name), each with its background and as wide as the widest
+/// (`RenderText(..., c->Width, iLineHeight, RT3_SORT_LEFT)`). Starts hidden until measured.
 fn spawn_box(commands: &mut Commands, root: Entity, key: SlotKey) -> SlotUi {
     let mut rows = Vec::new();
-    // El nombre va encima de las líneas de chat.
+    // The name goes above the chat lines.
     let n = key.lines.len() - key.chat;
     let ui = commands
         .spawn((
@@ -871,7 +871,7 @@ fn spawn_box(commands: &mut Commands, root: Entity, key: SlotKey) -> SlotUi {
         ))
         .id();
     for (k, line) in key.lines.iter().enumerate() {
-        // Solo el nombre lleva los 3 píxeles de más; la negrita, solo el nombre de los GM.
+        // Only the name gets the 3 extra pixels; bold only for GM names.
         let is_name = k + 1 == n;
         let text = commands
             .spawn((
@@ -901,27 +901,27 @@ fn spawn_box(commands: &mut Commands, root: Entity, key: SlotKey) -> SlotUi {
     SlotUi { root: ui, key, rows }
 }
 
-// --- Resaltado (`RenderPartObjectEdge`) ------------------------------------------------------------
+// --- Highlight (`RenderPartObjectEdge`) ------------------------------------------------------------
 
-/// Una cáscara de una pieza del cuerpo.
+/// A shell of a body part.
 struct Shell {
     entity: Entity,
     mesh: Handle<Mesh>,
-    /// Índice en `Skinned::body_meshes`.
+    /// Index into `Skinned::body_meshes`.
     part: usize,
-    /// 0 = la de fuera (`m_fEdgeScale`), 1 = la de dentro (−0.02).
+    /// 0 = the outer one (`m_fEdgeScale`), 1 = the inner one (−0.02).
     pass: usize,
 }
 
-/// Las cáscaras de un personaje (se crean la primera vez que se señala y luego se ocultan).
+/// A character's shells (created the first time it is hovered, then hidden).
 #[derive(Component)]
 struct EdgeShells(Vec<Shell>);
 
-/// Marca de las entidades de cáscara.
+/// Marker for shell entities.
 #[derive(Component)]
 struct EdgeShell;
 
-/// `BodyLight` de las dos pasadas (ZzzObject.cpp:10512-10541).
+/// `BodyLight` of the two passes (ZzzObject.cpp:10512-10541).
 pub fn edge_colors(kind: Kind, chaos_castle: bool) -> [[f32; 3]; 2] {
     if chaos_castle {
         [[0.1, 0.01, 0.0], [0.7, 0.07, 0.0]]
@@ -932,11 +932,11 @@ pub fn edge_colors(kind: Kind, chaos_castle: bool) -> [[f32; 3]; 2] {
     }
 }
 
-/// `BoneScale` de las dos pasadas: `m_fEdgeScale` y −0.02; en Chaos Castle `1 + 0.1/Scale` y
+/// `BoneScale` of the two passes: `m_fEdgeScale` and −0.02; in Chaos Castle `1 + 0.1/Scale` and
 /// `1 + 0.04/Scale` (ZzzObject.cpp:10510-10542).
 pub fn edge_scales(edge_scale: f32, object_scale: f32, chaos_castle: bool) -> [f32; 2] {
     if chaos_castle {
-        // (La segunda es `1 + 0.04/Scale + 0.02`, y se dibuja con `Scale − 0.02`.)
+        // (The second is `1 + 0.04/Scale + 0.02`, drawn with `Scale − 0.02`.)
         let s = object_scale.max(1e-3);
         [1.0 + 0.1 / s, 1.0 + 0.04 / s]
     } else {
@@ -944,7 +944,7 @@ pub fn edge_scales(edge_scale: f32, object_scale: f32, chaos_castle: bool) -> [f
     }
 }
 
-/// Huesos con `BoneScale`: `vp = R·v·s + T` es como girar con `R·s`.
+/// Bones with `BoneScale`: `vp = R·v·s + T` is like rotating with `R·s`.
 pub fn scale_bones(bones: &[bmd::Mat34], s: f32) -> Vec<bmd::Mat34> {
     bones
         .iter()
@@ -960,17 +960,17 @@ pub fn scale_bones(bones: &[bmd::Mat34], s: f32) -> Vec<bmd::Mat34> {
         .collect()
 }
 
-/// `pBitmap->Components == 4`: las texturas TGA (`OpenTga`, GlobalBitmap.cpp:716) no llevan cáscara.
+/// `pBitmap->Components == 4`: TGA textures (`OpenTga`, GlobalBitmap.cpp:716) get no shell.
 pub fn edge_skips_texture(texture: &str) -> bool {
     texture.to_ascii_lowercase().ends_with(".tga")
 }
 
-/// Material de una pasada: color plano sumando, sin escribir profundidad.
+/// Material for one pass: flat additive color, no depth write.
 ///
-/// El original pinta la cáscara antes que la pieza y la pieza (opaca) la tapa; aquí lo opaco va
-/// siempre antes que lo que suma, así que se dibujan solo las caras de atrás de la cáscara (quedan
-/// detrás del cuerpo y no lo tiñen) con el doble de color, que es lo que suman delante y detrás
-/// (el original no quita caras) en el halo.
+/// The original paints the shell before the part and the (opaque) part covers it; here opaque always
+/// goes before additive, so only the back faces of the shell are drawn (they stay
+/// behind the body and do not tint it) with double the color, which is what the front and back add up to
+/// (the original does no face culling) in the halo.
 fn edge_material(color: [f32; 3]) -> ModelMaterial {
     let base = StandardMaterial {
         base_color: Color::WHITE,
@@ -982,14 +982,14 @@ fn edge_material(color: [f32; 3]) -> ModelMaterial {
     crate::model_light::model_material(base, ModelLight::flat(color.map(|c| c * 2.0)))
 }
 
-/// Las caras de fuera de las mallas de MU (las que se quitan para ver solo las de atrás).
+/// The outer faces of MU meshes (culled so only the back ones are seen).
 const OUTWARD_FACE: Face = Face::Front;
 
-/// Materiales de las cáscaras por (tipo, Chaos Castle) y pasada.
+/// Shell materials by (kind, Chaos Castle) and pass.
 #[derive(Default)]
 struct EdgeMaterials(Vec<((Kind, bool), EdgePair)>);
 
-/// Los materiales de las dos pasadas.
+/// The materials of the two passes.
 type EdgePair = [Handle<ModelMaterial>; 2];
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
@@ -1052,7 +1052,7 @@ fn edge_materials(
     m
 }
 
-/// Dos cáscaras (ocultas) por cada pieza del cuerpo que la lleva, hijas del personaje.
+/// Two (hidden) shells for each body part that has one, children of the character.
 fn spawn_shells(
     commands: &mut Commands,
     owner: Entity,
@@ -1104,17 +1104,17 @@ mod tests {
         assert_eq!(player_color(0), [150, 255, 240, 255]);
         assert_eq!(player_color(6), [255, 0, 0, 255]);
         assert_eq!(player_color(9), [255, 0, 0, 255]);
-        // Un jugador normal sin gremio (como el héroe sin gremio): fondo de alianza.
+        // A normal player without a guild (like the hero without a guild): alliance background.
         let s = box_style(Kind::Player, false, false, 3, true, GR_NONE, false);
         assert_eq!(s.name, ([20, 50, 80, 150], [200, 220, 255, 255]));
-        // El propio: fondo verde, letras por su PK.
+        // The own one: green background, letters by its PK.
         let s = box_style(Kind::Player, true, false, 4, true, GR_NONE, false);
         assert_eq!(s.name, ([60, 100, 0, 150], [255, 150, 60, 255]));
-        // GM: letras cian en negrita; el fondo gris lo pisa el de gremio.
+        // GM: bold cyan letters; the gray background is overwritten by the guild one.
         let s = box_style(Kind::Player, false, true, 3, false, GR_RIVAL, false);
         assert_eq!(s.name, ([0, 0, 0, 150], [100, 250, 250, 255]));
         assert!(s.bold);
-        // NPC: color 0 aunque traiga otro PK; con el cambio, al revés.
+        // NPC: color 0 even with another PK; with the swap, reversed.
         let s = box_style(Kind::Npc, false, false, 3, false, GR_NONE, true);
         assert_eq!(s.name, ([150, 255, 240, 255], [10, 30, 50, 150]));
     }
@@ -1141,12 +1141,12 @@ mod tests {
 
     #[test]
     fn cajas_se_apartan_y_entran() {
-        // Dos cajas en el mismo sitio: la primera sube por encima de la segunda.
+        // Two boxes in the same place: the first moves above the second.
         let mut b = [BoxRect { x: 100, y: 100, w: 40, h: 43 }, BoxRect { x: 110, y: 100, w: 40, h: 43 }];
         place_boxes(&mut b, (1024, 768));
         assert_eq!(b[0].y, 100 - 43);
         assert_eq!(b[1].y, 100);
-        // Fuera por arriba y por la izquierda: se meten; por la derecha solo contra el ancho en píxeles.
+        // Off the top and left: pushed in; on the right only against the width in pixels.
         let mut b = [BoxRect { x: -5, y: -10, w: 40, h: 43 }, BoxRect { x: 700, y: 50, w: 40, h: 43 }];
         place_boxes(&mut b, (1024, 768));
         assert_eq!((b[0].x, b[0].y), (0, 0));
@@ -1166,12 +1166,12 @@ mod tests {
             boxes.tick(|_| true);
         }
         assert_eq!(boxes.slots[0].id_life, 0);
-        // La caja libre se la queda otro; el primero vuelve a empezar con 100 en la siguiente.
+        // The free box is taken by another; the first starts over with 100 on the next one.
         boxes.create(b);
         assert_eq!(boxes.slots[0].owner, Some(b));
         boxes.create(a);
         assert_eq!((boxes.slots[1].owner, boxes.slots[1].id_life), (Some(a), ID_LIFE_NEW));
-        // Si el dueño desaparece, se apaga.
+        // If the owner disappears, it switches off.
         boxes.tick(|e| e != a);
         assert_eq!(boxes.slots[1].id_life, 0);
     }
@@ -1183,14 +1183,14 @@ mod tests {
         let (a, b) = (world.spawn_empty().id(), world.spawn_empty().id());
         assert!(boxes.say(a, "hola", 0));
         assert_eq!(boxes.slots[0].chat_lines(), [("hola", 4 * 2 + 160)]);
-        // Lo nuevo empuja lo de antes a la línea de arriba.
+        // The new text pushes the old one to the line above.
         boxes.tick(|_| true);
         boxes.say(a, "adios", 0);
         assert_eq!(boxes.slots[0].chat_lines(), [("hola", 167), ("adios", 170)]);
-        // Largo: partido por el espacio más cercano al centro, las dos con la misma vida.
+        // Long: split at the space closest to the middle, both with the same life.
         boxes.say(b, "hola que tal estas hoy", 0);
         assert_eq!(boxes.slots[1].chat_lines(), [("hola que tal ", 204), ("estas hoy", 204)]);
-        // Mientras habla, su caja no se la queda otro, aunque no tenga el nombre a la vista.
+        // While speaking, nobody else takes their box, even if the name is not in view.
         boxes.create(b);
         assert_eq!(boxes.slots[1].id_life, ID_LIFE_AGAIN);
         let c = world.spawn_empty().id();
@@ -1199,7 +1199,7 @@ mod tests {
         // `#`: 1000 ticks.
         boxes.say(a, "aviso", 1);
         assert_eq!(boxes.slots[0].life[0], 1000);
-        // Los colores de las líneas: medio transparentes al final.
+        // The line colors: half transparent at the end.
         assert_eq!(chat_colors(false, 100).1, [230, 220, 200, 255]);
         assert_eq!(chat_colors(false, 5).1[3], 128);
         for _ in 0..1000 {
@@ -1226,14 +1226,14 @@ mod tests {
         assert_eq!(edge_colors(Kind::Player, false)[1], [0.7, 0.2, 0.0]);
         assert_eq!(edge_colors(Kind::Npc, false)[0], [0.02, 0.1, 0.0]);
         assert!(edge_skips_texture("hair_r.TGA") && !edge_skips_texture("skin_01.jpg"));
-        // `R·v·s + T`: el desplazamiento del hueso no se escala.
+        // `R·v·s + T`: the bone offset is not scaled.
         let mut m: bmd::Mat34 = [[1.0, 0.0, 0.0, 5.0], [0.0, 1.0, 0.0, 6.0], [0.0, 0.0, 1.0, 7.0]];
         m = scale_bones(&[m], 1.2)[0];
         assert_eq!(bmd::transform_point(&m, [10.0, 0.0, 0.0]), [17.0, 6.0, 7.0]);
     }
 
-    /// ¿Qué caras de las piezas de MU miran hacia fuera? (Para `OUTWARD_FACE`.) Con la regla de la
-    /// mano derecha, la normal de cada triángulo se compara con las normales de sus vértices.
+    /// Which faces of MU parts point outward? (For `OUTWARD_FACE`.) Using the right-hand
+    /// rule, each triangle's normal is compared with its vertex normals.
     #[test]
     fn caras_de_fuera() {
         let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data/Player");
@@ -1257,7 +1257,7 @@ mod tests {
             }
         }
         eprintln!("triángulos con la normal de su giro hacia fuera: {agree} de {total}");
-        // Antihorario (regla de la mano derecha) hacia fuera = cara delantera de wgpu.
+        // Counter-clockwise (right-hand rule) outward = wgpu front face.
         let ccw_outward = agree * 2 > total;
         assert_eq!(ccw_outward, OUTWARD_FACE == Face::Front);
     }

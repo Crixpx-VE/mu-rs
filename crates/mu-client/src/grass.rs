@@ -1,24 +1,24 @@
-//! Hierba del terreno que se mece con el viento (`RenderTerrainFace` con `TERRAIN_MAP_GRASS`
-//! en `ZzzLodTerrain.cpp`, 1566-1633).
+//! Terrain grass swaying in the wind (`RenderTerrainFace` with `TERRAIN_MAP_GRASS`
+//! in `ZzzLodTerrain.cpp`, 1566-1633).
 //!
-//! En cada casilla de hierba "pura" (textura base 0, 1 o 2 y sin mezcla con la segunda capa)
-//! el original levanta un plano vertical en diagonal, de la esquina (x, y) a la (x+1, y+1),
-//! con la textura `TileGrass0N.tga`:
+//! On every "pure" grass tile (base texture 0, 1 or 2 and no blend with the second layer)
+//! the original raises a diagonal vertical quad, from corner (x, y) to (x+1, y+1),
+//! with the `TileGrass0N.tga` texture:
 //!
-//! - alto = alto de la textura en píxeles × 2 (unidades de MU), y la parte de arriba
-//!   desplazada 50 unidades hacia -X;
-//! - U = x · 0.25 + un desfase al azar por fila (0, 0.25, 0.5 o 0.75); V de 0 (arriba) a 1;
-//! - viento: los vértices de arriba se mueven en Y con `TerrainGrassWind` ([`Wind`]).
+//! - height = texture height in pixels × 2 (MU units), with the top edge
+//!   shifted 50 units toward -X;
+//! - U = x · 0.25 + a random per-row offset (0, 0.25, 0.5 or 0.75); V from 0 (top) to 1;
+//! - wind: the top vertices move in Y with `TerrainGrassWind` ([`Wind`]).
 //!
-//! No hay hierba en Atlans ni Doppelganger 3 (`RenderTerrain`, 2625), en Chaos Castle ni el Valle de
-//! Loren (`TerrainGrassEnable`, 333-342), en Blood Castle (1573) ni en Icarus (sin terreno). En Vulcanus
-//! y Doppelganger 2 la primera es `TileGrass01_R.jpg` y toda la hierba va sumada (`EnableAlphaBlend`,
-//! MapManager.cpp:1541-1545 y ZzzLodTerrain.cpp:1584-1585).
+//! No grass in Atlans or Doppelganger 3 (`RenderTerrain`, 2625), in Chaos Castle or Valley of
+//! Loren (`TerrainGrassEnable`, 333-342), in Blood Castle (1573) or in Icarus (no terrain). In Vulcanus
+//! and Doppelganger 2 the first one is `TileGrass01_R.jpg` and all grass is additive (`EnableAlphaBlend`,
+//! MapManager.cpp:1541-1545 and ZzzLodTerrain.cpp:1584-1585).
 //!
-//! Solo se ve la de las casillas que dibuja el suelo ([`crate::terrain::TerrainCull`]). El viento
-//! depende del tiempo real, así que va igual a cualquier fps. Lo aplica el sombreador de vértices
-//! (`grass_wind.wesl`): la malla no cambia, solo los números del viento de cada fotograma. En los
-//! mapas de hierba sumada (Vulcanus, Doppelganger 2), con otro material, se recalcula en CPU.
+//! Only the grass on tiles the ground draws is visible ([`crate::terrain::TerrainCull`]). The wind
+//! depends on real time, so it runs the same at any fps. The vertex shader applies it
+//! (`grass_wind.wesl`): the mesh does not change, only the per-frame wind numbers. On
+//! additive-grass maps (Vulcanus, Doppelganger 2), with a different material, it is recomputed on the CPU.
 
 use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::camera::visibility::VisibilitySystems;
@@ -35,16 +35,16 @@ use crate::terrain::{LayerMaterial, LoadedTerrain, MU_SCALE, TerrainCull, quad_i
 
 pub struct GrassPlugin;
 
-/// Hierba con el viento en el sombreador.
+/// Grass with the wind in the shader.
 pub type GrassMaterial = ExtendedMaterial<StandardMaterial, GrassWind>;
 
-/// Los números del viento de este fotograma ([`Wind`]).
+/// This frame's wind numbers ([`Wind`]).
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
 pub struct GrassWind {
-    /// x: velocidad, y: escala, z: multiplicador de x, w: `MU_SCALE`.
+    /// x: speed, y: scale, z: x multiplier, w: `MU_SCALE`.
     #[uniform(100)]
     pub wind: Vec4,
-    /// Karutan: x velocidad, y escala del segundo viento, z = 1 si se usa.
+    /// Karutan: x speed, y scale of the second wind, z = 1 if used.
     #[uniform(100)]
     pub second: Vec4,
 }
@@ -55,7 +55,7 @@ impl MaterialExtension for GrassWind {
     }
 }
 
-/// Materiales de hierba del mapa (para darles el viento de cada fotograma).
+/// The map's grass materials (to feed them the wind each frame).
 #[derive(Resource, Default)]
 struct GrassMaterials(Vec<Handle<GrassMaterial>>);
 
@@ -72,27 +72,27 @@ impl Plugin for GrassPlugin {
     }
 }
 
-/// Texturas de terreno que llevan hierba encima (`BITMAP_MAPGRASS + capa1`, solo hay 3).
+/// Terrain textures that carry grass on top (`BITMAP_MAPGRASS + layer1`, there are only 3).
 const GRASS_TEXTURES: u8 = 3;
 
-/// `TerrainGrassWind` (y en Karutan `g_fTerrainGrassWind1`) de este momento (`InitTerrainLight`,
-/// ZzzLodTerrain.cpp:2350-2403): `sin(WindSpeed + x · mult) · WindScale`, que solo depende de la x.
+/// `TerrainGrassWind` (and in Karutan `g_fTerrainGrassWind1`) at this moment (`InitTerrainLight`,
+/// ZzzLodTerrain.cpp:2350-2403): `sin(WindSpeed + x · mult) · WindScale`, which only depends on x.
 pub struct Wind {
     speed: f32,
     scale: f32,
     x_mult: f32,
-    /// Karutan: segundo viento de la hierba (velocidad, escala).
+    /// Karutan: second grass wind (speed, scale).
     second: Option<(f32, f32)>,
 }
 
 impl Wind {
-    /// `ms` es `WorldTime`; `event`, la invasión (`EnableEvent`).
+    /// `ms` is `WorldTime`; `event`, the invasion (`EnableEvent`).
     pub fn new(world: u16, ms: i64, event: bool) -> Self {
         let speed = if event { (ms % 36000) as f32 * 0.01 } else { (ms % (360000 * 2)) as f32 * 0.002 };
         let (scale, x_mult) = match world as i32 - 1 {
-            // Tarkan y Karutan: x · 50.
+            // Tarkan and Karutan: x · 50.
             8 | 80 | 81 => (10.0, 50.0),
-            // Raklion (`WD_57ICECITY`, `WD_58ICECITY_BOSS`): escala 60.
+            // Raklion (`WD_57ICECITY`, `WD_58ICECITY_BOSS`): scale 60.
             57 | 58 => (60.0, 50.0),
             _ => (10.0, 5.0),
         };
@@ -100,18 +100,18 @@ impl Wind {
         Self { speed, scale, x_mult, second }
     }
 
-    /// Lo mismo para el sombreador ([`GrassWind`]).
+    /// Same, for the shader ([`GrassWind`]).
     fn uniforms(&self) -> (Vec4, Vec4) {
         let second = self.second.map_or(Vec4::ZERO, |(s, k)| Vec4::new(s, k, 1.0, 0.0));
         (Vec4::new(self.speed, self.scale, self.x_mult, MU_SCALE), second)
     }
 
-    /// `TerrainGrassWind[x]` (también ondula el agua).
+    /// `TerrainGrassWind[x]` (also ripples the water).
     pub fn terrain(&self, x: f32) -> f32 {
         (self.speed + x * self.x_mult).sin() * self.scale
     }
 
-    /// El viento que mueve la hierba: en Karutan el segundo (`g_fTerrainGrassWind1`, 1600-1613).
+    /// The wind that moves the grass: in Karutan the second one (`g_fTerrainGrassWind1`, 1600-1613).
     pub fn grass(&self, x: f32) -> f32 {
         match self.second {
             Some((speed, scale)) => (speed + x * 50.0).sin() * scale,
@@ -120,29 +120,29 @@ impl Wind {
     }
 }
 
-/// Mapas sin hierba (ver la documentación del módulo).
+/// Maps without grass (see the module docs).
 fn no_grass(world: u16) -> bool {
     matches!(world as i32 - 1,
-        // Atlans y Doppelganger 3.
+        // Atlans and Doppelganger 3.
         7 | 67
-        // Icarus y Kalima 1-7: no se dibuja el terreno (`IsWaterTerrain`, ZzzScene.cpp:2108).
+        // Icarus and Kalima 1-7: the terrain is not drawn (`IsWaterTerrain`, ZzzScene.cpp:2108).
         | 10 | 24..=29 | 36
-        // Blood Castle 1-7 y el de nivel maestro.
+        // Blood Castle 1-7 and the master-level one.
         | 11..=17 | 52
-        // Chaos Castle 1-6 y el de nivel maestro.
+        // Chaos Castle 1-6 and the master-level one.
         | 18..=23 | 53
-        // Valle de Loren.
+        // Valley of Loren.
         | 30)
 }
 
 #[derive(Component)]
 struct GrassMesh {
     mesh: Handle<Mesh>,
-    /// Posiciones sin viento (Bevy).
+    /// Positions without wind (Bevy).
     base: Vec<[f32; 3]>,
-    /// Para cada vértice de arriba: (índice del vértice, x de la casilla cuyo viento usa).
+    /// For each top vertex: (vertex index, x of the tile whose wind it uses).
     tops: Vec<(u32, u16)>,
-    /// Casilla de cada mata (una por cada cuatro vértices).
+    /// Tile of each tuft (one per four vertices).
     tiles: Vec<[u8; 2]>,
     area: [usize; 4],
     shown: Vec<bool>,
@@ -174,7 +174,7 @@ fn spawn_grass(
         let height = tex.height as f32 * 2.0;
         let image = images.add(to_bevy_image(&tex));
         let material = if pk {
-            // `EnableAlphaBlend`: sumada, sin escribir profundidad.
+            // `EnableAlphaBlend`: additive, no depth write.
             Err(layers.add(LayerMaterial::new(image, true)))
         } else {
             let m = materials.add(ExtendedMaterial {
@@ -182,7 +182,7 @@ fn spawn_grass(
                     base_color_texture: Some(image),
                     unlit: true,
                     cull_mode: None,
-                    // Prueba de alfa del original (`AlphaRef` 0.25).
+                    // The original's alpha test (`AlphaRef` 0.25).
                     alpha_mode: AlphaMode::Mask(0.25),
                     ..default()
                 },
@@ -216,10 +216,10 @@ fn spawn_grass(
     }
 }
 
-/// Lado de cada bloque de hierba, en casillas.
+/// Side of each grass chunk, in tiles.
 const CHUNK: usize = 16;
 
-/// `TerrainGrassTexture`: desfase de U al azar por fila (0, 0.25, 0.5, 0.75).
+/// `TerrainGrassTexture`: random per-row U offset (0, 0.25, 0.5, 0.75).
 fn row_offsets() -> Vec<f32> {
     let mut s: u32 = 0x1234_5678;
     (0..SIZE)
@@ -242,7 +242,7 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
     let mut idx: Vec<u32> = Vec::new();
     let mut tops = Vec::new();
     let mut tiles = Vec::new();
-    // MU (x, y, z) → Bevy (x, z, -y), 100 unidades por casilla.
+    // MU (x, y, z) → Bevy (x, z, -y), 100 units per tile.
     let to_bevy = |x: f32, y: f32, z: f32| [x / MU_SCALE, z / MU_SCALE, -y / MU_SCALE];
     let light = |x: usize, y: usize| {
         let l = t.light[y * SIZE + x];
@@ -254,11 +254,11 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
             if m.layer1[y * SIZE + x] != texture {
                 continue;
             }
-            // Sin suelo (`TW_NOGROUND`): ni terreno ni hierba.
+            // No ground (`TW_NOGROUND`): neither terrain nor grass.
             if t.attribute(x, y) & mu_data::terrain::attr::NO_GROUND != 0 {
                 continue;
             }
-            // Solo casillas sin mezcla con la segunda capa.
+            // Only tiles with no blend with the second layer.
             let corners = [(x, y), (x + 1, y), (x + 1, y + 1), (x, y + 1)];
             if corners.iter().any(|&(cx, cy)| m.alpha[cy * SIZE + cx] > 0) {
                 continue;
@@ -269,16 +269,16 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
             let su = x as f32 * 0.25 + row_offset[y];
 
             let base = pos.len() as u32;
-            // 0: arriba en (x, y)   1: arriba en (x+1, y+1)   2: abajo en (x+1, y+1)   3: abajo en (x, y)
+            // 0: top at (x, y)   1: top at (x+1, y+1)   2: bottom at (x+1, y+1)   3: bottom at (x, y)
             pos.push(to_bevy(xf - 50.0, yf, h0 + height));
             pos.push(to_bevy(xf + MU_SCALE - 50.0, yf + MU_SCALE, h2 + height));
             pos.push(to_bevy(xf + MU_SCALE, yf + MU_SCALE, h2));
             pos.push(to_bevy(xf, yf, h0));
             uv.extend_from_slice(&[[su, 0.0], [su + 0.25, 0.0], [su + 0.25, 1.0], [su, 1.0]]);
-            // Misma luz por vértice que el original (esquinas de la casilla en orden).
+            // Same per-vertex light as the original (tile corners in order).
             color.extend_from_slice(&[light(x, y), light(x + 1, y), light(x + 1, y + 1), light(x, y + 1)]);
             idx.extend_from_slice(&quad_indices(base));
-            // Viento de la casilla x para el vértice 0 y de la x+1 para el 1.
+            // Wind of tile x for vertex 0 and of x+1 for vertex 1.
             tops.push((base, x as u16));
             tops.push((base + 1, x as u16 + 1));
             tiles.push([x as u8, y as u8]);
@@ -288,7 +288,7 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
         return None;
     }
     let n = pos.len();
-    // Para el sombreador: (x de la columna cuyo viento usa, 1 = vértice de arriba).
+    // For the shader: (x of the column whose wind it uses, 1 = top vertex).
     let mut wind = vec![[0.0f32, 0.0]; n];
     for &(v, x) in &tops {
         wind[v as usize] = [x as f32, 1.0];
@@ -303,8 +303,8 @@ fn build_grass(t: &Terrain, texture: u8, height: f32, row_offset: &[f32], area: 
     Some((mesh, pos, tops, tiles))
 }
 
-/// La hierba va en la misma pasada que el suelo (`RenderTerrainFrustrum` con `TERRAIN_MAP_GRASS`):
-/// solo la de las casillas que se dibujan.
+/// The grass goes in the same pass as the ground (`RenderTerrainFrustrum` with `TERRAIN_MAP_GRASS`):
+/// only on the tiles being drawn.
 fn cull_grass(cull: Res<TerrainCull>, mut grass: Query<(&mut GrassMesh, &mut Visibility)>, mut meshes: ResMut<Assets<Mesh>>) {
     for (mut g, mut vis) in &mut grass {
         if g.cull_generation == cull.generation {
@@ -337,7 +337,7 @@ fn wave_grass(
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     let wind = Wind::new(args.world, crate::terrain::world_ms(&time), invasion.active());
-    // La hierba normal: solo los números del viento.
+    // Normal grass: only the wind numbers.
     let (w, second) = wind.uniforms();
     for h in &grass_materials.0 {
         if let Some(mut m) = wind_materials.get_mut(h) {
@@ -346,7 +346,7 @@ fn wave_grass(
         }
     }
     let mut per_x: Option<Vec<f32>> = None;
-    // La sumada (otro material): en CPU, solo los bloques que se vieron en el último fotograma.
+    // Additive grass (different material): on the CPU, only the chunks seen in the last frame.
     for (g, visible, layered) in &grass {
         if !visible.get() || !layered {
             continue;
@@ -354,7 +354,7 @@ fn wave_grass(
         let w = per_x.get_or_insert_with(|| (0..=SIZE).map(|x| wind.grass(x as f32) / MU_SCALE).collect());
         let mut pos = g.base.clone();
         for &(v, x) in &g.tops {
-            // +Y de MU es -Z en Bevy.
+            // MU +Y is Bevy -Z.
             pos[v as usize][2] -= w[x as usize];
         }
         if let Some(mut m) = meshes.get_mut(&g.mesh) {
@@ -374,12 +374,12 @@ mod tests {
         assert!((w.terrain(1.0) - (2.0f32 + 5.0).sin() * 10.0).abs() < 1e-4);
         // Tarkan: x · 50.
         assert!((Wind::new(9, 0, false).terrain(1.0) - 50f32.sin() * 10.0).abs() < 1e-4);
-        // Raklion: escala 60.
+        // Raklion: scale 60.
         assert!((Wind::new(58, 0, false).terrain(1.0) - 50f32.sin() * 60.0).abs() < 1e-4);
-        // Karutan: la hierba usa el segundo viento.
+        // Karutan: the grass uses the second wind.
         let k = Wind::new(81, 1000, false);
         assert!((k.grass(1.0) - (8.0f32 + 50.0).sin() * 15.0).abs() < 1e-4);
-        // El tiempo da la vuelta cada 720 s.
+        // Time wraps every 720 s.
         assert!((Wind::new(1, 720_000, false).terrain(0.0)).abs() < 1e-6);
         assert!(no_grass(8) && no_grass(12) && no_grass(19) && no_grass(31) && !no_grass(1));
     }

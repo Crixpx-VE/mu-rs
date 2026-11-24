@@ -1,31 +1,31 @@
-//! Brillo de los objetos: las pasadas de `RenderPartObjectEffect` (ZzzObject.cpp:9327-10385) según el
-//! nivel (+3 a +15), las opciones excelentes y los sets antiguos.
+//! Item glow: the `RenderPartObjectEffect` passes (ZzzObject.cpp:9327-10385) depending on
+//! level (+3 to +15), excellent options and ancient sets.
 //!
-//! Cada pasada es una llamada a `RenderPartObjectBody` / `RenderPartObjectBodyColor(2)` con sus
-//! `RENDER_*` ([`crate::objects::render::flags`]) y su `b->BodyLight` ([`GlowLight`]); quien dibuja la
-//! resuelve malla a malla con [`crate::objects::render::resolve`] como el resto de modelos. Va la rama
-//! general: los objetos con dibujo propio al principio de la función (la lanza de Kundun, los
-//! anillos de evento...) también la usan.
+//! Each pass is a call to `RenderPartObjectBody` / `RenderPartObjectBodyColor(2)` with its
+//! `RENDER_*` flags ([`crate::objects::render::flags`]) and its `b->BodyLight` ([`GlowLight`]); the drawer
+//! resolves it mesh by mesh with [`crate::objects::render::resolve`] like any other model. This is the
+//! general branch: the items with their own drawing at the start of the function (the Kundun spear, the
+//! event rings...) use it too.
 
 use super::group::*;
 use super::{Item, kind};
 use crate::objects::render::flags::*;
 
-/// `b->BodyLight` de una pasada.
+/// `b->BodyLight` of a pass.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum GlowLight {
     Fixed([f32; 3]),
-    /// `g_Luminosity · k`, con `g_Luminosity = sin(WorldTime · 0.004) · 0.15 + 0.6` (ZzzScene.cpp:2765).
+    /// `g_Luminosity · k`, with `g_Luminosity = sin(WorldTime · 0.004) · 0.15 + 0.6` (ZzzScene.cpp:2765).
     Luminosity([f32; 3]),
-    /// Excelente: `L = sin(WorldTime · 0.002) · 0.5 + 0.5` → `(L, 0.3 L, 1 − L)` (ZzzObject.cpp:10306-10307).
+    /// Excellent: `L = sin(WorldTime · 0.002) · 0.5 + 0.5` → `(L, 0.3 L, 1 − L)` (ZzzObject.cpp:10306-10307).
     Excellent,
-    /// Set antiguo: `PartObjectColor3` por `Alpha = sin(WorldTime · 0.001) · 0.5 + 0.4`
-    /// (`RENDER_CHROME3` con `Alpha` < 0.99 multiplica `BodyLight` por él, ZzzBMD.cpp:1110-1118).
+    /// Ancient set: `PartObjectColor3` times `Alpha = sin(WorldTime · 0.001) · 0.5 + 0.4`
+    /// (`RENDER_CHROME3` with `Alpha` < 0.99 multiplies `BodyLight` by it, ZzzBMD.cpp:1110-1118).
     Ancient([f32; 3]),
 }
 
 impl GlowLight {
-    /// El color con `WorldTime` en ms (OpenGL lo limita a [0, 1] al dibujar).
+    /// The color with `WorldTime` in ms (OpenGL clamps it to [0, 1] when drawing).
     pub fn at(self, world_time: f32) -> [f32; 3] {
         match self {
             GlowLight::Fixed(l) => l,
@@ -44,21 +44,21 @@ impl GlowLight {
         }
     }
 
-    /// Cambia con el tiempo.
+    /// Changes over time.
     pub fn animated(self) -> bool {
         !matches!(self, GlowLight::Fixed(_))
     }
 }
 
-/// Una llamada de dibujo de todas las mallas (`RenderBody`) con sus `RENDER_*` y su luz.
+/// One draw call over all meshes (`RenderBody`) with its `RENDER_*` flags and its light.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlowPass {
     pub flags: u32,
     pub light: GlowLight,
 }
 
-/// El nivel con el que se elige el brillo (`switch (Type)` del principio y el límite de efectos:
-/// `min(Level, RenderLevel · 2 + 5)` con `GetRenderLevel()` < 4).
+/// The level used to choose the glow (the `switch (Type)` at the start and the effects limit:
+/// `min(Level, RenderLevel · 2 + 5)` with `GetRenderLevel()` < 4).
 pub fn effect_level(item: &Item, render_level: u8) -> u8 {
     let mut level = item.level.min(15);
     let (g, i) = (item.group, item.index);
@@ -69,7 +69,7 @@ pub fn effect_level(item: &Item, render_level: u8) -> u8 {
         (POTION, 13) | (POTION, 14) | (POTION, 16) | (POTION, 31) | (POTION, 12) | (POTION, 22) => 8,
         (POTION, 25) | (POTION, 26) => 8,
         (WING, 136) | (WING, 138) | (WING, 141) | (WING, 137) | (WING, 15) => 8,
-        // `MODEL_COMPILED_CELE` y `MODEL_COMPILED_SOUL` (_define.h:609-610).
+        // `MODEL_COMPILED_CELE` and `MODEL_COMPILED_SOUL` (_define.h:609-610).
         (WING, 30) | (WING, 31) => 8,
         (WING, 0..=6) | (WING, 36..=43) | (WING, 11) => 0,
         (WING, 7) | (WING, 12..=14) | (WING, 16..=19) | (WING, 44..=47) => 9,
@@ -97,7 +97,7 @@ pub fn effect_level(item: &Item, render_level: u8) -> u8 {
     level
 }
 
-/// `PartObjectColor(Type, 1, 1, ...)` (ZzzObject.cpp:6483-6770): el color del cromado.
+/// `PartObjectColor(Type, 1, 1, ...)` (ZzzObject.cpp:6483-6770): the chrome color.
 pub fn part_object_color(item: &Item) -> [f32; 3] {
     let (g, i) = (item.group, item.index);
     let color = match (g, i) {
@@ -237,7 +237,7 @@ pub fn part_object_color(item: &Item) -> [f32; 3] {
     }
 }
 
-/// `PartObjectColor2(Type, 1, 1, Light, ...)` (ZzzObject.cpp:6771-6854): sobre la luz que había.
+/// `PartObjectColor2(Type, 1, 1, Light, ...)` (ZzzObject.cpp:6771-6854): on top of the previous light.
 pub fn part_object_color2(item: &Item, light: [f32; 3]) -> [f32; 3] {
     let (g, i) = (item.group, item.index);
     let color = match (g, i) {
@@ -259,14 +259,14 @@ pub fn part_object_color2(item: &Item, light: [f32; 3]) -> [f32; 3] {
     }
 }
 
-/// `PartObjectColor3` (ZzzObject.cpp:6855-6892): el del brillo de los sets antiguos.
+/// `PartObjectColor3` (ZzzObject.cpp:6855-6892): the ancient set glow color.
 pub fn part_object_color3(item: &Item) -> [f32; 3] {
     let gold = (HELM..=BOOTS).contains(&item.group) && matches!(item.index, 3 | 9 | 17);
     if gold { [1.0, 0.7, 0.2] } else { [0.1, 0.6, 1.0] }
 }
 
-/// Las pasadas del objeto con la luz `light` del sitio (la del inventario es (1, 1, 1)) y el límite de
-/// efectos de las opciones (`g_pOption->GetRenderLevel()`, 0 a 4).
+/// The item's passes with the local `light` (the inventory's is (1, 1, 1)) and the options'
+/// effects limit (`g_pOption->GetRenderLevel()`, 0 to 4).
 pub fn item_passes(item: &Item, light: [f32; 3], render_level: u8) -> Vec<GlowPass> {
     let level = effect_level(item, render_level);
     let rl = render_level;
@@ -322,21 +322,21 @@ mod tests {
         assert_eq!(flags(&lv(SWORD, 0, 9)), vec![TEXTURE, CHROME | BRIGHT, METAL | BRIGHT]);
         assert_eq!(flags(&lv(SWORD, 0, 11)), vec![TEXTURE, CHROME2 | BRIGHT, METAL | BRIGHT, CHROME | BRIGHT]);
         assert_eq!(flags(&lv(SWORD, 0, 15)), vec![TEXTURE, CHROME4 | BRIGHT, METAL | BRIGHT, CHROME | BRIGHT]);
-        // +7 y más: la base a 0.8 o 0.9.
+        // +7 and above: the base at 0.8 or 0.9.
         assert_eq!(item_passes(&lv(SWORD, 0, 7), [1.0; 3], 4)[0].light, GlowLight::Fixed([0.8; 3]));
         assert_eq!(item_passes(&lv(SWORD, 0, 13), [1.0; 3], 4)[0].light, GlowLight::Fixed([0.9; 3]));
-        // Excelente: una pasada más que suma la propia textura.
+        // Excellent: one more pass adding the item's own texture.
         let exc = Item { excellent: 4, ..lv(SWORD, 0, 9) };
         assert_eq!(item_passes(&exc, [1.0; 3], 4).last().unwrap(), &GlowPass { flags: TEXTURE | BRIGHT, light: GlowLight::Excellent });
-        // Las alas no brillan por nivel ni por excelente.
+        // Wings do not glow from level or excellent.
         assert_eq!(flags(&Item { excellent: 1, ..lv(WING, 4, 13) }), vec![TEXTURE]);
-        // Las joyas siempre como +8.
+        // Jewels always as +8.
         assert_eq!(flags(&lv(POTION, 13, 0)), vec![TEXTURE, CHROME | BRIGHT]);
     }
 
     #[test]
     fn limite_de_efectos() {
-        // Con `RenderLevel` 1 un +13 se queda en +7; con 0, en +5 (el azul que late) y sin excelente.
+        // With `RenderLevel` 1 a +13 stays at +7; with 0, at +5 (the pulsing blue) and no excellent.
         assert_eq!(effect_level(&lv(SWORD, 0, 13), 1), 7);
         let exc = Item { excellent: 1, ..lv(SWORD, 0, 13) };
         assert_eq!(item_passes(&exc, [1.0; 3], 0), vec![GlowPass { flags: TEXTURE, light: GlowLight::Luminosity([0.5, 0.7, 1.0]) }]);
@@ -344,7 +344,7 @@ mod tests {
 
     #[test]
     fn colores() {
-        // Kris: color 0 (1, 0.5, 0); la armadura de dragón (índice 1): color 1 (1, 0.2, 0).
+        // Kris: color 0 (1, 0.5, 0); the dragon armor (index 1): color 1 (1, 0.2, 0).
         assert_eq!(part_object_color(&Item::new(SWORD, 0)), [1.0, 0.5, 0.0]);
         assert_eq!(part_object_color(&Item::new(ARMOR, 1)), [1.0, 0.2, 0.0]);
         assert_eq!(part_object_color2(&Item::new(ARMOR, 4), [0.9; 3]), [0.9, 0.45, 0.0]);

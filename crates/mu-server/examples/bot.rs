@@ -1,16 +1,16 @@
-//! Cliente de prueba sin gráficos: hace lo mismo que el juego contra el servidor.
+//! Headless test client: does the same as the game against the server.
 //!
-//!   cargo run -p mu-server --example bot -- <cuenta> <contraseña> <personaje> [connect=127.0.0.1:44405] [segundos=3]
-//!                                           [destino de M] [--decir <texto>] [--susurrar <nombre> <texto>]
-//!                                           [--esperar <segundos antes de hablar>]
-//!                                           [--puerta x,y,puerta ...] [--accion <AT_*>]
+//!   cargo run -p mu-server --example bot -- <account> <password> <character> [connect=127.0.0.1:44405] [seconds=3]
+//!                                           [M destination] [--decir <text>] [--susurrar <name> <text>]
+//!                                           [--esperar <seconds before speaking>]
+//!                                           [--puerta x,y,gate ...] [--accion <AT_*>]
 //!
-//! Connect Server → Game Server → login → lista → (crea el personaje si no está) → entra →
-//! camina 3 pasos → (con destino: lo pide como la ventana `M`, espera `MapChanged` y contesta
-//! `ClientReadyAfterMapChange`, o el aviso si no puede) → (cada `--puerta`: se planta en (x, y)
-//! como hace el cliente al pisarla y pide cruzarla con `EnterGateRequest`, igual que el destino) →
-//! (espera, dice, susurra y hace la animación que se le pida, p. ej. 128 = sentarse) → espera
-//! mostrando lo que llega (otros jugadores, chat, susurros, avisos, animaciones) → sale.
+//! Connect Server → Game Server → login → list → (creates the character if missing) → enters →
+//! walks 3 steps → (with a destination: requests it like the `M` window, waits for `MapChanged` and replies
+//! `ClientReadyAfterMapChange`, or the notice if it cannot) → (each `--puerta`: stands at (x, y)
+//! as the client does when stepping on it and asks to cross it with `EnterGateRequest`, like the destination) →
+//! (waits, says, whispers and plays the requested animation, e.g. 128 = sit) → waits
+//! showing what arrives (other players, chat, whispers, notices, animations) → exits.
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -48,7 +48,7 @@ impl Conn {
         self.sock.write_all(&self.out.encrypt(&m.encode()))
     }
 
-    /// Espera un mensaje que cumpla `f` (los demás se enseñan).
+    /// Waits for a message matching `f` (the others are shown).
     fn wait<T>(&mut self, mut f: impl FnMut(&ServerMessage) -> Option<T>) -> std::io::Result<T> {
         loop {
             match self.recv()? {
@@ -79,7 +79,7 @@ fn cs_packet(s: &mut TcpStream, buf: &mut PacketBuffer) -> std::io::Result<conne
     }
 }
 
-/// Lo que llega, en claro para el chat y los avisos.
+/// What arrives, in plain text for chat and notices.
 fn show(user: &str, m: &ServerMessage) {
     match m {
         ServerMessage::ChatMessage { sender, message } => println!("[{user}] CHAT {sender} : {message}"),
@@ -92,7 +92,7 @@ fn show(user: &str, m: &ServerMessage) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut a: Vec<String> = std::env::args().skip(1).collect();
-    // Opciones con nombre (se quitan de las de posición).
+    // Named options (removed from the positional ones).
     let mut say = None;
     let mut whisper = None;
     let mut pause = 0.0f32;
@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     })?;
     println!("[{user}] dentro: mapa {} ({}, {}) vida {}/{} maná {}/{}", info.map, info.x, info.y, info.health, info.max_health, info.mana, info.max_mana);
-    // Llega justo después de la información (`ReceiveMoveMapChecksum`).
+    // Arrives right after the information (`ReceiveMoveMapChecksum`).
     let mut key = c.wait(|m| match m {
         ServerMessage::MapMoveChecksumKey { key } => Some(*key),
         _ => None,
@@ -202,14 +202,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match changed {
             Ok((map, x, y)) => {
                 println!("[{user}] cambia al mapa {map} ({x}, {y})");
-                // `SendRequestFinishLoading` cuando ha cargado.
+                // `SendRequestFinishLoading` once loaded.
                 c.send(ClientMessage::ClientReadyAfterMapChange)?;
             }
             Err(text) => println!("[{user}] no puede mover: AVISO {text}"),
         }
     }
     for (x, y, gate) in gates {
-        // El cliente camina hasta la puerta: el servidor guarda la casilla de llegada.
+        // The client walks to the gate: the server stores the destination tile.
         c.send(ClientMessage::Walk { source_x: x, source_y: y, rotation: 5, directions: vec![] })?;
         c.send(ClientMessage::EnterGate { gate, x: 0, y: 0 })?;
         println!("[{user}] pisa la puerta {gate} en ({x}, {y})");

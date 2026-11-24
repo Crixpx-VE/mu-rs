@@ -1,7 +1,7 @@
-//! Parte de personaje de las habilidades del Dark Knight, traducida de `ZzzCharacter.cpp`
-//! (`AttackStage`, `AttackEffect` y el `switch` al llegar a `g_iLimitAttackTime`), con lo visual de
-//! `UseSkillWarrior` (`SkillCast.cpp`) y `AttackKnight` (`ClassAttack.cpp`) al lanzarlas:
-//! Twisting Slash, Rageful Blow, Death Stab, Impale, Swell Life y las de espada (19-23).
+//! Character side of the Dark Knight skills, translated from `ZzzCharacter.cpp`
+//! (`AttackStage`, `AttackEffect` and the `switch` on reaching `g_iLimitAttackTime`), with the visuals of
+//! `UseSkillWarrior` (`SkillCast.cpp`) and `AttackKnight` (`ClassAttack.cpp`) on cast:
+//! Twisting Slash, Rageful Blow, Death Stab, Impale, Swell Life and the sword skills (19-23).
 
 use bevy::math::Vec3;
 
@@ -25,9 +25,9 @@ pub fn register(r: &mut Registry) {
     }
 }
 
-// --- Utilidades ----------------------------------------------------------------------------------
+// --- Helpers ---------------------------------------------------------------------------------------
 
-/// `c->LastAttackEffectTime` (0 = ninguno, `AttackTime` nunca vale 0 mientras dura).
+/// `c->LastAttackEffectTime` (0 = none; `AttackTime` is never 0 while it lasts).
 const LAST_EFFECT: usize = 7;
 
 /// `c->CheckAttackTime(n)`.
@@ -54,23 +54,23 @@ fn is_attack_action(action: usize) -> bool {
     (PLAYER_ATTACK_FIST..=PLAYER_RIDE_SKILL).contains(&(action as i32))
 }
 
-/// `IsAttackImpactFrame(o)` para un jugador.
+/// `IsAttackImpactFrame(o)` for a player.
 fn is_attack_impact_frame(a: &Actor) -> bool {
     a.frame >= 5.0 && is_attack_action(a.action)
 }
 
-/// `(sin, cos)` del rumbo (`o->Angle[2]`).
+/// `(sin, cos)` of the heading (`o->Angle[2]`).
 fn heading(a: &Actor) -> (f32, f32) {
     let r = a.angle.z.to_radians();
     (r.sin(), r.cos())
 }
 
-/// `c->Weapon[Hand].Type` (-1 sin arma).
+/// `c->Weapon[Hand].Type` (-1 without a weapon).
 fn weapon_type(a: &Actor) -> i32 {
     a.weapon.map_or(-1, |w| w.0)
 }
 
-/// Habilidades que pasan por `UseSkillWarrior` (las demás van por `AttackKnight`).
+/// Skills that go through `UseSkillWarrior` (the rest go through `AttackKnight`).
 fn uses_skill_warrior(skill: i32) -> bool {
     matches!(
         skill,
@@ -78,34 +78,34 @@ fn uses_skill_warrior(skill: i32) -> bool {
     )
 }
 
-// --- Cada tick (AttackStage + AttackEffect) ------------------------------------------------------------
+// --- Every tick (AttackStage + AttackEffect) -----------------------------------------------------------
 
 fn stage(c: &mut Cast, ctx: &mut Ctx) {
     let owner = Some(Target::Actor(c.owner));
     let actor = ctx.actor(owner).cloned();
 
     if let Some(o) = actor.as_ref() {
-        // Al lanzar: lo visual de UseSkillWarrior / AttackKnight.
+        // On cast: the visuals of UseSkillWarrior / AttackKnight.
         if c.attack_time == 1 {
             launch(c, o, ctx);
         }
         attack_stage(c, o, ctx);
     }
 
-    // AttackEffect: `Luminosity = rand() % 6 + 2` (para un jugador no hace nada más).
+    // AttackEffect: `Luminosity = rand() % 6 + 2` (does nothing else for a player).
     let _ = ctx.rand();
 
-    // El original hace `AttackTime += 1` y comprueba el límite en el mismo tick: así `finish`
-    // corre en el tick en que AttackStage vio 14 (o el salto a 15), no uno después.
+    // The original does `AttackTime += 1` and checks the limit in the same tick: so `finish`
+    // runs in the tick where AttackStage saw 14 (or the jump to 15), not one later.
     if c.attack_time + 1 >= LIMIT_ATTACK_TIME {
         c.attack_time = LIMIT_ATTACK_TIME;
     }
 }
 
-/// Lo que hacen `UseSkillWarrior` / `AttackKnight` en lo visual al lanzar.
+/// What `UseSkillWarrior` / `AttackKnight` do visually on cast.
 fn launch(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
-    // TODO(original): SetAttackSpeed/SetAction, giro hacia TargetPosition, LetHeroStop y
-    // SendRequestMagic(Continue) los hace character.rs / la red.
+    // TODO(original): SetAttackSpeed/SetAction, turning toward TargetPosition, LetHeroStop and
+    // SendRequestMagic(Continue) are handled by character.rs / the network.
     if uses_skill_warrior(c.skill) {
         let owner = Some(Target::Actor(c.owner));
         ctx.create_particle(BITMAP_SHINY + 2, o.position, o.angle, Vec3::ONE, 0, 0.0, owner);
@@ -116,13 +116,13 @@ fn launch(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
 
 fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
     let owner = Some(Target::Actor(c.owner));
-    // GetHandOfWeapon: las acciones de habilidad nunca son las de la mano izquierda → Hand = 0.
+    // GetHandOfWeapon: skill actions are never left-hand actions → Hand = 0.
     let bone = o.weapon_bone;
     let (s, co) = heading(o);
 
     match c.skill {
         AT_SKILL_DEATHSTAB => {
-            // TODO(original): también se corta si el hueso es Dummy (no lo sabemos).
+            // TODO(original): also bails out if the bone is Dummy (unknown here).
             if bone >= o.bones.len() {
                 return;
             }
@@ -131,7 +131,7 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                 set_last_attack_effect_time(c);
             }
             if (2..=8).contains(&c.attack_time) && ctx.rand_fps_check(1) {
-                // Viento que se junta en la espada desde atrás.
+                // Wind gathering on the sword from behind.
                 for _ in 0..3 {
                     let mut cur = o.position;
                     cur.z += 120.0;
@@ -143,14 +143,14 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                 }
             }
             if c.attack_time <= 8 && ctx.rand_fps_check(1) {
-                // Punto donde se junta el viento (m_vPosSword).
+                // Point where the wind gathers (m_vPosSword).
                 c.pos_sword = o.bone_world(bone, Vec3::ZERO);
                 let dist = 300.0;
                 c.pos_sword.x += dist * s;
                 c.pos_sword.y += -dist * co;
             }
             if (6..=12).contains(&c.attack_time) {
-                // Conos de la estocada.
+                // Thrust cones.
                 if ctx.rand_fps_check(1) {
                     let mut pos = o.bone_world(bone, Vec3::ZERO);
                     let dist = 100.0 + (c.attack_time - 8) as f32 * 10.0;
@@ -159,8 +159,8 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                     ctx.create_effect(MODEL_SPEAR, pos, o.angle, Vec3::ONE, 1, owner, -1, 0, 0, 0.0);
                     ctx.create_effect(MODEL_SPEAR, pos, o.angle, Vec3::ONE, 1, owner, -1, 0, 0, 0.0);
                 }
-                // TODO(original): si hay TargetCharacter vivo y AttackTime >= 10,
-                // to->m_byHurtByDeathstab = 35 (rayos por los huesos del objetivo; no hay monstruos).
+                // TODO(original): if there is a living TargetCharacter and AttackTime >= 10,
+                // to->m_byHurtByDeathstab = 35 (lightning along the target's bones; no monsters here).
             }
             if c.attack_time >= 12 {
                 c.attack_time = LIMIT_ATTACK_TIME;
@@ -171,12 +171,12 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                 ctx.play_sound("SOUND_RIDINGSPEAR");
                 set_last_attack_effect_time(c);
             } else if check_attack_time(c, 4) {
-                // Preparación: la lanza en la mano.
+                // Wind-up: the spear in the hand.
                 let p = o.bone_world(bone, Vec3::ZERO);
                 ctx.create_effect(MODEL__SPEAR, p, o.angle, Vec3::new(1.0, 1.0, 0.5), weapon_type(o), owner, -1, 0, 0, 0.0);
                 set_last_attack_effect_time(c);
             } else if check_attack_time(c, 8) {
-                // Conos delante.
+                // Cones in front.
                 let mut pos = o.position;
                 pos.x += 50.0 * s;
                 pos.y += -50.0 * co;
@@ -186,7 +186,7 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                 set_last_attack_effect_time(c);
             }
             if (13..=14).contains(&c.attack_time) && ctx.rand_fps_check(1) {
-                // Lanzazos rápidos.
+                // Rapid spear thrusts.
                 for _ in 0..3 {
                     let mut pos = o.position;
                     pos.x += 145.0 * s;
@@ -194,7 +194,7 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
                     pos.z += 110.0;
                     let light = Vec3::splat(0.3);
                     if check_attack_time(c, 11) {
-                        // (vacío en el original)
+                        // (empty in the original)
                     } else {
                         pos.x += (ctx.rand() % 60 - 30) as f32;
                         pos.y += (ctx.rand() % 60 - 30) as f32;
@@ -210,33 +210,33 @@ fn attack_stage(c: &mut Cast, o: &Actor, ctx: &mut Ctx) {
             }
         }
         _ => {
-            // default: Rageful Blow, Twisting Slash y las de espada.
+            // default: Rageful Blow, Twisting Slash and the sword skills.
             if o.frame >= 1.0 && o.action == PLAYER_ATTACK_SKILL_FURY_STRIKE as usize {
                 c.attack_time = LIMIT_ATTACK_TIME;
             } else if is_attack_impact_frame(o) {
-                // TODO(original): chispas BITMAP_SPARK+1 con el arco ITEM_SYLPH_WIND_BOW (no es del DK).
+                // TODO(original): BITMAP_SPARK+1 sparks with the ITEM_SYLPH_WIND_BOW bow (not a DK thing).
                 c.attack_time = LIMIT_ATTACK_TIME;
             }
         }
     }
 }
 
-// --- Al llegar a g_iLimitAttackTime -------------------------------------------------------------------
+// --- On reaching g_iLimitAttackTime ------------------------------------------------------------------
 
 fn finish(c: &mut Cast, ctx: &mut Ctx) {
     let owner = Some(Target::Actor(c.owner));
     let Some(o) = ctx.actor(owner).cloned() else { return };
     c.user[LAST_EFFECT] = 0.0;
-    // TODO(original): o->PKKey = getTargetCharacterKey(c, SelectedCharacter) (sin objetivos → -1).
+    // TODO(original): o->PKKey = getTargetCharacterKey(c, SelectedCharacter) (no targets → -1).
     let pk_key = -1;
-    // TODO(original): FindHotKey(Skill) (índice de la habilidad en la lista; solo lo usa la red).
+    // TODO(original): FindHotKey(Skill) (index of the skill in the list; only used by the network).
     let hot_key = 0;
-    // o->Light del personaje: no lo tenemos, blanco.
+    // The character's o->Light: not available, white.
     let light = Vec3::ONE;
 
     match c.skill {
         AT_SKILL_RAGEFUL_BLOW => {
-            // o->Weapon/WeaponLevel = arma derecha: el efecto lo lee de `Actor::weapon` del dueño.
+            // o->Weapon/WeaponLevel = right-hand weapon: the effect reads it from the owner's `Actor::weapon`.
             ctx.create_effect(MODEL_SKILL_FURY_STRIKE, o.position, o.angle, light, 0, owner, pk_key, 0, hot_key, 0.0);
             ctx.play_sound("SOUND_FURY_STRIKE1");
         }
@@ -254,7 +254,7 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
             ctx.play_sound("SOUND_SWELLLIFE");
         }
         AT_SKILL_TWISTING_SLASH => {
-            // o->Weapon/WeaponLevel = arma derecha: el efecto lo lee de `Actor::weapon` del dueño.
+            // o->Weapon/WeaponLevel = right-hand weapon: the effect reads it from the owner's `Actor::weapon`.
             ctx.create_effect(MODEL_SKILL_WHEEL1, o.position, o.angle, light, 0, owner, pk_key, 0, hot_key, 0.0);
             ctx.play_sound("SOUND_SKILL_SWORD4");
             // TODO(original): c->PostMoveProcess_Active(g_iLimitAttackTime).
@@ -262,7 +262,7 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // TODO(original): con TargetCharacter == -1 solo flechas (arcos) y PlayUntargetedAttackHitSound.
-    // Con objetivo: sangre BITMAP_BLOOD+1 si Hit, CreateSpark para PLAYER_ATTACK_SKILL_SWORD1..5,
-    // BITMAP_JOINT_ENERGY si ATTACK_DIE y el sonido del golpe (no hay monstruos ni daño).
+    // TODO(original): with TargetCharacter == -1 only arrows (bows) and PlayUntargetedAttackHitSound.
+    // With a target: BITMAP_BLOOD+1 blood on Hit, CreateSpark for PLAYER_ATTACK_SKILL_SWORD1..5,
+    // BITMAP_JOINT_ENERGY on ATTACK_DIE and the hit sound (no monsters or damage yet).
 }

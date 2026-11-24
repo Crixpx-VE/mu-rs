@@ -1,6 +1,6 @@
-//! Partículas traducidas de `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` y
-//! `DescribeParticle`): aurora de GM, máscara del Templo Maldito, nubes de Raklion, `CHROME2`,
-//! aura de AG adicional, explosión `SBUMB`, golpes `DAMAGE1`/`DAMAGE2` y `SWORD_EFFECT_MONO`.
+//! Particles translated from `ZzzEffectParticle.cpp` (`CreateParticle`, `MoveParticles` and
+//! `DescribeParticle`): GM aurora, Cursed Temple mask, Raklion clouds, `CHROME2`,
+//! additional AG aura, `SBUMB` explosion, `DAMAGE1`/`DAMAGE2` hits and `SWORD_EFFECT_MONO`.
 
 use bevy::math::Vec3;
 
@@ -30,10 +30,10 @@ pub fn register(r: &mut Registry) {
     r.particle(BITMAP_DAMAGE2, ParticleKind { create: Some(damage2_create), step: Some(damage2_step), draw: Some(damage2_draw) });
 }
 
-// --- Dibujo común ---------------------------------------------------------------------------------
+// --- Shared drawing ------------------------------------------------------------------------------
 
-/// `out.DrawSprite(Sprite(TexType, pos, W, H, light, rot, u, v, uw, vh))` con la mezcla de
-/// `RenderParticles` (JPG suma, TGA prueba de alfa) y alfa = 1 (JPG) o `light[0]` (TGA).
+/// `out.DrawSprite(Sprite(TexType, pos, W, H, light, rot, u, v, uw, vh))` with the blend from
+/// `RenderParticles` (JPG additive, TGA alpha test) and alpha = 1 (JPG) or `light[0]` (TGA).
 #[allow(clippy::too_many_arguments)]
 fn push_sprite(out: &mut DrawList, t: TexInfo, tex: i32, pos: Vec3, w: f32, h: f32, light: Vec3, rot: f32, uv: [f32; 4]) {
     out.sprites.push(SpriteDraw {
@@ -91,7 +91,7 @@ fn raklion_clouds_step(p: &mut Particle, ctx: &mut Ctx) {
     const LIGHTDIVIDEDFACTOR: f32 = 1.6;
     const EPSILON_: f32 = 0.01;
 
-    // Empuje por su −Y local.
+    // Push along its local −Y.
     let force = rotate(p.angle, Vec3::new(0.0, -1.0, 0.0)) * FORCESCALAR;
     p.position += force;
     p.scale += SCALEFACTOR;
@@ -116,7 +116,7 @@ fn raklion_clouds_step(p: &mut Particle, ctx: &mut Ctx) {
 fn chrome2_create(p: &mut Particle, ctx: &mut Ctx) {
     p.life_time = (ctx.rand() % 5 + 5) as f32;
     p.rotation = (ctx.rand() % 360) as f32;
-    // StartPosition = Position (ya lo pone Particle::new).
+    // StartPosition = Position (already set by Particle::new).
     p.start_position = p.position;
     p.scale *= 1.0 + (ctx.rand() % 10) as f32 * 0.03;
 }
@@ -130,7 +130,7 @@ fn chrome2_step(p: &mut Particle, ctx: &mut Ctx) {
 
     p.rotation += 1.0;
     p.alpha -= 0.05;
-    // Igual que el original: posición = la del objetivo − StartPosition.
+    // Same as the original: position = the target's − StartPosition.
     if let Some(tp) = ctx.target_position(p.target) {
         p.position = tp - p.start_position;
     }
@@ -156,7 +156,7 @@ fn ag_addition_create(p: &mut Particle, ctx: &mut Ctx) {
     p.scale = scale;
     p.gravity = (ctx.rand() % 16 + 12) as f32 * 0.1;
     p.alpha = 0.0;
-    // El color base (1, 0, 0.6) se guarda en TurningForce; la luz empieza apagada.
+    // The base color (1, 0, 0.6) is stored in TurningForce; the light starts off.
     p.turning_force = Vec3::new(1.0, 0.0, 0.6);
     p.light = Vec3::ZERO;
 }
@@ -175,8 +175,8 @@ fn ag_addition_step(p: &mut Particle, ctx: &mut Ctx) {
     let luminosity = p.alpha;
     p.light = p.turning_force * luminosity;
 
-    // `TransformByObjectBone(Temp_Pos, Target, 18)`: el hueso 18 del objetivo.
-    // (El original no comprueba Target; sin personaje se deja la posición como está.)
+    // `TransformByObjectBone(Temp_Pos, Target, 18)`: the target's bone 18.
+    // (The original does not check Target; without a character the position is left as is.)
     let Some(mut temp_pos) = ctx.actor(p.target).map(|a| a.bone_world(18, Vec3::ZERO)) else { return };
 
     if p.sub_type == 0 {
@@ -191,17 +191,17 @@ fn ag_addition_step(p: &mut Particle, ctx: &mut Ctx) {
     }
     p.position = temp_pos;
 
-    // TODO(original): si muere y el objetivo sigue con el buff eBuff_AG_Addition
-    // (g_isCharacterBuff), crea otra BITMAP_AG_ADDITION_EFFECT del mismo subtipo en Temp_Pos con
-    // o->Angle, o->Light, escala 1.0 y el mismo Target (además calcula un _Scale que no usa).
-    // Falta el sistema de buffs.
+    // TODO(original): when it dies and the target still has the eBuff_AG_Addition buff
+    // (g_isCharacterBuff), create another BITMAP_AG_ADDITION_EFFECT of the same subtype at Temp_Pos with
+    // o->Angle, o->Light, scale 1.0 and the same Target (it also computes an unused _Scale).
+    // The buff system is missing.
 }
 
 // --- BITMAP_SBUMB ---------------------------------------------------------------------------------
 
 fn sbumb_create(p: &mut Particle, _ctx: &mut Ctx) {
     p.life_time = 4.0;
-    // o->Scale = Scale (ya lo es).
+    // o->Scale = Scale (already is).
 }
 
 fn sbumb_step(p: &mut Particle, _ctx: &mut Ctx) {
@@ -224,7 +224,7 @@ fn damage1_create(p: &mut Particle, _ctx: &mut Ctx) {
 fn damage1_step(p: &mut Particle, _ctx: &mut Ctx) {
     p.scale *= 1.2;
     p.light *= 0.8;
-    // Al final de MoveParticles el original dobla la luz de las DAMAGE1 que siguen vivas.
+    // At the end of MoveParticles the original doubles the light of DAMAGE1 particles still alive.
     if p.live {
         p.light *= 2.0;
     }

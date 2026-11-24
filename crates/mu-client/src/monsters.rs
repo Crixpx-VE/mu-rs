@@ -1,19 +1,19 @@
-//! Monstruos y NPC del mapa: el modelo de cada número de monstruo del servidor (`CreateMonster`, ver
-//! `mu_data::monsters`), animado con sus acciones (`MONSTER01_*`) y su `PlaySpeed`, con la luz del terreno
-//! y caminando por casillas.
+//! Map monsters and NPCs: the model for each server monster number (`CreateMonster`, see
+//! `mu_data::monsters`), animated with its actions (`MONSTER01_*`) and its `PlaySpeed`, with terrain light
+//! and walking tile by tile.
 //!
-//! Lo manejan órdenes ([`MonsterOrder`], o [`Monsters`] desde un sistema): aparecer en una casilla mirando
-//! a una dirección, cambiar de acción, caminar y desaparecer. Las mandará la red (`AddNpcsToScope`,
-//! `ObjectMoved`, `ObjectAnimation`...); con `--monstruos-prueba` las manda [`test_monsters`].
+//! Driven by orders ([`MonsterOrder`], or [`Monsters`] from a system): appear on a tile facing
+//! a direction, change action, walk and disappear. The network sends them (`AddNpcsToScope`,
+//! `ObjectMoved`, `ObjectAnimation`...); with `--monstruos-prueba` [`test_monsters`] sends them.
 //!
-//! Animación como la del jugador: el original avanza `PlaySpeed` fotogramas por tick de 25 Hz
-//! (`CharacterAnimation`, ZzzCharacter.cpp:2280); aquí se avanza lo mismo por segundo de juego y la pose
-//! se interpola entre fotogramas. Al acabar una animación pasa lo de `BMD::PlayAnimation`
-//! (ZzzBMD.cpp:408-479) y `EtcStopAnimationSetting` (ZzzCharacter.cpp:3290-3335).
+//! Animation like the player's: the original advances `PlaySpeed` frames per 25 Hz tick
+//! (`CharacterAnimation`, ZzzCharacter.cpp:2280); here the same amount advances per game second and the pose
+//! is interpolated between frames. When an animation ends, `BMD::PlayAnimation`
+//! (ZzzBMD.cpp:408-479) and `EtcStopAnimationSetting` (ZzzCharacter.cpp:3290-3335) apply.
 //!
-//! Aún no: las armas en las manos (solo se guardan tipo y nivel), las armaduras de los NPC con forma de
-//! personaje (van con las piezas de clase), los efectos propios de cada monstruo (`MoveMonsterVisual`,
-//! huesos con nombre, `CreateJoint`...), los sonidos y el giro de la cabeza (`BoneHead`).
+//! Not yet: weapons in the hands (only type and level are stored), the armor of character-shaped
+//! NPCs (comes with the class parts), each monster's own effects (`MoveMonsterVisual`,
+//! named bones, `CreateJoint`...), sounds and head turning (`BoneHead`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::f32::consts::FRAC_PI_2;
@@ -52,17 +52,17 @@ impl Plugin for MonstersPlugin {
     }
 }
 
-/// Lo que se le puede pedir a un monstruo (o NPC). `key` es su número de objeto en el servidor.
+/// What a monster (or NPC) can be told to do. `key` is its server object number.
 #[derive(Message, Clone, Debug)]
 pub enum MonsterOrder {
-    /// `CreateMonster(number, x, y, key)` mirando hacia `direction` (0..7, la de los pasos).
+    /// `CreateMonster(number, x, y, key)` facing `direction` (0..7, the step directions).
     Spawn { key: u16, number: u16, x: u8, y: u8, direction: u8 },
     Action { key: u16, action: MonsterAction },
-    /// Que camine hasta la casilla (busca el camino, como `MoveMonsterClient` con `PathFinding2`).
+    /// Walk to the tile (finds the path, like `MoveMonsterClient` with `PathFinding2`).
     WalkTo { key: u16, x: u8, y: u8 },
-    /// Que dé estos pasos (direcciones 0..7) desde donde está.
+    /// Take these steps (directions 0..7) from where it stands.
     Walk { key: u16, directions: Vec<u8> },
-    /// Que mire hacia esta dirección (0..7).
+    /// Face this direction (0..7).
     Turn { key: u16, direction: u8 },
     Despawn { key: u16 },
 }
@@ -80,10 +80,10 @@ impl MonsterOrder {
     }
 }
 
-/// Acciones de un monstruo. Los de forma de personaje (`MODEL_PLAYER`) las traducen a las suyas como
+/// Monster actions. Character-shaped ones (`MODEL_PLAYER`) translate them to their own like
 /// `SetPlayerStop` / `SetPlayerWalk` / `SetPlayerAttack` / `SetPlayerShock` / `SetPlayerDie`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[allow(dead_code)] // La red las usará.
+#[allow(dead_code)] // The network will use them.
 pub enum MonsterAction {
     Stop,
     Stop2,
@@ -91,13 +91,13 @@ pub enum MonsterAction {
     Attack2,
     Shock,
     Die,
-    /// Una acción del modelo tal cual (`MONSTER01_*`, o `PLAYER_*` en los de forma de personaje).
+    /// A model action as is (`MONSTER01_*`, or `PLAYER_*` for character-shaped ones).
     Raw(u16),
 }
 
-/// Para mandar órdenes desde cualquier sistema.
+/// To send orders from any system.
 #[derive(SystemParam)]
-#[allow(dead_code)] // La red lo usará; ahora solo `--monstruos-prueba`.
+#[allow(dead_code)] // The network will use it; for now only `--monstruos-prueba`.
 pub struct Monsters<'w> {
     orders: MessageWriter<'w, MonsterOrder>,
 }
@@ -124,7 +124,7 @@ impl Monsters<'_> {
     }
 }
 
-/// Órdenes que esperan a que el mapa esté cargado.
+/// Orders waiting for the map to be loaded.
 #[derive(Resource, Default)]
 struct Pending(Vec<MonsterOrder>);
 
@@ -132,14 +132,14 @@ fn collect(mut from: MessageReader<MonsterOrder>, mut pending: ResMut<Pending>) 
     pending.0.extend(from.read().cloned());
 }
 
-/// Lo que manda el servidor de los monstruos y NPC:
-/// - `AddMonstersToScope` (`ReceiveCreateMonsterViewport`, WSclient.cpp:2512-2639): aparece en su casilla
-///   mirando a `Path >> 4` y, si su casilla de llegada es otra, camina hasta ella (`PathFinding2`);
-/// - `ObjectWalked` (`ReceiveMoveCharacter`): camina hasta la casilla de llegada desde donde esté;
-/// - `MapObjectOutOfScope`: desaparece.
+/// What the server sends about monsters and NPCs:
+/// - `AddMonstersToScope` (`ReceiveCreateMonsterViewport`, WSclient.cpp:2512-2639): appears on its tile
+///   facing `Path >> 4` and, if its destination tile differs, walks to it (`PathFinding2`);
+/// - `ObjectWalked` (`ReceiveMoveCharacter`): walks to the destination tile from wherever it is;
+/// - `MapObjectOutOfScope`: disappears.
 ///
-/// Los mensajes de jugadores también pasan por aquí: las órdenes con un `key` que no es de ningún
-/// monstruo no hacen nada.
+/// Player messages also come through here: orders with a `key` that belongs to no
+/// monster do nothing.
 fn from_server(mut from: MessageReader<crate::net::FromServer>, mut pending: ResMut<Pending>) {
     use mu_protocol::game::{OBJECT_ID_MASK, ServerMessage};
     for m in from.read() {
@@ -164,59 +164,59 @@ fn from_server(mut from: MessageReader<crate::net::FromServer>, mut pending: Res
     }
 }
 
-/// De dónde salen las velocidades de las acciones.
+/// Where the action speeds come from.
 #[derive(Clone, Copy)]
 enum Speeds {
     Monster(&'static data::MonsterModel),
     Npc(&'static data::NpcModel),
-    /// `player.bmd`: las de `character::play_speed`.
+    /// `player.bmd`: those of `character::play_speed`.
     Player,
-    /// Modelos sin tabla (`MODEL_WARCRAFT`, objetos de trampa): el original no les pone `PlaySpeed`.
+    /// Models without a table (`MODEL_WARCRAFT`, trap objects): the original sets no `PlaySpeed` for them.
     Unset,
 }
 
-/// Un monstruo o NPC en el mapa.
+/// A monster or NPC on the map.
 #[derive(Component)]
 pub struct Monster {
     pub key: u16,
     pub number: u16,
     pub def: &'static Def,
-    /// Posición en casillas (fraccionaria mientras camina).
+    /// Position in tiles (fractional while walking).
     pub pos: Vec2,
     path: VecDeque<(usize, usize)>,
-    /// Ángulo de MU (`o->Angle[2]`, en radianes).
+    /// MU angle (`o->Angle[2]`, in radians).
     facing: f32,
     pub action: usize,
     frame: f32,
-    /// La animación con `Loop` acabó: se queda en su último fotograma (`MONSTER01_DIE`).
+    /// The animation with `Loop` ended: it stays on its last frame (`MONSTER01_DIE`).
     held: bool,
     pub dead: bool,
     skeleton: Arc<Bmd>,
     parts: Vec<RigPart>,
     speeds: Speeds,
-    /// Acciones de `player.bmd` (los de forma de personaje).
+    /// `player.bmd` actions (character-shaped ones).
     player: Option<PlayerActions>,
-    /// Materiales y cómo les llega la luz.
+    /// Materials and how the light reaches them.
     materials: Vec<(Handle<ModelMaterial>, LookColor)>,
     light: Vec3,
     scale: f32,
-    /// `c->MoveSpeed` en casillas por segundo.
+    /// `c->MoveSpeed` in tiles per second.
     speed: f32,
-    /// `o->Timer` (sube 0.15 por tick al moverse, `MoveCharacterPosition`).
+    /// `o->Timer` (rises 0.15 per tick while moving, `MoveCharacterPosition`).
     timer: f32,
     shadow: bool,
 }
 
-/// Una malla del modelo (o de una pieza) que se posa con los huesos del esqueleto.
+/// A mesh of the model (or of a part) posed with the skeleton's bones.
 struct RigPart {
     model: Arc<Bmd>,
     mesh: usize,
     handle: Handle<Mesh>,
-    /// Va en la sombra (`RenderBodyShadow` no dibuja ni la `BlendMesh` ni la `HiddenMesh`).
+    /// Goes into the shadow (`RenderBodyShadow` draws neither the `BlendMesh` nor the `HiddenMesh`).
     shadow: bool,
 }
 
-/// Modelos y texturas ya cargados (cada monstruo tiene sus mallas: se posan en la CPU).
+/// Models and textures already loaded (each monster has its own meshes: posed on the CPU).
 #[derive(Resource, Default)]
 struct Cache {
     bmds: HashMap<PathBuf, Option<Arc<Bmd>>>,
@@ -239,8 +239,8 @@ impl Cache {
             .clone()
     }
 
-    /// La textura `name` de una malla, buscada en `dirs` en orden (como `OpenTexture`, que si no la
-    /// encuentra usa la ya cargada con el mismo nombre: LoadData.cpp:82-90).
+    /// Texture `name` of a mesh, searched in `dirs` in order (like `OpenTexture`, which, if it does not
+    /// find it, uses the already loaded one with the same name: LoadData.cpp:82-90).
     fn texture(&mut self, data: &Path, dirs: &[&str], name: &str, images: &mut Assets<Image>) -> Option<(Handle<Image>, AlphaKind)> {
         let file = bmd::texture_file_name(name);
         let path = dirs.iter().find_map(|d| fs::find(&find_dir(data, d), &file))?;
@@ -254,7 +254,7 @@ impl Cache {
     }
 }
 
-/// Carpeta bajo `Data` sin distinguir mayúsculas (`Npc`/`NPC`...).
+/// Folder under `Data`, case-insensitive (`Npc`/`NPC`...).
 fn find_dir(data: &Path, rel: &str) -> PathBuf {
     let mut d = data.to_path_buf();
     for part in rel.split('/').filter(|p| !p.is_empty()) {
@@ -263,16 +263,16 @@ fn find_dir(data: &Path, rel: &str) -> PathBuf {
     d
 }
 
-/// Una pieza que se dibuja: archivo y carpetas de sus texturas.
+/// A part that gets drawn: file and texture folders.
 struct Piece {
     dir: String,
     file: String,
     textures: Vec<String>,
-    /// `MODEL_LITTLESANTA + k`: el número que lleva su primera textura (ZzzOpenData.cpp:2170-2183).
+    /// `MODEL_LITTLESANTA + k`: the digit its first texture carries (ZzzOpenData.cpp:2170-2183).
     texture_digit: Option<u8>,
 }
 
-/// Esqueleto, piezas y velocidades del modelo de `def` en el mapa `world_active`.
+/// Skeleton, parts and speeds of the `def` model on map `world_active`.
 fn sources(def: &Def, world_active: i32) -> Option<((String, String), Vec<Piece>, Speeds)> {
     let piece = |dir: &str, file: &str, textures: &[&str]| Piece {
         dir: dir.into(),
@@ -289,7 +289,7 @@ fn sources(def: &Def, world_active: i32) -> Option<((String, String), Vec<Piece>
         }
         Model::Npc(name) => {
             let npc = data::npc_model(name)?;
-            // `OpenNpc` acaba con `OpenTexture(Type, "Npc\\")` (ZzzOpenData.cpp:2271): primero `Npc`.
+            // `OpenNpc` ends with `OpenTexture(Type, "Npc\\")` (ZzzOpenData.cpp:2271): `Npc` first.
             let mut main = piece(npc.dir, npc.file, &["Npc", npc.textures]);
             if npc.texture_patch {
                 let k = name.rsplit_once('+').and_then(|(_, k)| k.parse::<u8>().ok()).unwrap_or(0);
@@ -320,11 +320,11 @@ fn sources(def: &Def, world_active: i32) -> Option<((String, String), Vec<Piece>
             if let SubType::Model(name) = def.sub_type
                 && let Some((dir, file, tex)) = data::other_model(name)
             {
-                // `RenderPartObject(o, o->SubType, ...)` con los huesos del jugador (ZzzCharacter.cpp:9185-9188).
+                // `RenderPartObject(o, o->SubType, ...)` with the player's bones (ZzzCharacter.cpp:9185-9188).
                 pieces.push(piece(dir, file, &[tex]));
             } else {
-                // Las armaduras (`BodyPart`) son items: hasta que se carguen, las piezas sin equipo de la clase
-                // 0 (`Class` de `CreateCharacterPointer`).
+                // Armor (`BodyPart`) are items: until they are loaded, the class 0 unequipped
+                // parts (`Class` of `CreateCharacterPointer`).
                 for part in ["Helm", "Armor", "Pant", "Glove", "Boot"] {
                     pieces.push(piece("Player", &format!("{part}Class01.bmd"), &["Player"]));
                 }
@@ -334,7 +334,7 @@ fn sources(def: &Def, world_active: i32) -> Option<((String, String), Vec<Piece>
     })
 }
 
-/// Lo que hace falta para crear la entidad de un monstruo.
+/// What is needed to create a monster's entity.
 struct Built {
     skeleton: Arc<Bmd>,
     parts: Vec<RigPart>,
@@ -383,8 +383,8 @@ fn build(
             {
                 tex_name.insert(9, char::from(b'0' + k % 10));
             }
-            // `OpenTexture`: las texturas `hid*` son `BITMAP_HIDE` (LoadData.cpp:67) y `RenderMesh` no las
-            // dibuja (ZzzBMD.cpp:947).
+            // `OpenTexture`: `hid*` textures are `BITMAP_HIDE` (LoadData.cpp:67) and `RenderMesh` does not
+            // draw them (ZzzBMD.cpp:947).
             if tex_name.starts_with("hid") {
                 continue;
             }
@@ -405,7 +405,7 @@ fn build(
                 script: bmd::texture_script(&mesh.texture),
                 has_alpha: image.as_ref().is_some_and(|i| i.1 != AlphaKind::Opaque),
             };
-            // `RenderBody(RENDER_TEXTURE, o->Alpha, o->BlendMesh, o->BlendMeshLight, ...)` de `RenderObject`.
+            // `RenderBody(RENDER_TEXTURE, o->Alpha, o->BlendMesh, o->BlendMeshLight, ...)` from `RenderObject`.
             let looks = render::resolve_all(render::DEFAULT_PASSES, &draw, &info);
             let in_shadow = i as i32 != draw.hidden_mesh && mesh.texture_index as i32 != draw.blend_mesh;
             for (pass, look) in &looks {
@@ -422,7 +422,7 @@ fn build(
     Some(out)
 }
 
-/// Material de una malla en una pasada (como `objects::object_material`, con la luz que se pone luego).
+/// Material of a mesh in one pass (like `objects::object_material`, with the light set later).
 fn look_material(image: Option<Handle<Image>>, look: &MeshLook, pass: usize) -> ModelMaterial {
     let alpha_mode = match look.blend {
         LookBlend::Opaque => AlphaMode::Opaque,
@@ -444,7 +444,7 @@ fn look_material(image: Option<Handle<Image>>, look: &MeshLook, pass: usize) -> 
     model_material(base, light.with_chrome(look.chrome).with_subtract(look.blend == LookBlend::Subtract))
 }
 
-/// Las acciones de `player.bmd` de un monstruo con forma de personaje, según sus armas.
+/// The `player.bmd` actions of a character-shaped monster, depending on its weapons.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PlayerActions {
     stop: usize,
@@ -452,8 +452,8 @@ struct PlayerActions {
     attack: [usize; 2],
 }
 
-/// `GetEquipedBowType` (CharacterManager.cpp:281-292): arco en la izquierda (menos el carcaj, `BOW+7`) o
-/// ballesta en la derecha (menos las flechas, `BOW+15`).
+/// `GetEquipedBowType` (CharacterManager.cpp:281-292): bow in the left hand (except the quiver, `BOW+7`) or
+/// crossbow in the right (except the bolts, `BOW+15`).
 fn bow_type(def: &Def) -> u8 {
     let is = |w: Option<data::Item>, f: &dyn Fn(u16) -> bool| w.is_some_and(|w| w.group == 4 && f(w.index));
     if is(def.weapons[1], &|i| i != 7) {
@@ -465,16 +465,16 @@ fn bow_type(def: &Def) -> u8 {
     }
 }
 
-/// `SetPlayerStop`, `SetPlayerWalk` y `SetPlayerAttack` (ZzzCharacter.cpp:173-395, 399-946, 948-1107) para
-/// un monstruo sin montura ni alas, `Class` 0 y `Run` < 40. `TwoHand` es de la tabla de items
-/// (`ItemAttribute`), que aún no se lee: cuentan todas como de una mano.
+/// `SetPlayerStop`, `SetPlayerWalk` and `SetPlayerAttack` (ZzzCharacter.cpp:173-395, 399-946, 948-1107) for
+/// a monster without mount or wings, `Class` 0 and `Run` < 40. `TwoHand` comes from the item table
+/// (`ItemAttribute`), not read yet: all count as one-handed.
 fn player_actions(def: &Def, safe_zone: bool) -> PlayerActions {
     let [w0, w1] = def.weapons;
     let two_hand = false;
     let g0 = w0.map(|w| (w.group, w.index));
     let sword_like = |g: Option<(u8, u16)>| g.is_some_and(|(g, _)| g <= 2);
     let id = |v: i32| v as usize;
-    // El 257 vuela (`MonsterIndex == 257`, ZzzCharacter.cpp:245).
+    // 257 flies (`MonsterIndex == 257`, ZzzCharacter.cpp:245).
     if def.number == 257 {
         return PlayerActions { stop: id(ids::PLAYER_STOP_FLY), walk: id(ids::PLAYER_FLY), attack: [id(ids::PLAYER_ATTACK_FIST); 2] };
     }
@@ -508,7 +508,7 @@ fn player_actions(def: &Def, safe_zone: bool) -> PlayerActions {
     } else if matches!(g0, Some((5, _))) {
         if !two_hand { ids::PLAYER_WALK_SWORD } else { ids::PLAYER_WALK_SCYTHE }
     } else if matches!(g0, Some((3, 1))) {
-        // ZzzCharacter.cpp:641: `MODEL_SPEAR+2+MAX_ITEM_INDEX` nunca coincide: solo la `SPEAR+1`.
+        // ZzzCharacter.cpp:641: `MODEL_SPEAR+2+MAX_ITEM_INDEX` never matches: only `SPEAR+1`.
         ids::PLAYER_WALK_SPEAR
     } else if matches!(g0, Some((3, _))) {
         ids::PLAYER_WALK_SCYTHE
@@ -546,8 +546,8 @@ fn player_actions(def: &Def, safe_zone: bool) -> PlayerActions {
 }
 
 impl Monster {
-    /// `Actions[action].PlaySpeed` de su modelo, con lo que cambia `CharacterAnimation`
-    /// (ZzzCharacter.cpp:2322-2347) y lo que su `case` pone a mano (`Models[...].Actions[i].PlaySpeed`).
+    /// `Actions[action].PlaySpeed` of its model, with what `CharacterAnimation` changes
+    /// (ZzzCharacter.cpp:2322-2347) and what its `case` sets by hand (`Models[...].Actions[i].PlaySpeed`).
     fn play_speed(&self) -> f32 {
         let a = self.action;
         if let Some(&(_, s)) = self.def.model_speeds.iter().find(|(i, _)| *i as usize == a) {
@@ -585,7 +585,7 @@ impl Monster {
         self.player.map_or(action::WALK, |p| p.walk)
     }
 
-    /// `SetAction`: cambia la acción (si existe en el modelo) y empieza desde el fotograma 0.
+    /// `SetAction`: changes the action (if the model has it) and starts at frame 0.
     fn set_action(&mut self, a: usize) {
         if a >= self.skeleton.actions.len() {
             return;
@@ -607,7 +607,7 @@ impl Monster {
             (MonsterAction::Attack2, None) => action::ATTACK2,
             (MonsterAction::Attack1, Some(p)) => p.attack[0],
             (MonsterAction::Attack2, Some(p)) => p.attack[1],
-            // `SetPlayerShock` (ZzzCharacter.cpp:1286-1294): los monstruos no se encogen mientras atacan.
+            // `SetPlayerShock` (ZzzCharacter.cpp:1286-1294): monsters do not flinch while attacking.
             (MonsterAction::Shock, None) => {
                 if (action::ATTACK1..=action::ATTACK2).contains(&self.action) {
                     return;
@@ -629,15 +629,15 @@ impl Monster {
     }
 }
 
-/// `SetPlayerDie` (ZzzCharacter.cpp:1359-1395): los esqueletos y los modelos 25 y 30 no tienen animación
-/// de morir: desaparecen (`o->Live = false`) y saltan huesos o piedras (efectos aún sin traducir).
+/// `SetPlayerDie` (ZzzCharacter.cpp:1359-1395): skeletons and models 25 and 30 have no death
+/// animation: they vanish (`o->Live = false`) and bones or stones fly out (effects not translated yet).
 fn vanishes_on_death(def: &Def) -> bool {
     matches!(def.sub_type, SubType::Model("MODEL_SKELETON1" | "MODEL_SKELETON2" | "MODEL_SKELETON3")) && def.model == Model::Player
         || matches!(def.model, Model::Monster(25 | 30))
 }
 
-/// `BMD::PlayAnimation` (ZzzBMD.cpp:425-478) avanzando `speed` fotogramas. Devuelve `false` cuando la
-/// animación acaba (vuelve a empezar, o se queda en el último fotograma si tiene `Loop`).
+/// `BMD::PlayAnimation` (ZzzBMD.cpp:425-478) advancing `speed` frames. Returns `false` when the
+/// animation ends (restarts, or stays on the last frame if it has `Loop`).
 fn play_animation(frame: &mut f32, speed: f32, frames: usize, locked: bool, hold: bool) -> bool {
     if frames <= 1 {
         return true;
@@ -662,7 +662,7 @@ fn play_animation(frame: &mut f32, speed: f32, frames: usize, locked: bool, hold
     true
 }
 
-/// El fotograma que se dibuja: con `Loop` acabado, el último (`bone_matrices_at` volvería al primero).
+/// The frame to draw: with `Loop` finished, the last one (`bone_matrices_at` would wrap to the first).
 fn pose_frame(frame: f32, frames: usize, held: bool) -> f32 {
     if held { frames.saturating_sub(1) as f32 } else { frame }
 }
@@ -698,7 +698,7 @@ fn apply(
         }
         match order {
             MonsterOrder::Spawn { key, number, x, y, direction } => {
-                // Si ya estaba, se quita y se crea otra vez (`CreateCharacter` reutiliza el de su `Key`).
+                // If it already existed, it is removed and created again (`CreateCharacter` reuses the one for its `Key`).
                 for (e, m, shadow) in &monsters {
                     if m.key == key && gone.insert(e) {
                         commands.entity(e).despawn();
@@ -745,7 +745,7 @@ fn apply(
                     materials: built.materials,
                     light: Vec3::splat(-1.0),
                     scale: def.scale_in(world_active),
-                    // `MoveCharacterPosition` (ZzzCharacter.cpp:6201-6227): `MoveSpeed` unidades por tick.
+                    // `MoveCharacterPosition` (ZzzCharacter.cpp:6201-6227): `MoveSpeed` units per tick.
                     speed: def.move_speed as f32 * crate::fx::sim::TICKS_PER_SECOND / MU_SCALE,
                     timer: 0.0,
                     shadow: shadow_on,
@@ -848,8 +848,8 @@ fn apply(
     pending.0.extend(later);
 }
 
-/// Caja de selección (`BoundingBoxMin/Max` de `CreateCharacterPointer`, ZzzCharacter.cpp:11397-11502,
-/// o la que pone el `case`).
+/// Selection box (`BoundingBoxMin/Max` from `CreateCharacterPointer`, ZzzCharacter.cpp:11397-11502,
+/// or the one the `case` sets).
 fn bounding_box(def: &Def) -> ([f32; 3], [f32; 3]) {
     let mut min = [-60.0, -60.0, 0.0];
     let mut max = match def.model {
@@ -891,8 +891,8 @@ fn next_rand(state: &mut u32) -> u32 {
     *state >> 8
 }
 
-/// Altura del monstruo en MU: el suelo (o `RequestTerrainHeight + h` del `case`) y el vaivén del Budge
-/// Dragon (`MoveCharacterPosition`, ZzzCharacter.cpp:6222-6226).
+/// Monster height in MU: the ground (or the `case`'s `RequestTerrainHeight + h`) and the Budge
+/// Dragon bobbing (`MoveCharacterPosition`, ZzzCharacter.cpp:6222-6226).
 fn monster_height(m: &Monster, terrain: &LoadedTerrain) -> f32 {
     let ground = terrain.0.height_at(m.pos.x, m.pos.y);
     let mut h = m.def.height.map_or(ground + m.def.z_offset, |k| ground + k);
@@ -938,13 +938,13 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
         }
         if moving {
             m.timer += 0.15 * crate::fx::sim::TICKS_PER_SECOND * dt;
-            // `SetPlayerWalk` de los monstruos: `MONSTER01_WALK` (ZzzCharacter.cpp:725).
+            // Monster `SetPlayerWalk`: `MONSTER01_WALK` (ZzzCharacter.cpp:725).
             let w = m.walk_action();
             if m.action != w {
                 m.set_action(w);
             }
         } else if !m.dead && m.action == m.walk_action() {
-            // Al llegar, `SetPlayerStop` (ZzzCharacter.cpp:366-373).
+            // On arrival, `SetPlayerStop` (ZzzCharacter.cpp:366-373).
             let s = m.stop_action();
             m.set_action(s);
         }
@@ -952,7 +952,7 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
     }
 }
 
-/// Animación, pose de las mallas, sombra y luz del terreno.
+/// Animation, mesh pose, shadow and terrain light.
 #[allow(clippy::type_complexity)]
 fn animate(
     time: Res<Time>,
@@ -986,7 +986,7 @@ fn animate(
                         m.set_action(action::STOP1);
                     }
                 } else if m.action != m.stop_action() && m.action != m.walk_action() {
-                    // `PlayerStopAnimationSetting` (ZzzCharacter.cpp:3264-3282): ataques y golpes acaban parados.
+                    // `PlayerStopAnimationSetting` (ZzzCharacter.cpp:3264-3282): attacks and hits end in stop.
                     let s = m.stop_action();
                     m.set_action(s);
                 }
@@ -1013,7 +1013,7 @@ fn animate(
         }
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
 
-        // `c->Light` = luz del terreno + `o->Light` (ZzzCharacter.cpp:8906-8913); el 55 va fijo a 0.6.
+        // `c->Light` = terrain light + `o->Light` (ZzzCharacter.cpp:8906-8913); 55 is fixed at 0.6.
         let size = mu_data::terrain::SIZE;
         let (x, y) = ((m.pos.x.max(0.0) as usize).min(size - 1), (m.pos.y.max(0.0) as usize).min(size - 1));
         let mut light = Vec3::from_array(terrain.0.light[y * size + x]) + selectable.map_or(Vec3::ZERO, |s| s.light);
@@ -1036,8 +1036,8 @@ fn animate(
     }
 }
 
-/// `--monstruos-prueba`: unos cuantos monstruos y NPC del mapa (los que `Monsters.json` de MuMain dice
-/// que salen en él) alrededor del héroe, cambiando de acción cada pocos segundos para ver sus animaciones.
+/// `--monstruos-prueba`: a few of the map's monsters and NPCs (those MuMain's `Monsters.json` says
+/// appear on it) around the hero, changing action every few seconds to show their animations.
 fn test_monsters(
     args: Res<Args>,
     time: Res<Time>,
@@ -1067,7 +1067,7 @@ fn test_monsters(
             }
         }
         if numbers.is_empty() {
-            // Sin datos del mapa: los de Lorencia.
+            // No map data: the Lorencia ones.
             numbers = vec![0, 1, 2, 3, 4, 6, 14];
         }
         numbers.extend(npcs);
@@ -1102,7 +1102,7 @@ fn test_monsters(
     }
     st.timer = 0.0;
     st.step += 1;
-    // Parado → camina dos casillas y vuelve → ataque 1 → ataque 2 → golpe → parado 2 → muere → aparece otra vez.
+    // Stop → walk two tiles and back → attack 1 → attack 2 → hit → stop 2 → die → reappear.
     for (i, &(key, number, (x, y))) in st.list.iter().enumerate() {
         let step = (st.step + i) % 8;
         match step {
@@ -1118,7 +1118,7 @@ fn test_monsters(
     }
 }
 
-/// `Key` de los monstruos de prueba (lejos de los del servidor).
+/// `Key` of the test monsters (far from the server's).
 const TEST_KEY: u16 = 30_000;
 
 struct TestState {
@@ -1133,20 +1133,20 @@ mod tests {
 
     #[test]
     fn animacion_como_play_animation() {
-        // Sin `Loop`: vuelve a empezar y avisa.
+        // Without `Loop`: restarts and reports it.
         let mut f = 9.8;
         assert!(!play_animation(&mut f, 0.5, 10, false, false));
         assert!((f - 0.3).abs() < 1e-5);
-        // Con posiciones bloqueadas el bucle tiene un fotograma menos.
+        // With locked positions the loop has one frame fewer.
         let mut f = 8.8;
         assert!(!play_animation(&mut f, 0.5, 10, true, false));
         assert!((f - 0.3).abs() < 1e-5);
-        // Con `Loop` (morir): se queda al final.
+        // With `Loop` (dying): stays at the end.
         let mut f = 9.8;
         assert!(!play_animation(&mut f, 0.5, 10, false, true));
         assert!((f - 9.99).abs() < 1e-5);
         assert_eq!(pose_frame(f, 10, true), 9.0);
-        // En medio sigue.
+        // In the middle it keeps going.
         let mut f = 2.0;
         assert!(play_animation(&mut f, 0.34, 10, false, false));
         assert!((f - 2.34).abs() < 1e-5);
@@ -1154,15 +1154,15 @@ mod tests {
 
     #[test]
     fn acciones_de_los_esqueletos() {
-        // 14: espada y escudo → parado y caminando con espada, ataques de espada.
+        // 14: sword and shield → stop and walk with sword, sword attacks.
         let skel = data::defs(14, 0)[0];
         let a = player_actions(&skel, false);
         assert_eq!(a.stop, ids::PLAYER_STOP_SWORD as usize);
         assert_eq!(a.walk, ids::PLAYER_WALK_SWORD as usize);
         assert_eq!(a.attack[0], ids::PLAYER_ATTACK_SWORD_RIGHT1 as usize);
-        // En zona segura, sin armas en la mano.
+        // In a safe zone, no weapons in hand.
         assert_eq!(player_actions(&skel, true).stop, ids::PLAYER_STOP_MALE as usize);
-        // 15: arco en la izquierda.
+        // 15: bow in the left hand.
         let archer = data::defs(15, 0)[0];
         let a = player_actions(&archer, false);
         assert_eq!((a.stop, a.walk, a.attack[0]), (ids::PLAYER_STOP_BOW as usize, ids::PLAYER_WALK_BOW as usize, ids::PLAYER_ATTACK_BOW as usize));
@@ -1170,7 +1170,7 @@ mod tests {
         assert!(!vanishes_on_death(&data::defs(0, 0)[0]));
     }
 
-    /// Cada número de la tabla tiene de dónde sacar su modelo.
+    /// Every number in the table has a source for its model.
     #[test]
     fn todos_tienen_modelo() {
         for d in data::DEFS.iter() {

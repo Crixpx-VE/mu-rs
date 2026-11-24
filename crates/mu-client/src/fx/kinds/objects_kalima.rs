@@ -1,21 +1,21 @@
-//! Objetos del mapa con efectos de Kalima 1-7 y de Land of Trials.
+//! Map objects with effects for Kalima 1-7 and Land of Trials.
 //!
-//! - Kalima (`InHellas`: `WD_24HELLAS..WD_24HELLAS_END` y `WD_24HELLAS_7`), `GMHellas.cpp`:
-//!   `MoveHellasObjectSetting` (:312-362, una vez por tick para todo el mapa: sonido de ambiente,
-//!   destellos alrededor del personaje y piedras que caen al agua), `MoveHellasVisual` (:386-400) y
-//!   `RenderHellasVisual` (:434-511: luces, cascadas, la hierba que flota con `CheckGrass`).
-//!   Lo de `MoveHellasObjectSetting` se hace desde el primer objeto del mapa que se mueve en el tick
-//!   (como `objects_2.rs` con Heaven): por eso se registran todos los tipos de Kalima.
+//! - Kalima (`InHellas`: `WD_24HELLAS..WD_24HELLAS_END` and `WD_24HELLAS_7`), `GMHellas.cpp`:
+//!   `MoveHellasObjectSetting` (:312-362, once per tick for the whole map: ambient sound,
+//!   sparkles around the character and stones falling into the water), `MoveHellasVisual` (:386-400) and
+//!   `RenderHellasVisual` (:434-511: lights, waterfalls, the grass floating with `CheckGrass`).
+//!   The `MoveHellasObjectSetting` work runs from the first map object that moves in the tick
+//!   (like `objects_2.rs` with Heaven): that is why every Kalima type is registered.
 //! - Land of Trials (`WD_31HUNTING_GROUND`), `GMHuntingGround.cpp`: `MoveHuntingGroundObject`
-//!   (:44-113: mariposas, luz del suelo, el ambiente cada 5 minutos para cualquier objeto) y
-//!   `RenderHuntingGroundObjectVisual` (:115-153). La niebla (`CreateMist`, :915) está en `leaves.rs`.
+//!   (:44-113: butterflies, ground light, the ambient sound every 5 minutes for any object) and
+//!   `RenderHuntingGroundObjectVisual` (:115-153). The mist (`CreateMist`, :915) lives in `leaves.rs`.
 //!
-//! Y los dos efectos que solo crean estos mapas: la piedra de Kalima (`CreateEffect(9, ...)`, el
-//! modelo 9 del mapa = `MODEL_KALIMA_FALLING_STONE`; ZzzEffect.cpp:726-732 y 7448-7462) y las
-//! mariposas de Land of Trials (`MODEL_BUTTERFLY01`, ZzzEffect.cpp:711-725 y 7399-7447).
+//! Plus the two effects only these maps create: the Kalima stone (`CreateEffect(9, ...)`, map
+//! model 9 = `MODEL_KALIMA_FALLING_STONE`; ZzzEffect.cpp:726-732 and 7448-7462) and the
+//! Land of Trials butterflies (`MODEL_BUTTERFLY01`, ZzzEffect.cpp:711-725 and 7399-7447).
 //!
-//! Cómo se dibujan las mallas (el reflejo del agua, el cromado del 34, las luces que laten de Land
-//! of Trials) está en `mu-data/src/objects/rules_kalima.rs`; el agua, en `water_terrain.rs`.
+//! How the meshes are drawn (the water reflection, the chrome of 34, the pulsing lights of Land
+//! of Trials) is in `mu-data/src/objects/rules_kalima.rs`; the water, in `water_terrain.rs`.
 
 use std::sync::Mutex;
 
@@ -24,15 +24,15 @@ use bevy::math::{Vec2, Vec3};
 use crate::fx::core::*;
 use crate::water_terrain;
 
-// `gMapManager.WorldActive` de estos mapas.
+// `gMapManager.WorldActive` of these maps.
 const WD_24HELLAS: i32 = 24;
 const WD_24HELLAS_END: i32 = 29;
 const WD_24HELLAS_7: i32 = 36;
 const WD_31HUNTING_GROUND: i32 = 31;
 
-/// `Object25/Object01..59.bmd`: tipos 0-58 de Kalima.
+/// `Object25/Object01..59.bmd`: Kalima types 0-58.
 const KALIMA_TYPES: i32 = 59;
-/// `Object32/Object01..57.bmd`: tipos 0-56 de Land of Trials.
+/// `Object32/Object01..57.bmd`: Land of Trials types 0-56.
 const HUNTING_GROUND_TYPES: i32 = 57;
 
 pub fn register(r: &mut Registry) {
@@ -41,7 +41,7 @@ pub fn register(r: &mut Registry) {
             r.object(world, ty, kalima);
         }
     }
-    // Todos: el ambiente de `MoveHuntingGroundObject` va al final para cualquier tipo.
+    // All of them: the `MoveHuntingGroundObject` ambient sound comes last, for any type.
     for ty in 0..HUNTING_GROUND_TYPES {
         r.object(WD_31HUNTING_GROUND, ty, hunting_ground);
     }
@@ -49,23 +49,23 @@ pub fn register(r: &mut Registry) {
     r.effect(MODEL_BUTTERFLY01, EffectKind { create: Some(butterfly_create), step: Some(butterfly_step), draw: None });
 }
 
-/// `Random::Rand() % n` en coma flotante.
+/// `Random::Rand() % n` as a float.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-// --- Kalima ------------------------------------------------------------------------------------------
+// --- Kalima ----------------------------------------------------------------------------------------
 
 struct HellasTick {
-    /// `world_time` del último tick en que se hizo `MoveHellasObjectSetting`.
+    /// `world_time` of the last tick in which `MoveHellasObjectSetting` ran.
     time: f32,
-    /// `MoveSceneFrame`: ticks contados aquí.
+    /// `MoveSceneFrame`: ticks counted here.
     frame: u32,
 }
 
 static HELLAS: Mutex<HellasTick> = Mutex::new(HellasTick { time: f32::NAN, frame: 0 });
 
-/// `MoveHellasObjectSetting` (GMHellas.cpp:312-362), la primera vez que se llama en cada tick.
+/// `MoveHellasObjectSetting` (GMHellas.cpp:312-362), the first time it is called each tick.
 fn hellas_setting(ctx: &mut Ctx) {
     let frame = {
         let mut s = HELLAS.lock().unwrap_or_else(|e| e.into_inner());
@@ -81,13 +81,13 @@ fn hellas_setting(ctx: &mut Ctx) {
         let id = if ctx.rand() % 2 == 0 { "SOUND_KALIMA_AMBIENT2" } else { "SOUND_KALIMA_AMBIENT3" };
         ctx.play_sound(id);
     }
-    // TODO(original): con `GetHellasLevel(clase, nivel) == KUNDUN_ZONE` (nivel del personaje ≥ 350, o
-    // ≥ 350 en las clases de `startIndex = 7`) y el personaje en (25..=51, 44..=119), cada 50 ticks
-    // `SOUND_KUNDUN_AMBIENT1 + rand()%2`. El motor no tiene la clase ni el nivel del personaje.
+    // TODO(original): with `GetHellasLevel(class, level) == KUNDUN_ZONE` (character level ≥ 350, or
+    // ≥ 350 for the `startIndex = 7` classes) and the character in (25..=51, 44..=119), every 50 ticks
+    // `SOUND_KUNDUN_AMBIENT1 + rand()%2`. The engine does not have the character's class or level.
 
-    // `if ((rand()%10)==0 && object)`: `object` es `visibleObject`, que en Kalima nadie cuenta
-    // (`MoveObjectOnEffect` solo lo hace en Heaven, Chaos Castle y Battle Castle): siempre 0, pero el
-    // `rand()` se gasta igual.
+    // `if ((rand()%10)==0 && object)`: `object` is `visibleObject`, which nobody counts in Kalima
+    // (`MoveObjectOnEffect` only does it in Heaven, Chaos Castle and Battle Castle): always 0, but the
+    // `rand()` is consumed anyway.
     let _ = ctx.rand() % 10;
 
     if ctx.rand() % 5 == 0 {
@@ -111,7 +111,7 @@ fn kalima(o: &mut MapObject, ctx: &mut Ctx) {
     hellas_setting(ctx);
 
     let wt = ctx.world_time;
-    // `RenderHellasVisual` (:434-511). Los 37-40 los oculta `MoveHellasVisual` (las reglas de mallas).
+    // `RenderHellasVisual` (:434-511). 37-40 are hidden by `MoveHellasVisual` (the mesh rules).
     match o.ty {
         12 => {
             let luminosity = (wt * 0.001).sin() * 0.3 + 0.7;
@@ -127,13 +127,13 @@ fn kalima(o: &mut MapObject, ctx: &mut Ctx) {
             }
         }
         35 => {
-            // El dueño es el objeto del mapa: la partícula no lo usa.
+            // The owner is the map object: the particle does not use it.
             ctx.create_particle(BITMAP_LIGHT, o.position, o.angle, Vec3::new(0.3, 0.6, 1.0), 6, 1.0, None);
             o.hidden_mesh = -2;
         }
         36 => {
             ctx.create_particle(BITMAP_TRUE_BLUE, o.position, o.angle, Vec3::ONE, 0, 1.0, None);
-            // `o->Scale = 0.5f`: no lo usa nadie (la partícula va con escala 1).
+            // `o->Scale = 0.5f`: unused (the particle uses scale 1).
             o.hidden_mesh = -2;
         }
         37 => {
@@ -162,9 +162,9 @@ fn kalima(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// 15, 29 y 32: `CheckGrass` y `o->Position[2] = GetWaterTerrain(x, y) + 180` (:453-465). La malla la
-/// mueve igual `objects/movers.rs`; aquí se hace para que los efectos (la luz del 32) la sigan.
-/// `user[0..2]` es `o->Direction` (x, y).
+/// 15, 29 and 32: `CheckGrass` and `o->Position[2] = GetWaterTerrain(x, y) + 180` (:453-465). The mesh is
+/// moved the same way by `objects/movers.rs`; this is done here so the effects (the light of 32) follow it.
+/// `user[0..2]` is `o->Direction` (x, y).
 fn float_on_water(o: &mut MapObject, ctx: &mut Ctx) {
     if let Some(hero) = ctx.hero_actor().map(|a| (a.position.truncate(), a.action)) {
         let mut direction = Vec2::new(o.user[0], o.user[1]);
@@ -180,7 +180,7 @@ fn float_on_water(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// `CreateEffect(9)` (ZzzEffect.cpp:726-732): la piedra que cae del cielo de Kalima.
+/// `CreateEffect(9)` (ZzzEffect.cpp:726-732): the stone falling from the Kalima sky.
 fn falling_stone_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 30.0;
     e.scale = (ctx.rand() % 3) as f32 / 10.0 + 0.6;
@@ -189,10 +189,10 @@ fn falling_stone_create(e: &mut Effect, ctx: &mut Ctx) {
     e.direction = Vec3::new(-0.1, -0.1, -0.5);
 }
 
-/// `MoveEffect` del tipo 9 (ZzzEffect.cpp:7448-7462) + la cola común (`MoveParticle(o, true)`,
-/// 18119-18121; el tipo 9 es menor que `MODEL_BIRD01`: no se anima).
+/// `MoveEffect` for type 9 (ZzzEffect.cpp:7448-7462) + the common tail (`MoveParticle(o, true)`,
+/// 18119-18121; type 9 is below `MODEL_BIRD01`: not animated).
 fn falling_stone_step(e: &mut Effect, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `MoveEffect` (gasta un rand()).
+    // `Luminosity` from the start of `MoveEffect` (consumes a rand()).
     let _ = ctx.rand();
     e.position += e.direction * e.velocity;
     e.velocity += 3.0;
@@ -206,12 +206,12 @@ fn falling_stone_step(e: &mut Effect, ctx: &mut Ctx) {
     e.position += rotate(e.angle, e.direction);
 }
 
-// --- Land of Trials -----------------------------------------------------------------------------------
+// --- Land of Trials --------------------------------------------------------------------------------
 
-/// `g_MusicStartStamp` (GMHuntingGround.cpp:17): `timeGetTime()` de la última vez que sonó el ambiente.
+/// `g_MusicStartStamp` (GMHuntingGround.cpp:17): `timeGetTime()` of the last time the ambient sound played.
 static MUSIC_STAMP: Mutex<Option<u64>> = Mutex::new(None);
 
-/// `timeGetTime()`: milisegundos de reloj (no del tick, que va de 40 en 40).
+/// `timeGetTime()`: wall-clock milliseconds (not the tick time, which advances in steps of 40).
 fn time_get_time() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)
 }
@@ -220,22 +220,22 @@ fn hunting_ground(o: &mut MapObject, ctx: &mut Ctx) {
     // `MoveHuntingGroundObject` (:44-113).
     match o.ty {
         1 | 44 | 45 => {
-            // `timeGetTime()%1024 < 10`: con el reloj de verdad, como el original (el tiempo del tick
-            // va de 40 en 40 ms y daría otra frecuencia).
+            // `timeGetTime()%1024 < 10`: with the real clock, like the original (the tick time
+            // advances in steps of 40 ms and would give a different frequency).
             if time_get_time() % 1024 < 10 {
                 let sub_type = match o.ty {
                     1 => 0,
                     44 => 1,
                     _ => 2,
                 };
-                // El dueño es el objeto: `CreateEffect` solo usa su escala (`Direction[1] = -5·Scale`),
-                // que va en el parámetro de la escala (ver `butterfly_create`).
+                // The owner is the object: `CreateEffect` only uses its scale (`Direction[1] = -5·Scale`),
+                // passed in the scale parameter (see `butterfly_create`).
                 ctx.create_effect(MODEL_BUTTERFLY01, o.position, o.angle, Vec3::ONE, sub_type, None, -1, 0, 0, o.scale);
             }
             o.hidden_mesh = -2;
         }
         3 | 53 => o.hidden_mesh = -2,
-        // 27: `Position[2] += sin(Timer + WorldTime·0.0024)·0.3` mueve la malla: `objects/movers.rs`.
+        // 27: `Position[2] += sin(Timer + WorldTime·0.0024)·0.3` moves the mesh: `objects/movers.rs`.
         42 => {
             let luminosity = (ctx.rand() % 4 + 3) as f32 * 0.1;
             let light = Vec3::new(luminosity * 0.9, luminosity * 0.2, luminosity * 0.1);
@@ -244,7 +244,7 @@ fn hunting_ground(o: &mut MapObject, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    // El ambiente cada 300 s (el primero en cuanto se mueve un objeto: `g_MusicStartStamp` empieza en 0).
+    // The ambient sound every 300 s (the first as soon as an object moves: `g_MusicStartStamp` starts at 0).
     let now = time_get_time();
     {
         let mut stamp = MUSIC_STAMP.lock().unwrap_or_else(|e| e.into_inner());
@@ -279,11 +279,11 @@ fn hunting_ground(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// `CreateEffect(MODEL_BUTTERFLY01)` (ZzzEffect.cpp:711-725). `e.scale` llega con la escala del
-/// objeto dueño (`o->Owner->Scale`).
+/// `CreateEffect(MODEL_BUTTERFLY01)` (ZzzEffect.cpp:711-725). `e.scale` carries the scale of the
+/// owner object (`o->Owner->Scale`).
 fn butterfly_create(e: &mut Effect, ctx: &mut Ctx) {
     let owner_scale = e.scale;
-    // TODO(original): en la selección de personaje (`SceneFlag == CHARACTER_SCENE`) `HiddenMesh = -2`.
+    // TODO(original): in character selection (`SceneFlag == CHARACTER_SCENE`) `HiddenMesh = -2`.
     e.life_time = 250.0;
     e.velocity = 0.3;
     e.light_enable = false;
@@ -292,10 +292,10 @@ fn butterfly_create(e: &mut Effect, ctx: &mut Ctx) {
     e.scale = if e.sub_type == 3 { 0.9 } else { 0.25 };
 }
 
-/// `MoveEffect` de `MODEL_BUTTERFLY01` (ZzzEffect.cpp:7399-7447) + la cola común: anima
-/// (`PlayAnimation` con `Velocity`) y avanza en su dirección (`MoveParticle(o, true)`).
+/// `MoveEffect` for `MODEL_BUTTERFLY01` (ZzzEffect.cpp:7399-7447) + the common tail: animates
+/// (`PlayAnimation` with `Velocity`) and moves along its direction (`MoveParticle(o, true)`).
 fn butterfly_step(e: &mut Effect, ctx: &mut Ctx) {
-    // `Luminosity` del principio de `MoveEffect`.
+    // `Luminosity` from the start of `MoveEffect`.
     let _ = ctx.rand();
     if e.kind > 0 {
         e.angle.z += rf(ctx, 10);
@@ -329,7 +329,7 @@ fn butterfly_step(e: &mut Effect, ctx: &mut Ctx) {
             }
             Vec3::new(luminosity * 0.7, luminosity * 0.9, luminosity * 0.5)
         }
-        // `Light` se queda en (1, 1, 1).
+        // `Light` stays at (1, 1, 1).
         _ => Vec3::ONE,
     };
     ctx.create_sprite(BITMAP_LIGHT, e.position, 1.0, light, 0.0, 0);

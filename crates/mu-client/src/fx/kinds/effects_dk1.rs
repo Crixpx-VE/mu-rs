@@ -1,11 +1,11 @@
-//! Efectos (`Effects[]`) del Dark Knight traducidos de `ZzzEffect.cpp` (`CreateEffect`,
+//! Dark Knight effects (`Effects[]`) translated from `ZzzEffect.cpp` (`CreateEffect`,
 //! `MoveEffect`, `RenderEffects`/`DescribeEffectShadow`), `Behaviors/MoveHandlers.cpp`,
-//! `Behaviors/EffectBehaviors.cpp` y `Data/Effects/EffectTypes.json`:
-//! Twisting Slash (`MODEL_SKILL_WHEEL1/2`), los emisores de Death Stab/Impale (`MODEL_SPEAR`,
-//! `MODEL__SPEAR`), las lanzas de Impale (`MODEL_SPEARSKILL`) y la marca del suelo `BITMAP_MAGIC+1`.
+//! `Behaviors/EffectBehaviors.cpp` and `Data/Effects/EffectTypes.json`:
+//! Twisting Slash (`MODEL_SKILL_WHEEL1/2`), the Death Stab/Impale emitters (`MODEL_SPEAR`,
+//! `MODEL__SPEAR`), the Impale spears (`MODEL_SPEARSKILL`) and the ground mark `BITMAP_MAGIC+1`.
 //!
-//! Nota: cuando un tipo tiene `step`, el motor no hace la cola común de `MoveEffect`
-//! (`PlayAnimation` + `MoveParticle`), así que cada `step` la hace a mano donde toca.
+//! Note: when a kind has a `step`, the engine skips the common `MoveEffect` tail
+//! (`PlayAnimation` + `MoveParticle`), so each `step` does it by hand where needed.
 
 use bevy::math::{Vec2, Vec3};
 
@@ -23,9 +23,9 @@ pub fn register(r: &mut Registry) {
     r.effect(BITMAP_MAGIC + 1, EffectKind { create: Some(magic1_create), step: Some(magic1_step), draw: Some(magic1_draw) });
 }
 
-// --- Común -----------------------------------------------------------------------------------------
+// --- Common ----------------------------------------------------------------------------------------
 
-/// `Luminosity` del principio de `MoveEffect` (consume un `rand()` en cada efecto, como el original).
+/// `Luminosity` from the start of `MoveEffect` (consumes one `rand()` per effect, like the original).
 fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     let mut l = (ctx.rand() % 4 + 7) as f32 * 0.1;
     if e.life_time < 5.0 {
@@ -37,15 +37,15 @@ fn luminosity(e: &Effect, ctx: &mut Ctx) -> f32 {
     l
 }
 
-/// `MoveParticle(o, true)`: avanzar por `Direction` girada con `Angle`.
+/// `MoveParticle(o, true)`: move along `Direction` rotated by `Angle`.
 fn move_particle_turn(e: &mut Effect) {
     e.position += rotate(e.angle, e.direction);
 }
 
-/// `RenderEffects` no dibuja nada para estos tipos (fuera de `MODEL_SKILL_BEGIN..END` o `case: break`).
+/// `RenderEffects` draws nothing for these kinds (outside `MODEL_SKILL_BEGIN..END` or `case: break`).
 fn draw_nothing(_e: &Effect, _ctx: &DrawCtx, _out: &mut DrawList) {}
 
-/// Entidad del dueño si es un personaje.
+/// Owner entity, if it is a character.
 fn owner_actor<'a>(owner: Option<Target>, actors: &'a std::collections::HashMap<bevy::prelude::Entity, Actor>) -> Option<&'a Actor> {
     match owner? {
         Target::Actor(e) => actors.get(&e),
@@ -53,34 +53,34 @@ fn owner_actor<'a>(owner: Option<Target>, actors: &'a std::collections::HashMap<
     }
 }
 
-/// `WD_24HELLAS..=WD_24HELLAS_END` (24..=29) o `WD_24HELLAS_7` (36): `gMapManager.InHellas()`.
+/// `WD_24HELLAS..=WD_24HELLAS_END` (24..=29) or `WD_24HELLAS_7` (36): `gMapManager.InHellas()`.
 fn in_hellas(world: i32) -> bool {
     (24..=29).contains(&world) || world == 36
 }
 
-/// `MAX_ITEM_INDEX`: ítems por grupo.
+/// `MAX_ITEM_INDEX`: items per group.
 const MAX_ITEM_INDEX: i32 = 512;
 
-// --- MODEL_SKILL_WHEEL1 (Twisting Slash: el emisor) -------------------------------------------------
+// --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------
 
 fn wheel1_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 5.0;
-    // TODO(original): CharacterMachine->PacketSerial++ (red).
+    // TODO(original): CharacterMachine->PacketSerial++ (network).
 }
 
 fn wheel1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // Cada tick una rueda nueva; el subtipo (4 − LifeTime) le da su alfa.
+    // A new wheel every tick; the subtype (4 − LifeTime) gives its alpha.
     ctx.create_effect(MODEL_SKILL_WHEEL2, e.position, e.angle, e.light, 4 - e.life_time as i32, e.owner, e.pk_key, e.kind, e.skill, 0.0);
-    // WHEEL1 está excluido de la cola común (sin animación ni MoveParticle).
+    // WHEEL1 is excluded from the common tail (no animation, no MoveParticle).
 }
 
-// --- MODEL_SKILL_WHEEL2 (Twisting Slash: la espada fantasma que gira) -------------------------------
+// --- MODEL_SKILL_WHEEL2 (Twisting Slash: the spinning ghost sword) ---------------------------------
 
 fn wheel2_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 25.0;
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (red).
-    // user[0] = Direction[2] del tick anterior; user[1] = Angle[2] tras el tick (para interpolar al dibujar).
+    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    // user[0] = Direction[2] of the previous tick; user[1] = Angle[2] after the tick (to interpolate when drawing).
     e.user[0] = e.direction.z;
     e.user[1] = e.angle.z;
 }
@@ -95,7 +95,7 @@ fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
         _ => {}
     }
     let owner = owner_actor(e.owner, ctx.actors).map(|a| (a.position, a.weapon));
-    // Las lanzas giran más lejos.
+    // Spears orbit farther out.
     let is_spear = owner
         .and_then(|(_, w)| w)
         .is_some_and(|(m, _)| (MODEL_SPEAR..MODEL_SPEAR + MAX_ITEM_INDEX).contains(&m));
@@ -146,20 +146,20 @@ fn wheel2_step(e: &mut Effect, ctx: &mut Ctx) {
     position.z += height;
     ctx.create_sprite(BITMAP_LIGHT, position, 2.0, Vec3::new(1.0, 0.8, 0.6), 0.0, 0);
 
-    // TODO(original): en Hellas, cada 4 ticks de vida AddWaterWave(x, y, 2, -150) (no hay agua).
+    // TODO(original): in Hellas, every 4 ticks of life AddWaterWave(x, y, 2, -150) (no water yet).
 
-    // `UpdateDrawnEffectSprites`: la rueda gira cada vez más rápido.
+    // `UpdateDrawnEffectSprites`: the wheel spins faster and faster.
     e.user[0] = e.direction.z;
     e.direction.z -= 30.0;
     e.user[1] = e.angle.z;
 }
 
-/// `RenderWheelWeapon`: el MODELO DEL ARMA del dueño, girado y subido 100.
+/// `RenderWheelWeapon`: the owner's WEAPON MODEL, rotated and raised by 100.
 fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let Some(actor) = owner_actor(e.owner, ctx.actors) else { return };
     let Some((model, _level)) = actor.weapon else { return };
 
-    // Direction[2] interpolado con la misma fracción que el ángulo (user[0] = anterior, user[1] = Angle[2] final).
+    // Direction[2] interpolated with the same fraction as the angle (user[0] = previous, user[1] = final Angle[2]).
     let wrap = |d: f32| (d + 540.0).rem_euclid(360.0) - 180.0;
     let full = wrap(e.user[1] - e.prev_angle.z);
     let part = wrap(e.angle.z - e.prev_angle.z);
@@ -172,19 +172,19 @@ fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let mut position = e.position;
     position.z += 100.0;
 
-    // `ItemObjectAttribute`: escala 0.8 (0.7 de las lanzas a los bastones), luz 0.3, fotograma 0.
+    // `ItemObjectAttribute`: scale 0.8 (0.7 for spears through staffs), light 0.3, frame 0.
     let scale = if (MODEL_SPEAR..=MODEL_PLATINA_STAFF).contains(&model) { 0.7 } else { 0.8 };
     // `RequestModelTerrainLight + o->Light(0.3)`.
-    // TODO(original): no hay luz del terreno al dibujar; se aproxima con 0.7.
+    // TODO(original): no terrain light at draw time; approximated with 0.7.
     const TERRAIN_LIGHT: f32 = 0.7;
     let mut d = ModelDraw::new(model, position, angle, scale);
     d.light = Vec3::splat(TERRAIN_LIGHT + 0.3);
     d.alpha = e.alpha;
-    // TODO(original): RenderPartObject con WeaponLevel (brillos de nivel del arma) y b->Skin por clase.
+    // TODO(original): RenderPartObject with WeaponLevel (weapon level glow) and b->Skin per class.
     out.models.push(d);
 }
 
-// --- MODEL_SPEAR ("lightSpear": emisor invisible de Death Stab/Impale) ------------------------------
+// --- MODEL_SPEAR ("lightSpear": invisible Death Stab/Impale emitter) -------------------------------
 
 fn spear_create(e: &mut Effect, _ctx: &mut Ctx) {
     // EffectTypes.json: lifeTime 10.
@@ -194,7 +194,7 @@ fn spear_create(e: &mut Effect, _ctx: &mut Ctx) {
 
 fn spear_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // `Behaviors::MoveSpear`: deja una estela BITMAP_FLARE que le sigue.
+    // `Behaviors::MoveSpear`: leaves a BITMAP_FLARE trail that follows it.
     let me = Some(Target::Effect(e.id));
     if e.sub_type == 1 {
         if ctx.rand_fps_check(1) {
@@ -203,11 +203,11 @@ fn spear_step(e: &mut Effect, ctx: &mut Ctx) {
     } else if e.sub_type == 0 && ctx.rand_fps_check(1) {
         ctx.create_joint(BITMAP_FLARE, e.position, e.position, e.angle, 4, me, 50.0);
     }
-    // Cola común: MoveParticle(o, true).
+    // Common tail: MoveParticle(o, true).
     move_particle_turn(e);
 }
 
-// --- MODEL__SPEAR (Impale: preparación) -------------------------------------------------------------
+// --- MODEL__SPEAR (Impale: wind-up) ----------------------------------------------------------------
 
 fn spear2_create(e: &mut Effect, _ctx: &mut Ctx) {
     // EffectTypes.json: lifeTime 5, angle [0, 0, 0].
@@ -218,7 +218,7 @@ fn spear2_create(e: &mut Effect, _ctx: &mut Ctx) {
 
 fn spear2_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // `Move_MODEL__SPEAR`: tres estelas de curación que convergen en él.
+    // `Move_MODEL__SPEAR`: three healing trails converging on it.
     let p = Vec3::new(0.0, -100.0, 0.0);
     for _ in 0..3 {
         let angle = Vec3::new((ctx.rand() % 90) as f32, 0.0, (ctx.rand() % 360) as f32);
@@ -230,7 +230,7 @@ fn spear2_step(e: &mut Effect, ctx: &mut Ctx) {
     move_particle_turn(e);
 }
 
-// --- MODEL_SPEARSKILL (Impale: las lanzas) ----------------------------------------------------------
+// --- MODEL_SPEARSKILL (Impale: the spears) ---------------------------------------------------------
 
 fn spearskill_create(e: &mut Effect, _ctx: &mut Ctx) {
     e.life_time = 20.0;
@@ -243,13 +243,13 @@ fn spearskill_create(e: &mut Effect, _ctx: &mut Ctx) {
 
 fn spearskill_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
-    // Move_MODEL_SPEARSKILL no hace nada; cola común: PlayAnimation y MoveParticle(o, false).
-    // TODO(original): PlayAnimation para al final de una acción sin bucle (CurrentAction = 255).
+    // Move_MODEL_SPEARSKILL does nothing; common tail: PlayAnimation and MoveParticle(o, false).
+    // TODO(original): PlayAnimation stops at the end of a non-looping action (CurrentAction = 255).
     e.animation_frame += e.velocity;
     e.position += e.direction;
 }
 
-/// `RenderSkillSpear`: RidingSpear01 sumando (`RENDER_BRIGHT`) con luz · LifeTime · 0.05.
+/// `RenderSkillSpear`: additive RidingSpear01 (`RENDER_BRIGHT`) with light · LifeTime · 0.05.
 fn spearskill_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let mut d = ModelDraw::of_effect(e);
     d.model = MODEL_SPEARSKILL;
@@ -259,7 +259,7 @@ fn spearskill_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     out.models.push(d);
 }
 
-// --- BITMAP_MAGIC+1 (marca en el suelo Magic_Ground2) -----------------------------------------------
+// --- BITMAP_MAGIC+1 (Magic_Ground2 ground mark) ----------------------------------------------------
 
 fn magic1_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 20.0;
@@ -283,14 +283,14 @@ fn magic1_create(e: &mut Effect, ctx: &mut Ctx) {
             e.scale = 0.1;
         }
         11 | 12 => e.life_time = 20.0,
-        // o->Scale = Scale (ya lo es).
+        // o->Scale = Scale (already is).
         13 => e.life_time = 40.0,
         _ => {}
     }
     e.visible = false;
 }
 
-/// `CreateHealing`: tres estelas `BITMAP_JOINT_HEALING` que bajan hacia el efecto.
+/// `CreateHealing`: three `BITMAP_JOINT_HEALING` trails descending toward the effect.
 fn create_healing(e: &Effect, ctx: &mut Ctx) {
     let p = Vec3::new(0.0, -200.0, 0.0);
     for _ in 0..3 {
@@ -305,11 +305,11 @@ fn create_healing(e: &Effect, ctx: &mut Ctx) {
 fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
     let _ = luminosity(e, ctx);
     let s = e.sub_type;
-    // (Sin ENABLE_POTION_EFFECT el `else if` cuelga del primer `if`.)
+    // (Without ENABLE_POTION_EFFECT the `else if` hangs off the first `if`.)
     if s >= 1 && !matches!(s, 4 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13) {
         create_healing(e, ctx);
     } else if s == 6 {
-        // Chispas de luz por los huesos del dueño (BodyOrigin = StartPosition).
+        // Light sparks along the owner's bones (BodyOrigin = StartPosition).
         e.blend_mesh_light = (ctx.rand() % 10) as f32 * 0.1;
         if let Some(owner) = owner_actor(e.owner, ctx.actors).cloned() {
             let num_bones = owner.bones.len() as i32;
@@ -318,7 +318,7 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
             while (i as f32) < e.life_time && num_bones > 0 {
                 i += 1;
                 let index = (ctx.rand() % num_bones) as usize;
-                // TODO(original): se saltan los huesos Dummy (no se sabe cuáles son en Actor).
+                // TODO(original): Dummy bones are skipped (unknown which ones they are in Actor).
                 let p = Vec3::new(
                     (-50 + ctx.rand() % 100) as f32,
                     (-10 + ctx.rand() % 20) as f32,
@@ -329,16 +329,16 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
                     ctx.create_particle(BITMAP_LIGHT, position, owner.angle, light, 8, 1.0, None);
                 }
             }
-            // TODO(original): o->Owner->Alpha = LifeTime / 80 (el personaje se desvanece).
+            // TODO(original): o->Owner->Alpha = LifeTime / 80 (the character fades out).
         }
     } else if s == 9 {
         e.scale += 0.3;
         e.light *= 1.0 / 1.1;
     }
-    // Cola común: MoveParticle(o, true).
+    // Common tail: MoveParticle(o, true).
     move_particle_turn(e);
 
-    // `UpdateDrawnEffectShadowState` (tras el `LifeTime -= 1` del tick).
+    // `UpdateDrawnEffectShadowState` (after the tick's `LifeTime -= 1`).
     let lt = e.life_time - 1.0;
     if lt <= 0.0 {
         return;
@@ -361,7 +361,7 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
     }
 }
 
-/// `DescribeEffectShadow` de `BITMAP_MAGIC+1`: la marca pegada al suelo.
+/// `DescribeEffectShadow` for `BITMAP_MAGIC+1`: the mark stuck to the ground.
 fn magic1_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     let s = e.sub_type;
     let mut luminosity = 1.0;
@@ -401,11 +401,11 @@ fn magic1_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
             e.light * l
         }
         13 => e.light,
-        // En el original `Light` queda sin inicializar.
+        // In the original `Light` is left uninitialized.
         _ => Vec3::ZERO,
     };
-    // Decal(BITMAP_MAGIC+1, x, y, Scale, Scale, Light, -Angle[2]): tamaño en casillas (×100),
-    // 5 sobre el suelo. El original gira la UV con -Angle[2], es decir, la imagen +Angle[2].
+    // Decal(BITMAP_MAGIC+1, x, y, Scale, Scale, Light, -Angle[2]): size in tiles (×100),
+    // 5 above the ground. The original rotates the UV by -Angle[2], i.e. the image by +Angle[2].
     out.decals.push(DecalDraw {
         texture: BITMAP_MAGIC + 1,
         center: Vec2::new(e.position.x, e.position.y),

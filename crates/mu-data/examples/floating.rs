@@ -1,6 +1,6 @@
-//! Objetos por encima del suelo: altura del objeto menos la del terreno en su sitio (depuración).
+//! Objects above the ground: object height minus the terrain height at its spot (debugging).
 //!
-//!   cargo run -p mu-data --example floating -- <world> [tipo_min] [tipo_max] [data]
+//!   cargo run -p mu-data --example floating -- <world> [min_type] [max_type] [data]
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -20,8 +20,8 @@ fn main() {
         let ground = t.height_at(o.position[0] / 100.0, o.position[1] / 100.0);
         by_kind.entry(o.kind).or_default().push((o.position[2] - ground, o.position, o.angle));
     }
-    // Huérfanos: más de 60 por encima del suelo sin ningún otro objeto (que no sea del mismo
-    // rango) a menos de 2.5 casillas que llegue a su altura.
+    // Orphans: more than 60 above the ground with no other object (not of the same
+    // range) within 2.5 tiles that reaches its height.
     let tops: Vec<([f32; 3], f32)> = list
         .iter()
         .filter(|o| !(lo..=hi).contains(&o.kind))

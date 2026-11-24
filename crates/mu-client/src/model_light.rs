@@ -1,16 +1,16 @@
-//! Material de los modelos (objetos del mapa y personajes) con la luz del original: la del
-//! terreno por un factor según la normal de cada vértice (ver `model_light.wesl`).
+//! Material for models (map objects and characters) with the original lighting: the
+//! terrain light times a factor from each vertex normal (see `model_light.wesl`).
 //!
-//! Es un `StandardMaterial` sin luz de Bevy (textura, alfa, desplazamiento de UV...) más esa luz y,
-//! para las pasadas de `RenderMesh` del original (`ZzzBMD.cpp` ≈937-1354):
-//! - [`ModelLight::tint`]: un color por el que se multiplica (como `glColor`, en el espacio de color del
-//!   original: se pasa a lineal en el sombreador). Para `glColor3fv(BodyLight)` de la `StreamMesh` y el
-//!   cromado, y `BodyLight · BlendMeshLight` de la `BlendMesh`.
-//! - [`ModelLight::chrome`]: coordenadas de textura calculadas con la normal (`g_chrome`, los
-//!   `RENDER_CHROME*`); la fórmula es [`mu_data::objects::render::chrome_uv`].
-//! - [`ModelLight::subtract`]: `RENDER_DARK` (`EnableAlphaBlendMinus`: ZERO, ONE_MINUS_SRC_COLOR). Va con
-//!   `AlphaMode::Add` en el `StandardMaterial` (pasada transparente, sin escribir profundidad) y aquí se
-//!   cambia la mezcla.
+//! It is an unlit Bevy `StandardMaterial` (texture, alpha, UV offset...) plus that light and,
+//! for the original's `RenderMesh` passes (`ZzzBMD.cpp` ≈937-1354):
+//! - [`ModelLight::tint`]: a color to multiply by (like `glColor`, in the original's color
+//!   space: converted to linear in the shader). Used for `glColor3fv(BodyLight)` of the `StreamMesh` and
+//!   chrome, and `BodyLight · BlendMeshLight` of the `BlendMesh`.
+//! - [`ModelLight::chrome`]: texture coordinates computed from the normal (`g_chrome`, the
+//!   `RENDER_CHROME*` modes); the formula is [`mu_data::objects::render::chrome_uv`].
+//! - [`ModelLight::subtract`]: `RENDER_DARK` (`EnableAlphaBlendMinus`: ZERO, ONE_MINUS_SRC_COLOR). Used with
+//!   `AlphaMode::Add` on the `StandardMaterial` (transparent pass, no depth write) and the blend is
+//!   changed here.
 
 use bevy::asset::embedded_asset;
 use bevy::mesh::MeshVertexBufferLayoutRef;
@@ -34,17 +34,17 @@ impl Plugin for ModelLightPlugin {
     }
 }
 
-/// Lo que va al sombreador además de la luz.
+/// What goes to the shader besides the light.
 #[derive(Clone, Copy, Debug, ShaderType, Reflect)]
 pub struct ModelParams {
-    /// rgb: color por el que se multiplica (sin pasar a lineal, se limita a [0, 1] como `glColor`).
+    /// rgb: color to multiply by (not converted to linear, clamped to [0, 1] like `glColor`).
     pub tint: Vec4,
-    /// [`ChromeMode`] (0 = coordenadas del modelo).
+    /// [`ChromeMode`] (0 = model coordinates).
     pub chrome: u32,
-    /// 1 = `RENDER_DARK`: el alfa de la textura no cuenta (`GL_ONE_MINUS_SRC_COLOR` solo mira el color).
+    /// 1 = `RENDER_DARK`: the texture alpha does not count (`GL_ONE_MINUS_SRC_COLOR` only looks at color).
     pub dark: u32,
-    /// 1 = la luz (`BodyLight`) va en el `MeshTag` de cada objeto ([`encode_light`]) y no en el
-    /// material: así los objetos iguales comparten material y se dibujan juntos.
+    /// 1 = the light (`BodyLight`) goes in each object's `MeshTag` ([`encode_light`]) instead of the
+    /// material: so identical objects share a material and are batched together.
     pub tag_light: u32,
     pub _pad: u32,
 }
@@ -55,7 +55,7 @@ impl Default for ModelParams {
     }
 }
 
-/// `BodyLight` (0..1 por canal) en un `MeshTag`: 8 bits por canal.
+/// `BodyLight` (0..1 per channel) in a `MeshTag`: 8 bits per channel.
 pub fn encode_light(light: [f32; 3]) -> u32 {
     let b = light.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u32);
     b[0] | (b[1] << 8) | (b[2] << 16)
@@ -64,12 +64,12 @@ pub fn encode_light(light: [f32; 3]) -> u32 {
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
 #[bind_group_data(ModelLightKey)]
 pub struct ModelLight {
-    /// rgb: luz del original (`BodyLight`, sin pasar a lineal); a: 1 = iluminar por la normal.
+    /// rgb: original light (`BodyLight`, not converted to linear); a: 1 = light by the normal.
     #[uniform(100)]
     pub light: Vec4,
     #[uniform(101)]
     pub params: ModelParams,
-    /// `RENDER_DARK` (resta).
+    /// `RENDER_DARK` (subtractive).
     pub subtract: bool,
 }
 
@@ -92,41 +92,41 @@ impl From<&ModelLight> for ModelLightKey {
 }
 
 impl ModelLight {
-    /// Iluminado por la normal con la luz `light` del original (0..1 por canal).
+    /// Lit by the normal with the original's `light` (0..1 per channel).
     pub fn lit(light: [f32; 3]) -> Self {
         Self { light: Vec4::new(light[0], light[1], light[2], 1.0), params: ModelParams::default(), subtract: false }
     }
 
-    /// Sin luz (mallas aditivas: son luz propia).
+    /// Unlit (additive meshes: they are their own light).
     pub fn unlit() -> Self {
         Self { light: Vec4::ZERO, params: ModelParams::default(), subtract: false }
     }
 
-    /// Color plano `glColor3fv(color)`, sin luz por la normal (`StreamMesh`, cromado, `BlendMesh`).
+    /// Flat color `glColor3fv(color)`, no normal lighting (`StreamMesh`, chrome, `BlendMesh`).
     pub fn flat(color: [f32; 3]) -> Self {
         Self::unlit().with_tint(color)
     }
 
-    /// Multiplica además por `color` (en el espacio de color del original).
+    /// Also multiplies by `color` (in the original's color space).
     pub fn with_tint(mut self, color: [f32; 3]) -> Self {
         self.params.tint = Vec4::new(color[0], color[1], color[2], 1.0);
         self
     }
 
-    /// Coordenadas de cromado (`RENDER_CHROME*`).
+    /// Chrome coordinates (`RENDER_CHROME*`).
     pub fn with_chrome(mut self, mode: Option<ChromeMode>) -> Self {
         self.params.chrome = mode.map_or(0, |m| m as u32);
         self
     }
 
-    /// Iluminado por la normal con la luz del `MeshTag` de cada entidad ([`encode_light`]).
+    /// Lit by the normal with the light from each entity's `MeshTag` ([`encode_light`]).
     pub fn lit_by_tag() -> Self {
         let mut m = Self::lit([1.0; 3]);
         m.params.tag_light = 1;
         m
     }
 
-    /// `RENDER_DARK`. El `StandardMaterial` debe ir con `AlphaMode::Add`.
+    /// `RENDER_DARK`. The `StandardMaterial` must use `AlphaMode::Add`.
     pub fn with_subtract(mut self, on: bool) -> Self {
         self.subtract = on;
         self.params.dark = on as u32;
@@ -145,7 +145,7 @@ impl MaterialExtension for ModelLight {
         _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        // El sombreador de fragmentos lee el `MeshTag` con el índice de instancia.
+        // The fragment shader reads the `MeshTag` using the instance index.
         descriptor.vertex.shader_defs.push("VERTEX_OUTPUT_INSTANCE_INDEX".into());
         if let Some(fragment) = descriptor.fragment.as_mut() {
             fragment.shader_defs.push("VERTEX_OUTPUT_INSTANCE_INDEX".into());
@@ -166,7 +166,7 @@ impl MaterialExtension for ModelLight {
     }
 }
 
-/// Material de modelo a partir de su `StandardMaterial` (que debe ser `unlit`).
+/// Model material from its `StandardMaterial` (which must be `unlit`).
 pub fn model_material(base: StandardMaterial, light: ModelLight) -> ModelMaterial {
     ExtendedMaterial { base, extension: light }
 }
