@@ -97,11 +97,16 @@ fn log_start(args: Res<crate::Args>) {
     info!("registro en {}", path().display());
 }
 
-/// Every 30 s: fps (average) and the character's tile.
+/// Every 30 s: fps (average), the character's tile, and what the frame cost depends on (window
+/// size, entities, meshes drawn), so slow frames in a player's log can be explained.
+#[allow(clippy::too_many_arguments)]
 fn log_status(
     time: Res<Time<Real>>,
     diagnostics: Res<DiagnosticsStore>,
     players: Query<&crate::character::Player>,
+    windows: Query<&Window>,
+    entities: &bevy::ecs::entity::Entities,
+    meshes: Query<&ViewVisibility, With<Mesh3d>>,
     mut next: Local<f32>,
 ) {
     let now = time.elapsed_secs();
@@ -111,5 +116,15 @@ fn log_status(
     *next = now + 30.0;
     let fps = diagnostics.get(&FrameTimeDiagnosticsPlugin::FPS).and_then(|d| d.average()).unwrap_or(0.0);
     let pos = players.single().map(|p| format!("({:.1}, {:.1})", p.pos.x, p.pos.y)).unwrap_or_default();
-    info!("estado: {fps:.0} fps, personaje en {pos}, {:.0} s de juego", now);
+    let window = windows
+        .single()
+        .map(|w| format!("{}x{} {:?}", w.resolution.physical_width(), w.resolution.physical_height(), w.present_mode))
+        .unwrap_or_default();
+    let visible = meshes.iter().filter(|v| v.get()).count();
+    info!(
+        "estado: {fps:.0} fps, personaje en {pos}, {:.0} s de juego | ventana {window}, {} entidades, {visible}/{} mallas visibles",
+        now,
+        entities.len(),
+        meshes.iter().len()
+    );
 }

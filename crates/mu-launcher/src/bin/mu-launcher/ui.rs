@@ -245,10 +245,14 @@ impl Launcher {
 
 impl eframe::App for Launcher {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        ctx.request_repaint_after(Duration::from_millis(100));
+        let game = self.game.lock().unwrap().clone();
+        // While the game runs the launcher is minimized and must not take GPU time from it: no
+        // periodic repaints (the game thread asks for one when the game closes).
+        if game != Game::Running {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         self.dev_screenshot(ctx);
         let status = self.status.lock().map(|s| s.clone()).unwrap_or_default();
-        let game = self.game.lock().unwrap().clone();
         if status.ready && !self.art_tried_ready {
             self.art_tried_ready = true;
             self.load_art(ctx);
