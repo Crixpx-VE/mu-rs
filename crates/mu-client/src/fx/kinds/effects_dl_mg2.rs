@@ -26,8 +26,9 @@ use super::common::{self, luminosity, move_tail, rf};
 use crate::fx::core::*;
 
 /// Bones of `bossrock.bmd` (`MODEL_FISSURE`): 149, none of them dummy (read with mu-data's
-/// `bmdinfo` example). The bone loop of `MoveEffect` (ZzzEffect.cpp:10005) calls `rand()` once per
-/// non-dummy bone, so the count is needed to keep the `rand()` sequence.
+/// `bmdinfo` example). Only the fallback when the model file is missing: the bone loop of
+/// `MoveEffect` (ZzzEffect.cpp:10005) calls `rand()` once per non-dummy bone, so the count keeps
+/// the `rand()` sequence; with the file, its own bones are used.
 const FISSURE_BONES: usize = 149;
 
 /// `Models[MODEL_PLAYER].Actions[PLAYER_SKILL_FLAMESTRIKE].PlaySpeed = 0.69f + MagicSpeed2`
@@ -62,7 +63,7 @@ pub fn register(r: &mut Registry) {
     r.effect(MODEL_FEATHER, k(feather_create, feather_step, feather_draw));
     r.effect(MODEL_FEATHER_FOREIGN, k(feather_foreign_create, feather_foreign_step, feather_draw));
 
-    r.effect(MODEL_MOVE_TARGETPOSITION_EFFECT, k(move_target_create, move_target_step, draw_plain));
+    r.effect(MODEL_MOVE_TARGETPOSITION_EFFECT, k(move_target_create, move_target_step, move_target_draw));
     r.effect(MODEL_EFFECT_SD_AURA, k(sd_aura_create, sd_aura_step, sd_aura_draw));
     r.effect(MODEL_AURORA, k(aurora_create, aurora_step, draw_plain));
 }
@@ -98,13 +99,6 @@ fn owner_live(e: &Effect, ctx: &Ctx) -> bool {
     }
 }
 
-/// `b->PlayAnimation(..., Speed, ...)` called by a type's own `case` (on top of the common tail).
-/// TODO(original): like `common::play_animation`, the action length is unknown here, so the end
-/// of a non-looping action is not reproduced.
-fn play_anim(e: &mut Effect, speed: f32) {
-    e.animation_frame += speed;
-}
-
 /// `VectorNormalize`: a zero vector stays zero.
 fn normalize(v: Vec3) -> Vec3 {
     v.normalize_or_zero()
@@ -117,19 +111,25 @@ fn object(e: &Effect) -> Option<ModelDraw> {
     (e.alpha >= 0.01).then(|| ModelDraw::of_effect(e))
 }
 
-/// `RenderObject(o)` with `RenderBody(RENDER_TEXTURE, ...)`: the `default:` of `RenderEffects` for
-/// `MODEL_SKILL_BEGIN..MODEL_SKILL_END`, or an explicit `case` doing `RenderObject(o)`.
+/// `RenderObject(o)` with `RenderBody(RENDER_TEXTURE, Alpha, BlendMesh, BlendMeshLight, U, V,
+/// HiddenMesh)`: the last `else` of `Draw_RenderObject` (ZzzObject.cpp:2614), or the
+/// `MODEL_SHIELD_CRASH/2` branch (ZzzObject.cpp:1639, `BodyLight = Light`, the same call). Used by
+/// the `default:` of `RenderEffects` for `MODEL_SKILL_BEGIN..MODEL_SKILL_END`.
 fn draw_plain(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    if let Some(d) = object(e) {
+    if let Some(mut d) = object(e) {
+        d.render_flags = RENDER_TEXTURE;
         out.models.push(d);
     }
 }
 
 /// `RenderObject(o)` whose `Draw_RenderObject` branch sets a fixed `BodyLight` and then
-/// `RenderBody(RENDER_TEXTURE, ...)` (the change-up effects).
+/// `RenderBody(RENDER_TEXTURE, Alpha, BlendMesh, BlendMeshLight, U, V)` (the change-up effects,
+/// ZzzObject.cpp:493-514; no `HiddenMesh` argument, so -1).
 fn draw_with_light(e: &Effect, out: &mut DrawList, light: Vec3) {
     if let Some(mut d) = object(e) {
         d.light = light;
+        d.hidden_mesh = -1;
+        d.render_flags = RENDER_TEXTURE;
         out.models.push(d);
     }
 }
@@ -177,8 +177,11 @@ fn change_up_eff_step(e: &mut Effect, ctx: &mut Ctx) {
     if life(e) <= 1 && e.sub_type == 0 {
         // TODO(original): SetPlayerStop(Hero) (the hero returns to the standing action).
     }
+    // `b->PlayAnimation(..., Velocity/3, ...)` (10437-10446); its result is not used. (The
+    // original does not set `b->CurrentAction` first; this effect's action 0 is used.)
     if e.sub_type == 0 || e.sub_type == 2 {
-        play_anim(e, e.velocity / 3.0);
+        let speed = e.velocity / 3.0;
+        let _ = common::play_model_animation(e, ctx, speed);
     }
 }
 
@@ -326,13 +329,24 @@ fn fissure_step(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(ty, position, e.angle, e.light, 0, None, -1, 0, 0, 0.0);
     }
 
-    // Fire and smoke on random bones of the rock model.
-    for _ in 0..FISSURE_BONES {
-        if ctx.rand() % 12 == 0 {
-            // TODO(original): `TransformPosition(BoneTransform[i], 0, Position, true)` on the effect's
-            // own animated bones (bossrock.bmd at `AnimationFrame`); the engine gives no access to
-            // an effect model's bones, so the effect's origin is used.
-            let position = e.position;
+    // Fire and smoke on random bones of the rock model (10002-10013): `pModel->Animation(
+    // BoneTransform, o->AnimationFrame, ..., o->Angle, ...)` once, then for every bone
+    // `!Bones[i].Dummy && rand()%12 == 0` (no `rand()` for dummy bones) and
+    // `TransformPosition(BoneTransform[i], 0, Position, true)` (`BodyScale`/`BodyOrigin` of the
+    // model's last render, i.e. this effect's `Scale` and `Position`).
+    // Without the model file: [`FISSURE_BONES`] non-dummy bones (keeps the `rand()` sequence) at
+    // the effect's origin.
+    let dummy: Vec<bool> = match ctx.model(e.ty) {
+        Some(m) => m.bones.iter().map(|b| b.dummy).collect(),
+        None => vec![false; FISSURE_BONES],
+    };
+    let bones = ctx.effect_bones(e);
+    for (i, &is_dummy) in dummy.iter().enumerate() {
+        if !is_dummy && ctx.rand() % 12 == 0 {
+            let position = bones.as_ref().and_then(|b| b.get(i)).map_or(e.position, |m| {
+                let local = Vec3::from_array(mu_data::bmd::transform_point(m, [0.0; 3]));
+                e.position + rotate(e.angle, local * e.scale)
+            });
             ctx.create_particle(BITMAP_TRUE_FIRE, position, e.angle, Vec3::ONE, 3, 4.0, me(e));
             ctx.create_particle(BITMAP_SMOKE, position, e.angle, Vec3::ONE, 21, 1.0, None);
         }
@@ -360,8 +374,11 @@ fn balgas_step(e: &mut Effect, ctx: &mut Ctx) {
     let lum = luminosity(e, ctx);
     e.blend_mesh_light = life(e) as f32 * 0.1;
     let light = Vec3::new(lum * 0.3, lum * 0.6, lum);
-    // `Models[MODEL_BALGAS_SKILL].Actions[0].Loop = false` (ZzzOpenData.cpp:4176).
-    play_anim(e, e.velocity * 2.0);
+    // `b->CurrentAction = o->CurrentAction; b->PlayAnimation(..., Velocity*2, ...)` (10398-10400);
+    // `Models[MODEL_BALGAS_SKILL].Actions[0].Loop = false` (ZzzOpenData.cpp:4176). Its result is
+    // not used.
+    let speed = e.velocity * 2.0;
+    let _ = common::play_model_animation(e, ctx, speed);
     ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
     move_tail(e, ctx);
 }
@@ -539,7 +556,7 @@ fn blade_step(e: &mut Effect, ctx: &mut Ctx) {
 /// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)`.
 fn blade_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if let Some(mut d) = object(e) {
-        d.bright = true;
+        d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
         for _ in 0..3 {
             out.models.push(d);
         }
@@ -571,9 +588,13 @@ fn blow_create(e: &mut Effect, ctx: &mut Ctx) {
             // PBG_ADD_NEWCHAR_MONK_SKILL (Rage Fighter).
             e.life_time = 50.0;
             // `Position += Owner->Angle · (0, 0, 0)`: no change.
-            // TODO(original): if Owner->m_sTargetIndex >= 0, StartPosition = the position of
-            // CharactersClient[m_sTargetIndex] and Scale = 0.5 (otherwise `break`). The owner's
-            // target is not known here: StartPosition stays at Position.
+            // `if (Owner->m_sTargetIndex < 0) break;` then StartPosition = the target's position
+            // and Scale = 0.5. A target that is not in scope counts as no target.
+            let target = ctx.actor(e.owner).and_then(|a| a.target).and_then(|t| ctx.actors.get(&t)).map(|t| t.position);
+            if let Some(p) = target {
+                e.start_position = p;
+                e.scale = 0.5;
+            }
         }
         _ => {}
     }
@@ -757,42 +778,29 @@ fn plancrack_a_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// RenderEffects 18787 → ZzzObject.cpp:594: `BodyLight = Light · Alpha` and
-/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, ...)` (BodyLight already carries the alpha, so the
-/// model is drawn bright with alpha 1).
+/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh, BlendMeshLight, U, V)`.
 fn nightwater_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
     if let Some(mut d) = object(e) {
         d.light = e.light * e.alpha;
-        d.alpha = 1.0;
-        d.bright = true;
+        d.hidden_mesh = -1;
+        d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
         out.models.push(d);
     }
 }
 
 /// RenderEffects 18788 → ZzzObject.cpp:600/606: `BodyLight = Light · Alpha` and
-/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh 1, BlendMeshLight, U,
-/// -(int)WorldTime%2000*0.0001f)`: mesh 0 bright, mesh 1 (the blend mesh) additive with
-/// `BodyLight · BlendMeshLight` and scrolling V. Both models have exactly 2 meshes.
+/// `RenderBody(RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 1, BlendMeshLight, U,
+/// -(int)WorldTime%2000*0.0001f)`.
 fn plancrack_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(base) = object(e) else { return };
-    let body = e.light * e.alpha;
+    let Some(mut d) = object(e) else { return };
+    d.light = e.light * e.alpha;
+    d.hidden_mesh = -1;
+    d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    d.blend_mesh = 1;
+    // `-(int)WorldTime%2000*0.0001f`: integer negate and remainder, then the float product.
     let v = ((-(ctx.world_time as i32)) % 2000) as f32 * 0.0001;
-
-    let mut bright = base;
-    bright.light = body;
-    bright.alpha = 1.0;
-    bright.bright = true;
-    bright.hidden_mesh = 1;
-    out.models.push(bright);
-
-    let mut blend = base;
-    blend.light = body;
-    blend.alpha = 1.0;
-    blend.bright = false;
-    blend.hidden_mesh = 0;
-    blend.blend_mesh = 1;
-    blend.blend_mesh_light = e.blend_mesh_light;
-    blend.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, v);
-    out.models.push(blend);
+    d.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, v);
+    out.models.push(d);
 }
 
 // --- MODEL_EFFECT_FLAME_STRIKE --------------------------------------------------------------------------
@@ -836,8 +844,7 @@ fn flame_strike_step(e: &mut Effect, ctx: &mut Ctx) {
                     // owner (bone 33 as parent) and of this model: while the owner's frame is in
                     // 5..=13, CreateObjectBlur(o, bone 9, bone 6, (1,1,1), 2, false, m_iAnimation+1
                     // and +2) and CreateObjectBlur(o, bone 8, bone 5, (1,1,1), 5, false,
-                    // m_iAnimation+3). There is no object blur system (and no access to this
-                    // model's bones).
+                    // m_iAnimation+3). There is no object blur system.
                 }
             }
         }
@@ -867,20 +874,24 @@ fn flame_strike_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let angle = Vec3::new(x, y, z) * (180.0 / std::f32::consts::PI);
     let position = owner.position + rotate(owner.angle, bone_t * e.scale);
 
+    // `RenderMesh(0, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 0, Alpha, U, V, -1)`.
     let mut mesh0 = ModelDraw::new(MODEL_EFFECT_FLAME_STRIKE, position, angle, e.scale);
     mesh0.light = e.light;
+    mesh0.alpha = e.alpha;
     mesh0.action = e.current_action;
     mesh0.frame = e.animation_frame;
+    mesh0.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+    mesh0.mesh = 0;
     mesh0.blend_mesh = 0;
     mesh0.blend_mesh_light = e.alpha;
     mesh0.blend_mesh_tex_coord = e.blend_mesh_tex_coord;
-    mesh0.hidden_mesh = 1;
     out.models.push(mesh0);
 
+    // `RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT, Alpha, 1, Alpha, U, fV)`.
     let fv = ((((ctx.world_time as f64 * 0.05) as i32) % 16) / 4) as f32 * 0.25;
     let mut mesh1 = mesh0;
+    mesh1.mesh = 1;
     mesh1.blend_mesh = 1;
-    mesh1.hidden_mesh = 0;
     mesh1.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, fv);
     out.models.push(mesh1);
 }
@@ -1003,19 +1014,23 @@ fn feather_foreign_step(e: &mut Effect, ctx: &mut Ctx) {
     move_tail(e, ctx);
 }
 
-/// Default RenderObject → ZzzObject.cpp:1822 / 1906: mesh 0 with `RENDER_TEXTURE`, BlendMesh 0 and
-/// `BlendMeshLight = Alpha` (additive `BodyLight · Alpha`).
+/// Default RenderObject → ZzzObject.cpp:1822 / 1906: SubType 2/3 `RenderBody(RENDER_TEXTURE|
+/// RENDER_DARK, Alpha, BlendMesh, BlendMeshLight, U, V, HiddenMesh)` (subtractive); the others
+/// `RenderMesh(0, RENDER_TEXTURE, Alpha, 0, Alpha, U, V, HiddenMesh)` (BlendMesh 0 with
+/// `BlendMeshLight = Alpha`; `HiddenMesh` lands in `RenderMesh`'s texture argument, -1 = none).
 fn feather_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object(e) else { return };
     if e.sub_type == 2 || e.sub_type == 3 {
-        // TODO(original): RenderBody(RENDER_TEXTURE|RENDER_DARK, ...) (subtractive); ModelDraw has
-        // no subtractive mode, so these subtypes are not drawn.
-        return;
-    }
-    if let Some(mut d) = object(e) {
+        d.render_flags = RENDER_TEXTURE | RENDER_DARK;
+    } else {
+        d.render_flags = RENDER_TEXTURE;
+        d.mesh = 0;
         d.blend_mesh = 0;
         d.blend_mesh_light = e.alpha;
-        out.models.push(d);
+        d.texture = e.hidden_mesh;
+        d.hidden_mesh = -1;
     }
+    out.models.push(d);
 }
 
 // --- MODEL_MOVE_TARGETPOSITION_EFFECT -------------------------------------------------------------------
@@ -1033,16 +1048,20 @@ fn move_target_create(e: &mut Effect, ctx: &mut Ctx) {
 
     // DeleteEffect(BITMAP_MAGIC, NULL, 11), DeleteEffect(BITMAP_TARGET_POSITION_EFFECT2, NULL, 0),
     // DeleteEffect(BITMAP_TARGET_POSITION_EFFECT1, NULL, 0) and DeleteJoint(MODEL_SPEARSKILL, NULL,
-    // 16). The engine applies deletions after this tick's creations, which would also remove what
-    // is created below, so only the effects alive at tick start are deleted (by id), and the trails
-    // of the markers alive at tick start (their only creator is this code).
+    // 16) (a NULL joint target matches any). The engine applies deletions at the end of the tick,
+    // which would also remove what is created below, so:
+    // - what is alive since tick start: the effects by id, and the trails of the markers (their
+    //   only creator is this code) by target;
+    // - what was created earlier in this tick (e.g. by the previous marker's `step`, which runs
+    //   before click requests) is not in `Effects[]` yet: it is dropped from the pending spawns.
+    let deleted = |ty: i32, sub_type: i32, owner: Option<Target>| {
+        owner.is_none() && ((ty == BITMAP_MAGIC && sub_type == 11) || ((ty == BITMAP_TARGET_POSITION_EFFECT2 || ty == BITMAP_TARGET_POSITION_EFFECT1) && sub_type == 0))
+    };
     let old: Vec<(u32, i32)> = ctx
         .effects
         .iter()
-        .filter(|i| i.owner.is_none())
-        .filter(|i| (i.ty == BITMAP_MAGIC && i.sub_type == 11) || ((i.ty == BITMAP_TARGET_POSITION_EFFECT2 || i.ty == BITMAP_TARGET_POSITION_EFFECT1) && i.sub_type == 0))
+        .filter(|i| deleted(i.ty, i.sub_type, i.owner) || i.ty == MODEL_MOVE_TARGETPOSITION_EFFECT)
         .map(|i| (i.id, i.ty))
-        .chain(ctx.effects.iter().filter(|i| i.ty == MODEL_MOVE_TARGETPOSITION_EFFECT).map(|i| (i.id, i.ty)))
         .collect();
     for (id, ty) in old {
         if ty == MODEL_MOVE_TARGETPOSITION_EFFECT {
@@ -1051,6 +1070,23 @@ fn move_target_create(e: &mut Effect, ctx: &mut Ctx) {
             ctx.delete_effect_id(id);
         }
     }
+    // Their pool slots become free again, as `EffectDestructor` / `DeleteJoint` free them.
+    let (mut freed_joints, mut freed_effects) = (0, 0);
+    ctx.spawns.retain(|s| {
+        let drop = match s {
+            Spawn::Effect(x) => deleted(x.ty, x.sub_type, x.owner),
+            Spawn::Joint(j) => j.ty == MODEL_SPEARSKILL && j.sub_type == 16,
+            Spawn::Particle(_) => false,
+        };
+        match s {
+            Spawn::Effect(_) if drop => freed_effects += 1,
+            Spawn::Joint(_) if drop => freed_joints += 1,
+            _ => {}
+        }
+        !drop
+    });
+    ctx.free[1] += freed_joints;
+    ctx.free[2] += freed_effects;
 
     ctx.create_effect(BITMAP_MAGIC, e.position, e.angle, light, 11, None, -1, 0, 0, 0.0);
     ctx.create_effect(BITMAP_TARGET_POSITION_EFFECT2, e.position, e.angle, light, 0, None, -1, 0, 0, 0.0);
@@ -1076,6 +1112,20 @@ fn move_target_step(e: &mut Effect, ctx: &mut Ctx) {
         }
     }
     move_tail(e, ctx);
+}
+
+/// RenderEffects 18749 → ZzzObject.cpp:1801: `BodyLight = (1, 0.7, 0.3)` and `RenderMesh(0,
+/// RENDER_TEXTURE|RENDER_BRIGHT, Alpha, BlendMesh, BlendMeshLight)` (U, V = 0; `o->Light` is not
+/// used).
+fn move_target_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+    if let Some(mut d) = object(e) {
+        d.light = Vec3::new(1.0, 0.7, 0.3);
+        d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+        d.mesh = 0;
+        d.hidden_mesh = -1;
+        d.blend_mesh_tex_coord = Vec2::ZERO;
+        out.models.push(d);
+    }
 }
 
 // --- MODEL_EFFECT_SD_AURA ---------------------------------------------------------------------------
@@ -1107,6 +1157,8 @@ fn sd_aura_step(e: &mut Effect, ctx: &mut Ctx) {
 /// `BodyLight · BlendMeshLight`, scrolling V).
 fn sd_aura_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if let Some(mut d) = object(e) {
+        d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
+        d.hidden_mesh = -1;
         d.blend_mesh = 0;
         d.blend_mesh_tex_coord = Vec2::new(e.blend_mesh_tex_coord.x, ctx.world_time * 0.0006);
         out.models.push(d);
