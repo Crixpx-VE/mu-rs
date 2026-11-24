@@ -1,18 +1,18 @@
-//! Servidor de actualizaciones del cliente.
+//! Client update server.
 //!
-//!   mu-update-server --dir <carpeta_del_cliente> [--listen 0.0.0.0:44480]
+//!   mu-update-server --dir <client_folder> [--listen 0.0.0.0:44480]
 //!
-//! Publica todos los archivos de `--dir` (menos registros y temporales). Solo entrega los
-//! archivos que están en la lista, así que no se puede pedir nada de fuera de la carpeta.
-//! Cuando cambia un archivo (por ejemplo, al publicar un `mu-client.exe` nuevo), la lista se
-//! recalcula sola; para evitar entregar un archivo a medio copiar, publícalo con un nombre
-//! temporal (`.tmp`) y renómbralo al final.
+//! Publishes every file in `--dir` (except logs and temporary files). Only serves the
+//! files in the list, so nothing outside the folder can be requested.
+//! When a file changes (e.g. when publishing a new `mu-client.exe`), the list is
+//! recomputed automatically; to avoid serving a half-copied file, publish it under a
+//! temporary name (`.tmp`) and rename it at the end.
 //!
-//! También recibe los registros del juego que suben los lanzadores (`POST /log`) y los guarda
-//! en `registros/` junto a este programa (como mucho 8 MB cada uno y los 300 últimos).
+//! It also receives the game logs uploaded by launchers (`POST /log`) and stores them
+//! in `registros/` next to this program (at most 8 MB each and the last 300).
 //!
-//! Cada archivo publicado se comprime una vez con zstd (nivel 19) en `comprimidos/<sha256>.zst`
-//! junto a este programa, en segundo plano; mientras no está listo se entrega sin comprimir.
+//! Each published file is compressed once with zstd (level 19) into `comprimidos/<sha256>.zst`
+//! next to this program, in the background; until it's ready it is served uncompressed.
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
@@ -25,25 +25,25 @@ use mu_launcher::{DEFAULT_PORT, Entry, decode_path, format_manifest, format_mani
 use sha2::{Digest, Sha256};
 use tiny_http::{Header, Method, Request, Response, Server};
 
-/// Descargas a la vez; el resto recibe "503, inténtalo luego" (el lanzador reintenta).
+/// Concurrent downloads; the rest get "503, try later" (the launcher retries).
 const MAX_ACTIVE: usize = 64;
-/// Cada cuánto se vuelve a mirar la carpeta como mucho.
+/// How often, at most, the folder is rescanned.
 const RESCAN_EVERY: Duration = Duration::from_secs(2);
-/// Nivel de zstd: lento al comprimir (se hace una vez), igual de rápido al descomprimir.
+/// zstd level: slow to compress (done once), equally fast to decompress.
 const ZSTD_LEVEL: i32 = 19;
 
 struct Catalog {
     dir: PathBuf,
-    /// Huella calculada de cada archivo: (tamaño, fecha) → no hace falta recalcularla.
+    /// Computed hash of each file: (size, date) → no need to recompute it.
     hashes: HashMap<String, (u64, SystemTime, String)>,
-    /// Por ruta, en orden.
+    /// By path, in order.
     list: Vec<Entry>,
     entries: HashMap<String, Entry>,
     text: String,
     scanned: Option<Instant>,
-    /// Carpeta de los comprimidos (`<sha256>.zst`).
+    /// Folder of the compressed files (`<sha256>.zst`).
     cache: PathBuf,
-    /// Huella → tamaño comprimido (0: no compensa comprimirlo y se entrega tal cual).
+    /// Hash → compressed size (0: not worth compressing, served as is).
     packed: HashMap<String, u64>,
 }
 
@@ -79,7 +79,7 @@ impl Catalog {
         Ok(())
     }
 
-    /// La lista con el tamaño comprimido de lo que ya está comprimido.
+    /// The list with the compressed size of what is already compressed.
     fn text2(&self) -> String {
         let list: Vec<Entry> = self
             .list
@@ -90,7 +90,7 @@ impl Catalog {
     }
 }
 
-/// Carpeta de los archivos comprimidos: `comprimidos` junto a este programa (fuera de la publicada).
+/// Folder of the compressed files: `comprimidos` next to this program (outside the published one).
 fn cache_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -98,7 +98,7 @@ fn cache_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("comprimidos"))
 }
 
-/// En segundo plano: comprime lo que se publica y borra los comprimidos que ya no se usan.
+/// In the background: compresses what is published and deletes compressed files no longer used.
 fn compressor(catalog: Arc<Mutex<Catalog>>) {
     let workers = std::thread::available_parallelism().map_or(2, |n| (n.get() / 2).max(1));
     loop {
@@ -151,13 +151,13 @@ fn compressor(catalog: Arc<Mutex<Catalog>>) {
             );
         }
         prune_cache(&catalog);
-        // Lo que falló (p. ej. cambió mientras se comprimía) se reintenta en la próxima vuelta.
+        // What failed (e.g. changed while compressing) is retried in the next round.
         std::thread::sleep(Duration::from_secs(5));
     }
 }
 
-/// Comprime un archivo en `<cache>/<sha>.zst` (o deja `<sha>.raw` si no compensa). Devuelve el
-/// tamaño comprimido (0 si no compensa), o nada si el archivo cambió mientras se comprimía.
+/// Compresses a file into `<cache>/<sha>.zst` (or leaves `<sha>.raw` if not worth it). Returns the
+/// compressed size (0 if not worth it), or nothing if the file changed while compressing.
 fn pack(cache: &Path, sha: &str, path: &Path) -> Option<u64> {
     let zst = cache.join(format!("{sha}.zst"));
     let raw = cache.join(format!("{sha}.raw"));
@@ -173,7 +173,7 @@ fn pack(cache: &Path, sha: &str, path: &Path) -> Option<u64> {
         let mut enc = zstd::stream::write::Encoder::new(std::fs::File::create(&tmp)?, ZSTD_LEVEL)?;
         std::io::copy(&mut input, &mut enc)?;
         enc.finish()?.flush()?;
-        // Lo comprimido tiene que ser justo el archivo de la lista.
+        // The compressed data must be exactly the listed file.
         if hex(&input.hash.finalize()) != sha {
             let _ = std::fs::remove_file(&tmp);
             return Ok(None);
@@ -209,7 +209,7 @@ impl<R: Read> Read for HashingReader<R> {
     }
 }
 
-/// Borra los comprimidos de versiones que ya no se publican.
+/// Deletes compressed files of versions no longer published.
 fn prune_cache(catalog: &Mutex<Catalog>) {
     let (cache, live) = {
         let mut c = catalog.lock().unwrap();
@@ -281,13 +281,13 @@ fn main() {
     }
 }
 
-/// Tamaño máximo de un registro subido.
+/// Maximum size of an uploaded log.
 const MAX_LOG: usize = 8 << 20;
-/// Registros que se guardan como mucho (se borran los más viejos).
+/// Maximum number of logs kept (the oldest are deleted).
 const MAX_LOGS: usize = 300;
 
-/// Carpeta de los registros que suben los lanzadores: `registros` junto a este programa
-/// (fuera de la carpeta publicada).
+/// Folder for logs uploaded by launchers: `registros` next to this program
+/// (outside the published folder).
 fn logs_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
@@ -295,7 +295,7 @@ fn logs_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("registros"))
 }
 
-/// `POST /log`: el lanzador sube el registro del juego al cerrarse.
+/// `POST /log`: the launcher uploads the game log when it closes.
 fn receive_log(mut req: Request, who: &str) {
     let mut body = Vec::new();
     let read = std::io::Read::take(req.as_reader(), MAX_LOG as u64 + 1).read_to_end(&mut body);
@@ -328,7 +328,7 @@ fn prune_logs(dir: &Path) {
     if names.len() <= MAX_LOGS {
         return;
     }
-    // Los nombres empiezan por la hora: el orden alfabético es el de llegada.
+    // Names start with the time: alphabetical order is arrival order.
     names.sort();
     for old in &names[..names.len() - MAX_LOGS] {
         let _ = std::fs::remove_file(old);
@@ -382,7 +382,7 @@ fn handle(req: Request, catalog: &Mutex<Catalog>) {
         let _ = req.respond(Response::from_string("no existe").with_status_code(404));
         return;
     };
-    // Solo archivos de la lista: la ruta ya pasó `is_safe_path` al hacer la lista.
+    // Only listed files: the path already passed `is_safe_path` when building the list.
     let found = {
         let c = catalog.lock().unwrap();
         c.entries.get(&rel).map(|e| (to_local(&c.dir, &e.path), e.size))
@@ -396,7 +396,7 @@ fn handle(req: Request, catalog: &Mutex<Catalog>) {
             println!("{who} descarga {rel} ({} KB)", size / 1000);
             let _ = req.respond(Response::from_file(file).with_header(header("Content-Type", "application/octet-stream")));
         }
-        // Cambió desde que se hizo la lista: que el lanzador pida la lista otra vez.
+        // Changed since the list was built: the launcher should request the list again.
         None => {
             let _ = req.respond(Response::from_string("cambiando").with_status_code(503));
         }

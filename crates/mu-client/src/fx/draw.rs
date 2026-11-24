@@ -1,6 +1,6 @@
-//! Dibujo de los efectos cada fotograma: se interpola entre los dos últimos ticks, se pide a
-//! cada tipo lo que dibuja (`DescribeParticle`, `RenderEffects`...) y se agrupa por textura y mezcla
-//! en mallas que se rehacen cada fotograma.
+//! Per-frame effect drawing: interpolates between the last two ticks, asks each kind what it
+//! draws (`DescribeParticle`, `RenderEffects`...) and groups by texture and blending into meshes
+//! rebuilt every frame.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -15,11 +15,11 @@ use super::sim::{Actors, FxWorld};
 use super::textures::FxTextures;
 use crate::terrain::{LoadedTerrain, MU_SCALE};
 
-/// Lo que hay que dibujar este fotograma (lo usan también los modelos, en `models.rs`).
+/// What to draw this frame (also used by models, in `models.rs`).
 #[derive(Resource, Default)]
 pub struct FrameDraw(pub DrawList);
 
-/// Paso 1: pedir a cada objeto lo que dibuja, ya interpolado.
+/// Step 1: ask each object what it draws, already interpolated.
 pub fn collect(
     world: Res<FxWorld>,
     registry: Res<Registry>,
@@ -50,7 +50,7 @@ pub fn collect(
         }
     }
 
-    // `DescribeSprite`: el subtipo elige la mezcla.
+    // `DescribeSprite`: the subtype picks the blending.
     for s in &world.sprites {
         let Some(t) = ctx.tex(s.ty) else { continue };
         let blend = match s.sub_type {
@@ -71,7 +71,7 @@ pub fn collect(
         });
     }
 
-    // Estelas de las armas (`RenderBlurs`): suma, desvaneciéndose hacia lo más viejo.
+    // Weapon trails (`RenderBlurs`): additive, fading toward the oldest.
     for b in &world.blurs {
         let n = b.p1.len();
         if n < 2 {
@@ -81,7 +81,7 @@ pub fn collect(
         for j in 0..n - 1 {
             let (l1, l2) = ((n - j) as f32 / n as f32, (n - j - 1) as f32 / n as f32);
             let (u1, u2) = (j as f32 / n as f32, (j + 1) as f32 / n as f32);
-            // Un color por cuadrado: la media de sus dos extremos.
+            // One color per quad: the average of its two ends.
             let l = b.light * (l1 + l2) * 0.5;
             out.quads.push(QuadDraw {
                 texture: tex,
@@ -111,10 +111,10 @@ pub fn collect(
     frame.0 = out;
 }
 
-/// Mallas de sprites/estelas/marcas ya creadas, por (textura, mezcla).
+/// Sprite/trail/mark meshes already created, by (texture, blending).
 #[derive(Resource, Default)]
 pub struct Batches {
-    /// (malla, material, entidad) de cada lote de textura + mezcla.
+    /// (mesh, material, entity) of each texture + blending batch.
     map: HashMap<(i32, Blend), (Handle<Mesh>, Handle<FxMaterial>, Entity)>,
 }
 
@@ -138,18 +138,18 @@ impl Batch {
     }
 }
 
-/// MU (x, y, z arriba, 100 por casilla) → Bevy (x, z, -y), 1 por casilla.
+/// MU (x, y, z up, 100 per tile) → Bevy (x, z, -y), 1 per tile.
 pub fn mu_to_bevy(v: Vec3) -> Vec3 {
     Vec3::new(v.x, v.z, -v.y) / MU_SCALE
 }
 
-/// Color del original (se multiplica en sRGB) → lineal. Como `PackABGR`, se limita a [0, 1].
+/// Original color (multiplied in sRGB) → linear. Like `PackABGR`, clamped to [0, 1].
 fn linear(c: [f32; 4]) -> [f32; 4] {
     let f = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
     [f(c[0]), f(c[1]), f(c[2]), c[3].clamp(0.0, 1.0)]
 }
 
-/// Paso 2: sprites, marcas y estelas en mallas.
+/// Step 2: sprites, marks and trails into meshes.
 #[allow(clippy::too_many_arguments)]
 pub fn render_quads(
     mut commands: Commands,
@@ -166,7 +166,7 @@ pub fn render_quads(
     mut visibility: Query<&mut Visibility>,
 ) {
     let Ok(cam) = cameras.single() else { return };
-    // Ejes de la pantalla en coordenadas de MU (para los sprites).
+    // Screen axes in MU coordinates (for sprites).
     let to_mu = |v: Vec3| Vec3::new(v.x, -v.z, v.y);
     let (right, up) = (to_mu(cam.right().as_vec3()), to_mu(cam.up().as_vec3()));
     let mut out: HashMap<(i32, Blend), Batch> = HashMap::new();
@@ -175,7 +175,7 @@ pub fn render_quads(
         let (sn, cs) = s.rotation.to_radians().sin_cos();
         let (w, h) = (s.width * 0.5, s.height * 0.5);
         let [u, v, uw, vh] = s.uv;
-        // Igual que `RenderSprite`: abajo-izq, abajo-der, arriba-der, arriba-izq; v = 0 arriba.
+        // Same as `RenderSprite`: bottom-left, bottom-right, top-right, top-left; v = 0 at the top.
         let corners = [(-w, -h), (w, -h), (w, h), (-w, h)].map(|(dx, dy)| {
             s.position + right * (dx * cs - dy * sn) + up * (dx * sn + dy * cs)
         });
@@ -192,7 +192,7 @@ pub fn render_quads(
             let y = d.center.y + dx * sn + dy * cs;
             Vec3::new(x, y, height(x, y) + d.lift)
         });
-        // Como RenderTerrainAlphaBitmap: V crece hacia +Y.
+        // Like `RenderTerrainAlphaBitmap`: V grows toward +Y.
         let uvs = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
         out.entry((d.texture, d.blend)).or_default().quad(corners, uvs, linear(d.color));
     }
@@ -201,7 +201,7 @@ pub fn render_quads(
         out.entry((qd.texture, qd.blend)).or_default().quad(qd.corners, qd.uv, linear(qd.color));
     }
 
-    // Estelas (`DescribeJoint`): dos cintas en cruz a lo largo de las colas.
+    // Trails (`DescribeJoint`): two crossed ribbons along the tails.
     let scroll = (fixed.elapsed_secs() * 1000.0 % 1000.0) * 0.001;
     for j in &world.joints {
         let n = j.tails.len();
@@ -225,11 +225,11 @@ pub fn render_quads(
             match j.scroll {
                 JointScroll::None => base,
                 JointScroll::Thunder => {
-                    // Cara uno: U·2 − scroll; cara dos: la misma más 2·scroll (= U·2 + scroll).
+                    // Face one: U·2 − scroll; face two: the same plus 2·scroll (= U·2 + scroll).
                     if face_one { base * 2.0 - scroll } else { base * 2.0 + scroll }
                 }
                 JointScroll::Tile => (n - 1 - k) as f32 / 16.0 * 2.0 - 2.0 * scroll,
-                // FLARE_FORCE divide entre (MaxTails − 1) / 2 con división entera.
+                // FLARE_FORCE divides by (MaxTails − 1) / 2 with integer division.
                 JointScroll::Flare => (n - 1 - k) as f32 / ((j.max_tails.max(3) - 1) / 2) as f32 - scroll,
             }
         };
@@ -248,8 +248,8 @@ pub fn render_quads(
         }
     }
 
-    // Volcar en las mallas (creando las que falten). Los lotes sin nada este fotograma se ocultan
-    // en vez de vaciarse: Bevy avisa de cada malla vacía que sube.
+    // Upload into the meshes (creating missing ones). Batches with nothing this frame are hidden
+    // instead of emptied: Bevy warns about every empty mesh it uploads.
     for (key, (_, _, entity)) in batches.map.iter() {
         if let Ok(mut v) = visibility.get_mut(*entity) {
             v.set_if_neq(if out.contains_key(key) { Visibility::Inherited } else { Visibility::Hidden });
@@ -265,7 +265,7 @@ pub fn render_quads(
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(material.clone()),
                 Transform::default(),
-                // La malla cambia cada fotograma: sin recorte por caja (siempre se dibuja).
+                // The mesh changes every frame: no bounding-box culling (always drawn).
                 bevy::camera::visibility::NoFrustumCulling,
             )).id();
             (mesh, material, entity)

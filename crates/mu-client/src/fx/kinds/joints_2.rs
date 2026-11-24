@@ -1,13 +1,13 @@
-//! Estelas traducidas de `ZzzEffectJoint.cpp` (`CreateJoint`, `MoveJoint` y los sprites de
-//! `UpdateDrawnJointEffects`): rayos `JOINT_THUNDER + 1`, bola `JOINT_FIRE`, chispas `SPARK + 1`,
-//! auras/remolinos `MODEL_SPEARSKILL`, destellos `FLARE` / `FLARE_BLUE` y `FLARE + 1`.
+//! Trails translated from `ZzzEffectJoint.cpp` (`CreateJoint`, `MoveJoint` and the sprites of
+//! `UpdateDrawnJointEffects`): `JOINT_THUNDER + 1` bolts, `JOINT_FIRE` ball, `SPARK + 1` sparks,
+//! `MODEL_SPEARSKILL` auras/swirls, `FLARE` / `FLARE_BLUE` and `FLARE + 1` flares.
 //!
-//! Campos libres usados (`Joint::user`):
-//! - `user[3]`: `iIndex` del original (posición en `Joints[]`), que algunos tipos usan como semilla
-//!   de sus giros (`GetMagicScrew`). Se elige al azar al crear.
-//! - `user[2]`: marca interna (≠ 0 = volver a activar `create_tails` al empezar el próximo tick;
-//!   ver [`follow_with_angle`]).
-//! - `user[0]`, `user[1]`: lo propio de cada subtipo (documentado donde se usa).
+//! Free fields used (`Joint::user`):
+//! - `user[3]`: the original's `iIndex` (position in `Joints[]`), which some kinds use as the seed
+//!   of their spins (`GetMagicScrew`). Chosen at random on creation.
+//! - `user[2]`: internal flag (≠ 0 = re-enable `create_tails` at the start of the next tick;
+//!   see [`follow_with_angle`]).
+//! - `user[0]`, `user[1]`: per-subtype data (documented where used).
 
 use bevy::math::Vec3;
 
@@ -23,9 +23,9 @@ pub fn register(r: &mut Registry) {
     r.joint(BITMAP_FLARE + 1, JointKind { create: Some(flare1_create), step: Some(flare1_step) });
 }
 
-// --- Utilidades comunes -----------------------------------------------------------------------------
+// --- Shared utilities -------------------------------------------------------------------------------
 
-/// `MAX_JOINTS` del original (para elegir el `iIndex`).
+/// The original's `MAX_JOINTS` (to pick the `iIndex`).
 const MAX_JOINTS: i32 = 500;
 /// `MAX_SPEAR_FLARE_MOVES` (`ZzzEffect.h`).
 const MAX_SPEAR_FLARE_MOVES: i32 = 256;
@@ -39,7 +39,7 @@ fn v(x: f32, y: f32, z: f32) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
-/// `iIndex` del original.
+/// The original's `iIndex`.
 fn slot(j: &Joint) -> i32 {
     j.user[SLOT] as i32
 }
@@ -48,7 +48,7 @@ fn assign_slot(j: &mut Joint, ctx: &mut Ctx) {
     j.user[SLOT] = (ctx.rand() % MAX_JOINTS) as f32;
 }
 
-/// `SetNewestTail(o, AngleMatrix(angle), 2)`: la cruz de 4 puntos con un giro cualquiera.
+/// `SetNewestTail(o, AngleMatrix(angle), 2)`: the 4-point cross with an arbitrary rotation.
 fn tail_with(j: &Joint, angle: Vec3) -> [Vec3; 4] {
     let m = angle_matrix(angle);
     let h = j.scale * 0.5;
@@ -60,7 +60,7 @@ fn tail_with(j: &Joint, angle: Vec3) -> [Vec3; 4] {
     ]
 }
 
-/// `CreateTail(o, AngleMatrix(angle))`: desplaza las colas y deja una nueva delante.
+/// `CreateTail(o, AngleMatrix(angle))`: shifts the tails and adds a new one in front.
 fn create_tail(j: &mut Joint, angle: Vec3) {
     let t = tail_with(j, angle);
     j.tails.insert(0, t);
@@ -68,27 +68,27 @@ fn create_tail(j: &mut Joint, angle: Vec3) {
     j.tails.truncate(max);
 }
 
-/// `NumTails` del original (−1 = sin colas).
+/// The original's `NumTails` (−1 = no tails).
 fn num_tails(j: &Joint) -> i32 {
     j.tails.len() as i32 - 1
 }
 
-/// Deshace el avance genérico por −Y·Velocity que ya hizo el núcleo (para los tipos que el
-/// original excluye de ese avance al principio de `MoveJoint`).
+/// Undoes the generic −Y·Velocity advance already done by the core (for the kinds the
+/// original excludes from that advance at the start of `MoveJoint`).
 fn undo_generic_move(j: &mut Joint) {
     if j.velocity != 0.0 {
         j.position -= rotate(j.angle, v(0.0, -j.velocity, 0.0));
     }
 }
 
-/// El avance genérico (para repetir un `MoveJoint` entero dentro del mismo tick).
+/// The generic advance (to repeat a whole `MoveJoint` within the same tick).
 fn generic_move(j: &mut Joint) {
     if j.velocity != 0.0 {
         j.position += rotate(j.angle, v(0.0, -j.velocity, 0.0));
     }
 }
 
-/// Al empezar el tick: reactivar `create_tails` si [`follow_with_angle`] lo apagó en el anterior.
+/// At tick start: re-enable `create_tails` if [`follow_with_angle`] turned it off in the previous one.
 fn begin_step(j: &mut Joint) {
     if j.user[RESTORE_TAILS] != 0.0 {
         j.user[RESTORE_TAILS] = 0.0;
@@ -96,9 +96,9 @@ fn begin_step(j: &mut Joint) {
     }
 }
 
-/// El `FollowTail` final de `MoveJoint` usa la matriz calculada al principio (con el ángulo de
-/// antes del `switch`). Si el tipo giró la estela durante el tick, la cola se deja aquí con el
-/// ángulo viejo y se apaga `create_tails` hasta el próximo tick para que el núcleo no ponga otra.
+/// The final `FollowTail` of `MoveJoint` uses the matrix computed at the start (with the angle from
+/// before the `switch`). If the kind rotated the trail during the tick, the tail is placed here with the
+/// old angle and `create_tails` is turned off until the next tick so the core doesn't add another.
 fn follow_with_angle(j: &mut Joint, a0: Vec3) {
     if j.create_tails && j.live && j.angle != a0 {
         create_tail(j, a0);
@@ -107,8 +107,8 @@ fn follow_with_angle(j: &mut Joint, a0: Vec3) {
     }
 }
 
-/// `MoveHumming(Position, Angle, TargetPosition, Turn)`: gira hacia el objetivo como mucho `turn`
-/// grados (en Z y en X) y devuelve la distancia.
+/// `MoveHumming(Position, Angle, TargetPosition, Turn)`: turns toward the target by at most `turn`
+/// degrees (in Z and in X) and returns the distance.
 fn move_humming(pos: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f32 {
     let ta = create_angle(pos.x, pos.y, target.x, target.y);
     angle.z = turn_angle(angle.z, ta, turn);
@@ -119,7 +119,7 @@ fn move_humming(pos: Vec3, angle: &mut Vec3, target: Vec3, turn: f32) -> f32 {
     range.length()
 }
 
-/// `o->Target->Live` (sin objetivo = muerto).
+/// `o->Target->Live` (no target = dead).
 fn target_live(ctx: &Ctx, t: Option<Target>) -> bool {
     match t {
         Some(Target::Actor(_)) => ctx.actor(t).is_some_and(|a| a.live),
@@ -128,7 +128,7 @@ fn target_live(ctx: &Ctx, t: Option<Target>) -> bool {
     }
 }
 
-/// `ReferenceFrameClock()`: `WorldTime / 40` continuo.
+/// `ReferenceFrameClock()`: continuous `WorldTime / 40`.
 fn reference_clock(ctx: &Ctx) -> f64 {
     ctx.world_time as f64 / 40.0
 }
@@ -149,7 +149,7 @@ fn magic_screw(ctx: &Ctx, param: i32, speed_rate: f32) -> Vec3 {
     magic_screw_at(param as f64 + reference_clock(ctx), speed_rate)
 }
 
-/// `Random::Rand() % (half * 2) - half` (si `half` es 0 el original divide por cero; aquí 0).
+/// `Random::Rand() % (half * 2) - half` (if `half` is 0 the original divides by zero; here 0).
 fn rand_spread(ctx: &mut Ctx, half: i32) -> f32 {
     if half * 2 <= 0 {
         return 0.0;
@@ -157,13 +157,13 @@ fn rand_spread(ctx: &mut Ctx, half: i32) -> f32 {
     (ctx.rand() % (half * 2) - half) as f32
 }
 
-/// `Random::Rand() % n - h` como float.
+/// `Random::Rand() % n - h` as float.
 fn rand_off(ctx: &mut Ctx, n: i32, h: i32) -> f32 {
     (ctx.rand() % n - h) as f32
 }
 
-/// Colas tal y como quedarán tras el `FollowTail` del núcleo (lo que ve `UpdateDrawnJointEffects`,
-/// que se ejecuta después de mover todas las estelas).
+/// Tails as they will be after the core's `FollowTail` (what `UpdateDrawnJointEffects` sees,
+/// which runs after all trails have moved).
 fn drawn_tails(j: &Joint) -> Vec<[Vec3; 4]> {
     let mut t = j.tails.clone();
     if j.create_tails && j.live {
@@ -173,10 +173,10 @@ fn drawn_tails(j: &Joint) -> Vec<[Vec3; 4]> {
     t
 }
 
-/// `UpdateDrawnJointEffects`: el desvanecido de la marca del rayo que cae (`THUNDER + 1` sub 6) y
-/// los sprites de `MODEL_SPEARSKILL` 0/4/9 y `FLARE + 1` 6/8.
+/// `UpdateDrawnJointEffects`: the fade of the falling-bolt mark (`THUNDER + 1` sub 6) and
+/// the sprites of `MODEL_SPEARSKILL` 0/4/9 and `FLARE + 1` 6/8.
 fn update_drawn(j: &mut Joint, ctx: &mut Ctx) {
-    // Tras este tick el núcleo resta 1 a la vida y la mata si queda < 0.
+    // After this tick the core subtracts 1 from life and kills it if < 0.
     if !j.live || j.life_time - 1.0 < 0.0 || j.render_face == 0 {
         return;
     }
@@ -212,8 +212,8 @@ fn update_drawn(j: &mut Joint, ctx: &mut Ctx) {
     }
 }
 
-/// ¿La acción del personaje es andar/correr o una habilidad de espada? (`CurrentAction` en los rangos
-/// que usa el original para cortar los destellos al moverse).
+/// Is the character's action walking/running or a sword skill? (`CurrentAction` in the ranges
+/// the original uses to cut the flares when moving).
 fn is_running_action(ca: i32) -> bool {
     (PLAYER_WALK_MALE..=PLAYER_RUN_RIDE_WEAPON).contains(&ca)
         || (PLAYER_ATTACK_SKILL_SWORD1..=PLAYER_ATTACK_SKILL_SWORD5).contains(&ca)
@@ -223,17 +223,17 @@ fn is_running_action(ca: i32) -> bool {
 
 // --- BITMAP_JOINT_THUNDER + 1 -----------------------------------------------------------------------
 //
-// Subtipo 0: `Light[2]` del original es un contador (empieza en MaxTails) que decide qué segmentos
-// se dibujan: los de índice < contador en gris 0.7, el del contador con su parte fraccionaria y los
-// demás en negro (invisibles al sumar). Aquí el contador va en `user[0]`, la luz es 0.7 fija y las
-// colas se recortan a `contador` (se pierde solo el desvanecido del segmento fraccionario).
-// Subtipo 4: `TargetIndex[0]`/`[1]` van en `user[0]`/`user[1]`.
+// Subtype 0: the original's `Light[2]` is a counter (starts at MaxTails) that decides which segments
+// are drawn: those with index < counter in grey 0.7, the counter one with its fractional part and the
+// rest in black (invisible when additive). Here the counter lives in `user[0]`, the light is a fixed 0.7
+// and the tails are trimmed to `counter` (only the fade of the fractional segment is lost).
+// Subtype 4: `TargetIndex[0]`/`[1]` go in `user[0]`/`user[1]`.
 
 fn thunder_create(j: &mut Joint, ctx: &mut Ctx) {
     assign_slot(j, ctx);
     j.tails = vec![j.make_tail()];
     let tp_param = j.target_position;
-    // o->Scale = Scale (ya lo es).
+    // o->Scale = Scale (already is).
     j.tex_type = BITMAP_JOINT_THUNDER;
     j.scroll = JointScroll::Thunder;
 
@@ -242,7 +242,7 @@ fn thunder_create(j: &mut Joint, ctx: &mut Ctx) {
             j.max_tails = 50;
             j.velocity = 80.0 + (ctx.rand() % 20) as f32;
             j.life_time = 20.0;
-            // Light[2] = MaxTails: contador en user[0]; color de los segmentos 0.7.
+            // Light[2] = MaxTails: counter in user[0]; segment color 0.7.
             j.user[0] = j.max_tails as f32;
             j.light = Vec3::splat(0.7);
             j.start_position = j.position;
@@ -286,7 +286,7 @@ fn thunder_create(j: &mut Joint, ctx: &mut Ctx) {
             j.light = v(1.0, 0.8, 1.0);
             j.target_position = tp_param;
             j.target_position.z += 100.0;
-            // (El original calcula Angle[2] del argumento, que ya no usa.)
+            // (The original computes Angle[2] from the argument, which it no longer uses.)
         }
         8 => {
             j.max_tails = 50;
@@ -327,8 +327,8 @@ fn thunder_create(j: &mut Joint, ctx: &mut Ctx) {
         }
         12 => {
             j.velocity = 80.0 + (ctx.rand() % 20) as f32;
-            // Light[2] = MaxTails (el MaxTails que quedaba en la ranura): ≥ 1, y el original lo
-            // satura a 1 al dibujar.
+            // Light[2] = MaxTails (the MaxTails left in the slot): ≥ 1, and the original
+            // clamps it to 1 when drawing.
             j.light.z = 1.0;
             j.max_tails = 30;
             j.life_time = 4.0;
@@ -371,7 +371,7 @@ fn thunder_step(j: &mut Joint, ctx: &mut Ctx) {
                     j.position += rotate(a, v(0.0, -j.velocity, 0.0));
                 }
             } else {
-                // Light[2] -= 10.12: los segmentos viejos se apagan.
+                // Light[2] -= 10.12: old segments fade out.
                 j.user[0] -= 10.12;
                 let visible = j.user[0].trunc().max(0.0) as usize;
                 j.tails.truncate(visible);
@@ -418,10 +418,10 @@ fn thunder_step(j: &mut Joint, ctx: &mut Ctx) {
                 ctx.create_effect(MODEL_ICE, j.target_position, j.angle, light, 0, None, -1, 0, 0, 0.0);
             } else if j.sub_type == 6 {
                 j.target_position.z = ctx.terrain_height(j.target_position.x, j.target_position.y) + 30.0;
-                // El original pasa su `Light` local sin inicializar; se usa la luz de la estela.
+                // The original passes its uninitialized local `Light`; the trail's light is used.
                 ctx.create_particle(BITMAP_TRUE_BLUE, j.target_position, j.angle, j.light, 0, 2.0, None);
-                // TODO(original): DescribeJoint dibuja además una marca BITMAP_MAGIC + 1 (2×2,
-                // suma, luz = Velocity) en TargetPosition; falta un dibujo propio para estelas.
+                // TODO(original): DescribeJoint also draws a BITMAP_MAGIC + 1 mark (2×2,
+                // additive, light = Velocity) at TargetPosition; trails still lack their own drawing for it.
             }
         }
         4 => {
@@ -557,8 +557,8 @@ fn thunder_step(j: &mut Joint, ctx: &mut Ctx) {
         }
         _ => {}
     }
-    // (La rama final del original para 0/2/3/4/5/6/8/9/10 que conmuta m_bCreateTails es
-    // inalcanzable: todos esos subtipos entran antes en otra rama.)
+    // (The original's final branch for 0/2/3/4/5/6/8/9/10 that toggles m_bCreateTails is
+    // unreachable: all those subtypes enter another branch first.)
     follow_with_angle(j, a0);
     update_drawn(j, ctx);
 }
@@ -573,15 +573,15 @@ fn fire_create(j: &mut Joint, ctx: &mut Ctx) {
     j.max_tails = 8;
     j.life_time = 20.0;
     j.target_position += v(0.0, 0.0, 130.0);
-    // (PlayBuffer(SOUND_MAGIC_FIRE01) está comentado en el original.)
+    // (PlayBuffer(SOUND_MAGIC_FIRE01) is commented out in the original.)
 }
 
 fn fire_step(j: &mut Joint, ctx: &mut Ctx) {
-    // MoveHumming con giro 0: no gira, solo mide la distancia.
+    // MoveHumming with turn 0: doesn't turn, only measures the distance.
     let mut ang = j.angle;
     let distance = move_humming(j.position, &mut ang, j.target_position, 0.0);
     j.angle = ang;
-    // FollowTail dentro del caso (el núcleo pone otra al final, como el original).
+    // FollowTail inside the case (the core adds another at the end, like the original).
     create_tail(j, j.angle);
     if distance <= j.velocity {
         j.live = false;
@@ -590,7 +590,7 @@ fn fire_step(j: &mut Joint, ctx: &mut Ctx) {
     }
     let lum = (ctx.rand() % 4 + 4) as f32 * 0.1;
     ctx.add_terrain_light(j.position.x, j.position.y, v(lum, lum * 0.6, lum * 0.2), 4.0);
-    // Segundo avance por −Y·Velocity (además del genérico).
+    // Second advance by −Y·Velocity (besides the generic one).
     j.position += rotate(j.angle, v(0.0, -j.velocity, 0.0));
 }
 
@@ -639,7 +639,7 @@ fn spark_step(j: &mut Joint, _ctx: &mut Ctx) {
 fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
     assign_slot(j, ctx);
     let sub = j.sub_type;
-    // Subtipos 5-7 no dejan la cola inicial (bCreateStartTail = false).
+    // Subtypes 5-7 don't leave the initial tail (bCreateStartTail = false).
     if !matches!(sub, 5..=7) {
         j.tails = vec![j.make_tail()];
     }
@@ -659,14 +659,14 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 10000.0;
             j.max_tails = 30;
             j.tex_type = BITMAP_FLARE_BLUE;
-            // TODO(original): guarda m_iChaIndex (el personaje) para cambiar 4↔9 según el Fenrir.
+            // TODO(original): stores m_iChaIndex (the character) to switch 4↔9 depending on the Fenrir.
         }
         10 | 11 => {
             j.light = v(1.0, 0.6, 0.6);
             j.life_time = 10000.0;
             j.max_tails = 30;
             j.tex_type = BITMAP_LUCKY_SEAL_EFFECT;
-            // TODO(original): m_iChaIndex = FindCharacterIndex(iChaIndex) para cambiar 10↔11 según la montura.
+            // TODO(original): m_iChaIndex = FindCharacterIndex(iChaIndex) to switch 10↔11 depending on the mount.
         }
         1 => {
             j.light = Vec3::splat(0.2);
@@ -675,7 +675,7 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.tex_type = BITMAP_JOINT_SPIRIT;
         }
         2 => {
-            // Viento de Death Stab: 5 colas, una por tick.
+            // Death Stab wind: 5 tails, one per tick.
             j.target_position = tp_param;
             j.light = v(1.0, 0.3, 0.3);
             j.life_time = 20.0;
@@ -684,7 +684,7 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
         }
         3 => {
             if j.target.is_some() {
-                // TODO(original): Light = Target->Light (el objetivo es un efecto; falta su luz).
+                // TODO(original): Light = Target->Light (the target is an effect; its light is missing).
             } else {
                 j.light = v(0.5, 0.0, 0.0);
             }
@@ -710,7 +710,7 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.direction = v(0.0, 800.0, 0.0);
             j.start_position = tp_param;
             j.position = j.start_position + rotate(j.angle, j.direction);
-            // NumTails = -1 + CreateTail: una sola cola.
+            // NumTails = -1 + CreateTail: a single tail.
             j.tails.clear();
             let a = j.angle;
             create_tail(j, a);
@@ -727,7 +727,7 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.position = j.start_position + rotate(j.angle, j.direction);
         }
         14 => {
-            // Light = vPriorColor (ya viene en la luz de la estela).
+            // Light = vPriorColor (already in the trail's light).
             j.life_time = 100.0;
             j.max_tails = 30;
             j.tex_type = BITMAP_LIGHT;
@@ -737,9 +737,9 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 100.0;
             j.max_tails = 20;
             j.tex_type = BITMAP_JOINT_SPIRIT;
-            // DescribeJoint lo dibuja restando.
+            // DescribeJoint draws it subtractive.
             j.render_type = JointRender::AlphaBlendMinus;
-            // TODO(original): StartPosition = Target->Owner->Position (falta el dueño del objetivo).
+            // TODO(original): StartPosition = Target->Owner->Position (the target's owner is missing).
         }
         16 => {
             j.light = v(1.0, 1.0, 0.0);
@@ -752,15 +752,15 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 100.0;
             j.max_tails = 20;
             j.tex_type = BITMAP_JOINT_SPIRIT;
-            // TODO(original): StartPosition = Target->Owner->Position (falta el dueño del objetivo).
+            // TODO(original): StartPosition = Target->Owner->Position (the target's owner is missing).
         }
         _ => {}
     }
-    // o->Scale = Scale (ya lo es).
+    // o->Scale = Scale (already is).
 }
 
 fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
-    // TODO(original): con m_iChaIndex cambia 4↔9 (Fenrir fuera de zona segura) y 10↔11 (montura).
+    // TODO(original): with m_iChaIndex switches 4↔9 (Fenrir outside the safe zone) and 10↔11 (mount).
     let sub = j.sub_type;
     match sub {
         2 => {
@@ -773,7 +773,7 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
             let rate1 = ((j.life_time - 10.0) / 10.0).clamp(0.0, 1.0);
             let rate2 = 1.0 - rate1;
             let magic = magic_screw(ctx, slot(j) * 17721, 1.4) + j.target_position;
-            // TODO(original): TargetPos = Target->m_vPosSword; se aproxima con el hueso del arma.
+            // TODO(original): TargetPos = Target->m_vPosSword; approximated with the weapon bone.
             let sword = match ctx.actor(j.target) {
                 Some(a) => a.bone_world(a.weapon_bone, Vec3::ZERO),
                 None => ctx.target_position(j.target).unwrap_or(j.position),
@@ -793,11 +793,11 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
             }
             j.direction.x = ((j.life_time - j.direction.y) * 0.05).sin() * 3.0;
             j.position.x += j.direction.x;
-            // TODO(original): Light = Target->Light · fAlpha, con fAlpha según Target->LifeTime
-            // (> 50: (100 − vida) / 40; si no, vida / 10; máx. 1). Falta el estado del efecto objetivo.
+            // TODO(original): Light = Target->Light · fAlpha, with fAlpha by Target->LifeTime
+            // (> 50: (100 − life) / 40; otherwise life / 10; max 1). The target effect's state is missing.
         }
         5 | 6 | 7 => {
-            // Sin avance genérico (velocidad 0 de todos modos).
+            // No generic advance (velocity 0 anyway).
             undo_generic_move(j);
             for _ in 0..3 {
                 j.angle.z += 10.0;
@@ -858,13 +858,13 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                 }
             }
             if sub == 4 || sub == 9 {
-                // TODO(original): solo sigue viva mientras HasDefenseAura(Target) (buffs Defense /
-                // HelpNpc sin Cloaking); sin sistema de buffs se supone activa y quien la creó
-                // debe matarla al acabar el buff.
+                // TODO(original): only stays alive while HasDefenseAura(Target) (Defense /
+                // HelpNpc buffs without Cloaking); without a buff system it's assumed active and whoever
+                // created it must kill it when the buff ends.
                 j.life_time = 100.0;
             }
 
-            // Las colas se mueven con el objetivo (la última, Tails[NumTails], no: igual que el original).
+            // Tails move with the target (the last one, Tails[NumTails], doesn't: same as the original).
             let follows = matches!(sub, 0 | 4 | 9 | 10 | 11 | 14 | 16);
             let n = j.tails.len().saturating_sub(1);
             if follows {
@@ -885,8 +885,8 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                     j.target_position = p;
                 }
             } else if sub == 15 || sub == 17 {
-                // TODO(original): si Target->Owner es NULL muere; mueve las colas con
-                // StartPosition = Target->Owner->Position. Falta el dueño: StartPosition no cambia.
+                // TODO(original): dies if Target->Owner is NULL; moves the tails with
+                // StartPosition = Target->Owner->Position. Owner missing: StartPosition doesn't change.
                 if let Some(p) = ctx.target_position(j.target) {
                     j.target_position = p;
                 }
@@ -929,7 +929,7 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                 }
                 14 => {
                     if j.target.is_some() {
-                        // (Objetivo vivo: comprobado arriba.)
+                        // (Target alive: checked above.)
                         j.life_time = 100.0;
                         j.position = tp + dir * 15.0;
                     }
@@ -961,8 +961,8 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
 
 // --- BITMAP_FLARE / BITMAP_FLARE_BLUE ---------------------------------------------------------------
 //
-// `PKKey`: el original usa −1 por defecto y el `CreateJoint` de Rust deja 0; 0 (que en el original
-// dividiría por cero) se trata como −1.
+// `PKKey`: the original defaults to −1 and Rust's `CreateJoint` leaves 0; 0 (which in the original
+// would divide by zero) is treated as −1.
 
 fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
     assign_slot(j, ctx);
@@ -987,7 +987,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
                 j.life_time = 50.0;
                 j.direction.z = (ctx.rand() % 250 + 200) as f32 / 100.0;
             }
-            // TODO(original): Light = Target->Light (falta la luz del personaje).
+            // TODO(original): Light = Target->Light (the character's light is missing).
         }
         20 => {
             if j.target.is_none() {
@@ -1003,7 +1003,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
                 j.position = a.bone_world(33, Vec3::ZERO);
             }
             if j.ty == BITMAP_FLARE_BLUE {
-                // DescribeJoint: FLARE_BLUE sub 20 se dibuja con Blend2.
+                // DescribeJoint: FLARE_BLUE sub 20 is drawn with Blend2.
                 j.render_type = JointRender::AlphaBlendOther;
             }
         }
@@ -1011,7 +1011,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
             j.scale = scale;
             j.direction.z = (ctx.rand() % 150) as f32 / 100.0;
             j.direction.y = (ctx.rand() % 500 - 250) as f32;
-            // (El original comprueba aquí SubType == 25, imposible: siempre 40.)
+            // (The original checks SubType == 25 here, impossible: always 40.)
             j.velocity = 40.0;
             if j.scale > 10.0 {
                 j.life_time = 50.0;
@@ -1065,7 +1065,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = (25 + ctx.rand() % 50) as f32;
             j.light = Vec3::ONE;
         }
-        // (21, 22 y 40 solo existen con GUILD_WAR_EVENT, que no está definido: caen en el `else`.)
+        // (21, 22 and 40 only exist with GUILD_WAR_EVENT, which is not defined: they fall into the `else`.)
         41 => {
             j.scale = scale;
             j.life_time = 40.0;
@@ -1150,7 +1150,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
             j.angle = Vec3::ZERO;
             j.direction = Vec3::ZERO;
             j.start_position = j.position;
-            // AngleMatrix(o->TargetPosition): la posición objetivo hace de ángulo.
+            // AngleMatrix(o->TargetPosition): the target position acts as the angle.
             j.position = j.start_position + rotate(j.target_position, v(0.0, -50.0, 0.0));
         }
         9 => {
@@ -1193,7 +1193,7 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = (20 + (4 - pk)) as f32;
             j.scale = scale;
             j.max_tails = 15;
-            // NumTails = -1: sin colas.
+            // NumTails = -1: no tails.
             j.tails.clear();
             j.velocity = 0.0;
             j.direction = v(1.0, 5.0, 1.0);
@@ -1267,8 +1267,8 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
     j.target_position = tp_param;
 }
 
-/// Destellos de Impale (4) y Death Stab (12): se mueven varias veces por tick hasta que su vida
-/// es múltiplo de [`SPEAR_FLARE_LIFE_STEP`] (`MoveJointForFrame`).
+/// Impale (4) and Death Stab (12) flares: move several times per tick until their life
+/// is a multiple of [`SPEAR_FLARE_LIFE_STEP`] (`MoveJointForFrame`).
 fn is_spear_flare(j: &Joint) -> bool {
     (j.ty == BITMAP_FLARE || j.ty == BITMAP_FLARE_BLUE) && (j.sub_type == 4 || j.sub_type == 12)
 }
@@ -1277,27 +1277,27 @@ fn flare_step(j: &mut Joint, ctx: &mut Ctx) {
     flare_move(j, ctx);
     let mut moves = 1;
     while moves < MAX_SPEAR_FLARE_MOVES && is_spear_flare(j) {
-        // Vida tras el `LifeTime -= 1` que hará el núcleo al acabar este movimiento.
+        // Life after the `LifeTime -= 1` the core will do when this move ends.
         let after = j.life_time - 1.0;
         if !(j.live && after >= 0.0 && (after as i32) % SPEAR_FLARE_LIFE_STEP != 0) {
             break;
         }
-        // Terminar este movimiento aquí (lo que el núcleo hace tras `step`)...
+        // Finish this move here (what the core does after `step`)...
         if j.create_tails {
             j.follow_tail();
         }
         j.life_time = after;
-        // ...y hacer otro entero; el núcleo cerrará el último.
+        // ...and do another whole one; the core will close the last.
         generic_move(j);
         flare_move(j, ctx);
         moves += 1;
     }
 }
 
-/// Un `MoveJoint` de `FLARE` / `FLARE_BLUE` (sin el avance genérico ni el `FollowTail` final).
+/// One `MoveJoint` of `FLARE` / `FLARE_BLUE` (without the generic advance or the final `FollowTail`).
 fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
     let sub = j.sub_type;
-    // El original no aplica el avance genérico a los subtipos 1 (ambos) ni al 42 (FLARE).
+    // The original doesn't apply the generic advance to subtype 1 (both) or 42 (FLARE).
     if sub == 1 || (j.ty == BITMAP_FLARE && sub == 42) {
         undo_generic_move(j);
     }
@@ -1373,7 +1373,7 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         if target_live(ctx, j.target) {
             j.life_time = 100.0;
         } else {
-            // DeleteJoint(BITMAP_FLARE, Target, 42): cada una se mata al ver muerto su objetivo.
+            // DeleteJoint(BITMAP_FLARE, Target, 42): each one kills itself on seeing its target dead.
             j.live = false;
             return;
         }
@@ -1454,8 +1454,8 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         };
         j.position = j.target_position + dir * f_circle;
 
-        // 11/25 usan Target->StartPosition. TODO(original): falta el estado del objetivo; se usa
-        // su posición. Sin objetivo (el original fallaría) se usa TargetPosition.
+        // 11/25 use Target->StartPosition. TODO(original): the target's state is missing; its
+        // position is used. Without a target (the original would crash) TargetPosition is used.
         let tpos = ctx.target_position(j.target).unwrap_or(j.target_position);
         for k in 0..3 {
             let wobble = 25.0 * ((idx as f64 * 51231.0 + k as f64 * 3711.0 + frame / 10.0) * 0.01).cos() as f32;
@@ -1470,19 +1470,19 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         if sub == 11 {
             light = v(0.3, 0.3, 0.5);
             if j.skill == 1 {
-                // TODO(original): mueve el objetivo a esta posición (Target->Position) y CheckClientArrow.
+                // TODO(original): moves the target to this position (Target->Position) and CheckClientArrow.
             }
         }
         if sub == 25 {
             light = v(0.9, 0.4, 0.6);
             if j.skill == 1 {
-                // TODO(original): mueve el objetivo a esta posición (Target->Position) y CheckClientArrow.
+                // TODO(original): moves the target to this position (Target->Position) and CheckClientArrow.
             }
         }
         if sub == 45 && j.life_time <= 1.0 {
             if let Some(a) = ctx.actor(j.target) {
                 let (p, ang) = (a.position, a.angle);
-                // TODO(original): con Target->Light (falta la luz del personaje).
+                // TODO(original): with Target->Light (the character's light is missing).
                 ctx.create_effect(MODEL_CHANGE_UP_EFF, p, ang, Vec3::ONE, 1, j.target, -1, 0, 0, 0.0);
                 ctx.create_effect(MODEL_CHANGE_UP_CYLINDER, p, ang, Vec3::ONE, 1, j.target, -1, 0, 0, 0.0);
             }
@@ -1518,7 +1518,7 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
             j.position.z += j.direction.z;
         }
     } else if sub == 17 {
-        // (CA >= WALK_MALE) || (CA en SWORD1..5 && CA != RAGE_UNI_STOP_ONE_RIGHT), como el original.
+        // (CA >= WALK_MALE) || (CA in SWORD1..5 && CA != RAGE_UNI_STOP_ONE_RIGHT), like the original.
         let moving = ctx.actor(j.target).is_some_and(|a| {
             let ca = a.action as i32;
             ca >= PLAYER_WALK_MALE
@@ -1646,7 +1646,7 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         }
     }
 
-    // Al echar a andar o usar una habilidad de espada, los destellos pequeños se apagan.
+    // When starting to walk or using a sword skill, the small flares go out.
     if (sub == 0 || sub == 10 || sub == 18) && j.scale < 40.0 {
         if let Some(a) = ctx.actor(j.target) {
             if is_running_action(a.action as i32) {
@@ -1660,17 +1660,17 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
 
 // --- BITMAP_FLARE + 1 -------------------------------------------------------------------------------
 //
-// Varios subtipos siguen a un efecto y usan su `StartPosition` y `HeadAngle`, que el motor aún no
-// expone: se aproxima `Target->StartPosition` con la `start_position` de la estela (la posición del
-// objetivo al crearla) y `Target->HeadAngle` con cero.
+// Several subtypes follow an effect and use its `StartPosition` and `HeadAngle`, which the engine doesn't
+// expose yet: `Target->StartPosition` is approximated with the trail's `start_position` (the target's
+// position at creation) and `Target->HeadAngle` with zero.
 
 fn flare1_create(j: &mut Joint, ctx: &mut Ctx) {
     assign_slot(j, ctx);
     let sub = j.sub_type;
     let tp_param = j.target_position;
     let scale = j.scale;
-    // Subtipo 8: NumTails = -1 (sin cola inicial). Para que el núcleo no ponga una al crear,
-    // create_tails se apaga ahora y se reactiva al empezar el primer tick.
+    // Subtype 8: NumTails = -1 (no initial tail). So the core doesn't add one on creation,
+    // create_tails is turned off now and re-enabled at the start of the first tick.
     if sub == 8 {
         j.tails.clear();
         j.create_tails = false;
@@ -1692,7 +1692,7 @@ fn flare1_create(j: &mut Joint, ctx: &mut Ctx) {
         }
         3 => {
             j.scale = 20.0;
-            // TODO(original): Light = Target->Light (falta la luz del efecto objetivo).
+            // TODO(original): Light = Target->Light (the target effect's light is missing).
         }
         _ => {}
     }
@@ -1752,7 +1752,7 @@ fn flare1_create(j: &mut Joint, ctx: &mut Ctx) {
             j.velocity = 10.0;
             j.tex_type = BITMAP_FLARE;
             j.direction.x = 15.0;
-            // cos/sin de un número de 0 a 359 tomado como radianes, como el original.
+            // cos/sin of a number from 0 to 359 taken as radians, like the original.
             j.position.x = tp_param.x + ((ctx.rand() % 360) as f32).cos() * 40.0;
             j.position.y = tp_param.y - ((ctx.rand() % 360) as f32).sin() * 40.0;
             j.start_position = j.position;
@@ -1829,7 +1829,7 @@ fn flare1_create(j: &mut Joint, ctx: &mut Ctx) {
             j.light = v(1.0, 0.5, 0.3);
         }
         18 => {
-            // Light = vPriorColor (si se dio, ya viene en la luz de la estela).
+            // Light = vPriorColor (if given, already in the trail's light).
             j.render_type = JointRender::AlphaBlend;
             j.scale = scale;
             j.max_tails = 7;
@@ -1866,7 +1866,7 @@ fn flare1_step(j: &mut Joint, ctx: &mut Ctx) {
                 let target = if sub == 5 {
                     j.target_position
                 } else {
-                    // Target->Position (sin objetivo el original fallaría; se usa TargetPosition).
+                    // Target->Position (without a target the original would crash; TargetPosition is used).
                     ctx.target_position(j.target).unwrap_or(j.target_position)
                 };
                 let mut ang = j.angle;
@@ -1973,13 +1973,13 @@ fn flare1_step(j: &mut Joint, ctx: &mut Ctx) {
             }
         }
         19 | 20 => {
-            // Sin objetivo el original fallaría: se deja como está.
+            // Without a target the original would crash: left as is.
             if let Some(tpos) = ctx.target_position(j.target) {
                 let tstart = j.start_position;
                 let pos = (tpos - tstart) / 3.0;
                 j.target_position = tstart;
                 let mat = j.angle;
-                // `Angle` local sin inicializar en el original: se parte de cero.
+                // Uninitialized local `Angle` in the original: starts from zero.
                 let mut ang = Vec3::ZERO;
                 for _ in 0..3 {
                     if sub == 19 {
@@ -1994,10 +1994,10 @@ fn flare1_step(j: &mut Joint, ctx: &mut Ctx) {
             }
         }
         _ => {
-            // 0-4, 10, 11...: dibuja tres colas por tick a lo largo del recorrido del objetivo.
+            // 0-4, 10, 11...: draws three tails per tick along the target's path.
             if target_live(ctx, j.target) {
                 let tpos = ctx.target_position(j.target).unwrap_or(j.target_position);
-                // TODO(original): Target->StartPosition y Target->HeadAngle (ver arriba).
+                // TODO(original): Target->StartPosition and Target->HeadAngle (see above).
                 let tstart = j.start_position;
                 let pos = (tpos - tstart) / 3.0;
                 j.target_position = tstart;

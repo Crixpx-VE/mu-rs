@@ -1,13 +1,13 @@
-//! Conexión con el servidor (Connect Server y Game Server), en hilos aparte para no frenar el juego.
+//! Server connection (Connect Server and Game Server), on separate threads so the game doesn't stall.
 //!
-//! - **Dirección**: `juego=host:puerto` de `mu-launcher.txt`; si no está, el mismo host que
-//!   `servidor=` (el de las actualizaciones) en el puerto 44405; si tampoco, 127.0.0.1:44405.
-//! - **Connect Server**: se conecta, pide la lista y, al elegir un servidor, su dirección; luego
-//!   se cierra (como el original).
-//! - **Game Server**: un hilo lee, descifra y decodifica (`FromServer`); lo que se manda se cifra
-//!   en el hilo principal y se escribe directamente.
+//! - **Address**: `juego=host:port` from `mu-launcher.txt`; if missing, the same host as
+//!   `servidor=` (the updates one) on port 44405; failing that, 127.0.0.1:44405.
+//! - **Connect Server**: connects, asks for the list and, when a server is chosen, its address;
+//!   then closes (like the original).
+//! - **Game Server**: a thread reads, decrypts and decodes (`FromServer`); outgoing messages are
+//!   encrypted on the main thread and written directly.
 //!
-//! Los sistemas leen `FromServer` / `NetStatus` y mandan con `Net::send`.
+//! Systems read `FromServer` / `NetStatus` and send with `Net::send`.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -33,29 +33,29 @@ impl Plugin for NetPlugin {
     }
 }
 
-/// Donde se reparten los mensajes que llegan (en `PreUpdate`).
+/// Where incoming messages are dispatched (in `PreUpdate`).
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NetSystems;
 
-/// Un mensaje del Game Server.
+/// A message from the Game Server.
 #[derive(Message, Clone, Debug)]
 pub struct FromServer(pub ServerMessage);
 
-/// Lo que pasa con las conexiones.
+/// Connection events.
 #[derive(Message, Clone, Debug)]
 pub enum NetStatus {
-    /// Lista del Connect Server: (id, carga %).
+    /// Connect Server list: (id, load %).
     ServerList(Vec<(u16, u8)>),
-    /// No se pudo hablar con el Connect Server.
+    /// Could not talk to the Connect Server.
     ConnectFailed(String),
-    /// Conectado al Game Server (llegará `GameServerEntered`).
+    /// Connected to the Game Server (`GameServerEntered` will follow).
     GameConnected,
-    /// No se pudo conectar al Game Server, o se cortó.
+    /// Could not connect to the Game Server, or it was dropped.
     GameLost(String),
 }
 
-/// Lo que mandan los hilos, con el número de conexión al Game Server al que pertenece (lo de
-/// una conexión ya cerrada se tira).
+/// What the threads send, tagged with the Game Server connection number it belongs to (data from
+/// an already closed connection is discarded).
 enum Event {
     Status(u32, NetStatus),
     Message(u32, ServerMessage),
@@ -72,13 +72,13 @@ pub struct Net {
     events_tx: Sender<Event>,
     events: Mutex<Receiver<Event>>,
     game: Option<GameConn>,
-    /// Número de la conexión al Game Server actual.
+    /// Number of the current Game Server connection.
     generation: u32,
-    /// Hay una petición al Connect Server en marcha.
+    /// A Connect Server request is in progress.
     cs_busy: bool,
 }
 
-/// Dirección del Connect Server.
+/// Connect Server address.
 pub fn connect_server_address() -> String {
     if let Some(a) = crate::settings::saved_value("juego").filter(|a| !a.is_empty()) {
         return a;
@@ -109,13 +109,13 @@ fn read_packet(sock: &mut TcpStream, buf: &mut PacketBuffer) -> std::io::Result<
     }
 }
 
-/// Una conversación corta con el Connect Server: saludo, y luego `request` y su respuesta.
+/// A short exchange with the Connect Server: handshake, then `request` and its reply.
 fn ask_connect_server(request: connect::ClientMessage) -> std::io::Result<connect::ServerMessage> {
     let addr = resolve(&connect_server_address())?;
     let mut s = TcpStream::connect_timeout(&addr, Duration::from_secs(5))?;
     s.set_read_timeout(Some(Duration::from_secs(10)))?;
     let mut buf = PacketBuffer::default();
-    // Saludo.
+    // Handshake.
     read_packet(&mut s, &mut buf)?;
     s.write_all(&request.encode())?;
     loop {
@@ -129,7 +129,7 @@ fn ask_connect_server(request: connect::ClientMessage) -> std::io::Result<connec
 }
 
 impl Net {
-    /// `SendRequestServerList`: la lista llega como `NetStatus::ServerList`.
+    /// `SendRequestServerList`: the list arrives as `NetStatus::ServerList`.
     pub fn request_server_list(&mut self) {
         if self.cs_busy {
             return;
@@ -148,7 +148,7 @@ impl Net {
         });
     }
 
-    /// `SendRequestServerAddress` y conectar al Game Server que diga.
+    /// `SendRequestServerAddress` and connect to the Game Server it returns.
     pub fn connect_to_server(&mut self, server_id: u16) {
         self.close();
         self.generation += 1;
@@ -183,7 +183,7 @@ impl Net {
         });
     }
 
-    /// Manda un mensaje al Game Server (si hay conexión).
+    /// Sends a message to the Game Server (if connected).
     pub fn send(&mut self, msg: ClientMessage) {
         let Some(conn) = &mut self.game else {
             warn!("sin conexión: no se manda {msg:?}");
@@ -199,7 +199,7 @@ impl Net {
         self.game.is_some()
     }
 
-    /// Cierra la conexión con el Game Server (lo que llegue aún de ella se tira).
+    /// Closes the Game Server connection (anything still arriving from it is discarded).
     pub fn close(&mut self) {
         self.generation += 1;
         if let Some(conn) = self.game.take() {
@@ -208,7 +208,7 @@ impl Net {
     }
 }
 
-/// Hilo de lectura del Game Server.
+/// Game Server reader thread.
 fn read_game(mut stream: TcpStream, tx: Sender<Event>, generation: u32) {
     let mut crypto = ClientCrypto::default();
     let mut buf = PacketBuffer::default();
@@ -238,7 +238,7 @@ fn read_game(mut stream: TcpStream, tx: Sender<Event>, generation: u32) {
     }
 }
 
-/// Pasa lo que ha llegado de los hilos a mensajes de Bevy.
+/// Turns what arrived from the threads into Bevy messages.
 fn pump(mut net: ResMut<Net>, mut from: MessageWriter<FromServer>, mut status: MessageWriter<NetStatus>) {
     let mut events = Vec::new();
     if let Ok(rx) = net.events.lock() {
@@ -267,7 +267,7 @@ fn pump(mut net: ResMut<Net>, mut from: MessageWriter<FromServer>, mut status: M
                 }
                 status.write(s);
             }
-            // De una conexión ya cerrada.
+            // From an already closed connection.
             _ => {}
         }
     }

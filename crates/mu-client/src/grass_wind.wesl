@@ -1,6 +1,6 @@
-// Viento de la hierba (`TerrainGrassWind`, ZzzLodTerrain.cpp:2350-2403) en el sombreador de vértices:
-// los de arriba de cada mata (uv_b.y = 1) se mueven en la Y de MU (-Z de Bevy) según su columna x
-// (uv_b.x). Así la malla no se vuelve a subir a la tarjeta en cada fotograma.
+// Grass wind (`TerrainGrassWind`, ZzzLodTerrain.cpp:2350-2403) in the vertex shader:
+// the top vertices of each tuft (uv_b.y = 1) move along MU's Y (Bevy's -Z) according to their x column
+// (uv_b.x). This way the mesh isn't re-uploaded to the GPU every frame.
 
 import bevy_pbr::render::{
     mesh_functions,
@@ -9,9 +9,9 @@ import bevy_pbr::render::{
 };
 
 struct GrassWind {
-    // velocidad, escala, multiplicador de x, unidades de MU por unidad de Bevy.
+    // speed, scale, x multiplier, MU units per Bevy unit.
     wind: vec4<f32>,
-    // Karutan: velocidad y escala del segundo viento; z = 1 si se usa.
+    // Karutan: speed and scale of the second wind; z = 1 if used.
     second: vec4<f32>,
 };
 

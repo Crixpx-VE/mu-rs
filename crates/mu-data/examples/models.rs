@@ -1,4 +1,4 @@
-//! Lista los modelos de un mapa con sus animaciones (para depurar).
+//! Lists a map's models with their animations (for debugging).
 //!
 //!   cargo run -p mu-data --example models -- [world=1] [data=../referencias/MuMain/src/bin/Data]
 

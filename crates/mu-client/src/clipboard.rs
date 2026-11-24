@@ -1,12 +1,12 @@
-//! Copiar y pegar en las cajas de texto, como el `edit` de Windows que usa el original por debajo
-//! (`CUITextInputBox`): Ctrl+C/Ctrl+Insert copia, Ctrl+X/Mayús+Supr corta, Ctrl+V/Mayús+Insert pega
-//! y Ctrl+A selecciona todo. En las contraseñas (`ES_PASSWORD`) no se puede copiar ni cortar.
+//! Copy and paste in text boxes, like the Windows `edit` control the original uses underneath
+//! (`CUITextInputBox`): Ctrl+C/Ctrl+Insert copies, Ctrl+X/Shift+Del cuts, Ctrl+V/Shift+Insert pastes
+//! and Ctrl+A selects all. Passwords (`ES_PASSWORD`) cannot be copied or cut.
 
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::prelude::*;
 
-/// La tecla para la caja de texto: los atajos de edición pasan a `Key::Copy`, `Key::Cut`,
-/// `Key::Paste` y `Key::Select` (seleccionar todo); el resto, tal cual.
+/// The key for the text box: editing shortcuts become `Key::Copy`, `Key::Cut`,
+/// `Key::Paste` and `Key::Select` (select all); everything else as is.
 pub fn edit_key(ev: &KeyboardInput, ctrl: bool, shift: bool) -> Key {
     if ev.key_code == KeyCode::Insert {
         if shift && !ctrl {
@@ -22,7 +22,7 @@ pub fn edit_key(ev: &KeyboardInput, ctrl: bool, shift: bool) -> Key {
     if !ctrl {
         return ev.logical_key.clone();
     }
-    // La letra según la distribución del teclado (con Ctrl, Windows puede dar el carácter de control).
+    // The letter per keyboard layout (with Ctrl, Windows may give the control character).
     let letter = match &ev.logical_key {
         Key::Character(s) => match s.chars().next() {
             Some('\u{1}') => Some('a'),
@@ -50,20 +50,20 @@ pub fn edit_key(ev: &KeyboardInput, ctrl: bool, shift: bool) -> Key {
     }
 }
 
-/// Las teclas pulsadas este fotograma para una caja de texto (con repetición).
+/// Keys pressed this frame for a text box (with repeat).
 pub fn typed_keys(events: impl Iterator<Item = KeyboardInput>, keys: &ButtonInput<KeyCode>) -> Vec<Key> {
     let ctrl = keys.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
     let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
     events.filter(|k| k.state == bevy::input::ButtonState::Pressed).map(|k| edit_key(&k, ctrl, shift)).collect()
 }
 
-/// Lo que se pega en una caja de una línea: hasta el primer salto de línea y sin caracteres de control
-/// (los tabuladores pasan a espacio).
+/// What gets pasted into a single-line box: up to the first line break and without control
+/// characters (tabs become spaces).
 pub fn paste_text(text: &str) -> impl Iterator<Item = char> + '_ {
     text.lines().next().unwrap_or("").chars().map(|c| if c == '\t' { ' ' } else { c }).filter(|c| !c.is_control())
 }
 
-/// El texto del portapapeles de Windows (o nada).
+/// The Windows clipboard text (or nothing).
 pub fn get() -> String {
     match arboard::Clipboard::new().and_then(|mut c| c.get_text()) {
         Ok(t) => t,
@@ -74,7 +74,7 @@ pub fn get() -> String {
     }
 }
 
-/// Pone `text` en el portapapeles de Windows.
+/// Puts `text` on the Windows clipboard.
 pub fn set(text: &str) {
     if text.is_empty() {
         return;
@@ -104,7 +104,7 @@ mod tests {
         let v = ev(KeyCode::KeyV, Key::Character("v".into()));
         assert_eq!(edit_key(&v, true, false), Key::Paste);
         assert_eq!(edit_key(&v, false, false), Key::Character("v".into()));
-        // Windows con Ctrl puede dar el carácter de control.
+        // With Ctrl, Windows may give the control character.
         assert_eq!(edit_key(&ev(KeyCode::KeyC, Key::Character("\u{3}".into())), true, false), Key::Copy);
         assert_eq!(edit_key(&ev(KeyCode::KeyX, Key::Character("X".into())), true, true), Key::Cut);
         assert_eq!(edit_key(&ev(KeyCode::KeyA, Key::Character("a".into())), true, false), Key::Select);

@@ -1,18 +1,18 @@
-//! Búsqueda de camino (A*) sobre la rejilla de 256 x 256 casillas.
+//! Pathfinding (A*) over the 256 x 256 tile grid.
 //!
-//! La usan el cliente (para mover al personaje con un clic) y, más adelante,
-//! el servidor (para validar que el camino que manda el cliente es posible).
+//! Used by the client (to move the character on click) and, later,
+//! by the server (to validate that the path sent by the client is possible).
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
 use crate::terrain::SIZE;
 
-/// Las 8 direcciones de MU, en el orden del protocolo (0 = (-1,-1), sentido horario).
+/// MU's 8 directions, in protocol order (0 = (-1,-1), clockwise).
 pub const DIRECTIONS: [(i32, i32); 8] = [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)];
 
-/// Busca un camino de `from` a `to` (ambos incluidos). `walkable(x, y)` dice si se puede pisar.
-/// `max_nodes` limita el trabajo (el original busca caminos cortos).
+/// Finds a path from `from` to `to` (both included). `walkable(x, y)` says whether a tile can be stepped on.
+/// `max_nodes` limits the work (the original searches short paths).
 pub fn find_path(
     from: (usize, usize),
     to: (usize, usize),
@@ -26,7 +26,7 @@ pub fn find_path(
         return None;
     }
     let idx = |(x, y): (usize, usize)| y * SIZE + x;
-    // Distancia "octil" ×10: recto cuesta 10, diagonal 14.
+    // "Octile" distance ×10: straight costs 10, diagonal 14.
     let h = |(x, y): (usize, usize)| {
         let dx = x.abs_diff(to.0) as u32;
         let dy = y.abs_diff(to.1) as u32;
@@ -68,7 +68,7 @@ pub fn find_path(
             if !walkable(n.0, n.1) {
                 continue;
             }
-            // No cortar esquinas en diagonal entre dos casillas bloqueadas.
+            // Don't cut corners diagonally between two blocked tiles.
             if dx != 0 && dy != 0 && !walkable(n.0, cur.1) && !walkable(cur.0, n.1) {
                 continue;
             }
@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn rodea_un_muro() {
-        // Muro vertical en x=5 desde y=0 hasta y=9, con hueco en y=10.
+        // Vertical wall at x=5 from y=0 to y=9, with a gap at y=10.
         let walkable = |x: usize, y: usize| !(x == 5 && y < 10);
         let p = find_path((2, 2), (8, 2), walkable, 10_000).unwrap();
         assert_eq!(p.first(), Some(&(2, 2)));

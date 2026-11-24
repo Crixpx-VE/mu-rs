@@ -1,179 +1,179 @@
-//! Paquetes del Game Server: entrada, login, selección de personaje y mundo básico
-//! (aparecer en el mapa, caminar, ver a otros jugadores y salir).
+//! Game Server packets: entry, login, character selection and the basic world
+//! (appearing on the map, walking, seeing other players and leaving).
 //!
-//! Los índices son absolutos (cuentan la cabecera), igual que en los XML de OpenMU.
+//! Indices are absolute (they count the header), same as in OpenMU's XMLs.
 //!
 //! ```text
-//! servidor → cliente  GameServerEntered            C1 0C F1 00 <ok u8> <id jugador u16 BE> <versión 5>
-//! cliente  → servidor Login                        C3 3C F1 01 <usuario 10, Xor3> <contraseña 20, Xor3>
-//!                                                              <tick u32 BE> <versión 5> <serial 16>
-//! servidor → cliente  LoginResponse                C1 05 F1 01 <resultado>
-//! cliente  → servidor Logout                       C3 05 F1 02 <tipo: 0 cerrar, 1 elegir personaje, 2 elegir servidor>
-//! servidor → cliente  LogoutResponse               C3 05 F1 02 <tipo>
-//! cliente  → servidor RequestCharacterList         C1 05 F3 00 <idioma>
-//! servidor → cliente  CharacterList                C1 len F3 00 <desbloqueos> <movimientos> <n> <baúl ext.>
-//!                                                              n × [<slot> <nombre 10> 00 <nivel u16 LE>
-//!                                                                   <estado:4 | bloqueo:4> <apariencia 18> <rango gremio>]
-//! servidor → cliente  CharacterClassCreationUnlock C1 05 DE 00 <desbloqueos>
-//! cliente  → servidor CreateCharacter              C1 0F F3 01 <nombre 10> <clase << 2>
-//! servidor → cliente  CharacterCreationSuccessful  C1 2A F3 01 01 <nombre 10> <slot> <nivel u16 LE> <clase << 3>
-//!                                                              <estado> <apariencia 18> FF FF FF FF
-//! servidor → cliente  CharacterCreationFailed      C1 05 F3 01 00
-//! cliente  → servidor DeleteCharacter              C1 22 F3 02 <nombre 10> <código de seguridad 20>
-//! servidor → cliente  CharacterDeleteResponse      C1 05 F3 02 <resultado>
-//! cliente  → servidor SelectCharacter              C1 0E F3 03 <nombre 10>
-//! servidor → cliente  CharacterInformation         C3 48 F3 03 <x> <y> <mapa> <dirección> <exp u64 BE> <exp sig. u64 BE>
-//!                                                              <puntos u16 LE> <fuerza> <agilidad> <vitalidad> <energía>
-//!                                                              <vida> <vida máx> <maná> <maná máx> <escudo> <escudo máx>
-//!                                                              <AG> <AG máx> 00 00 <zen u32 LE> <héroe> <estado>
-//!                                                              <frutas> <frutas máx> <mando> <frutas -> <frutas - máx>
-//!                                                              <ampliaciones inventario> 00 00 00   (todos los u16 LE)
-//! cliente  → servidor ClientReadyAfterMapChange    C1 04 F3 12
-//! cliente  → servidor Ping                         C3 0C 0E 00 <tick u32 LE> <vel. ataque u16 LE> <vel. magia u16 LE>
-//! cliente  → servidor Walk (WalkRequest)           C1 len D4 <x origen> <y origen> <rotación:4 | pasos:4> <pasos, 2 por byte>
-//! servidor → cliente  ObjectWalked                 C1 len D4 <id u16 BE> <x destino> <y destino> <rotación:4 | pasos:4>
-//!                                                              <pasos, 2 por byte>
-//! servidor → cliente  AddCharactersToScope         C2 len 12 <n> n × [<id u16 BE> <x> <y> <apariencia 18> <nombre 10>
-//!                                                                    <x destino> <y destino> <rotación:4 | héroe:4>
-//!                                                                    <n efectos> <efectos n>]
-//!                                                  (apariencia: byte 0 = clase << 3 | postura)
-//! servidor → cliente  MapObjectOutOfScope          C1 len 14 <n> n × <id u16 BE>
-//! servidor → cliente  MapMoveChecksumKey           C1 08 8E 01 <clave u32 LE>
-//! cliente  → servidor WarpCommandRequest           C1 0A 8E 02 <clave u32 LE> <índice u16 LE>
-//! servidor → cliente  MapChanged                   C3 0F 1C 0F <cambio de mapa> <mapa u16 BE> <x> <y>
-//!                                                              <rotación> 00 00 00 00 00
-//! servidor → cliente  InventoryMoneyUpdate         C3 08 22 FE <zen u32 BE>
-//! cliente  → servidor PublicChatMessage            C1 len 00 <nombre 10> <texto, UTF-8 con su 00, como mucho 90>
-//! cliente  → servidor WhisperMessage               C1 len 02 <destinatario 10> <texto, UTF-8 con su 00, como mucho 90>
-//! servidor → cliente  ChatMessage                  C1 len 00 <quien habla 10> <texto con su 00>
-//! servidor → cliente  WhisperMessage               C1 len 02 <quien susurra 10> <texto con su 00>
-//! servidor → cliente  WhisperResult                C1 04 0C <0 = no está conectado>
-//! servidor → cliente  ServerMessage (aviso)        C1 len 0D <tipo> <veces> 00 <espera u16 LE> <color u32 LE>
-//!                                                              <velocidad> <texto con su 00>
-//! cliente  → servidor EnterGateRequest             C3 08 1C 00 <puerta u16 LE> <x> <y>
-//! cliente  → servidor AnimationRequest             C1 05 18 <dirección> <acción AT_*>
-//! servidor → cliente  ObjectAnimation              C1 09 18 <id u16 BE> <dirección> <acción AT_*> <id objetivo u16 BE>
+//! server → client  GameServerEntered            C1 0C F1 00 <ok u8> <player id u16 BE> <version 5>
+//! client → server  Login                        C3 3C F1 01 <user 10, Xor3> <password 20, Xor3>
+//!                                                           <tick u32 BE> <version 5> <serial 16>
+//! server → client  LoginResponse                C1 05 F1 01 <result>
+//! client → server  Logout                       C3 05 F1 02 <kind: 0 close, 1 pick character, 2 pick server>
+//! server → client  LogoutResponse               C3 05 F1 02 <kind>
+//! client → server  RequestCharacterList         C1 05 F3 00 <language>
+//! server → client  CharacterList                C1 len F3 00 <unlocks> <moves> <n> <vault ext.>
+//!                                                           n × [<slot> <name 10> 00 <level u16 LE>
+//!                                                                <status:4 | lock:4> <appearance 18> <guild rank>]
+//! server → client  CharacterClassCreationUnlock C1 05 DE 00 <unlocks>
+//! client → server  CreateCharacter              C1 0F F3 01 <name 10> <class << 2>
+//! server → client  CharacterCreationSuccessful  C1 2A F3 01 01 <name 10> <slot> <level u16 LE> <class << 3>
+//!                                                           <status> <appearance 18> FF FF FF FF
+//! server → client  CharacterCreationFailed      C1 05 F3 01 00
+//! client → server  DeleteCharacter              C1 22 F3 02 <name 10> <security code 20>
+//! server → client  CharacterDeleteResponse      C1 05 F3 02 <result>
+//! client → server  SelectCharacter              C1 0E F3 03 <name 10>
+//! server → client  CharacterInformation         C3 48 F3 03 <x> <y> <map> <direction> <exp u64 BE> <next exp u64 BE>
+//!                                                           <points u16 LE> <strength> <agility> <vitality> <energy>
+//!                                                           <life> <max life> <mana> <max mana> <shield> <max shield>
+//!                                                           <AG> <max AG> 00 00 <zen u32 LE> <hero> <status>
+//!                                                           <fruits> <max fruits> <command> <fruits -> <max fruits ->
+//!                                                           <inventory extensions> 00 00 00   (all u16 LE)
+//! client → server  ClientReadyAfterMapChange    C1 04 F3 12
+//! client → server  Ping                         C3 0C 0E 00 <tick u32 LE> <attack speed u16 LE> <magic speed u16 LE>
+//! client → server  Walk (WalkRequest)           C1 len D4 <source x> <source y> <rotation:4 | steps:4> <steps, 2 per byte>
+//! server → client  ObjectWalked                 C1 len D4 <id u16 BE> <target x> <target y> <rotation:4 | steps:4>
+//!                                                           <steps, 2 per byte>
+//! server → client  AddCharactersToScope         C2 len 12 <n> n × [<id u16 BE> <x> <y> <appearance 18> <name 10>
+//!                                                                 <target x> <target y> <rotation:4 | hero:4>
+//!                                                                 <n effects> <effects n>]
+//!                                               (appearance: byte 0 = class << 3 | pose)
+//! server → client  MapObjectOutOfScope          C1 len 14 <n> n × <id u16 BE>
+//! server → client  MapMoveChecksumKey           C1 08 8E 01 <key u32 LE>
+//! client → server  WarpCommandRequest           C1 0A 8E 02 <key u32 LE> <index u16 LE>
+//! server → client  MapChanged                   C3 0F 1C 0F <map change> <map u16 BE> <x> <y>
+//!                                                           <rotation> 00 00 00 00 00
+//! server → client  InventoryMoneyUpdate         C3 08 22 FE <zen u32 BE>
+//! client → server  PublicChatMessage            C1 len 00 <name 10> <text, UTF-8 with its 00, at most 90>
+//! client → server  WhisperMessage               C1 len 02 <recipient 10> <text, UTF-8 with its 00, at most 90>
+//! server → client  ChatMessage                  C1 len 00 <speaker 10> <text with its 00>
+//! server → client  WhisperMessage               C1 len 02 <whisperer 10> <text with its 00>
+//! server → client  WhisperResult                C1 04 0C <0 = not connected>
+//! server → client  ServerMessage (notice)       C1 len 0D <kind> <count> 00 <delay u16 LE> <color u32 LE>
+//!                                                           <speed> <text with its 00>
+//! client → server  EnterGateRequest             C3 08 1C 00 <gate u16 LE> <x> <y>
+//! client → server  AnimationRequest             C1 05 18 <direction> <action AT_*>
+//! server → client  ObjectAnimation              C1 09 18 <id u16 BE> <direction> <action AT_*> <target id u16 BE>
 //! ```
 //!
-//! # Puertas a pie
+//! # Walk-in gates
 //!
-//! `CheckGate` (ZzzInterface.cpp:7023-7149) mira cada tick si el héroe pisa una puerta de entrada
-//! (`Flag` 1) de su mapa y, si llega al nivel, manda `SendRequestMagicTeleport(&bResult, puerta,
-//! 0, 0)` (wsclientinline.h:655-675): `spe.Init(0xC1, 0x1C)`, un byte nulo, `WORD` puerta y las
-//! dos casillas (solo las usa el teletransporte del mago, con puerta 0), con `Send(TRUE)` (cifrado:
-//! C3, como `EnterGateRequest` de OpenMU). El servidor contesta con `MapChanged` como la ventana `M`.
+//! `CheckGate` (ZzzInterface.cpp:7023-7149) checks every tick whether the hero steps on an entry gate
+//! (`Flag` 1) of its map and, if the level is enough, sends `SendRequestMagicTeleport(&bResult, gate,
+//! 0, 0)` (wsclientinline.h:655-675): `spe.Init(0xC1, 0x1C)`, a null byte, `WORD` gate and the
+//! two tiles (only used by the wizard's teleport, with gate 0), with `Send(TRUE)` (encrypted:
+//! C3, like OpenMU's `EnterGateRequest`). The server replies with `MapChanged` like the `M` window.
 //!
-//! # Animaciones (`AT_*`)
+//! # Animations (`AT_*`)
 //!
-//! `SendRequestAction(acción, dirección)` (wsclientinline.h: `spe.Init(0xC1, 0x18)`, `BYTE` dirección
-//! y `BYTE` acción) al sentarse, apoyarse o curarse (ZzzInterface.cpp:3700-3733) y con los gestos del
-//! chat (`CheckChatText`, ZzzInterface.cpp:4434-4590). La dirección es
-//! `((Angle + 22.5) / 360 * 8 + 1) % 8`, la misma de `MapChanged` (el que la recibe gira
-//! `(dirección − 1) * 45`). El servidor lo reenvía a los que lo ven (`AnimationHandlerPlugIn` →
-//! `ObjectAnimation` de OpenMU), que lo lee `ReceiveAction` (`PRECEIVE_ACTION`, WSclient.h:728-736 y
-//! WSclient.cpp:3120-3353). Ver [`action`].
+//! `SendRequestAction(action, direction)` (wsclientinline.h: `spe.Init(0xC1, 0x18)`, `BYTE` direction
+//! and `BYTE` action) when sitting, leaning or healing (ZzzInterface.cpp:3700-3733) and with the chat
+//! gestures (`CheckChatText`, ZzzInterface.cpp:4434-4590). The direction is
+//! `((Angle + 22.5) / 360 * 8 + 1) % 8`, the same as in `MapChanged` (the receiver turns
+//! `(direction − 1) * 45`). The server relays it to those who see it (OpenMU's `AnimationHandlerPlugIn` →
+//! `ObjectAnimation`), read by `ReceiveAction` (`PRECEIVE_ACTION`, WSclient.h:728-736 and
+//! WSclient.cpp:3120-3353). See [`action`].
 //!
 //! # Chat
 //!
-//! `SendChat` y `SendChatWhisper` (wsclientinline.h:328-404) mandan `PCHATING` (WSclient.h:503-507):
-//! el nombre en 10 bytes y el texto con su cero, `min(strlen + 1, MAX_CHAT_SIZE)` bytes
-//! (`MAX_CHAT_SIZE` = 90). El cliente lo pasa a UTF-8 antes de mandarlo (NewUIChatInputBox.cpp:537).
-//! El servidor contesta con la misma estructura y código: `ReceiveChat` (0x00) y
-//! `ReceiveChatWhisper` (0x02), WSclient.cpp:1417-1539. El resultado del susurro (0x0C,
-//! `ReceiveChatWhisperResult`, WSclient.cpp:1541) solo se mira si es 0: "no está".
+//! `SendChat` and `SendChatWhisper` (wsclientinline.h:328-404) send `PCHATING` (WSclient.h:503-507):
+//! the name in 10 bytes and the text with its zero, `min(strlen + 1, MAX_CHAT_SIZE)` bytes
+//! (`MAX_CHAT_SIZE` = 90). The client converts it to UTF-8 before sending (NewUIChatInputBox.cpp:537).
+//! The server replies with the same structure and code: `ReceiveChat` (0x00) and
+//! `ReceiveChatWhisper` (0x02), WSclient.cpp:1417-1539. The whisper result (0x0C,
+//! `ReceiveChatWhisperResult`, WSclient.cpp:1541) is only checked for 0: "not there".
 //!
-//! El aviso del servidor es `PRECEIVE_NOTICE` (WSclient.h:516-524), sin `pack`: `Result` en el 3,
-//! `Count` en el 4, `Delay` (WORD) en el 6, `Color` (DWORD) en el 8, `Speed` en el 12 y el texto en el
-//! 13 para todos los tipos (`ReceiveNotice`, WSclient.cpp:1577). OpenMU lo manda igual para el S6:
-//! `ServerMessage` con el texto en el 4 pero precedido de nueve "0" (ShowMessagePlugIn.cs).
+//! The server notice is `PRECEIVE_NOTICE` (WSclient.h:516-524), without `pack`: `Result` at 3,
+//! `Count` at 4, `Delay` (WORD) at 6, `Color` (DWORD) at 8, `Speed` at 12 and the text at
+//! 13 for all kinds (`ReceiveNotice`, WSclient.cpp:1577). OpenMU sends it the same way for S6:
+//! `ServerMessage` with the text at 4 but preceded by nine "0" (ShowMessagePlugIn.cs).
 //!
-//! # Mover de mapa (`M`)
+//! # Map move (`M`)
 //!
-//! Al entrar, el servidor manda la clave (`ReceiveMoveMapChecksum`, WSclient.cpp:11932). Cada
-//! `SendRequestMoveMap` (wsclientinline.h:1217) lleva la siguiente: `GetMoveCommandKey` la pasa por
-//! [`map_move_key`] y se la queda (NewUIMoveCommandWindow.cpp:273-278); el servidor hace lo mismo
-//! con la suya (`CheckKeyValue`). Si le vale, quita el zen (`InventoryMoneyUpdate`), saca al
-//! personaje de la vista de los del mapa y manda `MapChanged`; el cliente carga el mapa y contesta
-//! `ClientReadyAfterMapChange` (`SendRequestFinishLoading`, WSclient.cpp:1814), y entonces el
-//! servidor lo mete en la vista de los del mapa nuevo (como `PlayerMapTransitions` de OpenMU).
+//! On entering, the server sends the key (`ReceiveMoveMapChecksum`, WSclient.cpp:11932). Each
+//! `SendRequestMoveMap` (wsclientinline.h:1217) carries the next one: `GetMoveCommandKey` runs it through
+//! [`map_move_key`] and keeps it (NewUIMoveCommandWindow.cpp:273-278); the server does the same
+//! with its own (`CheckKeyValue`). If valid, it takes the zen (`InventoryMoneyUpdate`), removes the
+//! character from the view of those on the map and sends `MapChanged`; the client loads the map and replies
+//! `ClientReadyAfterMapChange` (`SendRequestFinishLoading`, WSclient.cpp:1814), and then the
+//! server puts it in the view of those on the new map (like OpenMU's `PlayerMapTransitions`).
 //!
-//! `MapChanged` lo lee `ReceiveTeleport` (WSclient.cpp:1698) con `PRECEIVE_TELEPORT_POSITION`
-//! (WSclient.h, sin `pack`): `WORD Flag` en el byte 4 (el 5 es el byte alto del mapa de OpenMU),
-//! `Map` en el 6, `PositionX/Y` en el 7 y 8 y `Angle` en el 9. `Flag` 0 es un teletransporte en el
-//! mismo mapa (sin borrar a los demás); otro valor, cambio de mapa. OpenMU (`MapChanged`) mide 15.
+//! `MapChanged` is read by `ReceiveTeleport` (WSclient.cpp:1698) with `PRECEIVE_TELEPORT_POSITION`
+//! (WSclient.h, without `pack`): `WORD Flag` at byte 4 (5 is OpenMU's map high byte),
+//! `Map` at 6, `PositionX/Y` at 7 and 8 and `Angle` at 9. `Flag` 0 is a teleport within the
+//! same map (without clearing the others); any other value, a map change. OpenMU's (`MapChanged`) is 15 long.
 //!
-//! Formatos sacados de `OpenMU/src/Network/Packets/*.xml` (licencia MIT), variante Season 6 Ep3,
-//! contrastados con el cliente original (`Main5.2`: `WSclient.cpp`, `wsclientinline.h`, `ProtocolSend.cpp`).
+//! Formats taken from `OpenMU/src/Network/Packets/*.xml` (MIT license), Season 6 Ep3 variant,
+//! checked against the original client (`Main5.2`: `WSclient.cpp`, `wsclientinline.h`, `ProtocolSend.cpp`).
 //!
-//! # Clases en el cable
+//! # Classes on the wire
 //!
-//! Las clases se guardan como `CharacterClassNumber` de OpenMU (`clase base * 4 + evolución`:
-//! DW 0, SM 2, GM 3, DK 4, BK 6, BM 7, Elfa 8, ME 10, HE 11, MG 12, DM 13, DL 16, LE 17,
-//! Invocadora 20, BS 22, DiM 23, RF 24, FM 25). Según el paquete van desplazadas:
-//! - `CreateCharacter`: `clase << 2` (el cliente manda `(índice << 4) + skin`).
-//! - `CharacterCreationSuccessful` y el byte 0 de la apariencia: `clase << 3`
-//!   (el cliente lo deshace en `ChangeServerClassTypeToClientClassType`).
+//! Classes are stored as OpenMU's `CharacterClassNumber` (`base class * 4 + evolution`:
+//! DW 0, SM 2, GM 3, DK 4, BK 6, BM 7, Elf 8, ME 10, HE 11, MG 12, DM 13, DL 16, LE 17,
+//! Summoner 20, BS 22, DiM 23, RF 24, FM 25). Depending on the packet they are shifted:
+//! - `CreateCharacter`: `class << 2` (the client sends `(index << 4) + skin`).
+//! - `CharacterCreationSuccessful` and byte 0 of the appearance: `class << 3`
+//!   (the client undoes it in `ChangeServerClassTypeToClientClassType`).
 
 use crate::packet::{Packet, c1, c2};
 use crate::xor::xor3;
 
-/// Versión y serial del cliente Season 6 Ep3 que acepta OpenMU por defecto ("1.04d", GMO).
+/// Version and serial of the Season 6 Ep3 client OpenMU accepts by default ("1.04d", GMO).
 pub const CLIENT_VERSION: [u8; 5] = *b"10404";
 pub const CLIENT_SERIAL: [u8; 16] = *b"k1Pk2jcET48mxL3b";
 
-/// Bit alto del id de objeto en `AddCharactersToScope` (y en el resto de paquetes de "entra en
-/// vista"): el servidor lo pone cuando el objeto acaba de aparecer (spawn / teletransporte) y el
-/// cliente lo usa para el efecto de aparición. El id real es `id & OBJECT_ID_MASK`.
-/// Este módulo NO lo añade ni lo quita: `ScopeCharacter::id` viaja tal cual.
+/// High bit of the object id in `AddCharactersToScope` (and the other "enters view"
+/// packets): the server sets it when the object has just appeared (spawn / teleport) and the
+/// client uses it for the appear effect. The real id is `id & OBJECT_ID_MASK`.
+/// This module does NOT add or remove it: `ScopeCharacter::id` travels as is.
 pub const NEW_OBJECT_FLAG: u16 = 0x8000;
-/// Máscara para quedarse con el id real de un objeto.
+/// Mask to keep an object's real id.
 pub const OBJECT_ID_MASK: u16 = 0x7FFF;
 
-/// Máximo de pasos que caben en un paquete de caminar (el contador es un nibble).
+/// Maximum steps that fit in a walk packet (the counter is a nibble).
 pub const MAX_WALK_STEPS: usize = 15;
-/// Máximo de personajes en `CharacterList` para que quepa en un C1 (8 + 7 × 34 = 246).
+/// Maximum characters in `CharacterList` so it fits in a C1 (8 + 7 × 34 = 246).
 pub const MAX_CHARACTER_LIST: usize = 7;
-/// Máximo de ids en un `MapObjectOutOfScope` para que quepa en un C1 (4 + 125 × 2 = 254).
+/// Maximum ids in a `MapObjectOutOfScope` so it fits in a C1 (4 + 125 × 2 = 254).
 pub const MAX_OUT_OF_SCOPE_IDS: usize = 125;
-/// Máximo de personajes en un `AddCharactersToScope` (el contador es un byte).
+/// Maximum characters in an `AddCharactersToScope` (the counter is a byte).
 pub const MAX_SCOPE_CHARACTERS: usize = 255;
-/// `MAX_CHAT_SIZE` (WSclient.h:12): bytes del texto de un mensaje de chat, con su cero.
+/// `MAX_CHAT_SIZE` (WSclient.h:12): bytes of a chat message's text, with its zero.
 pub const MAX_CHAT_SIZE: usize = 90;
-/// Bytes del texto de un aviso del servidor (sin su cero) para que el paquete quepa en un C1
-/// (2 + 11 + 241 + 1 = 255), como `maxMessageLength` de OpenMU (ShowMessagePlugIn.cs).
+/// Bytes of a server notice's text (without its zero) so the packet fits in a C1
+/// (2 + 11 + 241 + 1 = 255), like OpenMU's `maxMessageLength` (ShowMessagePlugIn.cs).
 pub const MAX_NOTICE_TEXT: usize = 241;
 
-/// `Result` de `PRECEIVE_NOTICE` (`ReceiveNotice`, WSclient.cpp:1577-1610; `MessageType` en OpenMU).
+/// `Result` of `PRECEIVE_NOTICE` (`ReceiveNotice`, WSclient.cpp:1577-1610; `MessageType` in OpenMU).
 pub mod notice_kind {
-    /// Centrado y dorado (`CreateNotice(..., 0)`).
+    /// Centered and golden (`CreateNotice(..., 0)`).
     pub const GOLDEN_CENTER: u8 = 0;
-    /// Mensaje del sistema, en azul.
+    /// System message, in blue.
     pub const BLUE: u8 = 1;
-    /// Aviso del gremio (`GlobalText[483]`), centrado en verde.
+    /// Guild notice (`GlobalText[483]`), centered in green.
     pub const GUILD: u8 = 2;
 }
 
-/// Valores de `CharacterDeleteResponse::result` (`CharacterDeleteResult` en OpenMU).
+/// Values of `CharacterDeleteResponse::result` (`CharacterDeleteResult` in OpenMU).
 pub mod delete_result {
-    /// No se pudo borrar (el cliente lo muestra como "está en un gremio").
+    /// Could not delete (the client shows it as "is in a guild").
     pub const UNSUCCESSFUL: u8 = 0;
-    /// Borrado.
+    /// Deleted.
     pub const SUCCESSFUL: u8 = 1;
-    /// Código de seguridad incorrecto.
+    /// Wrong security code.
     pub const WRONG_SECURITY_CODE: u8 = 2;
-    /// No está en OpenMU, pero el cliente original lo entiende como "objetos bloqueados".
+    /// Not in OpenMU, but the original client understands it as "items locked".
     pub const ITEM_BLOCK: u8 = 3;
 }
 
-/// Valores de `Logout::kind` / `LogoutResponse::kind` (`LogOutType` en OpenMU).
+/// Values of `Logout::kind` / `LogoutResponse::kind` (`LogOutType` in OpenMU).
 pub mod logout_kind {
     pub const CLOSE_GAME: u8 = 0;
     pub const BACK_TO_CHARACTER_SELECTION: u8 = 1;
     pub const BACK_TO_SERVER_SELECTION: u8 = 2;
 }
 
-/// Acciones de `AnimationRequest` / `ObjectAnimation` (`enum OptionType`, _enum.h:1498-1545: empieza
-/// en `AT_ATTACK1` = 120 y sigue de uno en uno).
+/// Actions of `AnimationRequest` / `ObjectAnimation` (`enum OptionType`, _enum.h:1498-1545: starts
+/// at `AT_ATTACK1` = 120 and goes up one by one).
 pub mod action {
     pub const ATTACK1: u8 = 120;
     pub const ATTACK2: u8 = 121;
@@ -209,10 +209,10 @@ pub mod action {
     pub const LOOK_AROUND: u8 = 154;
     pub const CHEERS: u8 = 155;
 
-    /// `CharacterPose` de OpenMU (`AnimationHandlerPlugIn`: 0x80/0x6C sentado, 0x81/0x6D apoyado,
-    /// 0x82/0x6E colgado), la que va en los 3 bits bajos del byte 0 de la apariencia y que el cliente
-    /// enseña al aparecer (`Class & 0x07`, WSclient.cpp:2167-2191: 2 `PLAYER_SIT1`, 3 `PLAYER_POSE1`,
-    /// 4 `PLAYER_HEALING1`). 0 = de pie.
+    /// OpenMU's `CharacterPose` (`AnimationHandlerPlugIn`: 0x80/0x6C sitting, 0x81/0x6D leaning,
+    /// 0x82/0x6E hanging), stored in the low 3 bits of appearance byte 0 and shown by the client
+    /// on appearing (`Class & 0x07`, WSclient.cpp:2167-2191: 2 `PLAYER_SIT1`, 3 `PLAYER_POSE1`,
+    /// 4 `PLAYER_HEALING1`). 0 = standing.
     pub fn pose(action: u8) -> u8 {
         match action {
             0x80 | 0x6C => 2,
@@ -223,8 +223,8 @@ pub mod action {
     }
 }
 
-/// Bits de `CharacterList::unlock_flags` y `CharacterClassCreationUnlock::flags`
-/// (`CharacterCreationUnlockFlags` en `CommonEnums.xml` de OpenMU). 0 = nada desbloqueado.
+/// Bits of `CharacterList::unlock_flags` and `CharacterClassCreationUnlock::flags`
+/// (`CharacterCreationUnlockFlags` in OpenMU's `CommonEnums.xml`). 0 = nothing unlocked.
 pub mod unlock {
     pub const SUMMONER: u8 = 1;
     pub const DARK_LORD: u8 = 2;
@@ -232,7 +232,7 @@ pub mod unlock {
     pub const RAGE_FIGHTER: u8 = 8;
 }
 
-/// Resultado del login (`LoginResult` en OpenMU).
+/// Login result (`LoginResult` in OpenMU).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LoginResult {
     InvalidPassword,
@@ -281,7 +281,7 @@ impl LoginResult {
         }
     }
 
-    /// Texto para mostrar al jugador.
+    /// Text to show the player.
     pub fn message(self) -> &'static str {
         match self {
             Self::InvalidPassword => "Contraseña incorrecta",
@@ -300,34 +300,34 @@ impl LoginResult {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Clases, apariencia y direcciones
+// Classes, appearance and directions
 // ---------------------------------------------------------------------------------------------
 
-/// Índice de clase del cliente (0 DW, 1 DK, 2 Elfa, 3 MG, 4 DL, 5 Invocadora, 6 RF; los
-/// `CLASS_*` del cliente original) → `CharacterClassNumber` de OpenMU sin evolución.
+/// Client class index (0 DW, 1 DK, 2 Elf, 3 MG, 4 DL, 5 Summoner, 6 RF; the original
+/// client's `CLASS_*`) → OpenMU `CharacterClassNumber` without evolution.
 pub fn class_number(base_class_index: u8) -> u8 {
     base_class_index << 2
 }
 
-/// `CharacterClassNumber` → índice de clase del cliente (0..6), ignorando las evoluciones.
+/// `CharacterClassNumber` → client class index (0..6), ignoring evolutions.
 pub fn base_class_index(class_number: u8) -> u8 {
     class_number >> 2
 }
 
-/// Bytes de apariencia (18) de un personaje de la clase `class` (`CharacterClassNumber`) sin
-/// nada equipado, como los escribe `AppearanceSerializer` de OpenMU (Season 6):
-/// byte 0 = `clase << 3` (+ pose, 0 = de pie), armas a `FF`, índices de armadura con todos
-/// los bits a 1 ("vacío"), niveles a 0, sin alas y sin mascota (`byte 5 |= 3`).
+/// Appearance bytes (18) of a character of class `class` (`CharacterClassNumber`) with
+/// nothing equipped, as written by OpenMU's `AppearanceSerializer` (Season 6):
+/// byte 0 = `class << 3` (+ pose, 0 = standing), weapons `FF`, armor indices with all
+/// bits set ("empty"), levels 0, no wings and no pet (`byte 5 |= 3`).
 pub fn appearance_for_class(class: u8) -> [u8; 18] {
     let mut a = [0u8; 18];
     a[0] = (class << 3) & 0xF8;
-    // Mano izquierda / derecha: índice FF, grupo con los 3 bits altos a 1.
+    // Left / right hand: index FF, group with the 3 high bits set.
     a[1] = 0xFF;
     a[12] |= 0xF0;
     a[2] = 0xFF;
     a[13] |= 0xF0;
-    // Casco, armadura, pantalones, guantes y botas vacíos (nibble del índice, bit extra en el
-    // byte 9 y nibble alto del índice en los bytes 13..15).
+    // Empty helm, armor, pants, gloves and boots (index nibble, extra bit in
+    // byte 9 and index high nibble in bytes 13..15).
     a[3] |= 0xF0;
     a[9] |= 0x80;
     a[13] |= 0x0F;
@@ -343,25 +343,25 @@ pub fn appearance_for_class(class: u8) -> [u8; 18] {
     a[5] |= 0xF0;
     a[9] |= 0x08;
     a[15] |= 0x0F;
-    // Sin mascota.
+    // No pet.
     a[5] |= 0x03;
     a
 }
 
-/// Clase (`CharacterClassNumber`) a partir de los bytes de apariencia (solo mira el byte 0).
+/// Class (`CharacterClassNumber`) from the appearance bytes (only looks at byte 0).
 pub fn class_from_appearance(appearance: &[u8]) -> u8 {
     appearance.first().map_or(0, |&b| b >> 3)
 }
 
-/// Tabla de direcciones de MU: `(dx, dy)` para cada dirección 0..7 de los paquetes de caminar.
+/// MU direction table: `(dx, dy)` for each direction 0..7 of the walk packets.
 ///
-/// Es `DirTable` de `WSclient.cpp` del cliente original, que usa `SendCharacterMove` para
-/// convertir el camino de `PathFinding` en direcciones. Coincide con `Direction` de OpenMU
-/// menos 1 (`ToPacketByte`): 0 West, 1 SouthWest, 2 South, 3 SouthEast, 4 East, 5 NorthEast,
+/// It's `DirTable` from the original client's `WSclient.cpp`, used by `SendCharacterMove` to
+/// convert the `PathFinding` path into directions. Matches OpenMU's `Direction`
+/// minus 1 (`ToPacketByte`): 0 West, 1 SouthWest, 2 South, 3 SouthEast, 4 East, 5 NorthEast,
 /// 6 North, 7 NorthWest.
 pub const DIRECTIONS: [(i8, i8); 8] = [(-1, -1), (0, -1), (1, -1), (1, 0), (1, 1), (0, 1), (-1, 1), (-1, 0)];
 
-/// Dirección (0..7) para ir de `from` a la casilla adyacente `to`; `None` si no son vecinas.
+/// Direction (0..7) to go from `from` to the adjacent tile `to`; `None` if not neighbours.
 pub fn direction_between(from: (u8, u8), to: (u8, u8)) -> Option<u8> {
     let dx = to.0 as i16 - from.0 as i16;
     let dy = to.1 as i16 - from.1 as i16;
@@ -382,49 +382,49 @@ const KEY_GENERATE_FILTER: [[u32; 4]; 10] = [
     [454, 57684216, 6875, 45],
 ];
 
-/// `CKeyGenerater::GenerateKeyValue` (KeyGenerater.cpp:39-49): la clave siguiente de la de mover
-/// de mapa. `DWORD` con desbordamiento; `f[2] / f[3]` es división entera.
+/// `CKeyGenerater::GenerateKeyValue` (KeyGenerater.cpp:39-49): the next map-move
+/// key. `DWORD` with wrapping; `f[2] / f[3]` is integer division.
 pub fn map_move_key(key: u32) -> u32 {
     let f = KEY_GENERATE_FILTER[(key % 10) as usize];
     key.wrapping_mul(f[0]).wrapping_add(f[1]).wrapping_sub(f[2] / f[3])
 }
 
 // ---------------------------------------------------------------------------------------------
-// Mensajes
+// Messages
 // ---------------------------------------------------------------------------------------------
 
-/// Lo que el cliente manda al Game Server (en claro; cifrar con `crypto::ClientCrypto`).
+/// What the client sends to the Game Server (in plain text; encrypt with `crypto::ClientCrypto`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ClientMessage {
     Login { username: String, password: String, tick_count: u32, version: [u8; 5], serial: [u8; 16] },
     RequestCharacterList { language: u8 },
     SelectCharacter { name: String },
-    /// `class` es el `CharacterClassNumber` (DW 0, DK 4, Elfa 8, MG 12, DL 16, Invocadora 20, RF 24).
+    /// `class` is the `CharacterClassNumber` (DW 0, DK 4, Elf 8, MG 12, DL 16, Summoner 20, RF 24).
     CreateCharacter { name: String, class: u8 },
-    /// El cliente 1.04d manda siempre 20 bytes de código (máximo 20 aquí).
+    /// The 1.04d client always sends 20 code bytes (at most 20 here).
     DeleteCharacter { name: String, security_code: String },
     ClientReadyAfterMapChange,
-    /// `directions` son direcciones 0..7 (ver [`DIRECTIONS`]), como mucho [`MAX_WALK_STEPS`]
-    /// (las que sobren no se mandan). Sin pasos = "me he parado aquí mirando a `rotation`".
+    /// `directions` are directions 0..7 (see [`DIRECTIONS`]), at most [`MAX_WALK_STEPS`]
+    /// (extra ones are not sent). No steps = "I stopped here facing `rotation`".
     Walk { source_x: u8, source_y: u8, rotation: u8, directions: Vec<u8> },
     Ping { tick_count: u32, attack_speed: u16, magic_speed: u16 },
-    /// `kind`: ver [`logout_kind`].
+    /// `kind`: see [`logout_kind`].
     Logout { kind: u8 },
-    /// `SendRequestMoveMap(dwBlockKey, wMapIndex)`: `key` es la siguiente de [`map_move_key`] e
-    /// `index` el `MOVEREQINFO::index` elegido en la ventana de mover.
+    /// `SendRequestMoveMap(dwBlockKey, wMapIndex)`: `key` is the next one from [`map_move_key`] and
+    /// `index` the `MOVEREQINFO::index` chosen in the move window.
     WarpCommandRequest { key: u32, index: u16 },
-    /// `SendChat`: `name` es el del que habla (`Hero->ID`) y `message` el texto, con el prefijo
-    /// del canal si lo lleva (`~` grupo, `@` gremio, `$` Gens). Se cortan los bytes que pasen de
-    /// [`MAX_CHAT_SIZE`] − 1 (sin partir letras).
+    /// `SendChat`: `name` is the speaker's (`Hero->ID`) and `message` the text, with the
+    /// channel prefix if any (`~` party, `@` guild, `$` Gens). Bytes beyond
+    /// [`MAX_CHAT_SIZE`] − 1 are cut (without splitting characters).
     PublicChat { name: String, message: String },
-    /// `SendChatWhisper`: `target` es a quién se susurra.
+    /// `SendChatWhisper`: `target` is who is whispered to.
     Whisper { target: String, message: String },
-    /// `SendRequestMagicTeleport(&bResult, puerta, x, y)` (`EnterGateRequest`): el héroe pisa la
-    /// puerta de entrada `gate` de `Gate.bmd`. `x`/`y` solo valen con `gate` 0 (teletransporte
-    /// del mago); al pisar una puerta van a 0.
+    /// `SendRequestMagicTeleport(&bResult, gate, x, y)` (`EnterGateRequest`): the hero steps on the
+    /// entry gate `gate` from `Gate.bmd`. `x`/`y` only matter with `gate` 0 (the wizard's
+    /// teleport); when stepping on a gate they are 0.
     EnterGate { gate: u16, x: u8, y: u8 },
-    /// `SendRequestAction(acción, dirección)` (`AnimationRequest`): `action` es un `AT_*` (ver
-    /// [`action`]) y `rotation` la dirección 0..7 hacia donde mira.
+    /// `SendRequestAction(action, direction)` (`AnimationRequest`): `action` is an `AT_*` (see
+    /// [`action`]) and `rotation` the direction 0..7 it faces.
     Animation { rotation: u8, action: u8 },
     /// `SendRequestEquipmentItem` (wsclientinline.h): move the item in `from_slot` of
     /// `from_storage` to `to_slot` of `to_storage` (see [`storage`]). `item` is the item being moved
@@ -467,28 +467,28 @@ pub mod npc_window {
     pub const CHAOS_MACHINE: u8 = 3;
 }
 
-/// Un personaje de la lista de la pantalla de selección.
+/// A character in the selection screen list.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CharacterListEntry {
     pub slot: u8,
     pub name: String,
     pub level: u16,
-    /// `CharacterStatus` (0 normal, 1 baneado). En la lista solo caben 4 bits: se manda
-    /// `status & 0x0F` (el 32 de "GameMaster" no cabe; ese va en `CharacterInformation`).
+    /// `CharacterStatus` (0 normal, 1 banned). Only 4 bits fit in the list: it sends
+    /// `status & 0x0F` (the "GameMaster" 32 doesn't fit; that goes in `CharacterInformation`).
     pub status: u8,
-    /// `CharacterClassNumber`; en el cable va dentro de la apariencia (`clase << 3`).
+    /// `CharacterClassNumber`; on the wire it goes inside the appearance (`class << 3`).
     pub class: u8,
-    /// `GuildMemberRole`: 0 miembro, 32 battle master, 64 asistente, 128 maestro, 255 sin gremio.
+    /// `GuildMemberRole`: 0 member, 32 battle master, 64 assistant, 128 master, 255 no guild.
     pub guild_position: u8,
 }
 
-/// Datos del personaje al entrar al mundo (`CharacterInformation`, C3 F3 03, 72 bytes).
+/// Character data on entering the world (`CharacterInformation`, C3 F3 03, 72 bytes).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct CharacterInformation {
     pub x: u8,
     pub y: u8,
     pub map: u8,
-    /// El cliente gira `(direction - 1) * 45` grados.
+    /// The client turns `(direction - 1) * 45` degrees.
     pub direction: u8,
     pub experience: u64,
     pub next_experience: u64,
@@ -506,9 +506,9 @@ pub struct CharacterInformation {
     pub ability: u16,
     pub max_ability: u16,
     pub money: u32,
-    /// `CharacterHeroState`: 0 nuevo, 1 héroe, 2 héroe ligero, 3 normal, 4 aviso PK, 5/6 PK.
+    /// `CharacterHeroState`: 0 new, 1 hero, 2 light hero, 3 normal, 4 PK warning, 5/6 PK.
     pub hero_state: u8,
-    /// `CharacterStatus`: 0 normal, 1 baneado, 32 GM.
+    /// `CharacterStatus`: 0 normal, 1 banned, 32 GM.
     pub status: u8,
     pub used_fruit_points: u16,
     pub max_fruit_points: u16,
@@ -518,45 +518,45 @@ pub struct CharacterInformation {
     pub inventory_extensions: u8,
 }
 
-/// Un jugador que entra en el área de visión (`AddCharactersToScope`, variante S6 con efectos).
+/// A player entering the view area (`AddCharactersToScope`, S6 variant with effects).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScopeCharacter {
-    /// Id del objeto tal cual va en el cable: el servidor puede añadir [`NEW_OBJECT_FLAG`]
-    /// si acaba de aparecer; el cliente debe quedarse con `id & OBJECT_ID_MASK`.
+    /// Object id as it travels on the wire: the server may add [`NEW_OBJECT_FLAG`]
+    /// if it just appeared; the client must keep `id & OBJECT_ID_MASK`.
     pub id: u16,
     pub x: u8,
     pub y: u8,
-    /// `CharacterClassNumber`; va en la apariencia (sin equipo).
+    /// `CharacterClassNumber`; goes in the appearance (without equipment).
     pub class: u8,
     pub name: String,
     pub target_x: u8,
     pub target_y: u8,
-    /// Nibble alto del byte 34 (el cliente gira `(rotation - 1) * 45` grados).
+    /// High nibble of byte 34 (the client turns `(rotation - 1) * 45` degrees).
     pub rotation: u8,
-    /// `CharacterHeroState`, nibble bajo del byte 34.
+    /// `CharacterHeroState`, low nibble of byte 34.
     pub hero_state: u8,
-    /// `CharacterPose` (ver [`action::pose`]): 3 bits bajos del byte 0 de la apariencia.
+    /// `CharacterPose` (see [`action::pose`]): low 3 bits of appearance byte 0.
     pub pose: u8,
 }
 
-/// Un monstruo o NPC que entra en el área de visión (`PCREATE_MONSTER` de `ReceiveCreateMonsterViewport`,
-/// WSclient.cpp:2512-2639), sin efectos (`s_BuffCount` 0).
+/// A monster or NPC entering the view area (`PCREATE_MONSTER` from `ReceiveCreateMonsterViewport`,
+/// WSclient.cpp:2512-2639), without effects (`s_BuffCount` 0).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScopeMonster {
-    /// Id del objeto como va en el cable: [`NEW_OBJECT_FLAG`] = recién aparecido (`AppearMonster`).
+    /// Object id as it travels on the wire: [`NEW_OBJECT_FLAG`] = just appeared (`AppearMonster`).
     pub id: u16,
-    /// Número de monstruo (`Type`, 10 bits: `TypeH & 0x03` y `TypeL`).
+    /// Monster number (`Type`, 10 bits: `TypeH & 0x03` and `TypeL`).
     pub number: u16,
     pub x: u8,
     pub y: u8,
-    /// Casilla a la que va (el cliente camina hasta ella con `PathFinding2`).
+    /// Tile it is heading to (the client walks there with `PathFinding2`).
     pub target_x: u8,
     pub target_y: u8,
-    /// `Path >> 4`: el cliente gira `(rotation - 1) * 45` grados.
+    /// `Path >> 4`: the client turns `(rotation - 1) * 45` degrees.
     pub rotation: u8,
 }
 
-/// Bytes de un [`ScopeMonster`] sin efectos.
+/// Bytes of a [`ScopeMonster`] without effects.
 const SCOPE_MONSTER_LEN: usize = 10;
 
 impl ScopeMonster {
@@ -582,51 +582,51 @@ impl ScopeMonster {
     }
 }
 
-/// Lo que el Game Server manda al cliente (ya descifrado).
+/// What the Game Server sends to the client (already decrypted).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerMessage {
-    /// Monstruos y NPC que entran en la vista (`0x13`). Como mucho [`MAX_SCOPE_CHARACTERS`].
+    /// Monsters and NPCs entering view (`0x13`). At most [`MAX_SCOPE_CHARACTERS`].
     AddMonstersToScope(Vec<ScopeMonster>),
     GameServerEntered { success: bool, player_id: u16, version: [u8; 5] },
     LoginResponse(LoginResult),
-    /// Como mucho [`MAX_CHARACTER_LIST`] personajes (los que sobren no se mandan).
-    /// `unlock_flags`: ver [`unlock`].
+    /// At most [`MAX_CHARACTER_LIST`] characters (extra ones are not sent).
+    /// `unlock_flags`: see [`unlock`].
     CharacterList { unlock_flags: u8, move_count: u8, vault_extended: bool, characters: Vec<CharacterListEntry> },
-    /// `flags`: ver [`unlock`].
+    /// `flags`: see [`unlock`].
     CharacterClassCreationUnlock { flags: u8 },
     CharacterCreated { name: String, slot: u8, level: u16, class: u8 },
     CharacterCreationFailed,
-    /// `result`: ver [`delete_result`] (0 fallo, 1 borrado, 2 código incorrecto).
+    /// `result`: see [`delete_result`] (0 failure, 1 deleted, 2 wrong code).
     CharacterDeleteResponse { result: u8 },
     CharacterInformation(CharacterInformation),
-    /// Como mucho [`MAX_SCOPE_CHARACTERS`]; se mandan sin efectos.
+    /// At most [`MAX_SCOPE_CHARACTERS`]; sent without effects.
     AddCharactersToScope(Vec<ScopeCharacter>),
-    /// En S6 el cliente solo usa el destino y la rotación (recalcula el camino con
-    /// `PathFinding2`); `directions` puede ir vacío. Si va, se empaqueta como en `Walk`.
+    /// In S6 the client only uses the destination and rotation (it recomputes the path with
+    /// `PathFinding2`); `directions` may be empty. If present, it is packed as in `Walk`.
     ObjectWalked { id: u16, target_x: u8, target_y: u8, rotation: u8, directions: Vec<u8> },
-    /// Como mucho [`MAX_OUT_OF_SCOPE_IDS`] ids (los que sobren no se mandan).
+    /// At most [`MAX_OUT_OF_SCOPE_IDS`] ids (extra ones are not sent).
     MapObjectOutOfScope(Vec<u16>),
     LogoutResponse { kind: u8 },
-    /// La clave de mover de mapa (`PMSG_MAPMOVE_CHECKSUM`).
+    /// The map-move key (`PMSG_MAPMOVE_CHECKSUM`).
     MapMoveChecksumKey { key: u32 },
-    /// Cambio de mapa o teletransporte (`PRECEIVE_TELEPORT_POSITION`). `map` es `WorldActive`
-    /// (carpeta `World{map + 1}`); el cliente gira `(rotation - 1) * 45` grados.
+    /// Map change or teleport (`PRECEIVE_TELEPORT_POSITION`). `map` is `WorldActive`
+    /// (folder `World{map + 1}`); the client turns `(rotation - 1) * 45` degrees.
     MapChanged { is_map_change: bool, map: u16, x: u8, y: u8, rotation: u8 },
-    /// Zen del inventario (`ReceiveGetItem` con `Result` = `GET_ITEM_ZEN` = FE, WSclient.cpp:5607).
+    /// Inventory zen (`ReceiveGetItem` with `Result` = `GET_ITEM_ZEN` = FE, WSclient.cpp:5607).
     InventoryMoneyUpdate { money: u32 },
-    /// Alguien de alrededor ha hablado (`ReceiveChat`); el texto lleva el prefijo del canal.
+    /// Someone nearby spoke (`ReceiveChat`); the text carries the channel prefix.
     ChatMessage { sender: String, message: String },
-    /// Un susurro para nosotros (`ReceiveChatWhisper`).
+    /// A whisper for us (`ReceiveChatWhisper`).
     WhisperMessage { sender: String, message: String },
-    /// Resultado del último susurro (`ReceiveChatWhisperResult`): `false` = no hay nadie con
-    /// ese nombre.
+    /// Result of the last whisper (`ReceiveChatWhisperResult`): `false` = nobody with
+    /// that name.
     WhisperResult { success: bool },
-    /// Aviso del servidor (`ReceiveNotice`); `kind`: ver [`notice_kind`]. Los campos de la banda
-    /// deslizante (`Count`, `Delay`, `Color`, `Speed`, tipos 10-15) van a cero. Como mucho
-    /// [`MAX_NOTICE_TEXT`] bytes de texto.
+    /// Server notice (`ReceiveNotice`); `kind`: see [`notice_kind`]. The scrolling-banner
+    /// fields (`Count`, `Delay`, `Color`, `Speed`, kinds 10-15) are zero. At most
+    /// [`MAX_NOTICE_TEXT`] bytes of text.
     Notice { kind: u8, text: String },
-    /// Alguien hace una animación (`ReceiveAction`): `direction` como en `MapChanged`, `action` un
-    /// `AT_*` (ver [`action`]) y `target` el id del objetivo (0 si no hay).
+    /// Someone plays an animation (`ReceiveAction`): `direction` as in `MapChanged`, `action` an
+    /// `AT_*` (see [`action`]) and `target` the target id (0 if none).
     ObjectAnimation { id: u16, direction: u8, action: u8, target: u16 },
     /// The whole inventory after entering the world (`ReceiveInventory`, C4 F3 10): slot and the 12
     /// item bytes of each item (equipment 0-11, grid 12-75, personal shop 204+).
@@ -656,7 +656,7 @@ pub enum ServerMessage {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Utilidades de (de)serialización
+// (De)serialization utilities
 // ---------------------------------------------------------------------------------------------
 
 fn fixed<const N: usize>(s: &str) -> [u8; N] {
@@ -671,7 +671,7 @@ fn unfixed(b: &[u8]) -> String {
     String::from_utf8_lossy(&b[..end]).into_owned()
 }
 
-/// Los primeros bytes de `s` que caben en `max` sin partir una letra UTF-8.
+/// The first bytes of `s` that fit in `max` without splitting a UTF-8 character.
 pub fn truncate_utf8(s: &str, max: usize) -> &str {
     if s.len() <= max {
         return s;
@@ -683,7 +683,7 @@ pub fn truncate_utf8(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
-/// `<nombre 10> <texto> 00` detrás de `code` (`PCHATING`): el texto como mucho `max − 1` bytes.
+/// `<name 10> <text> 00` after `code` (`PCHATING`): the text at most `max − 1` bytes.
 fn chat_packet(code: u8, name: &str, text: &str, max: usize) -> Vec<u8> {
     let text = truncate_utf8(text, max - 1);
     let mut body = Vec::with_capacity(1 + 10 + text.len() + 1);
@@ -694,12 +694,12 @@ fn chat_packet(code: u8, name: &str, text: &str, max: usize) -> Vec<u8> {
     c1(&body)
 }
 
-/// Lee `<nombre 10> <texto>` de un `PCHATING` (el texto acaba en su cero o en el final).
+/// Reads `<name 10> <text>` from a `PCHATING` (the text ends at its zero or at the end).
 fn read_chat(d: &[u8]) -> Option<(String, String)> {
     Some((unfixed(d.get(3..13)?), unfixed(d.get(13..).unwrap_or(&[]))))
 }
 
-/// Paquete C1 de tamaño fijo `len` con código y subcódigo; el resto a cero.
+/// Fixed-size C1 packet of `len` with code and subcode; the rest zeroed.
 fn fixed_c1(len: usize, code: u8, sub_code: u8) -> Vec<u8> {
     debug_assert!(len <= 255);
     let mut p = vec![0u8; len];
@@ -710,7 +710,7 @@ fn fixed_c1(len: usize, code: u8, sub_code: u8) -> Vec<u8> {
     p
 }
 
-/// Igual que [`fixed_c1`] pero con cabecera C3 (la capa de cifrado lo cifra).
+/// Same as [`fixed_c1`] but with a C3 header (the encryption layer encrypts it).
 fn fixed_c3(len: usize, code: u8, sub_code: u8) -> Vec<u8> {
     let mut p = fixed_c1(len, code, sub_code);
     p[0] = 0xC3;
@@ -771,8 +771,8 @@ fn get_u64_be(p: &[u8], i: usize) -> Option<u64> {
     Some(u64::from_be_bytes(p.get(i..i + 8)?.try_into().ok()?))
 }
 
-/// `<rotación:4 | pasos:4>` seguido de los pasos, dos por byte (el primero en el nibble alto),
-/// como `SendCharacterMove` del cliente original y `DecodePayload` de OpenMU.
+/// `<rotation:4 | steps:4>` followed by the steps, two per byte (the first in the high nibble),
+/// like the original client's `SendCharacterMove` and OpenMU's `DecodePayload`.
 fn pack_steps(out: &mut Vec<u8>, rotation: u8, directions: &[u8]) {
     let directions = &directions[..directions.len().min(MAX_WALK_STEPS)];
     out.push((rotation << 4) | directions.len() as u8);
@@ -782,7 +782,7 @@ fn pack_steps(out: &mut Vec<u8>, rotation: u8, directions: &[u8]) {
     }
 }
 
-/// Inverso de [`pack_steps`]: `p[i]` es el byte de rotación/pasos.
+/// Inverse of [`pack_steps`]: `p[i]` is the rotation/steps byte.
 fn unpack_steps(p: &[u8], i: usize) -> Option<(u8, Vec<u8>)> {
     let head = *p.get(i)?;
     let count = (head & 0x0F) as usize;
@@ -795,24 +795,24 @@ fn unpack_steps(p: &[u8], i: usize) -> Option<(u8, Vec<u8>)> {
     Some((head >> 4, directions))
 }
 
-/// Bytes del paquete si tiene cabecera de tamaño de 1 byte (C1/C3).
+/// Packet bytes if it has a 1-byte size header (C1/C3).
 fn short_header<'a>(p: &Packet<'a>) -> Option<&'a [u8]> {
     (p.header.size_field_len() == 1).then_some(p.bytes)
 }
 
-/// Bytes del paquete si tiene cabecera de tamaño de 2 bytes (C2/C4).
+/// Packet bytes if it has a 2-byte size header (C2/C4).
 fn long_header<'a>(p: &Packet<'a>) -> Option<&'a [u8]> {
     (p.header.size_field_len() == 2).then_some(p.bytes)
 }
 
 const CHARACTER_LIST_ENTRY_LEN: usize = 34;
-const SCOPE_CHARACTER_LEN: usize = 36; // sin efectos
+const SCOPE_CHARACTER_LEN: usize = 36; // without effects
 const CHARACTER_INFORMATION_LEN: usize = 72;
 const CHARACTER_CREATED_LEN: usize = 42;
 const MAP_CHANGED_LEN: usize = 15;
 
 // ---------------------------------------------------------------------------------------------
-// Cliente → servidor
+// Client → server
 // ---------------------------------------------------------------------------------------------
 
 impl ClientMessage {
@@ -839,9 +839,9 @@ impl ClientMessage {
                 body.extend_from_slice(&tick_count.to_be_bytes());
                 body.extend_from_slice(version);
                 body.extend_from_slice(serial);
-                body.push(0); // relleno: el paquete original mide 60 (el serial acaba en el 59)
+                body.push(0); // padding: the original packet is 60 long (the serial ends at 59)
                 let mut p = c1(&body);
-                p[0] = 0xC3; // se manda cifrado
+                p[0] = 0xC3; // sent encrypted
                 p
             }
             Self::RequestCharacterList { language } => c1(&[0xF3, 0x00, *language]),
@@ -889,7 +889,7 @@ impl ClientMessage {
             Self::PublicChat { name, message } => chat_packet(0x00, name, message, MAX_CHAT_SIZE),
             Self::Whisper { target, message } => chat_packet(0x02, target, message, MAX_CHAT_SIZE),
             Self::EnterGate { gate, x, y } => {
-                // `spe.AddNullData(1)` en el byte 3; `Send(TRUE)`: cifrado (C3).
+                // `spe.AddNullData(1)` at byte 3; `Send(TRUE)`: encrypted (C3).
                 let mut p = fixed_c3(8, 0x1C, 0x00);
                 put_u16_le(&mut p, 4, *gate);
                 p[6] = *x;
@@ -918,9 +918,9 @@ impl ClientMessage {
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let p = Packet::parse(bytes)?;
         let d = short_header(&p)?;
-        // Paquetes sin subcódigo.
+        // Packets without a subcode.
         match p.code() {
-            // El byte 3 es el nulo de relleno (OpenMU lo acepta también sin cifrar).
+            // Byte 3 is the null padding (OpenMU also accepts it unencrypted).
             0x1C => return Some(Self::EnterGate { gate: get_u16_le(d, 4)?, x: *d.get(6)?, y: *d.get(7)? }),
             0x18 => return Some(Self::Animation { rotation: *d.get(3)?, action: *d.get(4)? }),
             0xD4 => {
@@ -970,7 +970,7 @@ impl ClientMessage {
             (0xF3, 0x01) => Some(Self::CreateCharacter { name: unfixed(d.get(4..14)?), class: *d.get(14)? >> 2 }),
             (0xF3, 0x02) => Some(Self::DeleteCharacter {
                 name: unfixed(d.get(4..14)?),
-                // Hay clientes que mandan menos de 20 bytes (solo los 7 del código).
+                // Some clients send fewer than 20 bytes (only the 7 of the code).
                 security_code: unfixed(d.get(14..).unwrap_or(&[])),
             }),
             (0xF3, 0x03) => Some(Self::SelectCharacter { name: unfixed(d.get(4..14)?) }),
@@ -987,7 +987,7 @@ impl ClientMessage {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Servidor → cliente
+// Server → client
 // ---------------------------------------------------------------------------------------------
 
 impl CharacterInformation {
@@ -1012,7 +1012,7 @@ impl CharacterInformation {
         put_u16_le(&mut p, 44, self.max_shield);
         put_u16_le(&mut p, 46, self.ability);
         put_u16_le(&mut p, 48, self.max_ability);
-        // 50..52: relleno (el DWORD del zen va alineado a 4 en el struct del cliente).
+        // 50..52: padding (the zen DWORD is 4-aligned in the client's struct).
         put_u32_le(&mut p, 52, self.money);
         p[56] = self.hero_state;
         p[57] = self.status;
@@ -1069,9 +1069,9 @@ impl CharacterListEntry {
         let e = &mut out[start..];
         e[0] = self.slot;
         e[1..11].copy_from_slice(&fixed::<10>(&self.name));
-        // e[11]: relleno (el WORD del nivel va alineado a 2).
+        // e[11]: padding (the level WORD is 2-aligned).
         put_u16_le(e, 12, self.level);
-        e[14] = self.status & 0x0F; // nibble alto: IsItemBlockActive = false
+        e[14] = self.status & 0x0F; // high nibble: IsItemBlockActive = false
         e[15..33].copy_from_slice(&appearance_for_class(self.class));
         e[33] = self.guild_position;
     }
@@ -1095,17 +1095,17 @@ impl ScopeCharacter {
         out.push(self.x);
         out.push(self.y);
         let mut appearance = appearance_for_class(self.class);
-        // `target[0] |= Pose` (AppearanceSerializer.cs:125 de OpenMU).
+        // `target[0] |= Pose` (OpenMU's AppearanceSerializer.cs:125).
         appearance[0] |= self.pose & 0x07;
         out.extend_from_slice(&appearance);
         out.extend_from_slice(&fixed::<10>(&self.name));
         out.push(self.target_x);
         out.push(self.target_y);
         out.push((self.rotation << 4) | (self.hero_state & 0x0F));
-        out.push(0); // sin efectos
+        out.push(0); // without effects
     }
 
-    /// Lee un personaje en `d[i..]`; devuelve también dónde empieza el siguiente.
+    /// Reads a character at `d[i..]`; also returns where the next one starts.
     fn read(d: &[u8], i: usize) -> Option<(Self, usize)> {
         let e = d.get(i..i + SCOPE_CHARACTER_LEN)?;
         let effects = e[35] as usize;
@@ -1155,9 +1155,9 @@ impl ServerMessage {
                 p[15] = *slot;
                 put_u16_le(&mut p, 16, *level);
                 p[18] = class << 3;
-                p[19] = 0; // CharacterStatus normal
-                // PreviewData (20..42): OpenMU lo rellena entero de FF y el cliente lo ignora
-                // (usa la clase); aquí va la apariencia sin equipo y el resto a FF.
+                p[19] = 0; // normal CharacterStatus
+                // PreviewData (20..42): OpenMU fills it entirely with FF and the client ignores it
+                // (it uses the class); here goes the appearance without equipment and the rest FF.
                 p[20..38].copy_from_slice(&appearance_for_class(*class));
                 p[38..42].fill(0xFF);
                 p
@@ -1212,7 +1212,7 @@ impl ServerMessage {
                 p
             }
             Self::MapChanged { is_map_change, map, x, y, rotation } => {
-                // `MapChanged` de OpenMU: 15 bytes, el 3 a 0F y del 10 al 14 a cero.
+                // OpenMU's `MapChanged`: 15 bytes, byte 3 is 0F and 10 to 14 are zero.
                 let mut p = fixed_c3(MAP_CHANGED_LEN, 0x1C, 0x0F);
                 p[4] = *is_map_change as u8;
                 p[5..7].copy_from_slice(&map.to_be_bytes());
@@ -1230,7 +1230,7 @@ impl ServerMessage {
             Self::WhisperMessage { sender, message } => chat_packet(0x02, sender, message, MAX_CHAT_SIZE),
             Self::WhisperResult { success } => c1(&[0x0C, *success as u8]),
             Self::Notice { kind, text } => {
-                // `Result`, `Count`, relleno, `Delay`, `Color` y `Speed` (bytes 3..13) y el texto.
+                // `Result`, `Count`, padding, `Delay`, `Color` and `Speed` (bytes 3..13) and the text.
                 let text = truncate_utf8(text, MAX_NOTICE_TEXT);
                 let mut body = vec![0u8; 11];
                 body[0] = 0x0D;
@@ -1286,7 +1286,7 @@ impl ServerMessage {
 
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let p = Packet::parse(bytes)?;
-        // Paquetes sin subcódigo.
+        // Packets without a subcode.
         match p.code() {
             0x12 => {
                 let d = long_header(&p)?;
@@ -1425,24 +1425,24 @@ impl ServerMessage {
                     level: get_u16_le(d, 16)?,
                     class: *d.get(18)? >> 3,
                 }),
-                // 0 = fallo; el cliente original también entiende 2 como otro fallo.
+                // 0 = failure; the original client also understands 2 as another failure.
                 _ => Some(Self::CharacterCreationFailed),
             },
             (0xF3, 0x02) => Some(Self::CharacterDeleteResponse { result: *d.get(4)? }),
             (0xF3, 0x03) => Some(Self::CharacterInformation(CharacterInformation::decode(d)?)),
             (0xDE, 0x00) => Some(Self::CharacterClassCreationUnlock { flags: *d.get(4)? }),
             (0x8E, 0x01) => Some(Self::MapMoveChecksumKey { key: get_u32_le(d, 4)? }),
-            // `ReceiveTeleport` no mira el byte 3 (ni el largo: `MapChangedExtended` mide 16).
+            // `ReceiveTeleport` doesn't look at byte 3 (nor the length: `MapChangedExtended` is 16 long).
             (0x1C, _) if d.len() >= 10 => Some(Self::MapChanged {
-                // `WORD Flag` (bytes 4 y 5) del original; con los mapas del S6 (< 256) el byte 5
-                // (alto del mapa) es 0 y basta el 4, como `IsMapChange` de OpenMU.
+                // The original's `WORD Flag` (bytes 4 and 5); with S6 maps (< 256) byte 5
+                // (map high byte) is 0 and byte 4 is enough, like OpenMU's `IsMapChange`.
                 is_map_change: d[4] != 0,
                 map: get_u16_be(d, 5)?,
                 x: d[7],
                 y: d[8],
                 rotation: d[9],
             }),
-            // `Item[0..4]` en big endian.
+            // `Item[0..4]` in big endian.
             (0x22, 0xFE) => Some(Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }),
             _ => None,
         }
@@ -1504,7 +1504,7 @@ mod tests {
         let login = ClientMessage::login("test", "secreto", 12345).encode();
         assert_eq!(login.len(), 60, "LoginLongPassword mide 60");
         assert_eq!(&login[..4], &[0xC3, 60, 0xF1, 0x01]);
-        // Usuario en el índice 4, contraseña en el 14, tick en el 34, versión en el 38, serial en el 43.
+        // User at index 4, password at 14, tick at 34, version at 38, serial at 43.
         assert_eq!(&login[38..43], b"10404");
         assert_eq!(&login[43..59], b"k1Pk2jcET48mxL3b");
         assert_eq!(u32::from_be_bytes(login[34..38].try_into().unwrap()), 12345);
@@ -1575,7 +1575,7 @@ mod tests {
         assert_eq!(direction_between((10, 10), (10, 10)), None);
         assert_eq!(direction_between((10, 10), (12, 10)), None);
         assert_eq!(direction_between((0, 0), (255, 255)), None, "sin dar la vuelta");
-        // Tabla del cliente original: 0 = (-1,-1), 3 = (+1, 0), 7 = (-1, 0).
+        // Original client table: 0 = (-1,-1), 3 = (+1, 0), 7 = (-1, 0).
         assert_eq!(direction_between((5, 5), (4, 4)), Some(0));
         assert_eq!(direction_between((5, 5), (6, 5)), Some(3));
         assert_eq!(direction_between((5, 5), (4, 5)), Some(7));
@@ -1623,7 +1623,7 @@ mod tests {
         let wire = ida_y_vuelta_servidor(msg);
         assert_eq!(wire.len(), 8 + 3 * 34);
         assert_eq!(&wire[..8], &[0xC1, (8 + 3 * 34) as u8, 0xF3, 0x00, 0x0F, 3, 3, 1]);
-        // Primer personaje: nivel LE en 8+12, apariencia en 8+15 (Grand Master = 3 << 3).
+        // First character: LE level at 8+12, appearance at 8+15 (Grand Master = 3 << 3).
         assert_eq!(&wire[20..22], &400u16.to_le_bytes());
         assert_eq!(wire[23], 3 << 3);
         assert_eq!(wire[8 + 33], 255);
@@ -1665,7 +1665,7 @@ mod tests {
     #[test]
     fn caminar() {
         let walk = ida_y_vuelta_cliente(ClientMessage::Walk { source_x: 130, source_y: 125, rotation: 5, directions: vec![3, 4, 5] });
-        // Rotación en el nibble alto, pasos en el bajo; luego dos pasos por byte, el primero arriba.
+        // Rotation in the high nibble, steps in the low one; then two steps per byte, the first on top.
         assert_eq!(walk, [0xC1, 8, 0xD4, 130, 125, 0x53, 0x34, 0x50]);
 
         let parado = ida_y_vuelta_cliente(ClientMessage::Walk { source_x: 10, source_y: 20, rotation: 2, directions: vec![] });
@@ -1677,7 +1677,7 @@ mod tests {
             otro => panic!("{otro:?}"),
         }
 
-        // El cliente original manda siempre 13 bytes (Path[8]) aunque haya menos pasos.
+        // The original client always sends 13 bytes (Path[8]) even with fewer steps.
         let original = [0xC1, 13, 0xD4, 50, 60, 0x12, 0x70, 0, 0, 0, 0, 0, 0];
         assert_eq!(
             ClientMessage::decode(&original),
@@ -1706,7 +1706,7 @@ mod tests {
     fn monstruos_que_entran_en_vista() {
         let bichos = vec![
             ScopeMonster { id: 0x8000 | 5, number: 3, x: 180, y: 90, target_x: 182, target_y: 91, rotation: 2 },
-            // Número de 10 bits (los del S6 pasan de 255).
+            // 10-bit number (S6 ones go above 255).
             ScopeMonster { id: 0x0102, number: 0x0215, x: 1, y: 2, target_x: 1, target_y: 2, rotation: 7 },
         ];
         let wire = ida_y_vuelta_servidor(ServerMessage::AddMonstersToScope(bichos));
@@ -1715,7 +1715,7 @@ mod tests {
         assert_eq!(&wire[5..15], &[0x80, 5, 0, 3, 180, 90, 182, 91, 0x20, 0]);
         assert_eq!(&wire[15..19], &[0x01, 0x02, 0x02, 0x15]);
 
-        // Con efectos (`s_BuffCount` 2) el siguiente empieza después de ellos.
+        // With effects (`s_BuffCount` 2) the next one starts after them.
         let paquete = c2(&[0x13, 2, 0, 1, 0, 3, 10, 10, 10, 10, 0x10, 2, 7, 8, 0, 2, 0, 4, 20, 20, 20, 20, 0x30, 0]);
         match ServerMessage::decode(&paquete) {
             Some(ServerMessage::AddMonstersToScope(v)) => {
@@ -1763,7 +1763,7 @@ mod tests {
         assert_eq!(wire[5 + 35], 0, "sin efectos");
         assert_eq!(ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(vec![])).len(), 5);
 
-        // Un personaje con efectos (como los manda OpenMU) también se lee.
+        // A character with effects (as OpenMU sends them) is also read.
         let mut con_efectos = wire[3..5 + 36].to_vec();
         con_efectos[1] = 1;
         con_efectos[2 + 35] = 2;
@@ -1774,7 +1774,7 @@ mod tests {
             otro => panic!("{otro:?}"),
         }
 
-        // Sentado (`CharacterPose::Sitting` = 2): en el byte 0 de la apariencia, bajo la clase.
+        // Sitting (`CharacterPose::Sitting` = 2): in appearance byte 0, below the class.
         let sentado = ScopeCharacter { id: 9, class: 8, name: "Elfa".into(), pose: 2, ..Default::default() };
         let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(vec![sentado]));
         assert_eq!(wire[9], (8 << 3) | 2);
@@ -1787,11 +1787,11 @@ mod tests {
 
     #[test]
     fn clave_de_mover() {
-        // A mano con `GenerateKeyValue`: 0 % 10 = 0 → 0 * 321 + 37531879 - 8734 / 32 (= 272).
+        // By hand with `GenerateKeyValue`: 0 % 10 = 0 → 0 * 321 + 37531879 - 8734 / 32 (= 272).
         assert_eq!(map_move_key(0), 37_531_879 - 272);
         // 1234567 % 10 = 7 → 1234567 * 665 + 78641332 - 6547 / 54 (= 121).
         assert_eq!(map_move_key(1_234_567), 1_234_567u32.wrapping_mul(665) + 78_641_332 - 121);
-        // DWORD: desborda sin fallar (u32::MAX % 10 = 5 → -987 + 24654876 - 5616 / 54).
+        // DWORD: wraps without failing (u32::MAX % 10 = 5 → -987 + 24654876 - 5616 / 54).
         assert_eq!(map_move_key(u32::MAX), 24_654_876 - 987 - 104);
     }
 
@@ -1807,7 +1807,7 @@ mod tests {
         let cambio = ida_y_vuelta_servidor(ServerMessage::MapChanged { is_map_change: true, map: 3, x: 175, y: 112, rotation: 1 });
         assert_eq!(cambio, [0xC3, 15, 0x1C, 0x0F, 1, 0, 3, 175, 112, 1, 0, 0, 0, 0, 0]);
         ida_y_vuelta_servidor(ServerMessage::MapChanged { is_map_change: false, map: 0, x: 1, y: 2, rotation: 0 });
-        // `MapChangedExtended` (16, con el discriminador) también se lee.
+        // `MapChangedExtended` (16, with the discriminator) is also read.
         let mut extendido = cambio.clone();
         extendido[1] = 16;
         extendido.push(7);
@@ -1818,7 +1818,7 @@ mod tests {
 
         let zen = ida_y_vuelta_servidor(ServerMessage::InventoryMoneyUpdate { money: 0x0001_E240 });
         assert_eq!(zen, [0xC3, 8, 0x22, 0xFE, 0x00, 0x01, 0xE2, 0x40], "zen en big endian");
-        // Cifrados de punta a punta.
+        // Encrypted end to end.
         let mut client = ClientCrypto::default();
         let mut server = ServerCrypto::default();
         for m in [ServerMessage::MapChanged { is_map_change: true, map: 51, x: 52, y: 225, rotation: 0 }, ServerMessage::InventoryMoneyUpdate { money: 5 }] {
@@ -1831,14 +1831,14 @@ mod tests {
     #[test]
     fn puertas_a_pie() {
         let pedir = ida_y_vuelta_cliente(ClientMessage::EnterGate { gate: 1, x: 0, y: 0 });
-        // `spe.Init(0xC1, 0x1C)`, `AddNullData(1)`, `WORD` puerta, x, y; cifrado (C3), 8 como OpenMU.
+        // `spe.Init(0xC1, 0x1C)`, `AddNullData(1)`, `WORD` gate, x, y; encrypted (C3), 8 like OpenMU.
         assert_eq!(pedir, [0xC3, 8, 0x1C, 0x00, 1, 0, 0, 0]);
         let mago = ida_y_vuelta_cliente(ClientMessage::EnterGate { gate: 0x0123, x: 130, y: 125 });
         assert_eq!(&mago[4..], &[0x23, 0x01, 130, 125]);
-        // Sin cifrar (C1) también se lee, como `WarpGateHandlerPlugIn` (`IsEncryptionExpected` falso).
+        // Unencrypted (C1) is also read, like `WarpGateHandlerPlugIn` (`IsEncryptionExpected` false).
         assert_eq!(ClientMessage::decode(&[0xC1, 8, 0x1C, 0, 3, 0, 0, 0]), Some(ClientMessage::EnterGate { gate: 3, x: 0, y: 0 }));
         assert_eq!(ClientMessage::decode(&[0xC3, 6, 0x1C, 0, 3, 0]), None, "corto");
-        // Cifrado de punta a punta.
+        // Encrypted end to end.
         let mut client = ClientCrypto::default();
         let mut server = ServerCrypto::default();
         let m = ClientMessage::EnterGate { gate: 3, x: 0, y: 0 };
@@ -1853,7 +1853,7 @@ mod tests {
         // `spe << (BYTE)p_Angle << (BYTE)p_Action`.
         assert_eq!(sentarse, [0xC1, 5, 0x18, 5, 0x80]);
         let visto = ida_y_vuelta_servidor(ServerMessage::ObjectAnimation { id: 0x1234, direction: 5, action: action::SIT1, target: 0 });
-        // `ObjectAnimation` de OpenMU (9): id BE en el 3, dirección en el 5, acción en el 6, objetivo en el 7.
+        // OpenMU's `ObjectAnimation` (9): BE id at 3, direction at 5, action at 6, target at 7.
         assert_eq!(visto, [0xC1, 9, 0x18, 0x12, 0x34, 5, 0x80, 0, 0]);
         ida_y_vuelta_servidor(ServerMessage::ObjectAnimation { id: 7, direction: 0, action: action::GREETING1, target: 0x0102 });
         assert_eq!((action::SIT1, action::POSE1, action::HEALING1, action::GREETING1, action::RUSH1, action::CHEERS), (128, 129, 130, 131, 148, 155));
@@ -1867,7 +1867,7 @@ mod tests {
     #[test]
     fn chat_y_susurros() {
         let hablar = ida_y_vuelta_cliente(ClientMessage::PublicChat { name: "Guerrero".into(), message: "hola".into() });
-        // `spe.Init(0xC1, 0x00)`, `Hero->ID` en 10 bytes y el texto con su cero.
+        // `spe.Init(0xC1, 0x00)`, `Hero->ID` in 10 bytes and the text with its zero.
         assert_eq!(hablar.len(), 3 + 10 + 5);
         assert_eq!(&hablar[..3], &[0xC1, 18, 0x00]);
         assert_eq!(&hablar[3..13], b"Guerrero\0\0");
@@ -1877,7 +1877,7 @@ mod tests {
         assert_eq!(&susurro[..3], &[0xC1, susurro.len() as u8, 0x02]);
         assert_eq!(*susurro.last().unwrap(), 0);
 
-        // Como mucho `MAX_CHAT_SIZE` bytes de texto con su cero, sin partir letras.
+        // At most `MAX_CHAT_SIZE` bytes of text with its zero, without splitting characters.
         let largo = ClientMessage::PublicChat { name: "A".into(), message: "x".repeat(200) }.encode();
         assert_eq!(largo.len(), 3 + 10 + MAX_CHAT_SIZE);
         let tildes = ClientMessage::PublicChat { name: "A".into(), message: "é".repeat(60) }.encode();
@@ -1886,7 +1886,7 @@ mod tests {
             otro => panic!("{otro:?}"),
         }
 
-        // El original copia `MAX_CHAT_SIZE` bytes aunque el paquete sea más corto: basta el cero.
+        // The original copies `MAX_CHAT_SIZE` bytes even if the packet is shorter: the zero is enough.
         let del_original = [0xC1, 3 + 10 + 4, 0x00, b'P', b'e', b'p', b'e', 0, 0, 0, 0, 0, 0, b'h', b'o', b'l', 0];
         assert_eq!(
             ClientMessage::decode(&del_original),
@@ -1899,10 +1899,10 @@ mod tests {
         assert_eq!(&susurrado[2..7], &[0x02, b'M', b'a', b'g', b'o']);
         assert_eq!(ida_y_vuelta_servidor(ServerMessage::WhisperResult { success: false }), [0xC1, 4, 0x0C, 0]);
         ida_y_vuelta_servidor(ServerMessage::WhisperResult { success: true });
-        // Vacío: nada más que el cero.
+        // Empty: nothing but the zero.
         ida_y_vuelta_servidor(ServerMessage::ChatMessage { sender: "Mago".into(), message: String::new() });
 
-        // Cifrados de punta a punta (el cliente pasa los C1 por Xor32).
+        // Encrypted end to end (the client passes C1 through Xor32).
         let mut client = ClientCrypto::default();
         let mut server = ServerCrypto::default();
         let m = ClientMessage::PublicChat { name: "Pepe".into(), message: "¿qué tal?".into() };
@@ -1914,15 +1914,15 @@ mod tests {
     #[test]
     fn avisos_del_servidor() {
         let aviso = ida_y_vuelta_servidor(ServerMessage::Notice { kind: notice_kind::BLUE, text: "Hola".into() });
-        // `PRECEIVE_NOTICE` sin `pack`: tipo en el 3 y el texto en el 13.
+        // `PRECEIVE_NOTICE` without `pack`: kind at 3 and the text at 13.
         assert_eq!(aviso.len(), 13 + 5);
         assert_eq!(&aviso[..4], &[0xC1, 18, 0x0D, 1]);
         assert_eq!(&aviso[4..13], &[0; 9]);
         assert_eq!(&aviso[13..], b"Hola\0");
-        // Como lo manda OpenMU al S6: el texto en el 4 tras nueve "0".
+        // As OpenMU sends it to S6: the text at 4 after nine "0".
         let openmu = c1(&[&[0x0D, 1][..], b"000000000", b"Aviso", &[0]].concat());
         assert_eq!(ServerMessage::decode(&openmu), Some(ServerMessage::Notice { kind: 1, text: "Aviso".into() }));
-        // Cabe en un C1 aunque el texto sea largo.
+        // Fits in a C1 even if the text is long.
         let largo = ServerMessage::Notice { kind: notice_kind::GOLDEN_CENTER, text: "a".repeat(400) }.encode();
         assert_eq!(largo.len(), 255);
         assert_eq!(truncate_utf8("añb", 2), "a", "no parte la ñ");
@@ -1949,7 +1949,7 @@ mod tests {
         let resp = ServerMessage::LogoutResponse { kind: 1 };
         assert_eq!(ServerMessage::decode(&client.decrypt(&server.encrypt(&resp.encode())).unwrap()), Some(resp));
 
-        // Un C1 en claro (caminar) también pasa por la capa de cifrado del cliente (Xor32).
+        // An unencrypted C1 (walking) also goes through the client's encryption layer (Xor32).
         let walk = ClientMessage::Walk { source_x: 1, source_y: 2, rotation: 3, directions: vec![4, 5] };
         assert_eq!(ClientMessage::decode(&server.decrypt(&client.encrypt(&walk.encode())).unwrap()), Some(walk));
     }

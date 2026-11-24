@@ -18,15 +18,15 @@ repository = "https://github.com/Crixpx-VE/mu-rs"
 [workspace.dependencies]
 mu-protocol = { path = "crates/mu-protocol" }
 mu-data = { path = "crates/mu-data" }
-# wav (efectos) y mp3 (música) del cliente original.
+# wav (sound effects) and mp3 (music) from the original client.
 bevy = { version = "0.20.1", features = ["wav", "mp3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-# Anchos de texto con la letra de la interfaz (chat).
+# Text widths with the UI font (chat).
 ab_glyph = "0.2.32"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png"] }
 
-# Bevy en debug es muy lento sin optimizar las dependencias.
+# Bevy in debug is very slow without optimizing dependencies.
 [profile.dev]
 opt-level = 1
 

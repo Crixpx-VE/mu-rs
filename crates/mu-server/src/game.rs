@@ -1,39 +1,39 @@
-//! Game Server: una tarea por conexión y un mundo compartido con los jugadores dentro.
+//! Game Server: one task per connection and a shared world with the players inside.
 //!
-//! Flujo de una conexión (el del cliente S6):
-//! 1. Saludo (`GameServerEntered`) con el id del jugador.
-//! 2. Login: si la cuenta no existe se crea con esa contraseña (servidor privado); si existe,
-//!    tiene que coincidir. Una cuenta no puede estar conectada dos veces.
-//! 3. Lista de personajes, crear (nombre de 4 a 10 letras o números, sin repetir) y borrar (con
-//!    la contraseña de la cuenta como código).
-//! 4. Elegir personaje: su información (`CharacterInformation`) y entra al mundo en su mapa; ve a
-//!    los demás jugadores de ese mapa y ellos a él.
-//! 5. Caminar: se guarda la casilla de llegada y se reenvía a los demás del mapa.
-//! 6. Mover de mapa (`M`): con la clave de `MapMoveChecksumKey`, el nivel y el zen (warp.rs), paga,
-//!    desaparece para los del mapa viejo y le llega `MapChanged`; cuando el cliente ha cargado
-//!    (`ClientReadyAfterMapChange`) se ven él y los del mapa nuevo.
-//! 7. Salir (o cortarse): se guarda dónde estaba y desaparece para los demás.
-//! 8. Chat (`PublicChatMessage`): le llega a todos los que lo ven, él incluido, con su nombre (no
-//!    el que diga el paquete), como `ChatMessageNormalProcessor` de OpenMU. Los canales de grupo
-//!    (`~`), gremio (`@`, `@@`) y Gens (`$`) no van a nadie porque aún no hay grupos, gremios ni
-//!    Gens. Lo que empieza por `/` es un comando: solo `/move <mapa>` (como la ventana `M`).
-//! 9. Susurro (`WhisperMessage`): al personaje conectado con ese nombre exacto (`strcmp`); si no
-//!    hay, `WhisperResult` con 0 (el cliente enseña "No users").
-//! 10. Si no puede mover de mapa, se lo dice con un aviso azul (`ServerMessage` tipo 1) con los
-//!    textos de OpenMU (`WarpAction.cs`); el de Icarus es `GlobalText[263]` del cliente.
-//! 11. Puertas a pie (`EnterGateRequest`): con las reglas de `Warps::enter_gate` va a la puerta de
-//!    llegada como con `M` (sin zen). Si la puerta no es de su mapa no se le contesta (como
-//!    `WarpGateHandlerPlugIn`); si no llega al nivel o está lejos, `MapChanged` sin cambio de mapa
-//!    en su casilla (`MapChangeFailedAsync` de OpenMU) para que el cliente siga.
-//! 12. Animaciones (`AnimationRequest`): se reenvían como `ObjectAnimation` a los demás que lo ven
-//!    (`AnimationHandlerPlugIn` de OpenMU) y se guarda la postura (sentado, apoyado, curándose) para
-//!    los que lo vean aparecer después; caminar la quita.
+//! Connection flow (the S6 client's):
+//! 1. Greeting (`GameServerEntered`) with the player id.
+//! 2. Login: if the account doesn't exist it is created with that password (private server); if it
+//!    exists, it must match. An account can't be connected twice.
+//! 3. Character list, create (name of 4 to 10 letters or digits, unique) and delete (with
+//!    the account password as the code).
+//! 4. Select character: its information (`CharacterInformation`) and it enters the world on its map; it
+//!    sees the other players on that map and they see it.
+//! 5. Walk: the destination tile is stored and relayed to the others on the map.
+//! 6. Map move (`M`): with the `MapMoveChecksumKey` key, level and zen (warp.rs), pays,
+//!    disappears for those on the old map and receives `MapChanged`; once the client has loaded
+//!    (`ClientReadyAfterMapChange`) it and those on the new map see each other.
+//! 7. Leave (or drop): where it was is saved and it disappears for the others.
+//! 8. Chat (`PublicChatMessage`): reaches everyone who sees it, itself included, with its name (not
+//!    the one the packet says), like OpenMU's `ChatMessageNormalProcessor`. The party (`~`),
+//!    guild (`@`, `@@`) and Gens (`$`) channels go to nobody since there are no parties, guilds or
+//!    Gens yet. Anything starting with `/` is a command: only `/move <map>` (like the `M` window).
+//! 9. Whisper (`WhisperMessage`): to the connected character with that exact name (`strcmp`); if
+//!    none, `WhisperResult` with 0 (the client shows "No users").
+//! 10. If it can't change map, it is told with a blue notice (`ServerMessage` type 1) with
+//!    OpenMU's texts (`WarpAction.cs`); the Icarus one is the client's `GlobalText[263]`.
+//! 11. Walk-in gates (`EnterGateRequest`): with the `Warps::enter_gate` rules it goes to the
+//!    destination gate as with `M` (no zen). If the gate isn't on its map there is no reply (like
+//!    `WarpGateHandlerPlugIn`); if the level is too low or it's too far, `MapChanged` without a map change
+//!    on its tile (OpenMU's `MapChangeFailedAsync`) so the client can continue.
+//! 12. Animations (`AnimationRequest`): relayed as `ObjectAnimation` to the others who see it
+//!    (OpenMU's `AnimationHandlerPlugIn`) and the pose (sitting, leaning, healing) is stored for
+//!    those who see it appear later; walking clears it.
 //!
-//! 13. Monstruos y NPC (monsters.rs): cada jugador ve los de su mapa a [`VIEW_RANGE`] casillas o menos
-//!    (`AddMonstersToScope`, y `MapObjectOutOfScope` al alejarse); un bucle de [`TICK`] los hace pasear
-//!    y manda cada paseo (`ObjectWalked`) a los que lo ven.
+//! 13. Monsters and NPCs (monsters.rs): each player sees those on its map within [`VIEW_RANGE`] tiles
+//!    (`AddMonstersToScope`, and `MapObjectOutOfScope` when moving away); a [`TICK`] loop makes them roam
+//!    and sends each walk (`ObjectWalked`) to those who see them.
 //!
-//! Entre jugadores, de momento "ver" es estar en el mismo mapa (sin radio de visión).
+//! Between players, for now "seeing" means being on the same map (no view radius).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -54,7 +54,7 @@ use crate::monsters::{MAX_MONSTERS, Mobs};
 use crate::spawn::Spawns;
 use crate::warp::{Refused, Warps};
 
-/// Un jugador dentro del mundo.
+/// A player inside the world.
 struct InWorld {
     account: String,
     name: String,
@@ -63,14 +63,14 @@ struct InWorld {
     x: u8,
     y: u8,
     rotation: u8,
-    /// `CharacterPose` (`action::pose`): 0 de pie.
+    /// `CharacterPose` (`action::pose`): 0 standing.
     pose: u8,
-    /// Visible en su mapa. Tras `MapChanged` no lo está hasta que el cliente ha cargado el mapa
-    /// nuevo (`ClientReadyAfterMapChange`, como `PlayerMapTransitions` de OpenMU).
+    /// Visible on its map. After `MapChanged` it isn't until the client has loaded the new
+    /// map (`ClientReadyAfterMapChange`, like OpenMU's `PlayerMapTransitions`).
     ready: bool,
-    /// Paquetes para él (en claro; su tarea de escritura los cifra).
+    /// Packets for it (in plain text; its writer task encrypts them).
     out: UnboundedSender<Vec<u8>>,
-    /// Monstruos y NPC que su cliente tiene creados.
+    /// Monsters and NPCs its client has created.
     mobs_seen: HashSet<u16>,
 }
 
@@ -85,7 +85,7 @@ impl InWorld {
             target_x: self.x,
             target_y: self.y,
             rotation: self.rotation,
-            // `CharacterHeroState::Normal` (3): sin PK (con 0 el cliente lo pinta como un NPC).
+            // `CharacterHeroState::Normal` (3): no PK (with 0 the client paints it as an NPC).
             hero_state: 3,
             pose: self.pose,
         }
@@ -95,19 +95,19 @@ impl InWorld {
 #[derive(Default)]
 struct World {
     players: HashMap<u16, InWorld>,
-    /// Cuentas conectadas ahora mismo.
+    /// Accounts connected right now.
     online: HashSet<String>,
     next_id: u16,
     mobs: Mobs,
 }
 
-/// Casillas a las que un jugador ve a los monstruos (`InfoRange` de la configuración de OpenMU, 12).
+/// Tiles within which a player sees monsters (`InfoRange` from OpenMU's configuration, 12).
 pub const VIEW_RANGE: u8 = 12;
 
-/// Cada cuánto andan y deciden los monstruos.
+/// How often monsters walk and decide.
 const TICK: Duration = Duration::from_millis(50);
 
-/// Ids de los jugadores: por encima de los de los monstruos.
+/// Player ids: above the monster ones.
 const FIRST_PLAYER_ID: u16 = MAX_MONSTERS as u16 + 1;
 
 pub struct Shared {
@@ -147,14 +147,14 @@ pub async fn serve(listener: TcpListener, shared: Arc<Shared>) -> std::io::Resul
     }
 }
 
-/// Estado de una conexión.
+/// Connection state.
 struct Session {
     id: u16,
     account: Option<String>,
-    /// Personaje dentro del mundo.
+    /// Character inside the world.
     in_world: bool,
-    /// Última clave de mover de mapa (`m_dwMapMoveKeyValue`): la que se mandó al entrar y luego
-    /// cada una de [`game::map_move_key`].
+    /// Last map-move key (`m_dwMapMoveKeyValue`): the one sent on entering and then
+    /// each one from [`game::map_move_key`].
     move_key: u32,
     out: UnboundedSender<Vec<u8>>,
 }
@@ -169,7 +169,7 @@ async fn session(socket: TcpStream, shared: &Arc<Shared>) -> std::io::Result<()>
     socket.set_nodelay(true)?;
     let (mut rd, mut wr) = socket.into_split();
     let (out, mut rx) = unbounded_channel::<Vec<u8>>();
-    // Escritura: cifra (C3/C4) y manda en orden.
+    // Writer: encrypts (C3/C4) and sends in order.
     let writer = tokio::spawn(async move {
         let mut crypto = ServerCrypto::default();
         while let Some(p) = rx.recv().await {
@@ -181,7 +181,7 @@ async fn session(socket: TcpStream, shared: &Arc<Shared>) -> std::io::Result<()>
 
     let id = {
         let mut w = shared.world.lock().unwrap();
-        // Ids de `FIRST_PLAYER_ID` a 0x7FFF que no estén en uso.
+        // Ids from `FIRST_PLAYER_ID` to 0x7FFF not in use.
         loop {
             w.next_id = if w.next_id >= 0x7FFF || w.next_id < FIRST_PLAYER_ID { FIRST_PLAYER_ID } else { w.next_id + 1 };
             if !w.players.contains_key(&w.next_id) {
@@ -234,7 +234,7 @@ async fn read_loop(rd: &mut tokio::net::tcp::OwnedReadHalf, s: &mut Session, sha
     }
 }
 
-/// Atiende un mensaje. `false` = cerrar la conexión.
+/// Handles a message. `false` = close the connection.
 fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
     match msg {
         ClientMessage::Login { username, password, .. } => {
@@ -254,7 +254,7 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
                 leave(s, shared, false);
             }
             let list = shared.db.lock().unwrap().characters(&account);
-            // Sin las cartas de la tienda: todas las clases se pueden crear.
+            // Without the shop cards: every class can be created.
             let unlock = 0x0F;
             s.send(ServerMessage::CharacterClassCreationUnlock { flags: unlock });
             s.send(ServerMessage::CharacterList {
@@ -294,7 +294,7 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::DeleteCharacter { name, security_code } => {
             let Some(account) = s.account.clone() else { return true };
             let mut db = shared.db.lock().unwrap();
-            // `CharacterDeleteResult`: 1 borrado, 2 código incorrecto, 0 no se pudo.
+            // `CharacterDeleteResult`: 1 deleted, 2 wrong code, 0 failed.
             let result = if !db.check_password(&account, &security_code) {
                 2
             } else if db.delete_character(&account, &name) {
@@ -318,7 +318,7 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
             leave(s, shared, false);
             s.send(ServerMessage::LogoutResponse { kind });
             if kind == 2 {
-                // A la lista de servidores: la cuenta queda libre.
+                // To the server list: the account is released.
                 if let Some(a) = s.account.take() {
                     shared.world.lock().unwrap().online.remove(&a);
                 }
@@ -387,7 +387,7 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
         hero_state: 3,
         ..Default::default()
     }));
-    // La clave para mover de mapa (`GCSendMapMoveChecksum` / `GenerateSeedValue`).
+    // The map-move key (`GCSendMapMoveChecksum` / `GenerateSeedValue`).
     s.move_key = shared.warps.random() as u32;
     s.send(ServerMessage::MapMoveChecksumKey { key: s.move_key });
     let me = InWorld {
@@ -411,8 +411,8 @@ fn enter_world(s: &mut Session, shared: &Shared, account: &str, c: &crate::db::C
     s.in_world = true;
 }
 
-/// Los monstruos que `id` tiene que ver ahora: le aparecen los que están a [`VIEW_RANGE`] o menos y le
-/// desaparecen los que ya no.
+/// The monsters `id` must see now: those within [`VIEW_RANGE`] appear and those no longer
+/// in range disappear.
 fn refresh_mobs(w: &mut World, id: u16) {
     let World { players, mobs, .. } = w;
     let Some(p) = players.get_mut(&id).filter(|p| p.ready) else { return };
@@ -432,7 +432,7 @@ fn refresh_mobs(w: &mut World, id: u16) {
     p.mobs_seen.extend(new.iter().map(|m| m.id));
 }
 
-/// Los monstruos dan sus pasos y deciden; luego cada jugador ve los que tiene cerca.
+/// Monsters take their steps and decide; then each player sees those nearby.
 fn tick(shared: &Shared) {
     let mut w = shared.world.lock().unwrap();
     let observed: HashSet<u16> = w.players.values().flat_map(|p| p.mobs_seen.iter().copied()).collect();
@@ -449,7 +449,7 @@ fn tick(shared: &Shared) {
     }
 }
 
-/// `me` (que aún no está en `w.players`, o es `id`) ve a los del mapa y ellos a él.
+/// `me` (not yet in `w.players`, or is `id`) sees those on the map and they see it.
 fn show_each_other(w: &World, id: u16, me: &InWorld) {
     let visible = |(pid, p): &(&u16, &InWorld)| **pid != id && p.ready && p.map == me.map;
     let others: Vec<ScopeCharacter> = w.players.iter().filter(visible).map(|(pid, p)| p.scope(*pid)).collect();
@@ -462,12 +462,12 @@ fn show_each_other(w: &World, id: u16, me: &InWorld) {
     }
 }
 
-/// `WarpCommandRequest` (la ventana `M`): primero la clave y luego [`warp_to`].
+/// `WarpCommandRequest` (the `M` window): first the key and then [`warp_to`].
 fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
     if !s.in_world {
         return;
     }
-    // `CheckKeyValue` (KeyGenerater.cpp:51-63): tiene que ser la siguiente de la última.
+    // `CheckKeyValue` (KeyGenerater.cpp:51-63): must be the one after the last.
     let expected = game::map_move_key(s.move_key);
     if key != expected {
         eprintln!("[game] {}: clave de mover incorrecta ({key:#010X}, esperaba {expected:#010X})", s.id);
@@ -477,27 +477,27 @@ fn warp(s: &mut Session, shared: &Shared, key: u32, index: u16) {
     warp_to(s, shared, index);
 }
 
-/// Un aviso azul en el chat del jugador (`ShowBlueMessageAsync` de OpenMU).
+/// A blue notice in the player's chat (OpenMU's `ShowBlueMessageAsync`).
 fn blue_notice(s: &Session, text: impl Into<String>) {
     s.send(ServerMessage::Notice { kind: game::notice_kind::BLUE, text: text.into() });
 }
 
-/// Por qué no puede ir, como se lo dice al jugador; `None` = no se le dice nada (un destino o una
-/// puerta que no existen son cosa del cliente o de los datos, no del jugador).
+/// Why it can't go, as told to the player; `None` = nothing is said (a destination or a
+/// gate that don't exist are the client's or the data's fault, not the player's).
 fn refused_message(why: Refused) -> Option<String> {
     match why {
-        // `WarpAction.CheckRequirements` de OpenMU.
+        // OpenMU's `WarpAction.CheckRequirements`.
         Refused::Level { needed } => Some(format!("You need to be level {needed} in order to warp")),
         Refused::Money { needed } => Some(format!("You need {needed} in order to warp")),
-        // `GlobalText[263]`: lo que dice el cliente original si se intenta sin alas (ZzzInterface.cpp:9301-9305).
+        // `GlobalText[263]`: what the original client says when trying without wings (ZzzInterface.cpp:9301-9305).
         Refused::NeedsWings => Some("You can enter Icarus only with wings, dinorant, fenrirr".to_string()),
         Refused::UnknownWarp | Refused::BadGate | Refused::NotEntrance | Refused::TooFar => None,
     }
 }
 
-/// Lo mismo al cruzar una puerta a pie: el nivel con `GlobalText[350]`, lo que enseña el cliente
-/// original en `CheckGate` (ZzzInterface.cpp:7095-7100) antes de pedirlo (OpenMU dice "Your level is
-/// too low to enter this map."; solo llega si el cliente no lo ha mirado).
+/// The same when crossing a gate on foot: the level with `GlobalText[350]`, what the original client
+/// shows in `CheckGate` (ZzzInterface.cpp:7095-7100) before requesting it (OpenMU says "Your level is
+/// too low to enter this map."; only reached if the client didn't check).
 fn gate_refused_message(why: Refused) -> Option<String> {
     match why {
         Refused::Level { needed } => Some(format!("Only characters over level {needed} can enter.")),
@@ -505,7 +505,7 @@ fn gate_refused_message(why: Refused) -> Option<String> {
     }
 }
 
-/// Lo que se cuenta en el registro.
+/// What is written to the log.
 fn refused_log(why: Refused, money: u32) -> String {
     match why {
         Refused::UnknownWarp => "no existe".to_string(),
@@ -518,9 +518,9 @@ fn refused_log(why: Refused, money: u32) -> String {
     }
 }
 
-/// Mover al destino `index` de la lista (ventana `M` o `/move`): destino, nivel y zen; luego
-/// paga, deja el mapa viejo y le dice al cliente a dónde va (`MapChanged`). Si no se puede, se lo
-/// dice en el chat (ver [`refused_message`]).
+/// Move to destination `index` of the list (`M` window or `/move`): destination, level and zen; then
+/// pays, leaves the old map and tells the client where it goes (`MapChanged`). If not possible, it
+/// is told in chat (see [`refused_message`]).
 fn warp_to(s: &Session, shared: &Shared, index: u16) {
     let Some(account) = s.account.clone() else { return };
     let mut w = shared.world.lock().unwrap();
@@ -547,8 +547,8 @@ fn warp_to(s: &Session, shared: &Shared, index: u16) {
     eprintln!("[game] {}: {name} va al destino {index}: mapa {} ({}, {}), paga {cost}", s.id, landing.map, landing.x, landing.y);
 }
 
-/// Lleva al jugador a `landing`: lo guarda, desaparece para los del mapa viejo y le llega
-/// `MapChanged`; se le vuelve a ver con `ClientReadyAfterMapChange` ([`map_ready`]).
+/// Takes the player to `landing`: saves it, disappears for those on the old map and it receives
+/// `MapChanged`; it is seen again with `ClientReadyAfterMapChange` ([`map_ready`]).
 fn move_to(s: &Session, shared: &Shared, w: &mut World, account: &str, landing: crate::warp::Landing) {
     let Some(me) = w.players.get(&s.id) else { return };
     shared.db.lock().unwrap().update_position(account, &me.name, landing.map, landing.x, landing.y, landing.angle);
@@ -559,13 +559,13 @@ fn move_to(s: &Session, shared: &Shared, w: &mut World, account: &str, landing: 
     }
     let Some(me) = w.players.get_mut(&s.id) else { return };
     (me.map, me.x, me.y, me.rotation, me.pose, me.ready) = (landing.map, landing.x, landing.y, landing.angle, 0, false);
-    // El cliente borra todo lo del mapa al cargar el nuevo.
+    // The client clears everything from the map when loading the new one.
     me.mobs_seen.clear();
     s.send(ServerMessage::MapChanged { is_map_change: true, map: landing.map as u16, x: landing.x, y: landing.y, rotation: landing.angle });
 }
 
-/// `EnterGateRequest` (el héroe pisa una puerta): con las reglas de `Warps::enter_gate`, a su
-/// puerta de llegada. La puerta 0 es el teletransporte del mago, que aún no hay.
+/// `EnterGateRequest` (the hero steps on a gate): with the `Warps::enter_gate` rules, to its
+/// destination gate. Gate 0 is the wizard's teleport, which doesn't exist yet.
 fn enter_gate(s: &Session, shared: &Shared, gate: u16) {
     let Some(account) = s.account.clone() else { return };
     if !s.in_world || gate == 0 {
@@ -582,20 +582,20 @@ fn enter_gate(s: &Session, shared: &Shared, gate: u16) {
         }
         Err(why) => {
             eprintln!("[game] {}: {name} no puede cruzar la puerta {gate} desde el mapa {map} ({x}, {y}): {}", s.id, refused_log(why, c.money));
-            // Una puerta que no es de su mapa solo se registra (`WarpGateHandlerPlugIn`).
+            // A gate not on its map is only logged (`WarpGateHandlerPlugIn`).
             if matches!(why, Refused::NotEntrance | Refused::BadGate) {
                 return;
             }
             if let Some(text) = gate_refused_message(why) {
                 blue_notice(s, text);
             }
-            // `MapChangeFailedAsync` → `SendMapChangedAsync(mapa, x, y, rotación, false)` (MapChangePlugIn.cs).
+            // `MapChangeFailedAsync` → `SendMapChangedAsync(map, x, y, rotation, false)` (MapChangePlugIn.cs).
             s.send(ServerMessage::MapChanged { is_map_change: false, map: map as u16, x, y, rotation });
         }
     }
 }
 
-/// `AnimationRequest`: se gira, guarda la postura y lo ven los demás del mapa (él no).
+/// `AnimationRequest`: turns, stores the pose and the others on the map see it (not itself).
 fn animation(s: &Session, shared: &Shared, rotation: u8, action: u8) {
     if !s.in_world {
         return;
@@ -613,7 +613,7 @@ fn animation(s: &Session, shared: &Shared, rotation: u8, action: u8) {
     }
 }
 
-/// `ClientReadyAfterMapChange`: ya ha cargado el mapa nuevo; se ven él y los de ese mapa.
+/// `ClientReadyAfterMapChange`: the new map has loaded; it and those on that map see each other.
 fn map_ready(s: &Session, shared: &Shared) {
     let mut w = shared.world.lock().unwrap();
     let Some(me) = w.players.get_mut(&s.id).filter(|p| !p.ready) else { return };
@@ -623,8 +623,8 @@ fn map_ready(s: &Session, shared: &Shared) {
     refresh_mobs(&mut w, s.id);
 }
 
-/// Canal de un mensaje de chat por su prefijo (`ChatMessageAction.GetMessageType` de OpenMU; el
-/// cliente los pone en NewUIChatInputBox.cpp:478-490 y los quita en `ReceiveChat`).
+/// Chat message channel by its prefix (OpenMU's `ChatMessageAction.GetMessageType`; the
+/// client adds them in NewUIChatInputBox.cpp:478-490 and strips them in `ReceiveChat`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Channel {
     Normal,
@@ -651,7 +651,7 @@ fn channel(message: &str) -> Channel {
     }
 }
 
-/// `PublicChatMessage`: a todos los del mapa que están en él (él también, así se ve lo que dice).
+/// `PublicChatMessage`: to everyone on the map who is in it (itself too, so it sees what it says).
 fn chat(s: &Session, shared: &Shared, message: &str) {
     if !s.in_world {
         return;
@@ -674,13 +674,13 @@ fn chat(s: &Session, shared: &Shared, message: &str) {
     }
 }
 
-/// Comandos del chat:
-/// - `/move <mapa>` (el nombre o el subnombre de la lista de la ventana `M`, sin mirar mayúsculas,
-///   como `GetMapIndexFromMovereq`), con las mismas reglas que la ventana.
-/// - `/goldnotice <texto>`, solo Game Master: aviso dorado en el centro de la pantalla de todos
-///   (`NoticeChatCommandPlugIn` de OpenMU → `MessageType.GoldenCenter`, `ReceiveNotice` tipo 0).
+/// Chat commands:
+/// - `/move <map>` (the name or subname from the `M` window list, case-insensitive,
+///   like `GetMapIndexFromMovereq`), with the same rules as the window.
+/// - `/goldnotice <text>`, Game Master only: golden notice in the center of everyone's screen
+///   (OpenMU's `NoticeChatCommandPlugIn` → `MessageType.GoldenCenter`, `ReceiveNotice` type 0).
 ///
-/// El resto se ignora.
+/// Everything else is ignored.
 fn command(s: &Session, shared: &Shared, message: &str) {
     let mut words = message.splitn(2, ' ');
     let name = words.next().unwrap_or("");
@@ -705,7 +705,7 @@ fn command(s: &Session, shared: &Shared, message: &str) {
     }
 }
 
-/// Un aviso a todos los que están en el mundo, en cualquier mapa (`SendGlobalMessageAsync` de OpenMU).
+/// A notice to everyone in the world, on any map (OpenMU's `SendGlobalMessageAsync`).
 fn global_notice(shared: &Shared, kind: u8, text: &str) {
     let packet = ServerMessage::Notice { kind, text: text.to_string() }.encode();
     let w = shared.world.lock().unwrap();
@@ -714,7 +714,7 @@ fn global_notice(shared: &Shared, kind: u8, text: &str) {
     }
 }
 
-/// `WhisperMessage`: al personaje conectado con ese nombre; si no hay, `WhisperResult` 0.
+/// `WhisperMessage`: to the connected character with that name; if none, `WhisperResult` 0.
 fn whisper(s: &Session, shared: &Shared, target: &str, message: &str) {
     if !s.in_world {
         return;
@@ -736,7 +736,7 @@ fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, 
     }
     let mut w = shared.world.lock().unwrap();
     let Some(me) = w.players.get_mut(&s.id).filter(|p| p.ready) else { return };
-    // Casilla de llegada: la de salida más cada paso.
+    // Destination tile: the starting one plus each step.
     let (mut x, mut y) = (source_x as i32, source_y as i32);
     for &d in &directions {
         let (dx, dy) = game::DIRECTIONS[(d & 7) as usize];
@@ -746,7 +746,7 @@ fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, 
     me.x = x.clamp(0, 255) as u8;
     me.y = y.clamp(0, 255) as u8;
     me.rotation = rotation;
-    // Al moverse deja de estar sentado o apoyado (el cliente también: camina).
+    // Moving ends sitting or leaning (the client does too: it walks).
     me.pose = 0;
     let map = me.map;
     let packet =
@@ -758,7 +758,7 @@ fn walk(s: &Session, shared: &Shared, source_x: u8, source_y: u8, rotation: u8, 
     }
 }
 
-/// Sale del mundo (guarda dónde estaba y desaparece para los demás); `disconnect` libera además la cuenta.
+/// Leaves the world (saves where it was and disappears for the others); `disconnect` also releases the account.
 fn leave(s: &mut Session, shared: &Shared, disconnect: bool) {
     let mut w = shared.world.lock().unwrap();
     if s.in_world {
@@ -800,7 +800,7 @@ mod tests {
         assert_eq!(refused_message(Refused::Money { needed: 2000 }).as_deref(), Some("You need 2000 in order to warp"));
         assert!(refused_message(Refused::NeedsWings).is_some_and(|t| t.contains("Icarus")));
         assert_eq!(refused_message(Refused::UnknownWarp), None);
-        // Puertas: el `GlobalText[350]` del cliente.
+        // Gates: the client's `GlobalText[350]`.
         assert_eq!(gate_refused_message(Refused::Level { needed: 20 }).as_deref(), Some("Only characters over level 20 can enter."));
         assert_eq!(gate_refused_message(Refused::TooFar), None);
     }

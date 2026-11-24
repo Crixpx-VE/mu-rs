@@ -1,23 +1,23 @@
-//! Objetos del mapa con efectos de la pantalla de login (`WD_73NEW_LOGIN_SCENE`, carpeta World74)
-//! y de la selección de personaje (`WD_74NEW_CHARACTER_SCENE`, carpeta World75).
+//! Map objects with effects on the login screen (`WD_73NEW_LOGIN_SCENE`, folder World74)
+//! and the character selection (`WD_74NEW_CHARACTER_SCENE`, folder World75).
 //!
-//! En el original estos dos mapas no tienen código propio: `GMNewTown.cpp` (`IsNewMap73_74`) pasa
-//! `CreateObject`, `MoveObject`, `UpdateObjectEffects`, `RenderObject` y
-//! `RenderObjectAfterCharacter` a `GMEmpireGuardian4.cpp`, porque `CMapManager::IsEmpireGuardian4()`
-//! también es verdadero en 73 y 74. Aquí está lo de `GMEmpireGuardian4::CreateObject` (≈38-67),
-//! `MoveObject` (≈84-176) y `UpdateObjectEffects` (≈670-984) que crea efectos; el dibujo (mallas
-//! ocultas, mallas que suman, luz del cuerpo, velocidad de la animación) está en
-//! `mu_data::objects::model_rules` (mapas 74 y 75), y el fundido por distancia de la cámara del
-//! login (`CullObjects`, `ZzzObject.cpp` ≈4205-4246) en `objects.rs`.
+//! In the original these two maps have no code of their own: `GMNewTown.cpp` (`IsNewMap73_74`) forwards
+//! `CreateObject`, `MoveObject`, `UpdateObjectEffects`, `RenderObject` and
+//! `RenderObjectAfterCharacter` to `GMEmpireGuardian4.cpp`, because `CMapManager::IsEmpireGuardian4()`
+//! is also true for 73 and 74. This holds the effect-creating parts of `GMEmpireGuardian4::CreateObject`
+//! (≈38-67), `MoveObject` (≈84-176) and `UpdateObjectEffects` (≈670-984); drawing (hidden meshes,
+//! additive meshes, body light, animation speed) is in `mu_data::objects::model_rules` (maps 74
+//! and 75), and the login camera distance fade (`CullObjects`, `ZzzObject.cpp` ≈4205-4246) in
+//! `objects.rs`.
 //!
-//! Sonidos: ninguno. `GMNewTown::PlayObjectSound` solo se llama en `WD_51HOME_6TH_CHAR`, y
-//! `GMEmpireGuardian4::PlayObjectSound` (`SOUND_EMPIREGUARDIAN_INDOOR_SOUND`) solo lo llama
-//! `MapProcess::MoveObject` para los mapas registrados, y 73/74 no lo están (solo `WD_72`).
-//! `Data/Maps/ObjectSounds.json` tampoco tiene nada para 73/74.
+//! Sounds: none. `GMNewTown::PlayObjectSound` is only called in `WD_51HOME_6TH_CHAR`, and
+//! `GMEmpireGuardian4::PlayObjectSound` (`SOUND_EMPIREGUARDIAN_INDOOR_SOUND`) is only called by
+//! `MapProcess::MoveObject` for registered maps, and 73/74 are not registered (only `WD_72`).
+//! `Data/Maps/ObjectSounds.json` has nothing for 73/74 either.
 //!
-//! En el login el original solo suelta los efectos de los objetos que dibuja ese fotograma
-//! (`MarkDrawn`: a menos de `RENDER_OBJECT_DIST` de la cámara): `objects.rs` lo apunta en
-//! `user[`[`SLOT_CULLED`]`]` (1 = no se dibuja) y aquí no se crea nada mientras tanto.
+//! On the login screen the original only releases effects for objects drawn that frame
+//! (`MarkDrawn`: within `RENDER_OBJECT_DIST` of the camera): `objects.rs` records it in
+//! `user[`[`SLOT_CULLED`]`]` (1 = not drawn) and nothing is created meanwhile.
 
 use bevy::math::Vec3;
 
@@ -27,17 +27,17 @@ use crate::fx::core::*;
 const WD_73NEW_LOGIN_SCENE: i32 = 73;
 const WD_74NEW_CHARACTER_SCENE: i32 = 74;
 
-/// Campo libre de [`MapObject::user`] que escribe `objects.rs` en el login: 1 si `CullObjects` no
-/// dibuja el objeto este fotograma (lejos de la cámara), 0 si lo dibuja.
+/// Free field of [`MapObject::user`] written by `objects.rs` on the login screen: 1 if `CullObjects`
+/// doesn't draw the object this frame (far from the camera), 0 if it does.
 pub const SLOT_CULLED: usize = 3;
 
-/// Tipos con código en `GMEmpireGuardian4::MoveObject` / `UpdateObjectEffects` / `CreateObject`.
-/// TODO(original): 10 (`SubType = rand() % 50` en `CreateObject`, dos veces porque también lo llama
-/// la cadena de `MapProcess::CreateObject`; luego `MoveObject` tiene la animación parada en el
-/// fotograma 0 esos ticks): `objects.rs` anima los objetos por grupos y no puede retrasar uno.
-/// TODO(original): 115/117 (`g_EmpireGuardian1.UpdateProjectileLauncher`: crea `MODEL_PROJECTILE`
-/// con `SubType` 100/101), que no está en el motor; no hay ninguno en World74/75.
-/// 157 (lámpara con velas) no hace nada en 73/74: `UpdateObjectEffects` vuelve antes.
+/// Types with code in `GMEmpireGuardian4::MoveObject` / `UpdateObjectEffects` / `CreateObject`.
+/// TODO(original): 10 (`SubType = rand() % 50` in `CreateObject`, twice because the
+/// `MapProcess::CreateObject` chain also calls it; then `MoveObject` keeps the animation stopped at
+/// frame 0 for those ticks): `objects.rs` animates objects in groups and can't delay one.
+/// TODO(original): 115/117 (`g_EmpireGuardian1.UpdateProjectileLauncher`: creates `MODEL_PROJECTILE`
+/// with `SubType` 100/101), not in the engine; there are none in World74/75.
+/// 157 (lamp with candles) does nothing in 73/74: `UpdateObjectEffects` returns early.
 const TYPES: [i32; 17] = [12, 20, 37, 50, 64, 79, 80, 82, 83, 84, 85, 86, 129, 130, 131, 132, 158];
 
 pub fn register(r: &mut Registry) {
@@ -48,12 +48,12 @@ pub fn register(r: &mut Registry) {
     }
 }
 
-/// `Random::Rand() % n` en coma flotante.
+/// `Random::Rand() % n` as floating point.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// `o->AnimationFrame` dentro de la acción 0 (como la deja `PlayAnimation`, que da la vuelta).
+/// `o->AnimationFrame` within action 0 (as left by `PlayAnimation`, which wraps around).
 fn anim_frame(o: &MapObject) -> f32 {
     let Some(act) = o.model.as_ref().and_then(|m| m.actions.first()) else { return 0.0 };
     let frames = if act.lock_positions.is_some() { act.frames.saturating_sub(1) } else { act.frames };
@@ -64,27 +64,27 @@ fn anim_frame(o: &MapObject) -> f32 {
 }
 
 fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
-    // CreateObject (una vez): 129-132 se quedan con el giro en grados enteros (`(int)Angle[2] % 360`).
+    // CreateObject (once): 129-132 keep the rotation in whole degrees (`(int)Angle[2] % 360`).
     if !o.created && (129..=132).contains(&o.ty) {
         o.angle.z = ((o.angle.z as i32) % 360) as f32;
     }
 
-    // MoveObject: los puntos de fuego, agua y humo no se dibujan.
+    // MoveObject: fire, water and smoke points are not drawn.
     if matches!(o.ty, 79 | 80 | 82..=86 | 129..=132) {
         o.hidden_mesh = -2;
     }
 
-    // UpdateObjectVisual: solo los objetos que se dibujan este fotograma.
+    // UpdateObjectVisual: only objects drawn this frame.
     if ctx.world_active == WD_73NEW_LOGIN_SCENE && o.user[SLOT_CULLED] != 0.0 {
         return;
     }
-    // `Luminosity` del principio de `UpdateObjectVisual` (gasta un `rand()` siempre).
+    // `Luminosity` at the start of `UpdateObjectVisual` (always consumes a `rand()`).
     let _luminosity = rf(ctx, 30);
 
     let wt = ctx.world_time;
     match o.ty {
         12 => {
-            // `BITMAP_SHINY + 5` (sin `LDS_FIX_ACCESS_INDEXNUMBER_ALREADY_LOADTEXTURE`).
+            // `BITMAP_SHINY + 5` (without `LDS_FIX_ACCESS_INDEXNUMBER_ALREADY_LOADTEXTURE`).
             let flumi = (wt * 0.0008).sin().abs() * 0.9 + 0.1;
             let scale = o.scale * 0.3 * flumi;
             let light1 = Vec3::splat(flumi);
@@ -97,7 +97,7 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
             ctx.create_sprite(BITMAP_SHINY + 5, pos, scale, light1, 0.0, 0);
         }
         20 => {
-            // Chispas al golpear (dos momentos de la animación, uno girado 180°).
+            // Sparks on hit (two animation moments, one rotated 180°).
             let frame = anim_frame(o);
             let turn = if frame > 5.4 && frame < 6.5 {
                 Some(180.0)
@@ -110,7 +110,7 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
                 let mut angle = Vec3::ZERO;
                 for _ in 0..4 {
                     angle = Vec3::new((ctx.rand() % 60 + 60 + 90) as f32, 0.0, o.angle.z + turn);
-                    // `o` como `Target`: el subtipo 5 no lo usa.
+                    // `o` as `Target`: subtype 5 doesn't use it.
                     ctx.create_joint(BITMAP_JOINT_SPARK, o.position, o.position, angle, 5, None, 10.0);
                 }
                 ctx.create_particle(BITMAP_SPARK, o.position, angle, o.light, 11, 1.0, None);
@@ -138,13 +138,13 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
                 let position = rotate(angle, Vec3::new(0.0, 30.0, 0.0)) + o.position;
                 let light = Vec3::new(0.04, 0.03, 0.02);
                 for _ in 0..3 {
-                    // `o` como dueño: el subtipo 22 no lo usa.
+                    // `o` as owner: subtype 22 doesn't use it.
                     ctx.create_particle(BITMAP_CLOUD, position, o.angle, light, 22, o.scale, None);
                 }
             }
         }
         79 => {
-            // Fuego: un resplandor rojo y una llama de tres tipos al azar.
+            // Fire: a red glow and a flame of three random kinds.
             ctx.create_sprite(BITMAP_LIGHT, o.position, 2.0 * o.scale, Vec3::new(1.0, 0.2, 0.0), 0.0, 0);
             let light = Vec3::ONE;
             match ctx.rand() % 3 {
@@ -159,7 +159,7 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
             ctx.create_sprite(BITMAP_LIGHT, o.position, 8.0 * o.scale, light, 0.0, 0);
         }
         82 => {
-            // `Light` sin inicializar en el original: el subtipo 9 pone la suya.
+            // Uninitialized `Light` in the original: subtype 9 sets its own.
             ctx.create_particle(BITMAP_WATERFALL_5, o.position, o.angle, Vec3::ZERO, 9, o.scale, None);
         }
         83 => {
@@ -176,22 +176,22 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
             if (0..=1).contains(&remainder) {
                 let n = ctx.rand() % 4 + 4;
                 for _ in 0..n {
-                    // `CreateEffectFpsChecked(BITMAP_FLAME, ..., 6, NULL, -1, 0, o->Scale)`: la escala
-                    // cae en el argumento `Skill` (WORD); la del efecto queda la de por defecto.
+                    // `CreateEffectFpsChecked(BITMAP_FLAME, ..., 6, NULL, -1, 0, o->Scale)`: the scale
+                    // lands in the `Skill` argument (WORD); the effect keeps the default scale.
                     let kind = (o.scale as i32) & 0xFFFF;
                     ctx.create_effect(BITMAP_FLAME, o.position, o.angle, light, 6, None, -1, kind, 0, 0.0);
                 }
             }
         }
         86 | 129 | 130 => {
-            // Niebla de colores que sube del suelo.
+            // Colored mist rising from the ground.
             if ctx.rand_fps_check(6) {
                 let light = match o.ty {
                     86 => Vec3::new(0.05, 0.02, 0.01),
                     129 => Vec3::new(0.01, 0.02, 0.05),
                     _ => Vec3::new(0.01, 0.05, 0.02),
                 };
-                // `o` como dueño: el subtipo 21 no lo usa.
+                // `o` as owner: subtype 21 doesn't use it.
                 ctx.create_particle(BITMAP_CLOUD, o.position, o.angle, light, 21, o.scale, None);
             }
         }
@@ -209,7 +209,7 @@ fn empire_guardian4(o: &mut MapObject, ctx: &mut Ctx) {
             }
         }
         158 => {
-            // `Light` sin inicializar en el original: el subtipo 64 calcula la suya al moverse.
+            // Uninitialized `Light` in the original: subtype 64 computes its own while moving.
             ctx.create_particle(BITMAP_SMOKE, o.position, o.angle, Vec3::ZERO, 64, o.scale, None);
         }
         _ => {}

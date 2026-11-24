@@ -1,20 +1,20 @@
-//! Objetos del mapa con efectos de Elbeland (`WD_51HOME_6TH_CHAR`), Swamp of Calmness
-//! (`WD_56MAP_SWAMP_OF_QUIET`), Santa Village (`WD_62SANTA_TOWN`), Duel Arena (`WD_64DUELARENA`) y
+//! Map objects with effects in Elbeland (`WD_51HOME_6TH_CHAR`), Swamp of Calmness
+//! (`WD_56MAP_SWAMP_OF_QUIET`), Santa Village (`WD_62SANTA_TOWN`), Duel Arena (`WD_64DUELARENA`) and
 //! Loren Market (`WD_79UNITEDMARKETPLACE`).
 //!
-//! Traducido de `GMNewTown.cpp`, `GMSwampOfQuiet.cpp`, `GMSantaTown.cpp`, `GMDuelArena.cpp` y
-//! `GMUnitedMarketPlace.cpp` (Main 5.2): `MoveObject` (luces del suelo, sonidos) y
-//! `RenderObjectVisual` / `RenderObjectAfterCharacter` (partículas y sprites). El dibujo de las
-//! mallas (ocultas, que suman, cromadas, que se desplazan, velocidad de la animación) está en
+//! Translated from `GMNewTown.cpp`, `GMSwampOfQuiet.cpp`, `GMSantaTown.cpp`, `GMDuelArena.cpp` and
+//! `GMUnitedMarketPlace.cpp` (Main 5.2): `MoveObject` (ground lights, sounds) and
+//! `RenderObjectVisual` / `RenderObjectAfterCharacter` (particles and sprites). Mesh drawing
+//! (hidden, additive, chrome, scrolling, animation speed) lives in
 //! `mu_data::objects::rules_elbeland`.
 //!
-//! Como en el original, el `RenderObjectVisual` común (`ZzzObject.cpp:2775`) gasta un `rand()`
-//! (`Luminosity`) antes de llegar al código de cada mapa.
+//! As in the original, the shared `RenderObjectVisual` (`ZzzObject.cpp:2775`) consumes one `rand()`
+//! (`Luminosity`) before reaching each map's code.
 //!
-//! Sonidos (`GMNewTown::PlayObjectSound`, 239-278): los objetos de Elbeland que se mueven piden su
-//! sonido en cada tick; el original lo pide con `PlayBuffer(id, objeto)` sobre un búfer de un solo
-//! canal, que no vuelve a empezar mientras suena. Los de agua no suenan si el héroe está en zona
-//! segura. El de Swamp está comentado en el original; Santa, Duel Arena y el mercado no tienen.
+//! Sounds (`GMNewTown::PlayObjectSound`, 239-278): moving Elbeland objects request their
+//! sound every tick; the original does it with `PlayBuffer(id, object)` on a single-channel
+//! buffer, which doesn't restart while playing. Water ones are silent if the hero is in the safe
+//! zone. Swamp's is commented out in the original; Santa, Duel Arena and the market have none.
 
 use bevy::math::Vec3;
 
@@ -28,9 +28,9 @@ const WD_62SANTA_TOWN: i32 = 62;
 const WD_64DUELARENA: i32 = 64;
 const WD_79UNITEDMARKETPLACE: i32 = 79;
 
-/// Tipos de Elbeland con código en `MoveObject`, `PlayObjectSound`, `RenderObjectVisual` o
-/// `RenderObjectAfterCharacter` (sprites). Los de 133-155 (personajes y monstruos de adorno del
-/// login antiguo) no están en `EncTerrain52.obj`.
+/// Elbeland types with code in `MoveObject`, `PlayObjectSound`, `RenderObjectVisual` or
+/// `RenderObjectAfterCharacter` (sprites). Types 133-155 (decorative characters and monsters of the
+/// old login) are not in `EncTerrain52.obj`.
 const ELBELAND_TYPES: [i32; 16] = [0, 2, 53, 54, 56, 58, 59, 60, 61, 63, 78, 79, 85, 89, 110, 121];
 const SWAMP_TYPES: [i32; 6] = [57, 71, 72, 74, 77, 78];
 const SANTA_TYPES: [i32; 3] = [26, 27, 28];
@@ -55,24 +55,24 @@ pub fn register(r: &mut Registry) {
     }
 }
 
-/// `rand() % n` en coma flotante.
+/// `rand() % n` as floating point.
 fn rf(ctx: &mut Ctx, n: i32) -> f32 {
     (ctx.rand() % n) as f32
 }
 
-/// El `rand()` de `Luminosity` al principio de `RenderObjectVisual` (`ZzzObject.cpp:2775`).
+/// The `Luminosity` `rand()` at the start of `RenderObjectVisual` (`ZzzObject.cpp:2775`).
 fn visual_luminosity(ctx: &mut Ctx) {
     let _ = ctx.rand();
 }
 
-/// `(TerrainWall[héroe] & TW_SAFEZONE) == TW_SAFEZONE` (`GMNewTown.cpp:245-248`).
+/// `(TerrainWall[hero] & TW_SAFEZONE) == TW_SAFEZONE` (`GMNewTown.cpp:245-248`).
 fn hero_in_safe_zone(ctx: &Ctx) -> bool {
     ctx.hero_actor()
         .map(|h| h.position)
         .is_some_and(|p| ctx.terrain_attribute(p.x, p.y) & mu_data::terrain::attr::SAFE_ZONE != 0)
 }
 
-/// Fuego de tres tipos al azar con su resplandor rojo (`GMDuelArena.cpp:143-165`,
+/// Fire of three random kinds with its red glow (`GMDuelArena.cpp:143-165`,
 /// `GMUnitedMarketPlace.cpp:303-325`).
 fn fire_point(o: &MapObject, ctx: &mut Ctx) {
     ctx.create_sprite(BITMAP_LIGHT, o.position, 2.0 * o.scale, Vec3::new(1.0, 0.2, 0.0), 0.0, 0);
@@ -87,7 +87,7 @@ fn fire_point(o: &MapObject, ctx: &mut Ctx) {
 // --- Elbeland (`GMNewTown.cpp`) -------------------------------------------------------------------
 
 fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
-    // `PlayObjectSound` (239-278), al principio de `MoveObject`.
+    // `PlayObjectSound` (239-278), at the start of `MoveObject`.
     let sound = match o.ty {
         2 => Some(("SOUND_ELBELAND_WATERSMALL01", true)),
         53 => Some(("SOUND_ELBELAND_RAVINE01", true)),
@@ -98,8 +98,8 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
         110 => Some(("SOUND_ELBELAND_VILLAGEPROTECTION01", false)),
         _ => None,
     };
-    // Búfer de un solo canal: varios objetos del mismo tipo en el mismo tick son una sola petición
-    // (`sound.rs` aún no ve como "sonando" lo que pidió en este mismo fotograma).
+    // Single-channel buffer: several objects of the same type in the same tick are one request
+    // (`sound.rs` doesn't yet see as "playing" what it requested in this same frame).
     if let Some((id, not_in_safe_zone)) = sound
         && !(not_in_safe_zone && hero_in_safe_zone(ctx))
         && !ctx.sounds.contains(&id)
@@ -107,8 +107,8 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
         ctx.play_sound(id);
     }
 
-    // `MoveObject` (124-235). Los desplazamientos de textura de 2/53/55/89 y la malla de 56 están
-    // en las reglas de dibujo; el águila de 62 en `boids.rs`.
+    // `MoveObject` (124-235). The texture scrolls of 2/53/55/89 and the mesh of 56 are
+    // in the draw rules; the eagle of 62 in `boids.rs`.
     match o.ty {
         0 => {
             let l = (ctx.rand() % 4 + 3) as f32 * 0.1;
@@ -124,7 +124,7 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
         _ => {}
     }
 
-    // Lo que crea el dibujo: `RenderObjectVisual` (295-364) y, para 78/79,
+    // What drawing creates: `RenderObjectVisual` (295-364) and, for 78/79,
     // `RenderObjectAfterCharacter` (964-990).
     visual_luminosity(ctx);
     let wt = ctx.world_time;
@@ -140,7 +140,7 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
             }
         }
         58 => {
-            // `Light` sin inicializar y `Scale` por defecto (1): el subtipo 0 pone su luz.
+            // Uninitialized `Light` and default `Scale` (1): subtype 0 sets its own light.
             ctx.create_particle(BITMAP_WATERFALL_5, o.position, o.angle, Vec3::ZERO, 0, 1.0, None);
         }
         59 => {
@@ -163,7 +163,7 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
                 let x = (wt * 0.03).cos() * (30.0 + rf(ctx, 5));
                 let y = (wt * 0.03).sin() * (30.0 + rf(ctx, 5));
                 let pos = o.bone_world(0, Vec3::new(x, y, 70.0));
-                // `o` como dueño: el subtipo 11 no lo usa.
+                // `o` as owner: subtype 11 doesn't use it.
                 ctx.create_particle(BITMAP_LIGHT, pos, o.angle, Vec3::ONE, 11, 0.6, None);
             }
         }
@@ -187,13 +187,13 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
     }
 }
 
-/// 60 (`RenderObjectVisual` 318-334): con `HiddenMesh != -2` crea 10 nubes (`BITMAP_CLOUD`
-/// subtipo 3) que siguen al objeto (`o->Target`) mientras se ve; al morir ponen
-/// `Target->HiddenMesh = 0` y se vuelven a crear la próxima vez que se dibuja. Como las nubes de
-/// Heaven (`objects_2.rs`): las sigue una marca ([`FX_MAP_ANCHOR`]) que muere cuando el objeto deja
-/// de moverse, y se crean otra vez cuando vuelve a moverse tras un hueco.
+/// 60 (`RenderObjectVisual` 318-334): with `HiddenMesh != -2` creates 10 clouds (`BITMAP_CLOUD`
+/// subtype 3) that follow the object (`o->Target`) while visible; when they die they set
+/// `Target->HiddenMesh = 0` and are recreated the next time it is drawn. Like the Heaven
+/// clouds (`objects_2.rs`): they follow a marker ([`FX_MAP_ANCHOR`]) that dies when the object stops
+/// moving, and are created again when it moves again after a gap.
 fn elbeland_fog(o: &mut MapObject, ctx: &mut Ctx) {
-    // `user[0]`: `world_time` de la última vez que se movió este objeto.
+    // `user[0]`: `world_time` of the last time this object moved.
     let gap = ctx.world_time - o.user[0];
     o.user[0] = ctx.world_time;
     if !o.created || gap > 100.0 {
@@ -245,7 +245,7 @@ fn swamp(o: &mut MapObject, ctx: &mut Ctx) {
         77 | 78 => {
             if ctx.rand() % 6 == 0 {
                 let light = if o.ty == 77 { Vec3::new(0.04, 0.06, 0.03) } else { Vec3::new(0.03, 0.03, 0.05) };
-                // `o` como dueño: el subtipo 20 no lo usa.
+                // `o` as owner: subtype 20 doesn't use it.
                 ctx.create_particle(BITMAP_CLOUD, o.position, o.angle, light, 20, o.scale, None);
             }
         }
@@ -259,7 +259,7 @@ fn santa(o: &mut MapObject, ctx: &mut Ctx) {
     // `MoveObject` (95-102).
     o.hidden_mesh = -2;
 
-    // `RenderObjectVisual` (149-186): luces de colores.
+    // `RenderObjectVisual` (149-186): colored lights.
     visual_luminosity(ctx);
     let lumi = ((ctx.world_time * 0.005).sin() + 1.0) * 0.1 + 0.9;
     let light = match o.ty {
@@ -285,7 +285,7 @@ fn duel(o: &mut MapObject, ctx: &mut Ctx) {
     match o.ty {
         35 => {
             if ctx.rand() % 3 == 0 {
-                // `o` como dueño: el subtipo 14 no lo usa.
+                // `o` as owner: subtype 14 doesn't use it.
                 ctx.create_particle(BITMAP_SMOKE, o.position, o.angle, Vec3::ONE, 14, o.scale, None);
             }
         }
@@ -330,7 +330,7 @@ fn market(o: &mut MapObject, ctx: &mut Ctx) {
             ctx.create_sprite(BITMAP_FLARE, pos, 1.5 * o.scale, Vec3::splat(lumi * 0.7), 0.0, 0);
         }
         54 => {
-            // `Light` = (0, 0, 0) y `Scale` por defecto (1): el subtipo 0 pone su luz.
+            // `Light` = (0, 0, 0) and default `Scale` (1): subtype 0 sets its own light.
             ctx.create_particle(BITMAP_WATERFALL_5, o.position, o.angle, Vec3::ZERO, 0, 1.0, None);
         }
         55 => {
@@ -356,8 +356,8 @@ mod tests {
     use super::*;
     use mu_data::objects::model_rules;
 
-    /// Los tipos que el `MoveObject` del original oculta (`HiddenMesh = -2`) tampoco los dibujan las
-    /// reglas de `mu_data` (la carpeta es `WorldActive + 1`), y los que se dibujan siguen visibles.
+    /// The types the original's `MoveObject` hides (`HiddenMesh = -2`) are not drawn by the
+    /// `mu_data` rules either (the folder is `WorldActive + 1`), and the drawn ones stay visible.
     #[test]
     fn ocultos_como_en_move_object() {
         let hidden: &[(i32, &[i32])] = &[

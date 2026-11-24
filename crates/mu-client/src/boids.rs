@@ -1,24 +1,24 @@
-//! Bichos que vuelan alrededor del personaje (`MoveBoids` / `RenderBoids` de GOBoid.cpp,
-//! `MoveBoid` de ZzzAI.cpp) y lo común con los del suelo y el agua (`fish.rs`).
+//! Creatures flying around the character (`MoveBoids` / `RenderBoids` from GOBoid.cpp,
+//! `MoveBoid` from ZzzAI.cpp) and what they share with the ground and water ones (`fish.rs`).
 //!
-//! Por mapa (`gMapManager.WorldActive`, = `Args.world` − 1), GOBoid.cpp:1218-1382:
-//! - Lorencia: pájaros (`Object1/Bird01`). Dungeon y Lost Tower: murciélagos (`Object2/Bat01`).
-//!   Noria: mariposas (`Object1/Butterfly01`) con su brillo. Blood Castle: cuervos
-//!   (`Object12/Crow01`) con los ojos rojos. 5 a la vez.
-//! - Icarus (`CreateDragon`, :818): 3 dragones (`Monster32`) 600 por debajo del personaje y 10
-//!   bichos invisibles (`MODEL_SPEARSKILL`) que arrastran una estela `MODEL_SPEARSKILL` 1.
-//! - Atlans (`CreateAtlanseFish`, :880): hasta 40 peces (`Object8/Fish02-03`) en banco, solo en la
-//!   mitad sur del mapa y si el personaje no está en una casilla con atributos.
-//! - Kalima (`CreateBigMon`, GMHellas.cpp:633): 2 huecos; de vez en cuando un monstruo enorme
-//!   (`Monster34`, negro) cruza muy por debajo de las nubes.
-//! - Elbeland: un tornado (`Object52/typhoonall`, :1345) fuera de la zona segura y el águila
-//!   (`Object52/sos3bi01`) que suelta el objeto 62 del mapa (GMNewTown.cpp:175).
-//! - Durante la invasión (ver `invasion.rs`) los huecos se llenan de dragones que cruzan hacia −Y.
+//! Per map (`gMapManager.WorldActive`, = `Args.world` − 1), GOBoid.cpp:1218-1382:
+//! - Lorencia: birds (`Object1/Bird01`). Dungeon and Lost Tower: bats (`Object2/Bat01`).
+//!   Noria: butterflies (`Object1/Butterfly01`) with their glow. Blood Castle: crows
+//!   (`Object12/Crow01`) with red eyes. 5 at a time.
+//! - Icarus (`CreateDragon`, :818): 3 dragons (`Monster32`) 600 below the character and 10
+//!   invisible creatures (`MODEL_SPEARSKILL`) dragging a `MODEL_SPEARSKILL` 1 trail.
+//! - Atlans (`CreateAtlanseFish`, :880): up to 40 fish (`Object8/Fish02-03`) in a school, only in the
+//!   southern half of the map and if the character is not on a tile with attributes.
+//! - Kalima (`CreateBigMon`, GMHellas.cpp:633): 2 slots; now and then a huge monster
+//!   (`Monster34`, black) crosses far below the clouds.
+//! - Elbeland: a tornado (`Object52/typhoonall`, :1345) outside the safe zone and the eagle
+//!   (`Object52/sos3bi01`) released by map object 62 (GMNewTown.cpp:175).
+//! - During the invasion (see `invasion.rs`) the slots fill with dragons crossing toward −Y.
 //!
-//! Vuelo en grupo (`MoveBoid`): cada uno gira hasta `Gravity` grados por tick hacia la media de las
-//! direcciones de los vecinos (a menos de 400) y se aparta de los que tiene a menos de 80.
+//! Flocking (`MoveBoid`): each one turns up to `Gravity` degrees per tick toward the average
+//! heading of its neighbours (within 400) and moves away from those within 80.
 //!
-//! Como las partículas: la lógica corre a 25 ticks por segundo y el dibujo interpola.
+//! Like particles: logic runs at 25 ticks per second and drawing interpolates.
 
 use std::f32::consts::FRAC_PI_2;
 use std::path::Path;
@@ -47,7 +47,7 @@ impl Plugin for BoidsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<BoidSprites>()
             .add_systems(Update, setup_boids.run_if(crate::scene::load_step(crate::scene::Step::Boids)))
-            // Antes del tick de efectos: las estelas que siguen a un bicho ven ya su posición nueva.
+            // Before the effects tick: trails following a creature already see its new position.
             .add_systems(FixedUpdate, step_boids.before(crate::fx::sim::tick))
             .add_systems(Update, draw_boids)
             .add_systems(PostUpdate, push_sprites.after(crate::fx::draw::collect).before(crate::fx::draw::render_quads));
@@ -58,22 +58,22 @@ impl Plugin for BoidsPlugin {
 const MAX_BOIDS: usize = 40;
 const NEIGHBOR_RANGE: f32 = 400.0;
 const SEPARATION_RANGE: f32 = 80.0;
-/// Acción de los dragones (`MONSTER01_DIE + 1`).
+/// Dragon action (`MONSTER01_DIE + 1`).
 const DRAGON_ACTION: usize = 7;
 /// `MONSTER01_WALK`.
 const MONSTER_WALK: usize = 2;
-/// Hueso de la cabeza del dragón, donde el original pone el fuego.
+/// Dragon head bone, where the original puts the fire.
 const DRAGON_HEAD_BONE: usize = 11;
-/// Tipo del objeto de Elbeland que suelta el águila (`GMNewTown::MoveObject`, case 62).
+/// Type of the Elbeland object that releases the eagle (`GMNewTown::MoveObject`, case 62).
 const EAGLE_PERCH: i16 = 62;
 
-/// Acciones del pájaro.
+/// Bird actions.
 const BIRD_FLY: usize = 0;
 const BIRD_GROUND: usize = 1;
 
-// --- Lo común con `fish.rs` -------------------------------------------------------------------------
+// --- Shared with `fish.rs` ---------------------------------------------------------------------------
 
-/// `AI` de los bichos (`BOID_FLY`...).
+/// Creature `AI` (`BOID_FLY`...).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Ai {
     Fly,
@@ -82,7 +82,7 @@ pub(crate) enum Ai {
     Up,
 }
 
-/// Qué es cada hueco (el `o->Type` del original).
+/// What each slot is (the original's `o->Type`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Kind {
     Bird,
@@ -91,38 +91,38 @@ pub(crate) enum Kind {
     Crow,
     Tornado,
     Eagle,
-    /// `MODEL_MONSTER01+31` de Icarus.
+    /// Icarus `MODEL_MONSTER01+31`.
     HeavenDragon,
-    /// `MODEL_SPEARSKILL` de Icarus: no se dibuja, solo lleva su estela.
+    /// Icarus `MODEL_SPEARSKILL`: not drawn, only carries its trail.
     HeavenBug,
-    /// `MODEL_FISH01+1..2` en banco (Atlans).
+    /// `MODEL_FISH01+1..2` in a school (Atlans).
     AtlansFish,
-    /// `MODEL_MONSTER01+33` de Kalima.
+    /// Kalima `MODEL_MONSTER01+33`.
     BigMon,
-    /// `MODEL_MONSTER01+31` de la invasión (`EnableEvent`).
+    /// Invasion `MODEL_MONSTER01+31` (`EnableEvent`).
     InvasionDragon,
     // `Fishs[]` (fish.rs).
-    /// `MODEL_FISH01` de Lorencia.
+    /// Lorencia `MODEL_FISH01`.
     Fish,
     Rat,
-    /// `MODEL_BUG01` de Arena.
+    /// Arena `MODEL_BUG01`.
     Bug,
-    /// `MODEL_BUG01+1` de Tarkan y Aida (luciérnaga con estela).
+    /// Tarkan and Aida `MODEL_BUG01+1` (firefly with trail).
     Firefly,
     Scorpion,
-    /// `MODEL_FISH01+3..6` de Atlans.
+    /// Atlans `MODEL_FISH01+3..6`.
     SeaFish,
-    /// `MODEL_FISH01+7..8` de Atlans: malla 0 sumando y sin sombra.
+    /// Atlans `MODEL_FISH01+7..8`: mesh 0 additive and without shadow.
     GlowFish,
-    /// `Type = -1` de Kalima: solo la estela `BITMAP_FLARE+1`.
+    /// Kalima `Type = -1`: only the `BITMAP_FLARE+1` trail.
     Flare,
 }
 
-/// Un modelo cargado y sus texturas.
+/// A loaded model and its textures.
 pub(crate) struct Model {
     pub bmd: Arc<Bmd>,
     pub textures: Vec<Option<Handle<Image>>>,
-    /// `HiddenMesh`: malla que no se dibuja (−1 = ninguna).
+    /// `HiddenMesh`: mesh that is not drawn (−1 = none).
     pub hidden_mesh: i32,
 }
 
@@ -151,11 +151,11 @@ struct Part {
     material: Handle<ModelMaterial>,
 }
 
-/// Un modelo dibujable para un hueco: entidad con una malla por cada malla del `.bmd`.
+/// A drawable model for a slot: entity with one mesh per `.bmd` mesh.
 pub(crate) struct Body {
     entity: Entity,
     parts: Vec<Part>,
-    /// Último estado del material (para no rehacerlo si no cambia).
+    /// Last material state (so it isn't rebuilt if unchanged).
     shown: Option<[i32; 6]>,
 }
 
@@ -200,19 +200,19 @@ fn spawn_body(
     Body { entity, parts, shown: None }
 }
 
-/// Un hueco de `Boids[]` / `Fishs[]` (el `OBJECT` del original, con lo que usan estos bichos).
+/// A `Boids[]` / `Fishs[]` slot (the original's `OBJECT`, with what these creatures use).
 pub(crate) struct Obj {
     pub live: bool,
     pub kind: Kind,
-    /// Índice en la tabla de modelos de la lista (`None` = no se dibuja).
+    /// Index into the list's model table (`None` = not drawn).
     pub model: Option<usize>,
     pub pos: Vec3,
     pub prev_pos: Vec3,
-    /// Grados (x, y, z) como `o->Angle`.
+    /// Degrees (x, y, z) like `o->Angle`.
     pub angle: Vec3,
     pub prev_angle: Vec3,
     pub head_angle: Vec3,
-    /// `Direction`: (x, y) punto al que va, z velocidad vertical.
+    /// `Direction`: (x, y) target point, z vertical speed.
     pub dir: Vec3,
     pub velocity: f32,
     pub gravity: f32,
@@ -232,11 +232,11 @@ pub(crate) struct Obj {
     pub light_enable: bool,
     pub blend_mesh: i32,
     pub blend_mesh_light: f32,
-    /// Se dibuja su sombra (`RenderBodyShadow`).
+    /// Its shadow is drawn (`RenderBodyShadow`).
     pub shadow_on: bool,
-    /// Dragón dorado de la invasión (`SubType = 1`).
+    /// Invasion golden dragon (`SubType = 1`).
     pub golden: bool,
-    /// Marca invisible del motor de efectos que hace de `o` para sus estelas (`Target::Effect`).
+    /// Invisible effects-engine marker acting as `o` for its trails (`Target::Effect`).
     pub anchor: Option<u32>,
     bodies: Vec<Option<Body>>,
     shadow: crate::shadow::Shadow,
@@ -280,7 +280,7 @@ impl Obj {
         }
     }
 
-    /// `o->Initialize()` (lo que usan estos bichos): todo a cero salvo los modelos y la sombra.
+    /// `o->Initialize()` (what these creatures use): everything zeroed except models and shadow.
     pub(crate) fn initialize(&mut self) {
         let bodies = std::mem::take(&mut self.bodies);
         let shadow = self.shadow.clone();
@@ -295,7 +295,7 @@ impl Obj {
         self.light = Vec3::ZERO;
     }
 
-    /// Guarda el estado del tick anterior (para interpolar).
+    /// Saves the previous tick's state (for interpolation).
     pub(crate) fn remember(&mut self) {
         self.prev_pos = self.pos;
         self.prev_angle = self.angle;
@@ -303,7 +303,7 @@ impl Obj {
         self.prev_alpha = self.alpha;
     }
 
-    /// Empieza a vivir aquí: sin interpolar desde donde estaba antes.
+    /// Starts living here: no interpolation from where it was before.
     pub(crate) fn place(&mut self, pos: Vec3) {
         self.pos = pos;
         self.prev_pos = pos;
@@ -328,7 +328,7 @@ impl Obj {
         }
     }
 
-    /// Lleva su marca a donde está ahora, o la quita si ha muerto.
+    /// Moves its marker to where it is now, or removes it if dead.
     pub(crate) fn sync_anchor(&mut self, fx: &mut FxWorld) {
         let Some(id) = self.anchor else { return };
         if self.live {
@@ -349,11 +349,11 @@ impl Obj {
     }
 }
 
-/// Tipo (sin código registrado) de la marca invisible que sigue a un bicho.
+/// Type (with no registered code) of the invisible marker that follows a creature.
 const BOID_ANCHOR: i32 = -2_000_101;
 const ANCHOR_LIFE: f32 = 1.0e9;
 
-/// Crea la marca que hará de `o` para lo que el bicho cree con `CreateJoint(..., o)`.
+/// Creates the marker that acts as `o` for what the creature creates with `CreateJoint(..., o)`.
 pub(crate) fn spawn_anchor(o: &mut Obj, fx: &mut FxWorld) -> Target {
     if let Some(id) = o.anchor.take() {
         fx.effects.retain(|e| e.id != id);
@@ -375,15 +375,15 @@ pub(crate) fn joint_on(o: &mut Obj, fx: &mut FxWorld, ty: i32, sub_type: i32, sc
     crate::fx::request(fx, Spawn::Joint(j));
 }
 
-/// Lo que miran del personaje (`Hero`).
+/// What they look at from the character (`Hero`).
 pub(crate) struct Hero {
-    /// Posición en MU (la altura, la del terreno).
+    /// Position in MU (height is the terrain's).
     pub pos: Vec3,
-    /// `TerrainWall` de su casilla.
+    /// `TerrainWall` of its tile.
     pub wall: u16,
     /// `Hero->SafeZone`.
     pub safe: bool,
-    /// Parado (`CurrentAction < PLAYER_WALK_MALE`).
+    /// Standing still (`CurrentAction < PLAYER_WALK_MALE`).
     pub still: bool,
 }
 
@@ -399,7 +399,7 @@ impl Hero {
     }
 }
 
-/// `TERRAIN_INDEX_REPEAT(x / TERRAIN_SCALE, y / TERRAIN_SCALE)` con x, y en MU.
+/// `TERRAIN_INDEX_REPEAT(x / TERRAIN_SCALE, y / TERRAIN_SCALE)` with x, y in MU.
 pub(crate) fn tile_index(x: f32, y: f32) -> usize {
     let tx = (x / MU_SCALE) as i32 & 255;
     let ty = (y / MU_SCALE) as i32 & 255;
@@ -416,12 +416,12 @@ pub(crate) fn open_wall(w: u16) -> bool {
     w == 0 || w == attr::CHARACTER
 }
 
-/// `RequestTerrainHeight(x, y)` con x, y en MU.
+/// `RequestTerrainHeight(x, y)` with x, y in MU.
 pub(crate) fn ground(t: &Terrain, p: Vec3) -> f32 {
     t.height_at(p.x / MU_SCALE, p.y / MU_SCALE)
 }
 
-/// `RequestTerrainLight(x, y)` (ZzzLodTerrain.cpp:933): luz del terreno interpolada.
+/// `RequestTerrainLight(x, y)` (ZzzLodTerrain.cpp:933): interpolated terrain light.
 fn terrain_light(t: &Terrain, x: f32, y: f32) -> Vec3 {
     let (xf, yf) = (x / MU_SCALE, y / MU_SCALE);
     let (xi, yi) = (xf as i32, yf as i32);
@@ -436,7 +436,7 @@ fn terrain_light(t: &Terrain, x: f32, y: f32) -> Vec3 {
     left + (right - left) * xd
 }
 
-/// `CalcAngle` (ZzzAI.cpp): rumbo entero en grados con 0 = +X y 90 = +Y (el de `AngleMatrix`).
+/// `CalcAngle` (ZzzAI.cpp): integer heading in degrees with 0 = +X and 90 = +Y (the `AngleMatrix` one).
 pub(crate) fn calc_angle(px: f32, py: f32, tx: f32, ty: f32) -> i32 {
     let grad = if tx - px == 0.0 { 0.0 } else { (py - ty) / (tx - px) };
     let mut theta = (grad.atan() * (180.0 / std::f32::consts::PI)) as i32;
@@ -449,7 +449,7 @@ pub(crate) fn calc_angle(px: f32, py: f32, tx: f32, ty: f32) -> i32 {
     (360 - theta) % 360
 }
 
-/// `TurnAngle(iTheta, iHeading, maxTURN)` (ZzzAI.cpp), en enteros como el original.
+/// `TurnAngle(iTheta, iHeading, maxTURN)` (ZzzAI.cpp), in integers like the original.
 pub(crate) fn turn_angle_int(theta: i32, heading: i32, max_turn: i32) -> i32 {
     let mut change = 0;
     let delta = (theta - heading).abs();
@@ -483,7 +483,7 @@ pub(crate) fn move_boid(list: &mut [Obj], i: usize) {
             yd += t.dir.y - me.y;
         }
         let p = (xd * xd + yd * yd).sqrt();
-        // (con p = 0 el original divide por cero y gira hacia cualquier lado)
+        // (with p = 0 the original divides by zero and turns any direction)
         if p > 0.0 {
             tx += xd / p;
             ty += yd / p;
@@ -497,12 +497,12 @@ pub(crate) fn move_boid(list: &mut [Obj], i: usize) {
     }
 }
 
-/// Fotogramas de una acción (1 si no existe).
+/// Frames of an action (1 if it doesn't exist).
 pub(crate) fn frames(model: &Bmd, action: usize) -> f32 {
     model.actions.get(action).map_or(1, |a| a.frames.max(1)) as f32
 }
 
-/// `PlayAnimation`: avanza `speed` fotogramas y da la vuelta al acabar.
+/// `PlayAnimation`: advances `speed` frames and wraps around at the end.
 pub(crate) fn play_animation(o: &mut Obj, models: &[Option<Model>], speed: f32) {
     let Some(m) = o.model.and_then(|m| models.get(m)).and_then(Option::as_ref) else { return };
     let n = frames(&m.bmd, o.action);
@@ -511,7 +511,7 @@ pub(crate) fn play_animation(o: &mut Obj, models: &[Option<Model>], speed: f32) 
     }
 }
 
-/// Un sprite de un fotograma (`CreateSprite` desde `RenderBoids`).
+/// A one-frame sprite (`CreateSprite` from `RenderBoids`).
 #[derive(Clone, Copy)]
 pub(crate) struct BoidSprite {
     texture: i32,
@@ -520,12 +520,12 @@ pub(crate) struct BoidSprite {
     light: Vec3,
 }
 
-/// Sprites de este fotograma, ya en su posición interpolada.
+/// This frame's sprites, already at their interpolated position.
 #[derive(Resource, Default)]
 pub(crate) struct BoidSprites(Vec<BoidSprite>);
 
-/// Coloca, gira, anima y da luz a cada hueco interpolando entre los dos últimos ticks
-/// (`RenderObject` + `RenderBodyShadow` de `RenderBoids` / `RenderFishs`).
+/// Places, rotates, animates and lights each slot interpolating between the last two ticks
+/// (`RenderObject` + `RenderBodyShadow` from `RenderBoids` / `RenderFishs`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_objs(
     list: &mut [Obj],
@@ -543,7 +543,7 @@ pub(crate) fn draw_objs(
     let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
     for (slot, o) in list.iter_mut().enumerate() {
         let alpha = o.prev_alpha + (o.alpha - o.prev_alpha) * a;
-        // `Calc_RenderObject` no dibuja con alfa < 0.01.
+        // `Calc_RenderObject` doesn't draw with alpha < 0.01.
         let current = o.model.filter(|&m| o.live && alpha >= 0.01 && models.get(m).is_some_and(Option::is_some));
         for (mi, body) in o.bodies.iter().enumerate() {
             if let Some(body) = body
@@ -573,7 +573,7 @@ pub(crate) fn draw_objs(
             o.prev_angle.y + d(o.prev_angle.y, o.angle.y) * a,
             o.prev_angle.z + d(o.prev_angle.z, o.angle.z) * a,
         );
-        // El original los dibuja girados un cuarto de vuelta (`o->Angle[2] += 90`).
+        // The original draws them rotated a quarter turn (`o->Angle[2] += 90`).
         let rot = Quat::from_euler(
             EulerRot::ZYX,
             (angle.z + 90.0).to_radians(),
@@ -593,7 +593,7 @@ pub(crate) fn draw_objs(
         if step < 0.0 {
             step += n;
         }
-        // Un salto (fotograma puesto a mano) no se interpola.
+        // A jump (frame set by hand) is not interpolated.
         let frame = if step <= 2.0 { (o.prev_frame + step * a) % n } else { o.frame };
         let action = if o.action < model.bmd.actions.len() { o.action } else { 0 };
         let bones = model.bmd.bone_matrices_at(action, frame);
@@ -601,7 +601,7 @@ pub(crate) fn draw_objs(
         let mut sh = crate::shadow::Builder::new(terrain.filter(|_| o.shadow_on), pos, rot, o.scale);
         for part in &body.parts {
             let posed = model.bmd.pose_with(part.mesh_index, &bones);
-            // `RenderBodyShadow` se salta la malla que suma (`m->Texture == BlendMesh`).
+            // `RenderBodyShadow` skips the additive mesh (`m->Texture == BlendMesh`).
             if o.shadow_on && part.texture as i32 != o.blend_mesh {
                 sh.add(&posed.positions);
             }
@@ -613,8 +613,8 @@ pub(crate) fn draw_objs(
         let v = q.get_mut(o.shadow.1).ok().map(|(_, v)| v);
         sh.finish(&o.shadow, meshes, v);
 
-        // `BodyLight` (ZzzObject.cpp:206): luz del terreno + `o->Light` (o la décima parte del
-        // terreno si `LightEnable` es falso). El monstruo de Kalima se dibuja negro
+        // `BodyLight` (ZzzObject.cpp:206): terrain light + `o->Light` (or a tenth of the
+        // terrain light if `LightEnable` is false). The Kalima monster is drawn black
         // (`RenderHellasObjectMesh`, GMHellas.cpp:515).
         let terrain_l = terrain.map_or(Vec3::ONE, |t| terrain_light(t, pos.x, pos.y));
         let body_light = match o.kind {
@@ -630,7 +630,7 @@ pub(crate) fn draw_objs(
             body.shown = Some(key);
             for part in &body.parts {
                 let additive = o.blend_mesh <= -2 || (o.blend_mesh >= 0 && part.texture as i32 == o.blend_mesh);
-                // Con alfa < 1 el original mezcla con prueba de alfa (> 0.25): por debajo no se ve.
+                // With alpha < 1 the original blends with an alpha test (> 0.25): below that it's invisible.
                 let show = additive || alpha >= 0.99 || alpha > crate::objects::ALPHA_REF;
                 if let Ok((_, mut vis)) = q.get_mut(part.entity) {
                     vis.set_if_neq(if show { Visibility::Inherited } else { Visibility::Hidden });
@@ -661,7 +661,7 @@ pub(crate) fn draw_objs(
             }
         }
 
-        // Lo que `RenderBoids` crea al dibujar (GOBoid.cpp:1535-1582).
+        // What `RenderBoids` creates while drawing (GOBoid.cpp:1535-1582).
         let at = |bone: usize, off: [f32; 3]| match bones.get(bone) {
             Some(m) => pos + rot * (Vec3::from_array(bmd::transform_point(m, off)) * o.scale),
             None => pos,
@@ -696,7 +696,7 @@ pub(crate) fn draw_objs(
     }
 }
 
-/// Pasa los sprites de los bichos a la lista de dibujo de los efectos (`DescribeSprite`, subtipo 0).
+/// Hands the creatures' sprites to the effects draw list (`DescribeSprite`, subtype 0).
 fn push_sprites(
     mut list: ResMut<BoidSprites>,
     mut frame: ResMut<crate::fx::draw::FrameDraw>,
@@ -720,7 +720,7 @@ fn push_sprites(
 
 // --- Boids[] ---------------------------------------------------------------------------------------
 
-/// Modelos de la lista de `Boids[]`.
+/// Models of the `Boids[]` list.
 const M_MAIN: usize = 0;
 const M_DRAGON: usize = 1;
 const M_FISH2: usize = 2;
@@ -740,7 +740,7 @@ fn in_atlans(wa: i32) -> bool {
     wa == 7 || wa == 67
 }
 
-/// Huecos que usa cada mapa (el `bOut` de `MoveBoids`, GOBoid.cpp:1222-1267).
+/// Slots used by each map (the `bOut` of `MoveBoids`, GOBoid.cpp:1222-1267).
 fn boid_slots(wa: i32) -> usize {
     match wa {
         7 | 67 => MAX_BOIDS,
@@ -761,7 +761,7 @@ struct Boids {
     event: Invasion,
     /// `MoveSceneFrame`.
     tick: u32,
-    /// Objetos 62 de Elbeland: posición y escala.
+    /// Elbeland objects 62: position and scale.
     perches: Vec<(Vec3, f32)>,
 }
 
@@ -846,7 +846,7 @@ fn step_boids(
     let hero = Hero::of(p, t);
     let wa = b.wa;
 
-    // Al empezar o acabar el evento, el original borra todos los bichos (`DeleteBoids`).
+    // When the event starts or ends, the original deletes all creatures (`DeleteBoids`).
     if b.event != *invasion {
         b.event = *invasion;
         for o in &mut b.list {
@@ -854,9 +854,9 @@ fn step_boids(
         }
     }
 
-    // El águila de Elbeland la suelta el objeto 62 al moverse (`MoveObjects` va antes que
-    // `MoveBoids`), siempre en `Boids[1]`. El original solo mueve los objetos que se ven; aquí,
-    // los que están tan cerca como los demás objetos con efectos.
+    // The Elbeland eagle is released by object 62 as it moves (`MoveObjects` runs before
+    // `MoveBoids`), always into `Boids[1]`. The original only moves visible objects; here,
+    // those as close as the other objects with effects.
     if wa == 51 && b.models[M_EAGLE].is_some() {
         for k in 0..b.perches.len() {
             let (pp, sc) = b.perches[k];
@@ -867,11 +867,11 @@ fn step_boids(
     }
 
     for i in 0..boid_slots(wa) {
-        // Kalima: 9 de cada 10 ticks no se crea nada.
+        // Kalima: 9 of every 10 ticks nothing is created.
         let create = !in_hellas(wa) || b.rand() % 10 == 0;
         if !b.list[i].live && create {
             if invasion.active() {
-                // Un dragón 1 de cada 300 ticks por hueco libre.
+                // A dragon 1 in 300 ticks per free slot.
                 if b.models[M_DRAGON].is_some() && b.chance(300) {
                     spawn_invasion_dragon(b, i, hero.pos, invasion.0 == 3);
                 }
@@ -889,7 +889,7 @@ fn step_boids(
 
         if b.list[i].kind == Kind::InvasionDragon {
             step_invasion_dragon(b, i, t, &mut fire);
-            // El rugido: 1 de cada 128 ticks por dragón vivo.
+            // The roar: 1 in 128 ticks per living dragon.
             if b.list[i].live && b.chance(128) {
                 sound.play("SOUND_MONSTER_BULLATTACK1");
             }
@@ -898,8 +898,8 @@ fn step_boids(
         }
 
         let kind = b.list[i].kind;
-        // `PlayAnimation`: 0.5 los monstruos; en Elbeland, el `PlaySpeed` de su acción
-        // (tornado 0.1, águila 0.5: MapManager.cpp:1182-1185).
+        // `PlayAnimation`: 0.5 for monsters; in Elbeland, its action's `PlaySpeed`
+        // (tornado 0.1, eagle 0.5: MapManager.cpp:1182-1185).
         let speed = match kind {
             Kind::HeavenDragon | Kind::BigMon => 0.5,
             Kind::Tornado => 0.1,
@@ -957,7 +957,7 @@ fn step_boids(
 
         move_boid_group(b, i, &hero);
 
-        // Atlans: con el personaje en la zona segura, los peces dan media vuelta y se van.
+        // Atlans: with the character in the safe zone, fish turn around and leave.
         {
             let o = &mut b.list[i];
             if o.life <= 0 && in_atlans(wa) && hero.wall == attr::SAFE_ZONE {
@@ -974,7 +974,7 @@ fn step_boids(
             o.life -= 1;
         }
 
-        // Sus sonidos, a menos de 6 casillas del personaje.
+        // Their sounds, within 6 tiles of the character.
         if hero.range(b.list[i].pos) < 600.0 {
             match kind {
                 Kind::Bird => {
@@ -1000,7 +1000,7 @@ fn step_boids(
         }
         b.list[i].alpha_step();
 
-        // El tornado echa humo cada vez que se dibuja (`CreateParticle(BITMAP_CLOUD, ..., 18, o)`).
+        // The tornado emits smoke every time it is drawn (`CreateParticle(BITMAP_CLOUD, ..., 18, o)`).
         if kind == Kind::Tornado && b.list[i].live {
             let o = &mut b.list[i];
             let target = match o.anchor {
@@ -1015,7 +1015,7 @@ fn step_boids(
     }
 }
 
-/// La creación de `MoveBoids` (GOBoid.cpp:1303-1382) para el hueco `i` si su mapa la tiene.
+/// `MoveBoids` creation (GOBoid.cpp:1303-1382) for slot `i` if its map has it.
 fn create_boid(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain, fx: &mut FxWorld) {
     let wa = b.wa;
     let can = match wa {
@@ -1064,7 +1064,7 @@ fn create_boid(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain, fx: &mut FxWor
             o.velocity = 0.0;
             o.blend_mesh_light = 0.0;
             o.head_angle.x = (b.rng.rand() % 314) as f32 / 100.0;
-            // (`Position[1] += 5` y luego se vuelve a colocar abajo)
+            // (`Position[1] += 5` and then placed back below)
             o.shadow_on = false;
             false
         }
@@ -1102,7 +1102,7 @@ fn create_boid(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain, fx: &mut FxWor
     }
 }
 
-/// `CreateDragon` (GOBoid.cpp:818): 3 dragones muy abajo y el resto bichos con estela.
+/// `CreateDragon` (GOBoid.cpp:818): 3 dragons far below and the rest creatures with trails.
 fn create_dragon(b: &mut Boids, i: usize, hero: &Hero, fx: &mut FxWorld) {
     if i < 3 {
         let (scale, vel, grav, ang, rx, ry) =
@@ -1138,7 +1138,7 @@ fn create_dragon(b: &mut Boids, i: usize, hero: &Hero, fx: &mut FxWorld) {
         o.blend_mesh = -1;
         o.timer = timer as f32 * 0.01;
         o.place(hero.pos + Vec3::new(rx as f32, ry as f32, 0.0));
-        // (en Blood Castle sería el subtipo 3; `CreateDragon` solo crea en Icarus)
+        // (in Blood Castle it would be subtype 3; `CreateDragon` only creates in Icarus)
         joint_on(o, fx, fxc::MODEL_SPEARSKILL, 1, 25.0);
         let ang = b.rand() % 360;
         let o = &mut b.list[i];
@@ -1147,7 +1147,7 @@ fn create_dragon(b: &mut Boids, i: usize, hero: &Hero, fx: &mut FxWorld) {
     }
 }
 
-/// `CreateAtlanseFish` (GOBoid.cpp:880): solo con el personaje en la mitad sur (y < 128).
+/// `CreateAtlanseFish` (GOBoid.cpp:880): only with the character in the southern half (y < 128).
 fn create_atlans_fish(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain) {
     if hero.pos.y * 0.01 >= 128.0 {
         b.list[i].live = false;
@@ -1172,7 +1172,7 @@ fn create_atlans_fish(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain) {
     o.place(p);
 }
 
-/// `CreateBigMon` (GMHellas.cpp:633): solo cuando `MoveSceneFrame % 100 == 0`.
+/// `CreateBigMon` (GMHellas.cpp:633): only when `MoveSceneFrame % 100 == 0`.
 fn create_big_mon(b: &mut Boids, i: usize, hero: &Hero) {
     if b.tick % 100 != 0 {
         b.list[i].live = false;
@@ -1199,8 +1199,8 @@ fn create_big_mon(b: &mut Boids, i: usize, hero: &Hero) {
     o.place(hero.pos + Vec3::new(-1000.0 - rx as f32, -500.0 + ry as f32, -800.0));
 }
 
-/// El águila de Elbeland (GMNewTown.cpp:197-231). Como el original, no se llama a
-/// `Initialize`: `AI` y `HeadAngle` siguen como los dejó la anterior.
+/// The Elbeland eagle (GMNewTown.cpp:197-231). Like the original, `Initialize` is not
+/// called: `AI` and `HeadAngle` stay as the previous one left them.
 fn create_eagle(b: &mut Boids, pos: Vec3, object_scale: f32) {
     let timer = b.rand() % 314;
     let o = &mut b.list[1];
@@ -1217,7 +1217,7 @@ fn create_eagle(b: &mut Boids, pos: Vec3, object_scale: f32) {
     o.gravity = 10.0 * object_scale;
     o.alpha_enable = true;
     o.scale = 0.5;
-    // `ShadowScale` 15 si el objeto está alto; si no, 0 (sombra transparente).
+    // `ShadowScale` 15 if the object is high; otherwise 0 (transparent shadow).
     o.shadow_on = pos.z > 100.0;
     o.blend_mesh = -1;
     o.timer = timer as f32 * 0.01;
@@ -1247,15 +1247,15 @@ fn move_butterfly(b: &mut Boids, i: usize, t: &Terrain) {
     o.pos.z += rz as f32 * 0.3;
 }
 
-/// `MoveBird` (GOBoid.cpp:948), con la bajada a posarse de MuMain: solo con el personaje
-/// quieto, y vuelven a volar cuando se mueve. Pájaros de Lorencia y cuervos de Blood Castle.
+/// `MoveBird` (GOBoid.cpp:948), with MuMain's landing descent: only while the character
+/// stands still, and they fly again when it moves. Lorencia birds and Blood Castle crows.
 fn move_bird(b: &mut Boids, i: usize, hero: &Hero, t: &Terrain, world_ms: f32) {
     let r = [b.rand() % 16 - 8, b.rand() % 256, b.rand() % 16 - 8];
     let o = &mut b.list[i];
     if o.ai == Ai::Fly {
         let dist = hero.range(o.pos);
-        // Solo bajan a posarse si el personaje está quieto: si no, rebotan en el
-        // suelo y vuelven a bajar una y otra vez a su lado (parece que lo persiguen).
+        // They only land if the character is still: otherwise they bounce off the
+        // ground and keep coming down beside it (looks like they chase it).
         if hero.still && (world_ms as i32) % 8192 < 2048 && (200.0..=400.0).contains(&dist) {
             o.ai = Ai::Down;
         }
@@ -1300,7 +1300,7 @@ fn take_off(o: &mut Obj) {
     o.action = BIRD_FLY;
 }
 
-/// `MoveHeavenBug` (GOBoid.cpp:1003): el ángulo se usa como radianes, como en el original.
+/// `MoveHeavenBug` (GOBoid.cpp:1003): the angle is used as radians, like the original.
 fn move_heaven_bug(b: &mut Boids, i: usize, hero: &Hero) {
     let frame = b.tick as f32;
     let gone = b.chance(5120);
@@ -1439,8 +1439,8 @@ fn spawn_invasion_dragon(b: &mut Boids, i: usize, hero: Vec3, golden: bool) {
     o.place(hero + Vec3::new(rx as f32, ry as f32, 300.0));
 }
 
-/// Dragón de la invasión (GOBoid.cpp:1395-1413): avanza `escala·40` por tick hacia donde mira,
-/// entre 300 y 400 sobre el suelo, con fuego en la cabeza; vive 128-255 ticks.
+/// Invasion dragon (GOBoid.cpp:1395-1413): advances `scale·40` per tick where it faces,
+/// 300 to 400 above the ground, with fire on its head; lives 128-255 ticks.
 fn step_invasion_dragon(b: &mut Boids, i: usize, t: &Terrain, fire: &mut FireRequests) {
     play_animation(&mut b.list[i], &b.models, 0.5);
     let head = b.models[M_DRAGON].as_ref().map(|m| m.bmd.clone());
@@ -1453,7 +1453,7 @@ fn step_invasion_dragon(b: &mut Boids, i: usize, t: &Terrain, fire: &mut FireReq
         o.live = false;
         return;
     }
-    // Fuego en la cabeza (hueso 11, desplazado 50 hacia −Y), en la pose que se dibuja.
+    // Fire on the head (bone 11, offset 50 toward −Y), in the drawn pose.
     if let Some(model) = head {
         let bones = model.bone_matrices_at(DRAGON_ACTION, o.frame);
         if let Some(m) = bones.get(DRAGON_HEAD_BONE) {
@@ -1499,13 +1499,13 @@ mod tests {
 
     #[test]
     fn calc_angle_como_el_original() {
-        // 0 = +X, 90 = +Y (lo que mueve `AngleMatrix(0, 0, a)` · (v, 0, 0)).
+        // 0 = +X, 90 = +Y (what `AngleMatrix(0, 0, a)` · (v, 0, 0) moves).
         assert_eq!(calc_angle(0.0, 0.0, 10.0, 0.0), 0);
         assert_eq!(calc_angle(0.0, 0.0, 10.0, 10.0), 45);
         assert_eq!(calc_angle(0.0, 0.0, -10.0, 0.0), 180);
         assert_eq!(calc_angle(0.0, 0.0, 10.0, -10.0), 315);
         assert_eq!(calc_angle(0.0, 0.0, -10.0, 10.0), 135);
-        // Con dx = 0 el original da 0 aunque el objetivo esté en ±Y.
+        // With dx = 0 the original gives 0 even if the target is at ±Y.
         assert_eq!(calc_angle(0.0, 0.0, 0.0, 10.0), 0);
     }
 
@@ -1516,7 +1516,7 @@ mod tests {
         assert_eq!(turn_angle_int(350, 10, 13), 3);
         assert_eq!(turn_angle_int(10, 350, 13), 357);
         assert_eq!(turn_angle_int(10, 15, 13), 15);
-        // Sin giro (los dragones de Icarus, `(int)Gravity` = 0).
+        // No turning (Icarus dragons, `(int)Gravity` = 0).
         assert_eq!(turn_angle_int(100, 200, 0), 100);
     }
 

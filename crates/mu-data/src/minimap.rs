@@ -1,26 +1,26 @@
-//! Marcas del minimapa (la ventana del Tab, `CNewUIMiniMap`):
-//! `Data/Local/<Idioma>/Minimap/Minimap_WorldN_<idioma>.bmd`.
+//! Minimap markers (the Tab window, `CNewUIMiniMap`):
+//! `Data/Local/<Language>/Minimap/Minimap_WorldN_<language>.bmd`.
 //!
-//! `CNewUIMiniMap::LoadImages` (NewUIMiniMap.cpp:210-272) lee de una vez
-//! `sizeof(MINI_MAP) × MAX_MINI_MAP_DATA + 45` bytes y detrás un `DWORD` con la suma de
-//! `GenerateCheckSum2(…, 0x2BC1)` (ZzzInfomation.h:108-131); si no cuadra dice "File corrupted." y
-//! cierra el juego. Cada registro va con `BuxConvert` (XOR `FC CF AB`, empezando de nuevo en cada
-//! uno). Los 45 bytes del final entran en la suma pero no se usan.
+//! `CNewUIMiniMap::LoadImages` (NewUIMiniMap.cpp:210-272) reads in one go
+//! `sizeof(MINI_MAP) × MAX_MINI_MAP_DATA + 45` bytes followed by a `DWORD` with the
+//! `GenerateCheckSum2(…, 0x2BC1)` sum (ZzzInfomation.h:108-131); if it doesn't match it says "File corrupted." and
+//! closes the game. Each record goes through `BuxConvert` (XOR `FC CF AB`, restarting for each
+//! one). The trailing 45 bytes are included in the sum but unused.
 //!
-//! `MINI_MAP` (_struct.h:190-196), con el alineamiento normal de 4 (fuera del `pack(1)`):
+//! `MINI_MAP` (_struct.h:190-196), with normal 4-byte alignment (outside the `pack(1)`):
 //!
-//! | desplazamiento | campo                                         |
+//! | offset         | field                                         |
 //! |----------------|-----------------------------------------------|
-//! | 0              | `BYTE Kind` (1 = NPC, 2 = puerta/portal)      |
-//! | 1..4           | relleno                                       |
-//! | 4, 8           | `int Location[2]`: casilla X e Y              |
-//! | 12             | `int Rotation`: giro del icono en grados       |
-//! | 16..116        | `char Name[100]` (Windows-1252, acaba en 0)    |
+//! | 0              | `BYTE Kind` (1 = NPC, 2 = gate/portal)        |
+//! | 1..4           | padding                                       |
+//! | 4, 8           | `int Location[2]`: tile X and Y               |
+//! | 12             | `int Rotation`: icon rotation in degrees      |
+//! | 16..116        | `char Name[100]` (Windows-1252, 0-terminated) |
 //!
-//! La lista acaba en el primer registro con `Kind == 0` (los bucles del original paran ahí).
+//! The list ends at the first record with `Kind == 0` (the original's loops stop there).
 //!
-//! Que un mapa tenga minimapa no depende de este archivo sino de que exista
-//! `Data/WorldN/mini_map.ozt` (`m_bSuccess`): sin marcas el mapa se ve igual, vacío.
+//! Whether a map has a minimap doesn't depend on this file but on the existence of
+//! `Data/WorldN/mini_map.ozt` (`m_bSuccess`): without markers the map looks the same, empty.
 
 use std::path::Path;
 
@@ -30,31 +30,31 @@ use crate::{Error, Result, fs};
 pub const MAX_MINI_MAP_DATA: usize = 100;
 /// `sizeof(MINI_MAP)`.
 pub const RECORD_SIZE: usize = 116;
-/// Lo que entra en la suma: los 100 registros y 45 bytes más.
+/// What goes into the sum: the 100 records and 45 more bytes.
 const BODY: usize = RECORD_SIZE * MAX_MINI_MAP_DATA + 45;
-/// Clave de `GenerateCheckSum2` (NewUIMiniMap.cpp:249).
+/// `GenerateCheckSum2` key (NewUIMiniMap.cpp:249).
 const CHECKSUM_KEY: u16 = 0x2BC1;
 /// `bBuxCode` (WSclient.cpp:202).
 const BUX: [u8; 3] = [0xFC, 0xCF, 0xAB];
 
-/// `Kind` de un NPC (icono `mini_map_ui_npc`).
+/// `Kind` of an NPC (icon `mini_map_ui_npc`).
 pub const KIND_NPC: u8 = 1;
-/// `Kind` de una puerta o portal (icono `mini_map_ui_portal`).
+/// `Kind` of a gate or portal (icon `mini_map_ui_portal`).
 pub const KIND_PORTAL: u8 = 2;
 
-/// Un registro `MINI_MAP`.
+/// A `MINI_MAP` record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Marker {
     pub kind: u8,
-    /// `Location[0]` y `Location[1]`: la casilla X e Y del mapa (0..256).
+    /// `Location[0]` and `Location[1]`: the map's X and Y tile (0..256).
     pub location: [i32; 2],
-    /// `Rotation`: grados que se gira el icono (`RenderPointRotate`, `Rotate_Loc`).
+    /// `Rotation`: degrees the icon is rotated (`RenderPointRotate`, `Rotate_Loc`).
     pub rotation: i32,
     pub name: String,
 }
 
-/// `GenerateCheckSum2` (ZzzInfomation.h:108-131): bloques de 4 bytes que se van sumando o
-/// haciendo XOR, alternando, con un remolino cada 16 bytes. El último bloque incompleto no entra.
+/// `GenerateCheckSum2` (ZzzInfomation.h:108-131): 4-byte blocks that are added or
+/// XORed, alternating, with a twist every 16 bytes. The last incomplete block is ignored.
 pub fn checksum2(buf: &[u8], key: u16) -> u32 {
     let k = key as u32;
     let mut result = k << 9;
@@ -74,7 +74,7 @@ pub fn checksum2(buf: &[u8], key: u16) -> u32 {
     result
 }
 
-/// Lee un `Minimap_WorldN_<idioma>.bmd` entero.
+/// Reads a whole `Minimap_WorldN_<language>.bmd`.
 pub fn read(buf: &[u8]) -> Result<Vec<Marker>> {
     if buf.len() < BODY + 4 {
         return Err(Error::Format(format!("minimapa de {} bytes, se esperaban {}", buf.len(), BODY + 4)));
@@ -102,8 +102,8 @@ pub fn read(buf: &[u8]) -> Result<Vec<Marker>> {
     Ok(out)
 }
 
-/// `Data/Local/<lang>/Minimap/Minimap_World<world>_<lang>.bmd` (NewUIMiniMap.cpp:230), con
-/// `world` la carpeta del mapa (`WorldActive + 1`) y `lang` el idioma (`g_strSelectedML`, "Eng").
+/// `Data/Local/<lang>/Minimap/Minimap_World<world>_<lang>.bmd` (NewUIMiniMap.cpp:230), with
+/// `world` the map folder (`WorldActive + 1`) and `lang` the language (`g_strSelectedML`, "Eng").
 pub fn load(data: &Path, world: u16, lang: &str) -> Result<Vec<Marker>> {
     let dir = fs::find(data, "Local")
         .and_then(|d| fs::find(&d, lang))
@@ -112,12 +112,12 @@ pub fn load(data: &Path, world: u16, lang: &str) -> Result<Vec<Marker>> {
     read(&fs::read(&dir, &format!("Minimap_World{world}_{lang}.bmd"))?)
 }
 
-/// Si el mapa tiene minimapa: `Data/WorldN/mini_map.ozt` existe (`m_bSuccess`, NewUIMiniMap.cpp:214-228).
+/// Whether the map has a minimap: `Data/WorldN/mini_map.ozt` exists (`m_bSuccess`, NewUIMiniMap.cpp:214-228).
 pub fn has_minimap(data: &Path, world: u16) -> bool {
     fs::find(data, &format!("World{world}")).and_then(|d| fs::find(&d, "mini_map.ozt")).is_some()
 }
 
-/// Un byte de Windows-1252 (los nombres van con el `char` del cliente).
+/// A Windows-1252 byte (names use the client's `char`).
 fn cp1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}', '\u{90}', '‘',
@@ -138,7 +138,7 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../dist/cliente/Data")
     }
 
-    /// Cifra un registro como lo haría la herramienta de Webzen (para probar sin datos).
+    /// Encrypts a record like Webzen's tool would (to test without data).
     fn record(kind: u8, x: i32, y: i32, rot: i32, name: &str) -> Vec<u8> {
         let mut r = vec![0u8; RECORD_SIZE];
         r[0] = kind;
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(m.len(), 2);
         assert_eq!(m[0], Marker { kind: 2, location: [10, 20], rotation: 45, name: "Gate".into() });
         assert_eq!(m[1].name, "Trainer");
-        // Un byte cambiado: la suma ya no cuadra.
+        // One byte changed: the sum no longer matches.
         buf[50] ^= 1;
         assert!(read(&buf).is_err());
     }
@@ -181,7 +181,7 @@ mod tests {
         assert!(m.iter().all(|k| k.kind == KIND_NPC));
     }
 
-    /// Todos los mapas con `mini_map.ozt` tienen su lista en inglés y se lee sin errores.
+    /// Every map with `mini_map.ozt` has its English list and it reads without errors.
     #[test]
     fn todos_los_mapas() {
         let data = data();

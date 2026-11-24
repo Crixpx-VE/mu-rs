@@ -1,10 +1,10 @@
-# Compila el cliente y el lanzador en release y los publica en la carpeta que sirve
-# mu-update-server. Los lanzadores de los jugadores los descargan al abrirse.
+# Builds the client and launcher in release and publishes them to the folder served by
+# mu-update-server. Players' launchers download them on startup.
 #
 #   .\publicar.ps1 [-Destino ..\dist\cliente]
 #
-# Cada archivo se copia primero como .tmp y luego se renombra, para que el servidor
-# nunca entregue un archivo a medio copiar.
+# Each file is first copied as .tmp and then renamed, so the server
+# never serves a half-copied file.
 param([string]$Destino = (Join-Path $PSScriptRoot '..\dist\cliente'))
 
 $ErrorActionPreference = 'Stop'
@@ -14,7 +14,7 @@ try {
     cargo build --release -p mu-client -p mu-launcher -p mu-server
     if ($LASTEXITCODE -ne 0) { throw 'la compilación falló' }
 
-    # El servidor de juego (tarea "mu-rs servidor"): igual, si cambió se reinicia.
+    # The game server (task "mu-rs servidor"): likewise, restarted if it changed.
     $tareaJuego = 'mu-rs servidor'
     $juego = Join-Path (Split-Path $Destino) 'servidor\mu-server.exe'
     $nuevoJuego = 'target\release\mu-server.exe'
@@ -27,7 +27,7 @@ try {
         Copy-Item $nuevoJuego $juego -Force
         $t = Get-ScheduledTask -TaskName $tareaJuego -ErrorAction SilentlyContinue
         if ($t -and $t.State -eq 'Disabled') {
-            # Desactivada mientras se prueba el cliente con OpenMU (tarea "mu-openmu", mismos puertos).
+            # Disabled while the client is tested against OpenMU (task "mu-openmu", same ports).
             "publicado: mu-server.exe (tarea '$tareaJuego' desactivada: no se arranca)"
         } elseif ($t) {
             Start-ScheduledTask -TaskName $tareaJuego
@@ -37,7 +37,7 @@ try {
         }
     }
 
-    # El servidor de actualizaciones (tarea programada): si cambió, se para, se cambia y se arranca.
+    # The update server (scheduled task): if it changed, stop it, replace it and start it.
     $tarea = 'mu-rs actualizaciones'
     $servidor = Join-Path (Split-Path $Destino) 'servidor\mu-update-server.exe'
     $nuevo = 'target\release\mu-update-server.exe'

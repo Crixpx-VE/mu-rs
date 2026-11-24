@@ -1,28 +1,29 @@
-//! Puertas a pie: `CheckGate` (ZzzInterface.cpp:7023-7149) y lo de `MoveHero` que la rodea
+//! Walk-in gates: `CheckGate` (ZzzInterface.cpp:7023-7149) and the surrounding part of `MoveHero`
 //! (`LoadingWorld`, ZzzInterface.cpp:7185-7195).
 //!
-//! - **Cada tick** (25 por segundo) baja `LoadingWorld`; a 9999998 el héroe se para
-//!   (`SetPlayerStop`). Con más de 30 el héroe no atiende al ratón ni mira las puertas.
-//! - **Puerta**: con `LoadingWorld` a 0, la primera puerta de entrada (`Flag` 1) del mapa
-//!   (`WorldActive`) cuyo rectángulo de `Gate.bmd` tiene la casilla del héroe (`PositionX/Y`, con
-//!   los bordes). El nivel es el de esa puerta, 2/3 para MG, DL y RF (`gs->Level * 2 / 3`).
-//!   - Puerta 28 sin nivel: nada (el `Success` del original).
-//!   - Puertas 62-65 (Icarus) sin alas, Dinorant ni Fenrir: `GlobalText[263]` y, si además le
-//!     falta nivel, `GlobalText[350]`. Sin equipo todavía, siempre. (El original lo repite en cada
-//!     tick mientras pisa la puerta; aquí espera lo mismo que con el nivel, 50 ticks.)
-//!   - Puertas 45-49 y 55-56 (Atlans) con Uniria (`GlobalText[261]`) y 62-65 con Uniria
-//!     (`GlobalText[569]`): sin equipo no se monta nada, no pasa nunca.
-//!   - Sin nivel: `LoadingWorld` = 50 y `GlobalText[350]` en el chat (`TYPE_ERROR_MESSAGE`).
-//!   - Si no: `SendRequestMagicTeleport(&bResult, puerta, 0, 0)` (wsclientinline.h:655-675), que no
-//!     sale si ya se está cambiando de mapa (`g_bWhileMovingZone`) o hace menos de 3 s de
-//!     `SendRequestFinishLoading` (`g_dwLatestZoneMoving`); si sale, `LoadingWorld` = 9999999
-//!     y `g_bWhileMovingZone` (salvo entre Lorencia y Valley of Loren, que no hay).
-//! - **Respuesta** (`ReceiveTeleport`, WSclient.cpp:1698-1816): con cambio de mapa, `LoadingWorld`
-//!   = 30 y, al cargar, `SendRequestFinishLoading` ([`GateState::finish_loading`], move_window.rs).
-//!   Al entrar al juego también (`ReceiveJoinMapServer`, WSclient.cpp:937). Sin cambio de mapa
-//!   (`Flag` 0, lo que contesta OpenMU, y nosotros, si el servidor no deja pasar) el original no
-//!   toca `LoadingWorld` y se quedaría sin poder moverse: aquí también vuelve a 30. Por lo mismo, si
-//!   en 5 s no llega nada se suelta (un servidor que no contesta, p. ej. con otro `Gate.bmd`).
+//! - **Every tick** (25 per second) `LoadingWorld` decreases; at 9999998 the hero stops
+//!   (`SetPlayerStop`). Above 30 the hero ignores the mouse and doesn't check gates.
+//! - **Gate**: with `LoadingWorld` at 0, the first entry gate (`Flag` 1) of the map
+//!   (`WorldActive`) whose `Gate.bmd` rectangle contains the hero's tile (`PositionX/Y`, edges
+//!   included). The level is that gate's, 2/3 for MG, DL and RF (`gs->Level * 2 / 3`).
+//!   - Gate 28 without the level: nothing (the original's `Success`).
+//!   - Gates 62-65 (Icarus) without wings, Dinorant or Fenrir: `GlobalText[263]` and, if the level
+//!     is also missing, `GlobalText[350]`. With no equipment yet, always. (The original repeats it every
+//!     tick while standing on the gate; here it waits the same as for the level, 50 ticks.)
+//!   - Gates 45-49 and 55-56 (Atlans) with Uniria (`GlobalText[261]`) and 62-65 with Uniria
+//!     (`GlobalText[569]`): without equipment nothing is mounted, never happens.
+//!   - Without the level: `LoadingWorld` = 50 and `GlobalText[350]` in chat (`TYPE_ERROR_MESSAGE`).
+//!   - Otherwise: `SendRequestMagicTeleport(&bResult, gate, 0, 0)` (wsclientinline.h:655-675), which is
+//!     not sent while already changing map (`g_bWhileMovingZone`) or less than 3 s after
+//!     `SendRequestFinishLoading` (`g_dwLatestZoneMoving`); if sent, `LoadingWorld` = 9999999
+//!     and `g_bWhileMovingZone` (except between Lorencia and Valley of Loren, which doesn't exist).
+//! - **Reply** (`ReceiveTeleport`, WSclient.cpp:1698-1816): with a map change, `LoadingWorld`
+//!   = 30 and, after loading, `SendRequestFinishLoading` ([`GateState::finish_loading`], move_window.rs).
+//!   Also when entering the game (`ReceiveJoinMapServer`, WSclient.cpp:937). Without a map change
+//!   (`Flag` 0, what OpenMU replies, and we do, if the server doesn't let you through) the original doesn't
+//!   touch `LoadingWorld` and would leave the hero unable to move: here it also goes back to 30. For the
+//!   same reason, if nothing arrives within 5 s it is released (a server that doesn't reply, e.g. with
+//!   another `Gate.bmd`).
 
 use bevy::prelude::*;
 use mu_data::warps::Gate;
@@ -44,21 +45,21 @@ impl Plugin for GatePlugin {
     }
 }
 
-/// `GlobalText[350]` y `[263]` (Text_eng.bmd).
+/// `GlobalText[350]` and `[263]` (Text_eng.bmd).
 const TEXT_LEVEL: &str = "Only characters over level %d can enter.";
 const TEXT_ICARUS: &str = crate::chat_log::TEXT_ICARUS_NEEDS_WINGS;
-/// `LoadingWorld` tras pedir la puerta.
+/// `LoadingWorld` after requesting the gate.
 const LOADING_SENT: u32 = 9_999_999;
-/// `LoadingWorld` tras cambiar de mapa (o entrar al juego).
+/// `LoadingWorld` after changing map (or entering the game).
 const LOADING_ARRIVED: u32 = 30;
-/// `LoadingWorld` tras no llegar al nivel.
+/// `LoadingWorld` after falling short of the level.
 const LOADING_REFUSED: u32 = 50;
-/// Lo que espera `SendRequestMagicTeleport` desde `SendRequestFinishLoading` (3000 ms).
+/// What `SendRequestMagicTeleport` waits for after `SendRequestFinishLoading` (3000 ms).
 const ZONE_MOVING_WAIT: f64 = 3.0;
-/// Sin respuesta del servidor en este tiempo, el héroe se suelta (no está en el original).
+/// Without a server reply within this time, the hero is released (not in the original).
 const NO_REPLY: f64 = 5.0;
 
-/// Las variables globales del original que usa `CheckGate`.
+/// The original's global variables used by `CheckGate`.
 #[derive(Resource, Default)]
 pub struct GateState {
     /// `GateAttribute` (`Gate.bmd`).
@@ -67,21 +68,21 @@ pub struct GateState {
     loading_world: u32,
     /// `g_bWhileMovingZone`.
     while_moving_zone: bool,
-    /// `g_dwLatestZoneMoving` (segundos de `Time<Real>`).
+    /// `g_dwLatestZoneMoving` (seconds of `Time<Real>`).
     latest_zone_moving: Option<f64>,
-    /// Cuándo se pidió la última puerta (para [`NO_REPLY`]).
+    /// When the last gate was requested (for [`NO_REPLY`]).
     sent_at: Option<f64>,
-    /// Fracción de tick acumulada.
+    /// Accumulated tick fraction.
     acc: f32,
 }
 
 impl GateState {
-    /// `LoadingWorld > 30`: el héroe no atiende al ratón.
+    /// `LoadingWorld > 30`: the hero ignores the mouse.
     pub fn blocks_input(&self) -> bool {
         self.loading_world > LOADING_ARRIVED
     }
 
-    /// `SendRequestFinishLoading` (wsclientinline.h:314-323): ya ha cargado el mapa nuevo.
+    /// `SendRequestFinishLoading` (wsclientinline.h:314-323): the new map has finished loading.
     pub fn finish_loading(&mut self, now: f64) {
         self.latest_zone_moving = Some(now);
         self.while_moving_zone = false;
@@ -95,7 +96,7 @@ fn load_gates(args: Res<Args>, mut state: ResMut<GateState>) {
     }
 }
 
-/// `ReceiveJoinMapServer` y `ReceiveTeleport`: `LoadingWorld = 30`.
+/// `ReceiveJoinMapServer` and `ReceiveTeleport`: `LoadingWorld = 30`.
 fn net_messages(mut from: MessageReader<crate::net::FromServer>, mut state: ResMut<GateState>) {
     for m in from.read() {
         match m.0 {
@@ -111,41 +112,41 @@ fn net_messages(mut from: MessageReader<crate::net::FromServer>, mut state: ResM
     }
 }
 
-/// Lo que dice `CheckGate` para el héroe en una casilla.
+/// What `CheckGate` says for the hero on a tile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Outcome {
-    /// `SendRequestMagicTeleport(&bResult, puerta, 0, 0)`.
+    /// `SendRequestMagicTeleport(&bResult, gate, 0, 0)`.
     Send(u16),
-    /// Sin nivel (`GlobalText[350]` con el nivel).
+    /// Level too low (`GlobalText[350]` with the level).
     Level(i32),
-    /// Icarus sin alas (`GlobalText[263]`, y `[350]` si además le falta nivel).
+    /// Icarus without wings (`GlobalText[263]`, and `[350]` if the level is also missing).
     Wings(Option<i32>),
 }
 
-/// El nivel que pide una puerta (ZzzInterface.cpp:7044-7051): 2/3 para MG (`CLASS_DARK`), DL y RF.
+/// The level a gate requires (ZzzInterface.cpp:7044-7051): 2/3 for MG (`CLASS_DARK`), DL and RF.
 fn gate_level(class: Class, level: u16) -> i32 {
     if matches!(class, Class::Gladiator | Class::Lord | Class::Fighter) { level as i32 * 2 / 3 } else { level as i32 }
 }
 
-/// El bucle de `CheckGate` (sin `LoadingWorld`): la primera puerta de entrada de `map` que pisa
-/// `(x, y)` y qué hacer.
+/// The `CheckGate` loop (without `LoadingWorld`): the first entry gate of `map` stepped on at
+/// `(x, y)` and what to do.
 fn check(gates: &[Gate], map: u8, (x, y): (i32, i32), class: Class, hero_level: i32) -> Option<Outcome> {
     for (i, gs) in gates.iter().enumerate() {
         if gs.flag != 1 || gs.map != map {
             continue;
         }
-        // Sin ordenar las esquinas, como el original (`x >= x1 && x <= x2`).
+        // Corners not sorted, like the original (`x >= x1 && x <= x2`).
         if !(x >= gs.x1 as i32 && y >= gs.y1 as i32 && x <= gs.x2 as i32 && y <= gs.y2 as i32) {
             continue;
         }
         let level = gate_level(class, gs.level);
-        // La 28 (Devias → Lost Tower) sin nivel no hace nada.
+        // Gate 28 (Devias → Lost Tower) without the level does nothing.
         if i == 28 && hero_level < level {
             return None;
         }
-        // Atlans con Uniria (`GlobalText[261]`): sin equipo, nunca.
+        // Atlans with Uniria (`GlobalText[261]`): without equipment, never.
         if (62..=65).contains(&i) {
-            // Sin alas, Dinorant ni Fenrir (no hay equipo todavía).
+            // No wings, Dinorant or Fenrir (no equipment yet).
             return Some(Outcome::Wings((hero_level < level).then_some(level)));
         }
         if hero_level < level {
@@ -156,7 +157,7 @@ fn check(gates: &[Gate], map: u8, (x, y): (i32, i32), class: Class, hero_level: 
     None
 }
 
-/// `MoveHero` (lo de `LoadingWorld`) + `CheckGate`, una vez por tick.
+/// `MoveHero` (the `LoadingWorld` part) + `CheckGate`, once per tick.
 #[allow(clippy::too_many_arguments)]
 fn check_gate(
     time: Res<Time>,
@@ -182,13 +183,13 @@ fn check_gate(
         state.acc -= 1.0;
         if state.loading_world > 0 {
             state.loading_world -= 1;
-            // `SetPlayerStop` (a 29 también, pero eso solo cambia la animación un tick: sigue caminando).
+            // `SetPlayerStop` (at 29 too, but that only changes the animation for one tick: it keeps walking).
             if state.loading_world == LOADING_SENT - 1 {
                 p.path.clear();
                 p.operate = None;
             }
         }
-        // `LoadingWorld > 30`: `return` antes de `CheckGate`; y `CheckGate` pide 0.
+        // `LoadingWorld > 30`: `return` before `CheckGate`; and `CheckGate` requires 0.
         if state.loading_world != 0 || !net.connected() {
             continue;
         }
@@ -201,7 +202,7 @@ fn check_gate(
         };
         match outcome {
             Outcome::Send(gate) => {
-                // `SendRequestMagicTeleport`: no sale cambiando de mapa ni hasta 3 s después.
+                // `SendRequestMagicTeleport`: not sent while changing map or until 3 s later.
                 let busy = state.while_moving_zone || state.latest_zone_moving.is_some_and(|t| now - t < ZONE_MOVING_WAIT);
                 if busy {
                     state.while_moving_zone = false;
@@ -236,7 +237,7 @@ mod tests {
         Gate { flag, map, x1, y1, x2, y2, target, angle: 0, level, max_level: 0 }
     }
 
-    /// Las puertas de Lorencia ↔ Dungeon de `Gate.bmd` (1 → 2 y 3 → 4) y una de Icarus.
+    /// The Lorencia ↔ Dungeon gates from `Gate.bmd` (1 → 2 and 3 → 4) and one in Icarus.
     fn gates() -> Vec<Gate> {
         let mut g = vec![Gate::default(); 70];
         g[1] = gate(1, 0, (121, 232, 123, 233), 2, 20);
@@ -257,16 +258,16 @@ mod tests {
         assert_eq!(check(&g, 0, (124, 232), Class::Knight, 50), None);
         assert_eq!(check(&g, 1, (122, 232), Class::Knight, 50), None, "otro mapa");
         assert_eq!(check(&g, 0, (122, 232), Class::Knight, 19), Some(Outcome::Level(20)));
-        // 20 * 2 / 3 = 13 para MG, DL y RF.
+        // 20 * 2 / 3 = 13 for MG, DL and RF.
         assert_eq!(check(&g, 0, (122, 232), Class::Lord, 13), Some(Outcome::Send(1)));
         assert_eq!(check(&g, 0, (122, 232), Class::Gladiator, 12), Some(Outcome::Level(13)));
         assert_eq!(check(&g, 0, (122, 232), Class::Wizard, 13), Some(Outcome::Level(20)));
-        // De vuelta, sin nivel.
+        // Back, without the level.
         assert_eq!(check(&g, 1, (108, 248), Class::Knight, 1), Some(Outcome::Send(3)));
-        // La 28 sin nivel no dice nada.
+        // Gate 28 without the level says nothing.
         assert_eq!(check(&g, 2, (2, 248), Class::Knight, 39), None);
         assert_eq!(check(&g, 2, (2, 248), Class::Knight, 40), Some(Outcome::Send(28)));
-        // Icarus sin alas: siempre el aviso, y el del nivel si falta.
+        // Icarus without wings: always the warning, plus the level one if missing.
         assert_eq!(check(&g, 2, (10, 10), Class::Knight, 400), Some(Outcome::Wings(None)));
         assert_eq!(check(&g, 2, (10, 10), Class::Knight, 100), Some(Outcome::Wings(Some(170))));
     }

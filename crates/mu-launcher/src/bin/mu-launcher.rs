@@ -1,16 +1,16 @@
-//! Lanzador: actualiza el cliente y lo abre.
+//! Launcher: updates the client and starts it.
 //!
-//!   mu-launcher [opciones del juego, p. ej. --world 3]
+//!   mu-launcher [game options, e.g. --world 3]
 //!
-//! 1. Pide la lista de archivos al servidor (dirección en `mu-launcher.txt`: `servidor=http://ip:puerto`).
-//! 2. Descarga lo que falte o haya cambiado (comprimido, varios a la vez), comprobando la huella
-//!    SHA-256 de cada archivo. Si algo falla, lo vuelve a intentar hasta tenerlo todo.
-//! 3. Abre `mu-client.exe` con las opciones recibidas.
-//! 4. Al cerrarse el juego, sube su registro (`mu-client.log`) al servidor (`POST /log`).
+//! 1. Requests the file list from the server (address in `mu-launcher.txt`: `servidor=http://ip:port`).
+//! 2. Downloads whatever is missing or changed (compressed, several at once), checking each
+//!    file's SHA-256 hash. If something fails, retries until it has everything.
+//! 3. Starts `mu-client.exe` with the received options.
+//! 4. When the game closes, uploads its log (`mu-client.log`) to the server (`POST /log`).
 //!
-//! El juego solo se abre con todos los archivos. Si el servidor no responde, se abre la versión
-//! que ya hay solo si la última actualización terminó entera. Si se actualiza a sí mismo, se
-//! vuelve a abrir con la versión nueva (antes de descargar lo demás).
+//! The game only starts with all files present. If the server doesn't respond, the existing version
+//! is started only if the last update completed fully. If it updates itself, it
+//! restarts with the new version (before downloading the rest).
 
 use std::collections::HashMap;
 use std::io::{self, BufRead, Read, Write};
@@ -28,16 +28,16 @@ use sha2::{Digest, Sha256};
 
 const CONFIG_FILE: &str = "mu-launcher.txt";
 const STATE_FILE: &str = ".mu-launcher-state";
-/// Línea del estado que dice que la última actualización terminó entera.
+/// State line saying the last update completed fully.
 const COMPLETE_MARK: &str = "#completo";
 const CLIENT_EXE: &str = "mu-client.exe";
-/// Lo que el juego saca por consola (el registro propio del juego es `mu-client.log`).
+/// What the game prints to the console (the game's own log is `mu-client.log`).
 const CONSOLE_LOG: &str = "mu-client-consola.log";
-/// Descargas a la vez.
+/// Concurrent downloads.
 const WORKERS: usize = 6;
-/// Intentos por archivo en cada vuelta (luego se vuelve a pedir la lista).
+/// Attempts per file in each round (then the list is requested again).
 const ATTEMPTS: u32 = 4;
-/// Espera antes de volver a intentar la actualización entera.
+/// Wait before retrying the whole update.
 const RETRY_WAIT: Duration = Duration::from_secs(5);
 
 type Res<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -98,8 +98,8 @@ fn main() {
     }
 }
 
-/// Sube al servidor el registro del juego (`mu-client.log`) y lo que sacó por consola, para
-/// poder ver qué pasó sin que el jugador tenga que copiarlo.
+/// Uploads the game log (`mu-client.log`) and its console output to the server, so
+/// what happened can be seen without the player having to copy it.
 fn send_log(dir: &Path, url: &str, slot: &LogSlot) {
     let read = |name: &str| std::fs::read(dir.join(name)).unwrap_or_default();
     let mut body = format!("=== {} ===\n", slot.game).into_bytes();
@@ -126,7 +126,7 @@ fn self_name() -> String {
         .unwrap_or_else(|| "mu-launcher.exe".into())
 }
 
-/// `servidor=...` de `mu-launcher.txt` (o la variable `MU_UPDATE_URL`).
+/// `servidor=...` from `mu-launcher.txt` (or the `MU_UPDATE_URL` variable).
 fn server_url(dir: &Path) -> Option<String> {
     if let Ok(u) = std::env::var("MU_UPDATE_URL") {
         return Some(u);
@@ -143,18 +143,18 @@ struct Updated {
 }
 
 enum Failure {
-    /// No se pudo pedir la lista.
+    /// The list could not be requested.
     Offline(String),
-    /// Faltan archivos por bajar.
+    /// Files still left to download.
     Download(String),
 }
 
-/// Lo que se sabe de cada archivo local: (tamaño, fecha) → huella. Evita recalcular 1 GB cada vez.
+/// What is known about each local file: (size, date) → hash. Avoids rehashing 1 GB every time.
 type State = HashMap<String, (u64, u128, String)>;
 
-/// La lista del servidor: con tamaños comprimidos si el servidor los da, si no la de siempre.
+/// The server list: with compressed sizes if the server provides them, otherwise the classic one.
 fn fetch_manifest(agent: &ureq::Agent, url: &str) -> Result<Vec<Entry>, String> {
-    // Ok(None): el servidor es viejo y no tiene `/manifest2`.
+    // Ok(None): the server is old and has no `/manifest2`.
     let get = |path: &str| -> Result<Option<String>, String> {
         match agent.get(&format!("{url}{path}")).call() {
             Ok(r) => r.into_string().map(Some).map_err(|e| e.to_string()),
@@ -180,8 +180,8 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
     println!("{} archivos en el servidor.", manifest.len());
 
     let mut state = load_state(dir);
-    // Lo que instaló el lanzador (está en su estado) y el servidor ya no publica: se borra.
-    // Solo esos archivos: la configuración del jugador y los registros nunca están en el estado.
+    // What the launcher installed (it's in its state) and the server no longer publishes: deleted.
+    // Only those files: the player's settings and logs are never in the state.
     let published: std::collections::HashSet<&str> = manifest.iter().map(|e| e.path.as_str()).collect();
     let gone: Vec<String> = state
         .keys()
@@ -199,7 +199,7 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
     let mut pending: Vec<&Entry> = vec![];
     let mut checked = 0usize;
     for (i, e) in manifest.iter().enumerate() {
-        // Mostrar avance mientras se comprueban archivos que aún no conocemos (la primera vez, todos).
+        // Show progress while checking files not yet known (the first time, all of them).
         if checked > 0 && (i % 250 == 0 || i + 1 == manifest.len()) {
             print!("\r  Comprobando archivos  {}  {}/{}", bar(i as u64 + 1, manifest.len() as u64), i + 1, manifest.len());
             let _ = io::stdout().flush();
@@ -231,10 +231,10 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
         save_state(dir, &state, true);
         return Ok(Updated { files: 0, relaunch: false });
     }
-    // Desde aquí, hasta que no termine, el cliente no está completo.
+    // From here until it finishes, the client is not complete.
     save_state(dir, &state, false);
 
-    // Si hay lanzador nuevo, primero ese: el nuevo baja lo demás (quizá de otra manera).
+    // If there is a new launcher, that first: the new one downloads the rest (maybe differently).
     let me = self_name();
     if let Some(e) = pending.iter().find(|e| e.path.eq_ignore_ascii_case(&me)) {
         println!("Hay un lanzador nuevo; se descarga primero.");
@@ -261,13 +261,13 @@ fn update(dir: &Path, url: &str) -> Result<Updated, Failure> {
     Ok(Updated { files, relaunch: false })
 }
 
-/// Lo que viaja por la red de un archivo.
+/// What travels over the network for a file.
 fn wire_size(e: &Entry) -> u64 {
     if e.packed > 0 { e.packed } else { e.size }
 }
 
-/// Descarga `pending` con varias conexiones a la vez. Cada archivo se intenta varias veces; si
-/// alguno no llega, devuelve error (y el que llama vuelve a pedir la lista y lo intenta otra vez).
+/// Downloads `pending` over several connections at once. Each file is tried several times; if
+/// any doesn't arrive, returns an error (and the caller requests the list again and retries).
 fn download_all(
     dir: &Path,
     url: &str,
@@ -313,7 +313,7 @@ fn download_all(
                 }
             });
         }
-        // Avance, y guardar el estado de vez en cuando por si se corta.
+        // Progress, and save the state now and then in case of interruption.
         let mut last_save = Instant::now();
         loop {
             let n = finished.load(Ordering::SeqCst);
@@ -354,7 +354,7 @@ fn download_all(
     }
 }
 
-/// Cuenta lo que llega por la red (para el avance); si la descarga falla, lo descuenta.
+/// Counts what arrives over the network (for progress); if the download fails, subtracts it.
 struct Counting<'a, R> {
     inner: R,
     wire: &'a AtomicU64,
@@ -372,13 +372,13 @@ impl<R: Read> Read for Counting<'_, R> {
 
 impl<R> Drop for Counting<'_, R> {
     fn drop(&mut self) {
-        // El avance cuenta lo que se ha bajado bien: lo de un intento fallido se quita, y el
-        // archivo bueno cuenta lo que dice la lista (ni más ni menos).
+        // Progress counts what downloaded correctly: a failed attempt's bytes are removed, and the
+        // good file counts what the list says (no more, no less).
         self.wire.fetch_sub(self.got, Ordering::Relaxed);
     }
 }
 
-/// Descarga a `<archivo>.part` (descomprimiendo si viene comprimido) y comprueba tamaño y huella.
+/// Downloads to `<file>.part` (decompressing if compressed) and checks size and hash.
 fn download(agent: &ureq::Agent, url: &str, e: &Entry, local: &Path, wire: &AtomicU64) -> Result<(), String> {
     let run = || -> Res<()> {
         if let Some(parent) = local.parent() {
@@ -419,11 +419,11 @@ fn download(agent: &ureq::Agent, url: &str, e: &Entry, local: &Path, wire: &Atom
     run().map_err(|e| e.to_string())
 }
 
-/// Pone en su sitio el `.part` ya comprobado.
+/// Moves the already verified `.part` into place.
 fn install(e: &Entry, local: &Path, me: &str) -> Result<(), String> {
     let run = || -> io::Result<()> {
         if e.path.eq_ignore_ascii_case(me) && local.exists() {
-            // Windows no deja sobrescribir un .exe abierto, pero sí renombrarlo.
+            // Windows doesn't allow overwriting an open .exe, but does allow renaming it.
             let old = local.with_extension("exe.old");
             let _ = std::fs::remove_file(&old);
             std::fs::rename(local, old)?;
@@ -440,7 +440,7 @@ fn part_ext(p: &Path) -> String {
     }
 }
 
-/// Las últimas 40 letras de una ruta (sin cortar un carácter por la mitad).
+/// The last 40 characters of a path (without splitting a character).
 fn short(p: &str) -> &str {
     let mut start = p.len().saturating_sub(40);
     while !p.is_char_boundary(start) {
@@ -449,7 +449,7 @@ fn short(p: &str) -> &str {
     &p[start..]
 }
 
-/// Barra de progreso de texto: `[██████░░░░░░]  45%`.
+/// Text progress bar: `[██████░░░░░░]  45%`.
 fn bar(done: u64, total: u64) -> String {
     const WIDTH: u64 = 30;
     let frac = if total == 0 { 1.0 } else { (done as f64 / total as f64).min(1.0) };
@@ -479,7 +479,7 @@ fn load_state(dir: &Path) -> State {
         .collect()
 }
 
-/// ¿Terminó entera la última actualización?
+/// Did the last update complete fully?
 fn load_complete(dir: &Path) -> bool {
     std::fs::read_to_string(dir.join(STATE_FILE)).is_ok_and(|t| t.lines().next() == Some(COMPLETE_MARK))
 }
@@ -490,16 +490,16 @@ fn save_state(dir: &Path, state: &State, complete: bool) {
     let _ = std::fs::write(dir.join(STATE_FILE), text);
 }
 
-/// Los dos registros de una partida: el del juego y lo que saca por consola.
+/// The two logs of a session: the game's and its console output.
 struct LogSlot {
     game: String,
     console: String,
 }
 
-/// Con varios juegos abiertos a la vez, cada uno lleva sus propios registros: el primero
-/// `mu-client.log` y `mu-client-consola.log`, el segundo `mu-client-2.log` y
-/// `mu-client-consola-2.log`... Un registro de consola abierto por otro lanzador está en uso
-/// (se abre sin dejar escribir a nadie más), así que se pasa al siguiente.
+/// With several games open at once, each has its own logs: the first
+/// `mu-client.log` and `mu-client-consola.log`, the second `mu-client-2.log` and
+/// `mu-client-consola-2.log`... A console log opened by another launcher is in use
+/// (opened without letting anyone else write), so the next one is used.
 fn log_slot(dir: &Path) -> (LogSlot, Option<std::fs::File>) {
     for n in 1..=16 {
         let suffix = if n == 1 { String::new() } else { format!("-{n}") };
@@ -514,7 +514,7 @@ fn log_slot(dir: &Path) -> (LogSlot, Option<std::fs::File>) {
 #[cfg(windows)]
 fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
     use std::os::windows::fs::OpenOptionsExt;
-    // FILE_SHARE_READ: los demás pueden leerlo pero no abrirlo para escribir.
+    // FILE_SHARE_READ: others can read it but not open it for writing.
     std::fs::OpenOptions::new().write(true).create(true).truncate(true).share_mode(1).open(path)
 }
 
@@ -523,8 +523,8 @@ fn open_exclusive(path: &Path) -> io::Result<std::fs::File> {
     std::fs::File::create(path)
 }
 
-/// Abre el juego y espera a que se cierre. Devuelve si terminó bien. El juego escribe su
-/// registro en `slot.game` (se lo dice `MU_LOG`); lo que saca por consola va a `console`.
+/// Starts the game and waits for it to close. Returns whether it ended well. The game writes its
+/// log to `slot.game` (told via `MU_LOG`); its console output goes to `console`.
 fn run_client(dir: &Path, args: &[String], slot: &LogSlot, log: Option<std::fs::File>) -> bool {
     let exe: PathBuf = dir.join(CLIENT_EXE);
     let mut cmd = Command::new(&exe);
