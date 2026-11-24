@@ -365,7 +365,7 @@ impl ViewCache {
                     .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals)
                     .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, posed.uvs),
             );
-            let tex_path = fs::find(&dir, &bmd::texture_file_name(&m.texture));
+            let tex_path = item_texture(data, &dir, &bmd::texture_file_name(&m.texture));
             let own = tex_path.and_then(|p| {
                 self.images
                     .entry(p.clone())
@@ -388,6 +388,16 @@ impl ViewCache {
         }
         Some(out)
     }
+}
+
+/// Where an item model's texture is. The model comes from its own folder (`AccessModel`, e.g. the
+/// pets `Helper01-04.bmd` from `Player`), but its textures are opened from the folder given to
+/// `OpenTexture`: `Item\` for almost every item (ZzzOpenData.cpp:1390-1403), `Skill\` or `Npc\` for a
+/// few (1344-1378). So: next to the model first, then those folders.
+fn item_texture(data: &Path, model_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
+    fs::find(model_dir, name).or_else(|| {
+        ["Item", "Skill", "Npc"].iter().find_map(|folder| fs::find(&fs::find(data, folder)?, name))
+    })
 }
 
 /// `OpenTexture` (LoadData.cpp:46-71): textures starting with `ski` or `level` are skin
@@ -418,6 +428,24 @@ fn player_bones(skel: &Bmd, body_height: f32) -> Vec<bmd::Mat34> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The pets' models are in `Player` but their textures in `Item` (they showed up white).
+    #[test]
+    fn pet_textures_come_from_item() {
+        let data = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../referencias/MuMain/src/bin/Data");
+        let Some(player) = fs::find(&data, "Player") else { return };
+        for i in 1..=4 {
+            let name = format!("Helper0{i}.bmd");
+            let Ok(model) = fs::read(&player, &name).and_then(|b| bmd::read(&b)) else { continue };
+            for m in &model.meshes {
+                if hidden_texture(&m.texture) {
+                    continue;
+                }
+                let tex = bmd::texture_file_name(&m.texture);
+                assert!(item_texture(&data, &player, &tex).is_some(), "{name}: no texture {tex}");
+            }
+        }
+    }
 
     #[test]
     fn texturas_escondidas() {
