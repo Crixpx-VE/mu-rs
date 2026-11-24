@@ -1,6 +1,7 @@
 //! Code for each effect kind, translated from MuMain. Each file is one family and has
 //! `pub fn register(r: &mut Registry)`, which registers its kinds.
 
+pub mod common;
 pub mod particles_1;
 pub mod particles_2;
 pub mod particles_3;
@@ -21,6 +22,30 @@ pub mod objects_kalima;
 pub mod objects_kanturu;
 pub mod objects_raklion;
 pub mod fire;
+
+// TEMPORARY: families being translated, each behind its own feature (see Cargo.toml).
+#[cfg(feature = "fxw-elf")]
+pub mod effects_elf;
+#[cfg(feature = "fxw-summoner")]
+pub mod effects_summoner;
+#[cfg(feature = "fxw-wizard")]
+pub mod effects_wizard;
+#[cfg(feature = "fxw-dl-mg1")]
+pub mod effects_dl_mg1;
+#[cfg(feature = "fxw-dl-mg2")]
+pub mod effects_dl_mg2;
+#[cfg(feature = "fxw-bitmaps1")]
+pub mod effects_bitmaps1;
+#[cfg(feature = "fxw-bitmaps2")]
+pub mod effects_bitmaps2;
+#[cfg(feature = "fxw-monk")]
+pub mod effects_monk;
+#[cfg(feature = "fxw-monsters1")]
+pub mod effects_monsters1;
+#[cfg(feature = "fxw-monsters2")]
+pub mod effects_monsters2;
+#[cfg(feature = "fxw-events")]
+pub mod effects_events;
 
 use super::core::Registry;
 
@@ -45,4 +70,26 @@ pub fn register_all(r: &mut Registry) {
     objects_kanturu::register(r);
     objects_raklion::register(r);
     fire::register(r);
+    #[cfg(feature = "fxw-elf")]
+    effects_elf::register(r);
+    #[cfg(feature = "fxw-summoner")]
+    effects_summoner::register(r);
+    #[cfg(feature = "fxw-wizard")]
+    effects_wizard::register(r);
+    #[cfg(feature = "fxw-dl-mg1")]
+    effects_dl_mg1::register(r);
+    #[cfg(feature = "fxw-dl-mg2")]
+    effects_dl_mg2::register(r);
+    #[cfg(feature = "fxw-bitmaps1")]
+    effects_bitmaps1::register(r);
+    #[cfg(feature = "fxw-bitmaps2")]
+    effects_bitmaps2::register(r);
+    #[cfg(feature = "fxw-monk")]
+    effects_monk::register(r);
+    #[cfg(feature = "fxw-monsters1")]
+    effects_monsters1::register(r);
+    #[cfg(feature = "fxw-monsters2")]
+    effects_monsters2::register(r);
+    #[cfg(feature = "fxw-events")]
+    effects_events::register(r);
 }

@@ -17,6 +17,8 @@ pub mod material;
 pub mod models;
 pub mod sim;
 pub mod textures;
+#[cfg(test)]
+mod smoke_tests;
 
 pub mod tables {
     pub mod bitmaps;

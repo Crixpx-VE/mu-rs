@@ -20,3 +20,16 @@ ab_glyph.workspace = true
 # Profiling: `cargo build --release -p mu-client --features traza` writes a Chrome trace
 # (`trace-*.json`) with the time spent in each system. Not enabled in published builds.
 traza = ["bevy/trace_chrome"]
+# TEMPORARY (fx-all work in progress): each effect family being translated is compiled only with
+# its feature, so unfinished files do not break the others. Removed when the families are done.
+fxw-elf = []
+fxw-summoner = []
+fxw-wizard = []
+fxw-dl-mg1 = []
+fxw-dl-mg2 = []
+fxw-bitmaps1 = []
+fxw-bitmaps2 = []
+fxw-monk = []
+fxw-monsters1 = []
+fxw-monsters2 = []
+fxw-events = []
