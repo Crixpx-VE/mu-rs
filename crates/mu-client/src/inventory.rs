@@ -24,13 +24,22 @@
 //!   durability or stack size (`ReceiveDurability`, 0x2A). `--inventario-prueba` sets up a test
 //!   inventory (+0 to +15, excellent and one ancient) when there is no server.
 //!
-//! Missing: repair, personal store, the window's ancient sets and sockets, potion hotkeys, item
-//! stacking (jewels on items, `IsOverlayItem`) and the grid's durability colors.
+//! - **Repair** (`SetRepairMode`, NewUIMyInventory.cpp:427-445): the repair button (from level 50,
+//!   hidden with the NPC shop, vault... open, 1301-1327) or `L` (573-586) toggle it, and so does the
+//!   NPC shop's repair button (shop.rs). In repair mode items are not picked up, the tooltips show
+//!   the repair cost (`RenderRepairInfo`) and a click on an item asks the server to repair it
+//!   (`SendRequestRepair`, 1463-1487 and 2148-2173): with a repair shop open at its price, otherwise
+//!   paying the self-repair price (`p_AddGold` 1). Durability and zen change when the server says so.
+//! - **NPC shop**: with it open, the tooltips show the selling price (`RenderItemInfo`,
+//!   ZzzInventory.cpp:2189-2213) and an item dropped on the shop is sold (shop.rs).
+//!
+//! Missing: personal store, the window's ancient sets and sockets, potion hotkeys, item stacking
+//! (jewels on items, `IsOverlayItem`) and the grid's durability colors.
 
 use bevy::prelude::*;
 use bevy::text::{FontSize, FontSmoothing, FontWeight, LineHeight};
 use mu_data::items::info::{HeroView, TipLine, item_info};
-use mu_data::items::{Item, group, slot};
+use mu_data::items::{Item, group, price, slot};
 
 use mu_protocol::game::{ClientMessage, FIRST_GRID_SLOT, ServerMessage, storage};
 
@@ -58,11 +67,21 @@ impl Plugin for InventoryPlugin {
                 PreUpdate,
                 keys.after(bevy::input::InputSystems).after(crate::chat::ChatKeys).run_if(in_state(GameScene::Game)),
             )
+            .configure_sets(Update, (InventorySet::Mouse, InventorySet::Draw).chain().before(ItemViewSet))
             .add_systems(
                 Update,
-                (follow_char_info, update_mouse, request_views, draw).chain().before(ItemViewSet).run_if(in_state(GameScene::Game)),
-            );
+                (follow_char_info, update_mouse).chain().in_set(InventorySet::Mouse).run_if(in_state(GameScene::Game)),
+            )
+            .add_systems(Update, (request_views, draw).chain().in_set(InventorySet::Draw).run_if(in_state(GameScene::Game)));
     }
+}
+
+/// The inventory's mouse handling and its drawing; windows that draw with it (the NPC shop) go in
+/// between.
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub enum InventorySet {
+    Mouse,
+    Draw,
 }
 
 /// Grid cell of an inventory slot (12-75: `MAX_EQUIPMENT_INDEX` + y · 8 + x).
@@ -72,13 +91,13 @@ fn grid_cell(slot: u8) -> Option<(u8, u8)> {
 }
 
 /// Inventory slot of a grid cell.
-fn grid_slot(x: u8, y: u8) -> u8 {
+pub(crate) fn grid_slot(x: u8, y: u8) -> u8 {
     FIRST_GRID_SLOT + y * COLUMNS as u8 + x
 }
 
 /// Inventory slot the held item came from (`MAX_EQUIPMENT_INDEX + GetSourceLinealPos()` or the
 /// equipment `lineal_pos`).
-fn source_slot(from: Source) -> u8 {
+pub(crate) fn source_slot(from: Source) -> u8 {
     match from {
         Source::Grid { x, y } => grid_slot(x, y),
         Source::Equipment(s) => s,
@@ -115,7 +134,7 @@ const H: f32 = 429.0;
 pub const COLUMNS: usize = 8;
 pub const ROWS: usize = 8;
 const GRID: (f32, f32) = (POS.0 + 15.0, POS.1 + 200.0);
-const SQUARE: f32 = 20.0;
+pub(crate) const SQUARE: f32 = 20.0;
 /// `WND_TOP_EDGE`, `WND_LEFT_EDGE`, `WND_BOTTOM_EDGE`, `WND_RIGHT_EDGE` (NewUIInventoryCtrl.h:109-112).
 const EDGE_TOP: f32 = 3.0;
 const EDGE_LEFT: f32 = 4.0;
@@ -125,12 +144,12 @@ const EDGE_RIGHT: f32 = 9.0;
 const BTN_EXIT: (f32, f32) = (POS.0 + 13.0, POS.1 + 391.0);
 const BTN_REPAIR: (f32, f32) = (POS.0 + 50.0, POS.1 + 391.0);
 const BTN_SHOP: (f32, f32) = (POS.0 + 87.0, POS.1 + 391.0);
-const BTN_W: f32 = 36.0;
-const BTN_H: f32 = 29.0;
-/// `GlobalText[223, 225, 233, 1125, 989, 2651]`.
+pub(crate) const BTN_W: f32 = 36.0;
+pub(crate) const BTN_H: f32 = 29.0;
+/// `GlobalText[223, 225, 233, 1125, 989, 2651]` (233 "Repair (L)": MuMain Localization/Game.en.resx:649).
 const TITLE: &str = "Inventory";
 const TIP_EXIT: &str = "Close (I,V)";
-const TIP_REPAIR: &str = "Repair (R)";
+pub(crate) const TIP_REPAIR: &str = "Repair (L)";
 const TIP_SHOP: &str = "Open personal store(S)";
 const SET_OPTION: &str = "[Set option]";
 const SOCKET_OPTION: &str = "[Socket option]";
@@ -158,7 +177,7 @@ fn slot_rect(i: usize) -> (f32, f32, f32, f32) {
 }
 
 /// `CheckMouseIn(x, y, width, height)`.
-fn inside(m: Vec2, x: f32, y: f32, w: f32, h: f32) -> bool {
+pub(crate) fn inside(m: Vec2, x: f32, y: f32, w: f32, h: f32) -> bool {
     m.x >= x && m.x < x + w && m.y >= y && m.y < y + h
 }
 
@@ -188,7 +207,7 @@ pub struct Picked {
 
 /// Grid `m_EventState`.
 #[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
-enum CtrlEvent {
+pub(crate) enum CtrlEvent {
     #[default]
     None,
     Hover,
@@ -216,6 +235,14 @@ pub struct Inventory {
     tooltip: Option<usize>,
     /// The close button is held down over it (`BUTTON_STATE_DOWN`).
     exit_down: bool,
+    /// The repair button is held down (`BUTTON_STATE_DOWN`).
+    repair_down: bool,
+    /// `m_RepairMode` (`REPAIR_MODE_ON`).
+    pub repair_mode: bool,
+    /// The original's global `RepairEnable`: 2 after a repair tooltip of an item that needs repairing,
+    /// 1 after one that does not (`RenderRepairInfo`, ZzzInventory.cpp:5845 and 5857); 0 when the
+    /// inventory closes (`ClosingProcess`, NewUIMyInventory.cpp:821). The cursor reads it.
+    pub repair_enable: u8,
     /// X offset from `POS`: with the character window open the original moves it to
     /// `640-190*2` (`SetPos`, NewUISystem.cpp:590-609) and back to `640-190` on close (974).
     /// Everything is computed at `POS` and shifted when reading the mouse and drawing.
@@ -224,7 +251,7 @@ pub struct Inventory {
 
 impl Inventory {
     /// `ItemAttribute.Width/Height` (1×1 if not in the table).
-    fn size(data: &ItemData, item: &Item) -> (u8, u8) {
+    pub(crate) fn size(data: &ItemData, item: &Item) -> (u8, u8) {
         data.attr(item).map_or((1, 1), |a| (a.width.max(1), a.height.max(1)))
     }
 
@@ -338,6 +365,29 @@ impl Inventory {
                 self.pending = false;
                 self.backup_picked();
             }
+            ServerMessage::ItemBought { slot, item } => {
+                // `ReceiveBuy` (WSclient.cpp:6003-6030): `InsertItem` for a grid slot and
+                // `SOUND_GET_ITEM01` (the shop clears its pending purchase, shop.rs).
+                if grid_cell(*slot).is_some()
+                    && let Some(item) = Item::from_bytes(item)
+                {
+                    self.place(*slot, item);
+                }
+                return Some("SOUND_GET_ITEM01");
+            }
+            ServerMessage::SellResult { result, .. } => match result {
+                // `ReceiveSell` (WSclient.cpp:6032-6064): refused, the item goes back (with 0xFE
+                // `HideAll` closes the inventory, which puts it back too).
+                0 | 0xFF => self.backup_picked(),
+                0xFE => {}
+                // Sold: `DeletePickedItem` (the zen is set by shop.rs).
+                _ => {
+                    if self.picked.take().is_some() {
+                        self.event = CtrlEvent::None;
+                    }
+                    return Some("SOUND_GET_ITEM01");
+                }
+            },
             ServerMessage::ItemRemoved { slot } => self.remove(*slot),
             ServerMessage::ItemDurability { slot, durability, .. } => {
                 if let Some(item) = self.item_in(*slot) {
@@ -369,7 +419,7 @@ impl Inventory {
 
     /// `BackupPickedItem`: the held item returns to its place. Not while a move waits for its answer
     /// (`if(ms_pPickedItem && EquipmentItem == false)`, NewUIInventoryCtrl.cpp:1481).
-    fn backup_picked(&mut self) {
+    pub(crate) fn backup_picked(&mut self) {
         if self.pending {
             return;
         }
@@ -384,11 +434,24 @@ impl Inventory {
         self.event = CtrlEvent::None;
     }
 
+    /// `ClosingProcess` (NewUIMyInventory.cpp:818-823): the held item goes back, `RepairEnable = 0`
+    /// and repair mode off.
     fn close(&mut self) {
         self.backup_picked();
         self.open = false;
         self.tooltip = None;
         self.exit_down = false;
+        self.repair_down = false;
+        self.repair_enable = 0;
+        self.set_repair_mode(false);
+    }
+
+    /// `SetRepairMode` (NewUIMyInventory.cpp:427-445): also the grid's (`CNewUIInventoryCtrl::
+    /// SetRepairMode`, which switches its tooltips to `TOOLTIP_TYPE_REPAIR`).
+    pub fn set_repair_mode(&mut self, on: bool) {
+        self.repair_mode = on;
+        self.tooltip = None;
+        self.event = CtrlEvent::None;
     }
 
     /// `g_pNewUISystem->Toggle(INTERFACE_INVENTORY)`.
@@ -396,8 +459,27 @@ impl Inventory {
         if self.open {
             self.close();
         } else {
+            // `OpenningProcess` (NewUIMyInventory.cpp:781-816): repair mode off.
+            self.open = true;
+            self.set_repair_mode(false);
+        }
+    }
+
+    /// `m_pNewUIMng->ShowInterface(INTERFACE_INVENTORY)`: shown by a window that comes with it (the
+    /// NPC shop, NewUISystem.cpp:659-665), without the inventory's `OpenningProcess`.
+    pub fn show(&mut self) {
+        if !self.open {
             self.open = true;
             self.event = CtrlEvent::None;
+        }
+    }
+
+    /// Asks the server to repair inventory slot `slot` (`SendRequestRepair(index, addGold)`):
+    /// `self_repair` when paying from the inventory (`p_AddGold` 1). Durability and zen change when
+    /// the server answers (`ItemDurability`, `InventoryMoneyUpdate`).
+    pub(crate) fn request_repair(net: &mut crate::net::Net, slot: u8, self_repair: bool) {
+        if net.connected() {
+            net.send(ClientMessage::RepairItem { slot, self_repair });
         }
     }
 
@@ -542,10 +624,14 @@ fn fill_test_inventory(args: Res<Args>, data: Res<ItemData>, mut inv: ResMut<Inv
 
 /// `I`/`V` open or close (`CNewUIHotKey`; blocked while message boxes are up); Esc closes (before the
 /// system menu sees it: the window comes first in the original's key order).
+#[allow(clippy::too_many_arguments)]
 fn keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     game_ui: Res<crate::options::GameUi>,
     move_window: Res<crate::move_window::MoveWindow>,
+    shop: Res<crate::shop::NpcShop>,
+    dialog: Res<crate::npc::NpcDialog>,
+    hero: Option<Res<crate::account::Hero>>,
     mut inv: ResMut<Inventory>,
     mut sound: ResMut<SoundQueue>,
 ) {
@@ -553,18 +639,45 @@ fn keys(
         return;
     }
     if keys.just_pressed(KeyCode::KeyI) || keys.just_pressed(KeyCode::KeyV) {
-        inv.toggle();
-        sound.play("SOUND_CLICK01");
+        // Not while a sale waits for the server (NewUIHotKey.cpp:157-165 and 198-206).
+        if !shop.selling {
+            inv.toggle();
+            sound.play("SOUND_CLICK01");
+        }
     } else if inv.open
         && keys.just_pressed(KeyCode::Escape)
         && !game_ui.option_open()
         && !game_ui.window_menu_open()
         && !move_window.is_open()
     {
-        inv.close();
-        sound.play("SOUND_CLICK01");
+        // NewUIMyInventory.cpp:564-572: Esc is taken even while selling, but closes nothing then.
+        if !shop.selling {
+            inv.close();
+            sound.play("SOUND_CLICK01");
+        }
         keys.clear_just_pressed(KeyCode::Escape);
+    } else if inv.open
+        && keys.just_pressed(KeyCode::KeyL)
+        && repair_enable_level(hero.as_deref())
+        && !matches!(dialog.kind(), Some(crate::npc::WindowKind::Shop | crate::npc::WindowKind::ChaosMachine))
+    {
+        // `ToggleRepairMode` (NewUIMyInventory.cpp:573-586).
+        let on = !inv.repair_mode;
+        inv.set_repair_mode(on);
     }
+}
+
+/// `m_bRepairEnableLevel`: level 50 or more (`OpenningProcess`, NewUIMyInventory.cpp:788-797).
+fn repair_enable_level(hero: Option<&crate::account::Hero>) -> bool {
+    hero.is_some_and(|h| h.level >= 50)
+}
+
+/// `RenderButtons` / `BtnProcess` (NewUIMyInventory.cpp:1305-1313 and 2197-2205): the repair and
+/// personal store buttons only work without the NPC shop, vault, Chaos Machine, Devil Square or
+/// Blood Castle windows (no trade window yet).
+fn own_buttons(dialog: &crate::npc::NpcDialog) -> bool {
+    use crate::npc::WindowKind::*;
+    !matches!(dialog.kind(), Some(Shop | Vault | ChaosMachine | DevilSquare | BloodCastle))
 }
 
 /// `CNewUIMyInventory::Update` + `UpdateMouseEvent` (NewUIMyInventory.cpp:447-558 and 653-675).
@@ -576,6 +689,7 @@ fn update_mouse(
     game_ui: Res<crate::options::GameUi>,
     hero: Option<Res<crate::account::Hero>>,
     info: Option<Res<crate::account::HeroInfo>>,
+    (shop, dialog): (Res<crate::shop::NpcShop>, Res<crate::npc::NpcDialog>),
     mut inv: ResMut<Inventory>,
     mut sound: ResMut<SoundQueue>,
     mut net: ResMut<crate::net::Net>,
@@ -589,8 +703,19 @@ fn update_mouse(
     };
     // `MouseX`, `MouseY`: integers on the 640×480 screen.
     let m = inv.local(m.floor());
+    let repair_level = repair_enable_level(hero.as_deref());
     let hero = hero_view(hero.as_deref(), info.as_deref());
     let (pressed, released) = (mouse.pressed(MouseButton::Left), mouse.just_released(MouseButton::Left));
+    let just_pressed = mouse.just_pressed(MouseButton::Left);
+    // Who pays a repair (NewUIMyInventory.cpp:1477-1484 and 2163-2170): the repair shop, or the
+    // inventory's own repair from level 50.
+    let repair_by = if shop.open && shop.repair_shop {
+        Some(false)
+    } else if repair_level {
+        Some(true)
+    } else {
+        None
+    };
     let inv = &mut *inv;
 
     // `Update`: the equipment slot under the mouse (`CheckMouseIn(x + 1, y, w - 4, h - 4)`).
@@ -609,10 +734,10 @@ fn update_mouse(
         inv.tooltip = None;
     }
 
-    // `CNewUIInventoryCtrl::UpdateMouseEvent`.
+    // `CNewUIInventoryCtrl::UpdateMouseEvent`: no picking up in repair mode (NewUIInventoryCtrl.cpp:798).
     if inv.event == CtrlEvent::None && !pressed && pointed_item.is_some() {
         inv.event = CtrlEvent::Hover;
-    } else if inv.event == CtrlEvent::Hover && released && inv.picked.is_none() {
+    } else if inv.event == CtrlEvent::Hover && released && inv.picked.is_none() && !inv.repair_mode {
         if let Some(i) = pointed_item {
             inv.event = CtrlEvent::Picking;
             let g = inv.grid.remove(i);
@@ -623,6 +748,16 @@ fn update_mouse(
     } else if inv.event == CtrlEvent::Hover && !pressed && inv.picked.is_none() {
         if pointed_item != inv.tooltip {
             inv.tooltip = pointed_item;
+        }
+    }
+    // `RenderRepairInfo` leaves `RepairEnable` at 2 or 1 for the item it shows (ZzzInventory.cpp:5845-5857).
+    if inv.repair_mode {
+        let shown = inv.tooltip.and_then(|i| inv.grid.get(i)).map(|g| g.item).or_else(|| inv.pointed_slot.and_then(|s| inv.equipment[s]));
+        if let Some(item) = shown
+            && let Some(attr) = data.attr(&item)
+            && !price::is_repair_ban(&item)
+        {
+            inv.repair_enable = if (item.durability as u32) < mu_data::items::max_durability(attr, &item) { 2 } else { 1 };
         }
     }
 
@@ -644,6 +779,14 @@ fn update_mouse(
                             sound.play("SOUND_GET_ITEM01");
                         }
                     }
+                }
+            }
+            // Repair mode (1463-1487): the equipped item is repaired instead of picked up.
+            None if inv.repair_mode => {
+                if let (Some(item), Some(self_repair)) = (inv.equipment[s], repair_by)
+                    && !price::is_repair_ban(&item)
+                {
+                    Inventory::request_repair(&mut net, s as u8, self_repair);
                 }
             }
             None => {
@@ -681,16 +824,30 @@ fn update_mouse(
                 return;
             }
         }
+    } else if inside(m, POS.0, POS.1, W, H) && inv.repair_mode && just_pressed {
+        // Repair mode, left press on a grid item (2148-2173): `MAX_EQUIPMENT + x + y · 8`.
+        if let Some(i) = pointed_item {
+            let g = inv.grid[i];
+            if let Some(self_repair) = repair_by
+                && !price::is_repair_ban(&g.item)
+            {
+                Inventory::request_repair(&mut net, grid_slot(g.x, g.y), self_repair);
+            }
+            return;
+        }
     }
 
-    // `BtnProcess`: the close button (released over it) and the top X (`m_Pos + (169, 7)`, 13×12).
+    // `BtnProcess`: the top X (`m_Pos + (169, 7)`, 13×12), the close button (released over it) and the
+    // repair button (2207-2211).
     let over_exit = inside(m, BTN_EXIT.0, BTN_EXIT.1, BTN_W, BTN_H);
-    if mouse.just_pressed(MouseButton::Left) && inside(m, POS.0 + 169.0, POS.1 + 7.0, 13.0, 12.0) {
+    let over_repair = repair_level && own_buttons(&dialog) && inside(m, BTN_REPAIR.0, BTN_REPAIR.1, BTN_W, BTN_H);
+    if just_pressed && inside(m, POS.0 + 169.0, POS.1 + 7.0, 13.0, 12.0) {
         inv.close();
         return;
     }
-    if over_exit && mouse.just_pressed(MouseButton::Left) {
-        inv.exit_down = true;
+    if just_pressed {
+        inv.exit_down = over_exit;
+        inv.repair_down = over_repair;
     }
     if !pressed {
         if inv.exit_down && over_exit && released {
@@ -698,7 +855,13 @@ fn update_mouse(
             sound.play("SOUND_CLICK01");
             return;
         }
+        if inv.repair_down && over_repair && released {
+            // `ToggleRepairMode` (2368-2379).
+            let on = !inv.repair_mode;
+            inv.set_repair_mode(on);
+        }
         inv.exit_down = false;
+        inv.repair_down = false;
     }
 }
 
@@ -719,6 +882,7 @@ fn request_views(
     data: Res<ItemData>,
     opts: Res<crate::options::GameOptions>,
     inv: Res<Inventory>,
+    shop: Res<crate::shop::ShopDraw>,
     mut views: ResMut<ItemViews>,
 ) {
     let mut out = Vec::new();
@@ -750,6 +914,8 @@ fn request_views(
         for v in &mut out {
             v.rect[0] += inv.dx;
         }
+        // The NPC shop's items, already on the screen (shop.rs).
+        out.extend(shop.views.iter().copied());
     }
     if views.views != out {
         views.views = out;
@@ -762,7 +928,7 @@ fn request_views(
 // --- Drawing -----------------------------------------------------------------------------------
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-enum Tex {
+pub(crate) enum Tex {
     Back,
     Top,
     Left,
@@ -792,10 +958,12 @@ enum Tex {
     TableBottom,
     TableLeft,
     TableRight,
+    /// IMAGE_NPCSHOP_REPAIR_MONEY (NewUINPCShop.cpp:292).
+    Money2,
 }
 
 impl Tex {
-    const ALL: [Tex; 29] = [
+    const ALL: [Tex; 30] = [
         Tex::Back,
         Tex::Top,
         Tex::Left,
@@ -825,6 +993,7 @@ impl Tex {
         Tex::TableBottom,
         Tex::TableLeft,
         Tex::TableRight,
+        Tex::Money2,
     ];
 
     /// `CNewUIMyInventory::LoadImages` (NewUIMyInventory.cpp:1153-1177) and
@@ -862,6 +1031,7 @@ impl Tex {
             Tex::TableBottom => "newui_item_table03(Dw).tga",
             Tex::TableLeft => "newui_item_table03(L).tga",
             Tex::TableRight => "newui_item_table03(R).tga",
+            Tex::Money2 => "newui_item_money2.tga",
         }
     }
 }
@@ -871,7 +1041,7 @@ struct InventoryTextures(std::collections::HashMap<Tex, Handle<Image>>);
 
 /// A piece on the 640×480 screen.
 #[derive(Clone, PartialEq, Debug)]
-enum Piece {
+pub(crate) enum Piece {
     /// `RenderImage`: the `src` part of the texture at (x, y, width, height) (stretched if sizes differ).
     Image { tex: Tex, x: f32, y: f32, w: f32, h: f32, src: [f32; 4] },
     /// `RenderColor` with `glColor4f`.
@@ -880,35 +1050,38 @@ enum Piece {
     Text { x: f32, y: f32, w: Option<f32>, text: String, color: [f32; 3], bold: bool, bg: Option<[f32; 4]> },
 }
 
+impl Piece {
+    /// The same piece `dx` further right.
+    pub(crate) fn shifted(&self, dx: f32) -> Piece {
+        let mut p = self.clone();
+        match &mut p {
+            Piece::Image { x, .. } | Piece::Color { x, .. } | Piece::Text { x, .. } => *x += dx,
+        }
+        p
+    }
+}
+
 /// `RenderImage(tex, x, y, w, h, 0, sv)`: unstretched from (0, sv).
-fn img(tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32) -> Piece {
+pub(crate) fn img(tex: Tex, x: f32, y: f32, w: f32, h: f32, sv: f32) -> Piece {
     Piece::Image { tex, x, y, w, h, src: [0.0, sv, w, h] }
 }
 
-fn color(x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) -> Piece {
+pub(crate) fn color(x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4]) -> Piece {
     Piece::Color { x, y, w, h, rgba }
 }
 
-fn text(x: f32, y: f32, w: Option<f32>, s: &str, color: [f32; 3], bold: bool) -> Piece {
+pub(crate) fn text(x: f32, y: f32, w: Option<f32>, s: &str, color: [f32; 3], bold: bool) -> Piece {
     Piece::Text { x, y, w, text: s.to_string(), color, bold, bg: None }
 }
 
 /// `ConvertGold`: thousands separated by commas.
 pub fn convert_gold(zen: u32) -> String {
-    let s = zen.to_string();
-    let mut out = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if i > 0 && (s.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
+    price::convert_gold(zen as i64)
 }
 
 /// `getGoldColor` (ZzzInventory.cpp:1041-1057; ABGR): red from 10 000 000, orange from 1 000 000,
 /// green from 100 000 and light yellow otherwise.
-fn gold_color(zen: u32) -> [f32; 3] {
+pub(crate) fn gold_color(zen: u32) -> [f32; 3] {
     let c = |r: u8, g: u8, b: u8| [r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0];
     if zen >= 10_000_000 {
         c(255, 0, 0)
@@ -924,18 +1097,18 @@ fn gold_color(zen: u32) -> [f32; 3] {
 /// Tooltip line height (`TextSize.cy` of `g_hFont` on the 480 screen).
 const TIP_LINE: f32 = FONT;
 
-/// `RenderTipTextList(sx, sy, ...)` (ZzzInventory.cpp:285-453) with the `RenderItemInfo` placement
-/// (`sy += INVENTORY_SCALE` and not past 420, ZzzInventory.cpp ≈5600-5620).
-fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metrics: &crate::chat::TextMetrics) {
+/// The height `RenderTipTextList` gives the box: `(lines · cy + gaps · cy / 2) · 1.1`.
+fn tip_height(lines: &[TipLine]) -> f32 {
+    let (texts, gaps) = lines.iter().fold((0, 0), |(t, g), l| if l.is_gap() { (t, g + 1) } else { (t + 1, g) });
+    (TIP_LINE * texts as f32 + TIP_LINE / 2.0 * gaps as f32) * 1.1
+}
+
+/// `RenderTipTextList(sx, sy, ...)` (ZzzInventory.cpp:285-453): the box centered on `sx`, from `sy` down.
+fn push_tip_list(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metrics: &crate::chat::TextMetrics) {
     if lines.is_empty() {
         return;
     }
-    let (texts, gaps) = lines.iter().fold((0, 0), |(t, g), l| if l.is_gap() { (t, g + 1) } else { (t + 1, g) });
-    let height = (TIP_LINE * texts as f32 + TIP_LINE / 2.0 * gaps as f32) * 1.1;
-    let mut sy = sy + 20.0;
-    if sy + height > 420.0 {
-        sy = 420.0 - height;
-    }
+    let height = tip_height(lines);
     // Bold text is slightly wider than the regular font it is measured with.
     let width = lines
         .iter()
@@ -966,20 +1139,150 @@ fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metri
     }
 }
 
-/// `CNewUIButton::Render` of the help text: below the button, centered, on a black background of alpha 180.
-fn push_button_tip(out: &mut Vec<Piece>, s: &str, bx: f32, by: f32, metrics: &crate::chat::TextMetrics) {
+/// [`push_tip_list`] with the `RenderItemInfo` placement (`sy += INVENTORY_SCALE` and not past 420,
+/// ZzzInventory.cpp:5596-5629).
+pub(crate) fn push_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, metrics: &crate::chat::TextMetrics) {
+    let height = tip_height(lines);
+    let mut sy = sy + 20.0;
+    if sy + height > 420.0 {
+        sy = 420.0 - height;
+    }
+    push_tip_list(out, lines, sx, sy, metrics);
+}
+
+/// [`push_tip_list`] with the `RenderRepairInfo` placement (ZzzInventory.cpp:5937-5947): above the
+/// point by its height without the 1.1 (`((TextNum - SkipNum) · cy + SkipNum · cy / 2)`), or below
+/// the item (`p->Height · INVENTORY_SCALE`) if it does not fit.
+fn push_repair_tooltip(out: &mut Vec<Piece>, lines: &[TipLine], sx: f32, sy: f32, item_height: u8, metrics: &crate::chat::TextMetrics) {
+    let height = tip_height(lines) / 1.1;
+    let sy = if sy - height >= 0.0 { sy - height } else { sy + item_height as f32 * SQUARE };
+    push_tip_list(out, lines, sx, sy, metrics);
+}
+
+/// `CNewUIButton::Render` of the help text with `istoppos` (`ChangeToolTipText(text, true)`,
+/// NewUIButton.cpp:439-460): above the button, centered, on a black background of alpha 180.
+pub(crate) fn push_button_tip(out: &mut Vec<Piece>, s: &str, bx: f32, by: f32, metrics: &crate::chat::TextMetrics) {
     let tw = metrics.width(s).ceil();
     let mut x = (bx + BTN_W / 2.0 - tw / 2.0).floor();
-    let y = by + BTN_H + 2.0;
+    let y = by - (FONT + 2.0);
     if x + tw + 6.0 > 640.0 {
         x -= x + tw + 6.0 - 640.0;
     }
     out.push(Piece::Text { x, y, w: Some(tw + 6.0), text: s.to_string(), color: [1.0; 3], bold: false, bg: Some([0.0, 0.0, 0.0, 180.0 / 255.0]) });
 }
 
+/// `CNewUIInventoryCtrl::Render` (NewUIInventoryCtrl.cpp:862-939) of a `cols`×`rows` grid at
+/// `origin`: the occupied cells, the squares and the table border.
+pub(crate) fn push_grid_frame(out: &mut Vec<Piece>, origin: (f32, f32), cols: usize, rows: usize, occupied: &dyn Fn(usize, usize) -> bool) {
+    let (gx, gy) = origin;
+    for y in 0..rows {
+        for x in 0..cols {
+            let (px, py) = (gx + x as f32 * SQUARE, gy + y as f32 * SQUARE);
+            if occupied(x, y) {
+                // `ITEM_COLOR_NORMAL`.
+                out.push(color(px, py, SQUARE, SQUARE, [0.3, 0.5, 0.5, 0.6]));
+            }
+            out.push(img(Tex::Square, px, py, 21.0, 21.0, 0.0));
+        }
+    }
+    let (sw, sh) = (cols as f32 * SQUARE, rows as f32 * SQUARE);
+    out.push(img(Tex::TableTopLeft, gx - EDGE_LEFT, gy - EDGE_TOP, 14.0, 14.0, 0.0));
+    out.push(img(Tex::TableTopRight, gx + sw - EDGE_RIGHT, gy - EDGE_TOP, 14.0, 14.0, 0.0));
+    out.push(img(Tex::TableBottomLeft, gx - EDGE_LEFT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
+    out.push(img(Tex::TableBottomRight, gx + sw - EDGE_RIGHT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
+    // One-pixel borders side by side: the 1-pixel strip stretched.
+    let (x0, x1) = (gx - EDGE_LEFT + 14.0, gx + sw - EDGE_RIGHT);
+    let (y0, y1) = (gy - EDGE_TOP + 14.0, gy + sh - EDGE_BOTTOM);
+    let strip = |tex, x, y, w, h, src: [f32; 4]| Piece::Image { tex, x, y, w, h, src };
+    out.push(strip(Tex::TableTop, x0, gy - EDGE_TOP, x1 - x0, 14.0, [0.0, 0.0, 1.0, 14.0]));
+    out.push(strip(Tex::TableBottom, x0, gy + sh - EDGE_BOTTOM, x1 - x0, 14.0, [0.0, 0.0, 1.0, 14.0]));
+    out.push(strip(Tex::TableLeft, gx - EDGE_LEFT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
+    out.push(strip(Tex::TableRight, gx + sw - EDGE_RIGHT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
+}
+
+/// The held item over a grid (NewUIInventoryCtrl.cpp:940-1113): where it would land, in `normal`
+/// (`m_afColorStateNormal`, (0.1, 0.4, 0.8) unless a window changes it) or red where it does not fit.
+/// `size` is the held item's, `m` the mouse.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn push_drop_overlay(
+    out: &mut Vec<Piece>,
+    origin: (f32, f32),
+    cols: usize,
+    rows: usize,
+    size: (u8, u8),
+    m: Vec2,
+    occupied: &dyn Fn(usize, usize) -> bool,
+    normal: [f32; 3],
+) {
+    let (gx, gy) = origin;
+    let (sw, sh) = (cols as f32 * SQUARE, rows as f32 * SQUARE);
+    let (w, h) = size;
+    let (pw, ph) = (w as f32 * SQUARE, h as f32 * SQUARE);
+    let (px, py) = (m.x - (pw / 2.0).floor(), m.y - (ph / 2.0).floor());
+    let intersects = px < gx + sw && px + pw > gx && py < gy + sh && py + ph > gy;
+    if !intersects {
+        return;
+    }
+    let ix = m.x as i32 - (w as i32 - 1) * SQUARE as i32 / 2;
+    let iy = m.y as i32 - (h as i32 - 1) * SQUARE as i32 / 2;
+    // Outside the grid, the cell index (negative or past the end) counted from its corner.
+    let cell = |v: i32, origin: f32| {
+        let d = v - origin as i32;
+        if d < 0 { d / SQUARE as i32 - 1 } else { d / SQUARE as i32 }
+    };
+    let (mut cx, mut cy) = (cell(ix, gx), cell(iy, gy));
+    let (mut nw, mut nh) = (w as i32, h as i32);
+    let mut warning = false;
+    let (cols, rows) = (cols as i32, rows as i32);
+    if cx < 0 && cx >= -nw {
+        nw += cx;
+        cx = 0;
+        warning = true;
+    }
+    if cx + nw > cols && cx < cols {
+        nw = cols - cx;
+        warning = true;
+    }
+    if cy < 0 && cy >= -nh {
+        nh += cy;
+        cy = 0;
+        warning = true;
+    }
+    if cy + nh > rows && cy < rows {
+        nh = rows - cy;
+        warning = true;
+    }
+    if warning {
+        out.push(color(gx + cx as f32 * SQUARE, gy + cy as f32 * SQUARE, nw as f32 * SQUARE, nh as f32 * SQUARE, [1.0, 0.2, 0.2, 0.4]));
+    } else if (0..cols).contains(&cx) && (0..rows).contains(&cy) {
+        for dy in 0..nh {
+            for dx in 0..nw {
+                let (sx, sy) = (cx + dx, cy + dy);
+                let busy = occupied(sx as usize, sy as usize);
+                // `m_afColorStateWarning` (1, 0.2, 0.2) or `m_afColorStateNormal`, at 0.4.
+                let c = if busy { [1.0, 0.2, 0.2, 0.4] } else { [normal[0], normal[1], normal[2], 0.4] };
+                out.push(color(gx + sx as f32 * SQUARE, gy + sy as f32 * SQUARE, SQUARE, SQUARE, c));
+            }
+        }
+    }
+}
+
+/// `m_afColorStateNormal` (NewUIInventoryCtrl.cpp:187-190).
+pub(crate) const DROP_NORMAL: [f32; 3] = [0.1, 0.4, 0.8];
+
 impl Inventory {
-    /// `CNewUIMyInventory::Render` (everything behind the items).
-    fn back_pieces(&self, data: &ItemData, hero: &HeroView, zen: u32, m: Option<Vec2>, metrics: &crate::chat::TextMetrics) -> Vec<Piece> {
+    /// `CNewUIMyInventory::Render` (everything behind the items). `own_buttons`: the repair and
+    /// personal store buttons are shown (see [`own_buttons`]).
+    #[allow(clippy::too_many_arguments)]
+    fn back_pieces(
+        &self,
+        data: &ItemData,
+        hero: &HeroView,
+        zen: u32,
+        m: Option<Vec2>,
+        own_buttons: bool,
+        metrics: &crate::chat::TextMetrics,
+    ) -> Vec<Piece> {
         let mut out = Vec::new();
         let (x, y) = POS;
         // `RenderFrame`.
@@ -999,13 +1302,14 @@ impl Inventory {
         // `RenderButtons`: repair from level 50 and the store from level 6 (`OpenningProcess`).
         let over = |bx: f32, by: f32| m.is_some_and(|m| inside(m, bx, by, BTN_W, BTN_H));
         let mut tips = Vec::new();
-        if hero.level >= 50 {
-            out.push(img(Tex::Repair, BTN_REPAIR.0, BTN_REPAIR.1, BTN_W, BTN_H, 0.0));
+        if own_buttons && hero.level >= 50 {
+            let frame = if self.repair_down && over(BTN_REPAIR.0, BTN_REPAIR.1) { BTN_H } else { 0.0 };
+            out.push(img(Tex::Repair, BTN_REPAIR.0, BTN_REPAIR.1, BTN_W, BTN_H, frame));
             if over(BTN_REPAIR.0, BTN_REPAIR.1) {
                 tips.push((TIP_REPAIR, BTN_REPAIR));
             }
         }
-        if hero.level >= 6 {
+        if own_buttons && hero.level >= 6 {
             out.push(img(Tex::Shop, BTN_SHOP.0, BTN_SHOP.1, BTN_W, BTN_H, 0.0));
             if over(BTN_SHOP.0, BTN_SHOP.1) {
                 tips.push((TIP_SHOP, BTN_SHOP));
@@ -1019,89 +1323,13 @@ impl Inventory {
         for (s, (bx, by)) in tips {
             push_button_tip(&mut out, s, bx, by, metrics);
         }
-        self.push_grid(&mut out, data, m);
+        let occupied = |x: usize, y: usize| self.owner(data, x, y).is_some();
+        push_grid_frame(&mut out, GRID, COLUMNS, ROWS, &occupied);
+        if let (Some(p), Some(m)) = (self.picked, m) {
+            push_drop_overlay(&mut out, GRID, COLUMNS, ROWS, Self::size(data, &p.item), m, &occupied, DROP_NORMAL);
+        }
         self.push_equipment(&mut out, data, hero);
         out
-    }
-
-    /// `CNewUIInventoryCtrl::Render` (NewUIInventoryCtrl.cpp:862-1128).
-    fn push_grid(&self, out: &mut Vec<Piece>, data: &ItemData, m: Option<Vec2>) {
-        let (gx, gy) = GRID;
-        for y in 0..ROWS {
-            for x in 0..COLUMNS {
-                let (px, py) = (gx + x as f32 * SQUARE, gy + y as f32 * SQUARE);
-                if self.owner(data, x, y).is_some() {
-                    // `ITEM_COLOR_NORMAL`.
-                    out.push(color(px, py, SQUARE, SQUARE, [0.3, 0.5, 0.5, 0.6]));
-                }
-                out.push(img(Tex::Square, px, py, 21.0, 21.0, 0.0));
-            }
-        }
-        let (sw, sh) = (COLUMNS as f32 * SQUARE, ROWS as f32 * SQUARE);
-        out.push(img(Tex::TableTopLeft, gx - EDGE_LEFT, gy - EDGE_TOP, 14.0, 14.0, 0.0));
-        out.push(img(Tex::TableTopRight, gx + sw - EDGE_RIGHT, gy - EDGE_TOP, 14.0, 14.0, 0.0));
-        out.push(img(Tex::TableBottomLeft, gx - EDGE_LEFT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
-        out.push(img(Tex::TableBottomRight, gx + sw - EDGE_RIGHT, gy + sh - EDGE_BOTTOM, 14.0, 14.0, 0.0));
-        // One-pixel borders side by side: the 1-pixel strip stretched.
-        let (x0, x1) = (gx - EDGE_LEFT + 14.0, gx + sw - EDGE_RIGHT);
-        let (y0, y1) = (gy - EDGE_TOP + 14.0, gy + sh - EDGE_BOTTOM);
-        let strip = |tex, x, y, w, h, src: [f32; 4]| Piece::Image { tex, x, y, w, h, src };
-        out.push(strip(Tex::TableTop, x0, gy - EDGE_TOP, x1 - x0, 14.0, [0.0, 0.0, 1.0, 14.0]));
-        out.push(strip(Tex::TableBottom, x0, gy + sh - EDGE_BOTTOM, x1 - x0, 14.0, [0.0, 0.0, 1.0, 14.0]));
-        out.push(strip(Tex::TableLeft, gx - EDGE_LEFT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
-        out.push(strip(Tex::TableRight, gx + sw - EDGE_RIGHT, y0, 14.0, y1 - y0, [0.0, 0.0, 14.0, 1.0]));
-
-        // Held item over the grid: where it would land, in blue, or red if it does not fit.
-        let (Some(p), Some(m)) = (self.picked, m) else { return };
-        let (w, h) = Self::size(data, &p.item);
-        let (pw, ph) = (w as f32 * SQUARE, h as f32 * SQUARE);
-        let (px, py) = (m.x - (pw / 2.0).floor(), m.y - (ph / 2.0).floor());
-        let intersects = px < gx + sw && px + pw > gx && py < gy + sh && py + ph > gy;
-        if !intersects {
-            return;
-        }
-        let ix = m.x as i32 - (w as i32 - 1) * SQUARE as i32 / 2;
-        let iy = m.y as i32 - (h as i32 - 1) * SQUARE as i32 / 2;
-        // Outside the grid, the cell index (negative or past the end) counted from its corner.
-        let cell = |v: i32, origin: f32| {
-            let d = v - origin as i32;
-            if d < 0 { d / SQUARE as i32 - 1 } else { d / SQUARE as i32 }
-        };
-        let (mut cx, mut cy) = (cell(ix, gx), cell(iy, gy));
-        let (mut nw, mut nh) = (w as i32, h as i32);
-        let mut warning = false;
-        let (cols, rows) = (COLUMNS as i32, ROWS as i32);
-        if cx < 0 && cx >= -nw {
-            nw += cx;
-            cx = 0;
-            warning = true;
-        }
-        if cx + nw > cols && cx < cols {
-            nw = cols - cx;
-            warning = true;
-        }
-        if cy < 0 && cy >= -nh {
-            nh += cy;
-            cy = 0;
-            warning = true;
-        }
-        if cy + nh > rows && cy < rows {
-            nh = rows - cy;
-            warning = true;
-        }
-        if warning {
-            out.push(color(gx + cx as f32 * SQUARE, gy + cy as f32 * SQUARE, nw as f32 * SQUARE, nh as f32 * SQUARE, [1.0, 0.2, 0.2, 0.4]));
-        } else if (0..cols).contains(&cx) && (0..rows).contains(&cy) {
-            for dy in 0..nh {
-                for dx in 0..nw {
-                    let (sx, sy) = (cx + dx, cy + dy);
-                    let busy = self.owner(data, sx as usize, sy as usize).is_some();
-                    // `m_afColorStateWarning` (1, 0.2, 0.2) / `m_afColorStateNormal` (0.1, 0.4, 0.8), at 0.4.
-                    let c = if busy { [1.0, 0.2, 0.2, 0.4] } else { [0.1, 0.4, 0.8, 0.4] };
-                    out.push(color(gx + sx as f32 * SQUARE, gy + sy as f32 * SQUARE, SQUARE, SQUARE, c));
-                }
-            }
-        }
     }
 
     /// `RenderEquippedItem` (NewUIMyInventory.cpp:1214-1299).
@@ -1143,10 +1371,26 @@ impl Inventory {
         }
     }
 
-    /// Tooltips (`RenderItemToolTip` of the grid and the equipment).
-    fn front_pieces(&self, data: &ItemData, hero: &HeroView, metrics: &crate::chat::TextMetrics) -> Vec<Piece> {
+    /// Tooltips (`RenderItemToolTip` of the grid and the equipment): the item info, with the
+    /// selling price while the NPC shop is open (`shop_open`), or in repair mode the repair info
+    /// (`TOOLTIP_TYPE_REPAIR`, NewUIInventoryCtrl.cpp:1419-1422, and NewUIMyInventory.cpp:2246-2253)
+    /// priced for `place`.
+    fn front_pieces(&self, data: &ItemData, hero: &HeroView, shop_open: bool, place: price::RepairPlace, metrics: &crate::chat::TextMetrics) -> Vec<Piece> {
         let mut out = Vec::new();
         let mana = |s: u16| data.skill_mana.as_ref().and_then(|m| m.get(s as usize)).map(|&m| m as u32);
+        let tip = |out: &mut Vec<Piece>, attr: &mu_data::items::ItemAttribute, item: &Item, sx: f32, sy: f32| {
+            if self.repair_mode {
+                if let Some((lines, _)) = price::repair_info(attr, item, hero, place) {
+                    push_repair_tooltip(out, &lines, sx, sy, attr.height, metrics);
+                }
+                return;
+            }
+            let mut lines = item_info(attr, item, hero, &mana);
+            if shop_open && let Some(line) = price::price_line(attr, item, false, 0) {
+                price::add_price_line(&mut lines, line);
+            }
+            push_tooltip(out, &lines, sx, sy, metrics);
+        };
         // `CNewUIInventoryCtrl::RenderItemToolTip`: centered over the item, from its top row
         // (half a cell lower for one-high items).
         if let (Some(i), None) = (self.tooltip, self.picked)
@@ -1158,7 +1402,7 @@ impl Inventory {
             if attr.height == 1 {
                 sy += SQUARE / 2.0;
             }
-            push_tooltip(&mut out, &item_info(attr, &g.item, hero, &mana), sx.floor(), sy, metrics);
+            tip(&mut out, attr, &g.item, sx.floor(), sy);
         }
         // `CNewUIMyInventory::RenderItemToolTip`: the slot's, from its center.
         if let Some(s) = self.pointed_slot
@@ -1166,7 +1410,7 @@ impl Inventory {
             && let Some(attr) = data.attr(&item)
         {
             let (x, y, w, h) = slot_rect(s);
-            push_tooltip(&mut out, &item_info(attr, &item, hero, &mana), (x + w / 2.0).floor(), (y + h / 2.0).floor(), metrics);
+            tip(&mut out, attr, &item, (x + w / 2.0).floor(), (y + h / 2.0).floor());
         }
         out
     }
@@ -1287,6 +1531,7 @@ fn draw(
     metrics: Res<crate::chat::TextMetrics>,
     hero: Option<Res<crate::account::Hero>>,
     info: Option<Res<crate::account::HeroInfo>>,
+    (shop, shop_draw, dialog): (Res<crate::shop::NpcShop>, Res<crate::shop::ShopDraw>, Res<crate::npc::NpcDialog>),
     mut roots: Query<&mut Visibility, With<InventoryRoot>>,
     mut layers: Query<(Entity, &Layer, Option<&mut ImageNode>, &mut Node)>,
     mut last: Local<(Vec<Piece>, Vec<Piece>, bool)>,
@@ -1303,8 +1548,12 @@ fn draw(
     let m = windows.single().ok().and_then(crate::mainframe::cursor_virtual).map(|c| inv.local(c.floor()));
     let hero = hero_view(hero.as_deref(), info.as_deref());
     let zen = info.as_ref().map_or(inv.zen, |i| i.0.money);
-    let back = inv.back_pieces(&data, &hero, zen, m, &metrics);
-    let front = inv.front_pieces(&data, &hero, &metrics);
+    let mut back = inv.back_pieces(&data, &hero, zen, m, own_buttons(&dialog), &metrics);
+    let mut front = inv.front_pieces(&data, &hero, shop.open, shop.repair_place(inv.open), &metrics);
+    // The NPC shop draws in these layers too (so its items go between its background and its
+    // tooltips); its pieces are on the screen, the layers are shifted by `dx`.
+    back.extend(shop_draw.back.iter().map(|p| p.shifted(-inv.dx)));
+    front.extend(shop_draw.front.iter().map(|p| p.shifted(-inv.dx)));
     // Layers are created once (`spawn_root`); the first time they are drawn even if nothing changed.
     let fresh = !last.2;
     for (e, layer, image, mut node) in &mut layers {

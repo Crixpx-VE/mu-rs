@@ -17,7 +17,11 @@
 //! **The dialog** (`ReceiveTalk`, WSclient.cpp:5829-6001): `HideAll`, then the window of `Value`
 //! (see [`WindowKind`]) and `SOUND_CLICK01` + `SOUND_INTERFACE01`. The NPC store or vault items
 //! arrive after it (`ReceiveTradeInventory`, WSclient.cpp:1358-1415) and are kept in
-//! [`NpcDialog::store`].
+//! [`NpcDialog::store`]. Some NPCs open their window with another packet: `ReceiveNPCDlgUIStart`
+//! (C3 F9 01, the Gens NPCs), `ReceiveQuestState` (C1 A1, the quest NPCs) and
+//! `ReceiveCreateGuildInterface` (C1 54, the guild master). Those windows do not exist yet, but they
+//! count as an open dialog so that they close with their packet (OpenMU keeps the player in
+//! `NpcDialogOpened` and ignores every other talk until then).
 //!
 //! **Closing** sends the packet of each window (`ClosingProcess`): `SendExitInventory` for the
 //! shop, `SendRequestStorageExit` for the vault, `SendRequestMixExit` for the Chaos Machine. OpenMU
@@ -92,6 +96,15 @@ pub enum WindowKind {
     EmpireGuardian,
     /// 0x25: `INTERFACE_UNITEDMARKETPLACE_NPC_JULIA`.
     Julia,
+    /// `INTERFACE_NPC_DIALOGUE`, opened by `ReceiveNPCDlgUIStart` (C3 F9 01, WSclient.cpp:9881-9890)
+    /// instead of `ReceiveTalk`: the Gens NPCs and others with talk lines. No window yet.
+    NpcDialogue,
+    /// `INTERFACE_NPCQUEST`, opened by `ReceiveQuestState` (C1 A1, WSclient.cpp:9539-9546): Sevina,
+    /// Marlon, Devin... No window yet.
+    NpcQuest,
+    /// `INTERFACE_NPCGUILDMASTER`, opened by `ReceiveCreateGuildInterface` (C1 54,
+    /// WSclient.cpp:6700-6703). No window yet.
+    GuildMaster,
     /// The rest with their own `case`: message boxes (7, 9 `INDEX_NPC_LAHAP`, 0x11, 0x12, 0x17-0x20,
     /// 0x26), the old server division window (5), `INTERFACE_SENATUS` (0x0C) and
     /// `SendRequestBCStatus` (0x0D).
@@ -135,6 +148,13 @@ impl WindowKind {
             // NewUIMixInventory.cpp:145-168: `MIXTYPE_GOBLIN_NORMAL`, `JERRIDON`, `CHAOS_CARD` and
             // `CHERRYBLOSSOM` (the types `ReceiveTalk` sets) → `SendRequestMixExit`.
             Self::ChaosMachine => Some(ClientMessage::CloseCrafting),
+            // `CNewUINPCDialogue::ProcessClosing` (NewUINPCDialogue.cpp:379-386) and
+            // `CNewUINPCQuest::ProcessClosing` (NewUINPCQuest.cpp:463-467): `SendExitInventory`.
+            Self::NpcDialogue | Self::NpcQuest => Some(ClientMessage::CloseNpc),
+            // `CNewUIGuildMakeWindow::ClosingProcess` (NewUIGuildMakeWindow.cpp:247-253):
+            // `SendRequestGuildMaster(FALSE)`, which OpenMU also takes as closing the dialog
+            // (`GuildMasterAnswerAction`).
+            Self::GuildMaster => Some(ClientMessage::GuildMasterAnswer { show_creation: false }),
             // Commented out in NewUIDoppelGangerWindow.cpp:212-215 and NewUIUnitedMarketPlaceWindow.cpp:
             // 227-230; empty in NewUIEmpireGuardianNPC.cpp.
             Self::Doppelganger | Self::Julia | Self::EmpireGuardian => None,
@@ -150,7 +170,8 @@ impl WindowKind {
         matches!(self, Self::Shop | Self::Vault | Self::ChaosMachine)
     }
 
-    /// Hidden by `UpdateSendMoveInterface` (NewUISystem.cpp:1662-1753) when the hero walks.
+    /// Hidden by `UpdateSendMoveInterface` (NewUISystem.cpp:1662-1753) when the hero walks; the guild
+    /// master, quest and dialogue windows at 1673-1684 and 1725-1728.
     fn closes_on_move(self) -> bool {
         matches!(
             self,
@@ -163,6 +184,9 @@ impl WindowKind {
                 | Self::Doppelganger
                 | Self::EmpireGuardian
                 | Self::Julia
+                | Self::NpcDialogue
+                | Self::NpcQuest
+                | Self::GuildMaster
         )
     }
 
@@ -170,7 +194,8 @@ impl WindowKind {
     /// NewUIStorageInventory.cpp:123, the inventory's for the Chaos Machine (NewUIMyInventory.cpp:564),
     /// NewUIEnterDevilSquare.cpp:129, NewUIBloodCastleEnter.cpp:144, NewUICursedTempleEnter.cpp:227,
     /// NewUIDuelWatchWindow.cpp:97, NewUIDoppelGangerWindow.cpp:105, NewUIEmpireGuardianNPC.cpp:91,
-    /// NewUIUnitedMarketPlaceWindow.cpp:108). The message boxes of `Other`: not yet.
+    /// NewUIUnitedMarketPlaceWindow.cpp:108, NewUINPCDialogue.cpp:211-213, NewUINPCQuest.cpp:155-157,
+    /// NewUIGuildMakeWindow.cpp:445-447). The message boxes of `Other`: not yet.
     fn closes_on_esc(self) -> bool {
         self != Self::Other
     }
@@ -185,8 +210,13 @@ pub struct NpcDialog {
     pub npc_number: Option<u16>,
     /// `g_pNPCShop->SetRepairShop` (ZzzInterface.cpp:3424-3438): it repairs.
     pub repair: bool,
-    /// The open window (`ReceiveTalk`'s `Value`, see [`WindowKind`]); `None` when closed.
+    /// `ReceiveTalk`'s `Value` of the open window (see [`WindowKind::of`]); `None` when closed or
+    /// when the window came from another packet (see [`NpcDialog::open_kind`]).
     pub window: Option<u8>,
+    /// The open window; `None` when closed.
+    kind: Option<WindowKind>,
+    /// Counts the windows opened, so a window that replaces another of the same kind is seen as new.
+    pub serial: u32,
     /// Items of the NPC store or vault (`ReceiveTradeInventory`): slot and the 12 item bytes.
     pub store: Vec<(u8, [u8; 12])>,
     /// The inventory was open the last time it was looked at (to see it close).
@@ -195,12 +225,12 @@ pub struct NpcDialog {
 
 impl NpcDialog {
     pub fn kind(&self) -> Option<WindowKind> {
-        self.window.map(WindowKind::of)
+        self.kind
     }
 
-    #[allow(dead_code)] // For the shop window.
+    #[allow(dead_code)] // Used by the tests.
     pub fn is_open(&self) -> bool {
-        self.window.is_some()
+        self.kind.is_some()
     }
 
     /// `SendRequestTalk` went out for this NPC.
@@ -213,9 +243,19 @@ impl NpcDialog {
     /// `ReceiveTalk`: `HideAll` closes the open window (with its packet), then the new one opens.
     /// Returns the packets to send.
     fn open(&mut self, window: u8) -> Vec<ClientMessage> {
-        let mut out: Vec<ClientMessage> = self.close().into_iter().collect();
+        let mut out = self.open_kind(WindowKind::of(window));
         self.window = Some(window);
         out.extend(WindowKind::of(window).open_packet());
+        out
+    }
+
+    /// A dialog window opened by a packet other than `ReceiveTalk` (`OpenNpcDialog`, the quest
+    /// state, the guild master): like `open`, the window open before closes with its packet (the
+    /// server keeps one NPC dialog at a time, OpenMU `TalkNpcAction.cs:38-50`).
+    fn open_kind(&mut self, kind: WindowKind) -> Vec<ClientMessage> {
+        let out: Vec<ClientMessage> = self.close().into_iter().collect();
+        self.kind = Some(kind);
+        self.serial = self.serial.wrapping_add(1);
         out
     }
 
@@ -235,7 +275,7 @@ impl NpcDialog {
 
     /// `Hide` of the window: its `ClosingProcess` packet. The talked-to NPC is kept.
     fn close(&mut self) -> Option<ClientMessage> {
-        let kind = self.kind()?;
+        let kind = self.kind.take()?;
         self.window = None;
         self.store.clear();
         kind.close_packet()
@@ -255,9 +295,20 @@ impl NpcDialog {
 }
 
 /// Closes the dialog: its packet and, for the windows that come with it, the inventory.
-fn close_dialog(dialog: &mut NpcDialog, net: &mut crate::net::Net, inv: &mut crate::inventory::Inventory, why: &str) {
+pub(crate) fn close_dialog(dialog: &mut NpcDialog, net: &mut crate::net::Net, inv: &mut crate::inventory::Inventory, why: &str) {
+    close_dialog_with(dialog, net, inv, why, None);
+}
+
+/// [`close_dialog`], sending `fallback` when the window has no closing packet of its own.
+fn close_dialog_with(
+    dialog: &mut NpcDialog,
+    net: &mut crate::net::Net,
+    inv: &mut crate::inventory::Inventory,
+    why: &str,
+    fallback: Option<ClientMessage>,
+) {
     let Some(kind) = dialog.kind() else { return };
-    let packet = dialog.close();
+    let packet = dialog.close().or(fallback);
     info!("NPC: se cierra la ventana {kind:?} ({why}), se manda {packet:?}");
     if let Some(p) = packet
         && net.connected()
@@ -399,6 +450,7 @@ fn talk_action(
     mut dialog: ResMut<NpcDialog>,
     (mut chat, metrics): (ResMut<crate::chat::Chat>, Res<crate::chat::TextMetrics>),
     mut net: ResMut<crate::net::Net>,
+    mut inv: ResMut<crate::inventory::Inventory>,
 ) {
     let Some(key) = request.0.take() else { return };
     timer.max = 12;
@@ -418,6 +470,10 @@ fn talk_action(
         TalkOutcome::Message(text) => system(&text),
         TalkOutcome::Send { repair, message } => {
             info!("NPC {} (número {}): se le habla", key, npc.number);
+            // Safety net (not in the original): OpenMU ignores a talk while its player is still in
+            // `NpcDialogOpened` (`TalkNpcAction.cs:38-50`), so a dialog this client thinks is open is
+            // closed first, with `SendExitInventory` if the window has no packet of its own.
+            close_dialog_with(&mut dialog, &mut net, &mut inv, "se habla con otro NPC", Some(ClientMessage::CloseNpc));
             dialog.talked(key, npc.number, repair);
             if net.connected() {
                 net.send(ClientMessage::TalkToNpc { id: key });
@@ -447,24 +503,32 @@ fn server_messages(
     mut players: Query<&mut crate::character::Player>,
 ) {
     for m in from.read() {
+        let send = |packets: Vec<ClientMessage>, net: &mut crate::net::Net| {
+            for p in packets {
+                if net.connected() {
+                    net.send(p);
+                }
+            }
+        };
+        // `g_pNewUISystem->HideAll()` of the windows that exist here (the NPC dialog closes in
+        // `open`/`open_kind` with its packet).
+        let mut hide_all = |inv: &mut crate::inventory::Inventory, dialog: &mut NpcDialog| {
+            if inv.open {
+                inv.toggle();
+            }
+            char_info.close();
+            move_window.close();
+            // (`hide_all` would also close the system menu box, a message box `HideAll` leaves.)
+            if !game_ui.modal() {
+                game_ui.hide_all();
+            }
+            dialog.inventory_seen = false;
+        };
         match &m.0 {
             ServerMessage::NpcWindow { window } => {
                 // `HideAll` (WSclient.cpp:5834), then `Show` of the window.
-                for p in dialog.open(*window) {
-                    if net.connected() {
-                        net.send(p);
-                    }
-                }
-                if inv.open {
-                    inv.toggle();
-                }
-                char_info.close();
-                move_window.close();
-                // (`hide_all` would also close the system menu box, a message box `HideAll` leaves.)
-                if !game_ui.modal() {
-                    game_ui.hide_all();
-                }
-                dialog.inventory_seen = false;
+                send(dialog.open(*window), &mut net);
+                hide_all(&mut inv, &mut dialog);
                 sound.play("SOUND_CLICK01");
                 sound.play("SOUND_INTERFACE01");
                 // (Outside window mode the original also moves the mouse to the left of the screen,
@@ -476,6 +540,28 @@ fn server_messages(
                     WindowKind::of(*window),
                     if dialog.repair { ", repara" } else { "" }
                 );
+            }
+            ServerMessage::OpenNpcDialog { npc, contribution } => {
+                // `ReceiveNPCDlgUIStart` (WSclient.cpp:9881-9890): `Show(INTERFACE_NPC_DIALOGUE)` unless
+                // it is already open. The window itself is not implemented yet: it only counts as an
+                // open dialog, so Esc, walking or another NPC close it with `SendExitInventory`.
+                if dialog.kind() != Some(WindowKind::NpcDialogue) {
+                    send(dialog.open_kind(WindowKind::NpcDialogue), &mut net);
+                }
+                info!("NPC {npc}: se abre su diálogo (contribución gens {contribution}; la ventana aún no existe)");
+            }
+            ServerMessage::QuestStateDialog { quest, state } => {
+                // `ReceiveQuestState` (WSclient.cpp:9539-9546): `HideAll`, then `Show(INTERFACE_NPCQUEST)`.
+                // The quest window is not implemented yet.
+                send(dialog.open_kind(WindowKind::NpcQuest), &mut net);
+                hide_all(&mut inv, &mut dialog);
+                info!("NPC: ventana de misión {quest} (estado {state:#04x}; la ventana aún no existe)");
+            }
+            ServerMessage::GuildMasterDialog => {
+                // `ReceiveCreateGuildInterface` (WSclient.cpp:6700-6703): `Show(INTERFACE_NPCGUILDMASTER)`.
+                // The guild creation window is not implemented yet.
+                send(dialog.open_kind(WindowKind::GuildMaster), &mut net);
+                info!("NPC: ventana del maestro de gremios (aún no existe)");
             }
             ServerMessage::StoreItemList { kind, items } => {
                 let kept = dialog.set_store(*kind, items);
@@ -505,6 +591,7 @@ fn server_messages(
 }
 
 /// Esc closes the dialog before the system menu sees it (like the inventory).
+#[allow(clippy::too_many_arguments)]
 fn esc_key(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     game_ui: Res<crate::options::GameUi>,
@@ -513,8 +600,11 @@ fn esc_key(
     mut net: ResMut<crate::net::Net>,
     mut inv: ResMut<crate::inventory::Inventory>,
     mut sound: ResMut<crate::sound::SoundQueue>,
+    shop: Res<crate::shop::NpcShop>,
 ) {
     if !keys.just_pressed(KeyCode::Escape)
+        // Not while a sale waits for the server (NewUINPCShop.cpp:191).
+        || shop.selling
         || game_ui.modal()
         || game_ui.option_open()
         || game_ui.window_menu_open()
@@ -586,6 +676,26 @@ mod tests {
         assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
         assert!(d.open(0x23).is_empty());
         assert_eq!(d.close(), None);
+    }
+
+    /// The dialogs OpenMU opens without `NpcWindowResponse` (Gens NPCs, quest NPCs, guild master) must
+    /// count as open, or the server would ignore every later talk (it keeps `NpcDialogOpened`).
+    #[test]
+    fn dialogs_without_receive_talk() {
+        let mut d = NpcDialog::default();
+        assert!(d.open_kind(WindowKind::NpcDialogue).is_empty());
+        assert!(d.is_open() && d.window.is_none() && !d.blocks_talk());
+        assert!(WindowKind::NpcDialogue.closes_on_move() && WindowKind::NpcDialogue.closes_on_esc());
+        // The quest window replaces it, closing it first.
+        assert_eq!(d.open_kind(WindowKind::NpcQuest), vec![ClientMessage::CloseNpc]);
+        assert_eq!(d.kind(), Some(WindowKind::NpcQuest));
+        // A shop after it: `HideAll` closes the quest window with `SendExitInventory`.
+        assert_eq!(d.open(0), vec![ClientMessage::CloseNpc]);
+        assert_eq!(d.kind(), Some(WindowKind::Shop));
+        d.close();
+        d.open_kind(WindowKind::GuildMaster);
+        assert_eq!(d.close(), Some(ClientMessage::GuildMasterAnswer { show_creation: false }));
+        assert!(!d.is_open());
     }
 
     #[test]

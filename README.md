@@ -25,9 +25,9 @@ formulas, timings and numbers are taken from the original client logic, not gues
 
 ## Features
 
-**Overall progress: 46 of 79 features done (58%)**
+**Overall progress: 47 of 79 features done (59%)**
 
-`████████████░░░░░░░░` 58%
+`████████████░░░░░░░░` 59%
 
 Checked items work in the client against [OpenMU](https://github.com/MUnique/OpenMU) unless they
 say otherwise; the last section is our own server. The list grows as the game does, so the
@@ -82,7 +82,7 @@ percentage measures what is listed, not the whole original game.
   - [x] Monsters and NPCs from the server (appear, walk, leave the view)
   - [x] Inventory from the server and moving items (confirmed by the server)
   - [x] Talking to NPCs (talk cursor, walk to the NPC, dialog opens and closes like the original)
-  - [ ] NPC shops: buy, sell, repair
+  - [x] NPC shops: buy, sell, repair (prices from the original formulas)
   - [ ] Vault
   - [ ] Quests (Sevina, Marlon...)
   - [ ] Attacking monsters, damage numbers
