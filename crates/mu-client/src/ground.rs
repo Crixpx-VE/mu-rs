@@ -433,7 +433,6 @@ fn drop_on_ground(
     args: Res<crate::Args>,
     (game_ui, move_window, char_info): (Res<crate::options::GameUi>, Res<crate::move_window::MoveWindow>, Res<crate::char_info::CharInfoWindow>),
     dialog: Res<crate::npc::NpcDialog>,
-    hero: Option<Res<crate::account::Hero>>,
     (mut chat, metrics): (ResMut<crate::chat::Chat>, Res<crate::chat::TextMetrics>),
     mut inv: ResMut<Inventory>,
     mut net: ResMut<crate::net::Net>,
@@ -458,9 +457,9 @@ fn drop_on_ground(
     if matches!(dialog.kind(), Some(Shop | Vault | ChaosMachine | DevilSquare | BloodCastle)) {
         return;
     }
-    let name = hero.as_ref().map_or(String::new(), |h| h.name.clone());
+    // `g_pChatListBox->AddText("", GlobalText[...], TYPE_ERROR_MESSAGE)`.
     let mut error = |text: &str| {
-        chat.add(&name, text, MsgType::Error, MsgType::All, &metrics);
+        chat.add("", text, MsgType::Error, MsgType::All, &metrics);
     };
     if price::is_high_value_item(&picked.item) {
         error(txt::EXPENSIVE);
@@ -542,7 +541,6 @@ fn get_item(
     terrain: Option<Res<LoadedTerrain>>,
     players: Query<&crate::character::Player>,
     mut timer: ResMut<crate::character::MouseTimer>,
-    hero: Option<Res<crate::account::Hero>>,
     (mut chat, metrics): (ResMut<crate::chat::Chat>, Res<crate::chat::TextMetrics>),
     mut net: ResMut<crate::net::Net>,
 ) {
@@ -561,8 +559,7 @@ fn get_item(
     if zen.is_some() {
         ground.request(id, &mut net);
     } else if inv.find_empty(&data, &item).is_none() {
-        let name = hero.as_ref().map_or(String::new(), |h| h.name.clone());
-        chat.add(&name, txt::INVENTORY_FULL, MsgType::System, MsgType::All, &metrics);
+        chat.add("", txt::INVENTORY_FULL, MsgType::System, MsgType::All, &metrics);
         // `Position[2] = RequestTerrainHeight + 3`, `Gravity = 50`.
         if let (Some(t), Some(g)) = (terrain.as_deref(), ground.items.get_mut(&id))
             && let Some((_, p)) = g.pos.as_mut()
