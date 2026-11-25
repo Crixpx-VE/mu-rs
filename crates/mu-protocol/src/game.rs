@@ -2646,23 +2646,23 @@ mod tests {
 
     /// Dropping and picking up (wsclientinline.h:1122-1142) and OpenMU's answers
     /// (ServerToClientPackets.xml `ItemsDropped`, `MoneyDropped`, `ItemDropRemoved`,
-    /// `ItemAddedToInventory`, `ItemDropResponse`, `ItemPickUpRequestFailed`).
+    /// `ItemAddedToInventory`, `ItemDropResponse`, `ItemPickUpRequestFailed`). The bytes marked
+    /// "captured" come from the live OpenMU (`bot --suelo`, a Small Axe in Lorencia at (178, 124)).
     #[test]
     fn ground_item_packets() {
-        // `SendRequestDropItem(MAX_EQUIPMENT_INDEX + 0, 130, 125)`: x, y, slot, encrypted.
-        assert_eq!(ida_y_vuelta_cliente(ClientMessage::DropItem { x: 130, y: 125, slot: 12 }), [0xC3, 6, 0x23, 130, 125, 12]);
-        // `SendRequestGetItem(0x0123)`: the key in big endian, encrypted.
-        assert_eq!(ida_y_vuelta_cliente(ClientMessage::PickUpItem { id: 0x0123 }), [0xC3, 5, 0x22, 0x01, 0x23]);
+        // Captured requests: drop slot 14 at (178, 124), pick up drop 1 (both encrypted).
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::DropItem { x: 178, y: 124, slot: 14 }), [0xC3, 0x06, 0x23, 0xB2, 0x7C, 0x0E]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::PickUpItem { id: 1 }), [0xC3, 0x05, 0x22, 0x00, 0x01]);
 
-        // ItemDropResponse: success and slot.
-        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: true, slot: 12 }), [0xC1, 5, 0x23, 1, 12]);
-        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: false, slot: 0 }), [0xC1, 5, 0x23, 0, 0]);
+        // Captured ItemDropResponse: dropped, and refused on (0, 0) (not walkable).
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: true, slot: 14 }), [0xC1, 0x05, 0x23, 0x01, 0x0E]);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: false, slot: 14 }), [0xC1, 0x05, 0x23, 0x00, 0x0E]);
 
-        // ItemsDropped: one fresh Kris +0 (sword 1) at (130, 125), id 0x0012 with the 0x8000 flag.
-        let kris = [0x01, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
-        let mut wire = vec![0xC2, 0x00, 0x15, 0x20, 0x01, 0x80, 0x12, 130, 125];
-        wire.extend_from_slice(&kris);
-        let drop = DroppedItem { id: 0x12, fresh: true, x: 130, y: 125, item: kris };
+        // Captured ItemsDropped: the axe, a fresh drop (0x8000 on id 1) at (178, 124).
+        let axe = [0x00, 0x00, 0x12, 0x00, 0x00, 0x10, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        let mut wire = vec![0xC2, 0x00, 0x15, 0x20, 0x01, 0x80, 0x01, 0xB2, 0x7C];
+        wire.extend_from_slice(&axe);
+        let drop = DroppedItem { id: 1, fresh: true, x: 178, y: 124, item: axe };
         assert_eq!(ServerMessage::decode(&wire), Some(ServerMessage::ItemsDropped(vec![drop])));
         assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemsDropped(vec![drop])), wire);
         assert_eq!(drop.zen(), None);
@@ -2673,16 +2673,19 @@ mod tests {
         assert_eq!(list, [DroppedItem::money(0x34, false, 10, 20, 1_234_567)]);
         assert_eq!(list[0].zen(), Some(1_234_567));
 
-        // ItemDropRemoved: two ids.
+        // Captured ItemDropRemoved (it comes before the pick-up answer), and two ids.
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropRemoved(vec![1])), [0xC2, 0x00, 0x07, 0x21, 0x01, 0x00, 0x01]);
         let gone = [0xC2, 0x00, 0x09, 0x21, 0x02, 0x00, 0x12, 0x00, 0x34];
         assert_eq!(ServerMessage::decode(&gone), Some(ServerMessage::ItemDropRemoved(vec![0x12, 0x34])));
         assert_eq!(ServerMessage::ItemDropRemoved(vec![0x12, 0x34]).encode(), gone);
 
-        // ItemAddedToInventory: slot and the item (16 bytes, encrypted).
-        let mut added = vec![0xC3, 16, 0x22, 13];
-        added.extend_from_slice(&kris);
-        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemPickedUp { slot: 13, item: kris }), added);
-        // ItemPickUpRequestFailed: general, stacked and OpenMU's zen limit (4 bytes).
+        // Captured ItemAddedToInventory: slot 14 and the item (16 bytes, encrypted).
+        let mut added = vec![0xC3, 0x10, 0x22, 0x0E];
+        added.extend_from_slice(&axe);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemPickedUp { slot: 14, item: axe }), added);
+        // Captured ItemPickUpRequestFailed: a drop id that does not exist, or 4 tiles away.
+        assert_eq!(ServerMessage::decode(&[0xC3, 0x04, 0x22, 0xFF]), Some(ServerMessage::ItemPickUpFailed { reason: pick_up::FAILED }));
+        // Stacked and OpenMU's zen limit (4 bytes).
         for reason in [pick_up::FAILED, pick_up::STACKED, pick_up::ZEN] {
             assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemPickUpFailed { reason }), [0xC3, 4, 0x22, reason]);
         }

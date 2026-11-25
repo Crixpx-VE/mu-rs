@@ -232,10 +232,13 @@ fn ground_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<
         c.collect(user, secs)
     };
     let first = c.collect(user, 2.0)?;
+    // Not a box or a potion (OpenMU opens a box when it is dropped): a weapon or armor, also an
+    // equipped one (it comes back to the grid and is put on again at the end).
     let item = first.iter().find_map(|m| match m {
-        ServerMessage::InventoryList(list) => list.iter().find(|(s, _)| (12..76).contains(s)).copied(),
+        ServerMessage::InventoryList(list) => list.iter().find(|(s, b)| *s < 76 && (b[5] >> 4) < 12).copied(),
         _ => None,
     });
+    let equipped = item.filter(|(s, _)| *s < 12);
     step(c, ClientMessage::PickUpItem { id: 0x7FFE }, 1.0)?;
     let Some((slot, _)) = item else {
         println!("[{user}] no item in the inventory grid to drop");
@@ -249,14 +252,13 @@ fn ground_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<
         })
     };
     step(c, ClientMessage::DropItem { x: 0, y: 0, slot }, 1.0)?;
-    let got = step(c, ClientMessage::DropItem { x, y, slot }, 1.5)?;
+    let mut got = step(c, ClientMessage::DropItem { x, y, slot }, 1.5)?;
     if let Some(id) = dropped_at(&got, x, y) {
-        step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+        got = step(c, ClientMessage::PickUpItem { id }, 1.5)?;
     }
     // Where it went back to (the server picks the slot).
     let slot = got
         .iter()
-        .chain(c.collect(user, 0.5)?.iter())
         .find_map(|m| match m {
             ServerMessage::ItemPickedUp { slot, .. } => Some(*slot),
             _ => None,
@@ -269,7 +271,17 @@ fn ground_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<
         // Two steps east: then it is 2 tiles away (OpenMU's `MaximumPickupDistance` is 3).
         let dirs: Vec<u8> = [(x, y), (x + 1, y), (x + 2, y)].windows(2).filter_map(|w| mu_protocol::game::direction_between(w[0], w[1])).collect();
         step(c, ClientMessage::Walk { source_x: x, source_y: y, rotation: dirs[0], directions: dirs }, 1.5)?;
-        step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+        let got = step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+        if let (Some((to, bytes)), Some(from)) = (
+            equipped,
+            got.iter().find_map(|m| match m {
+                ServerMessage::ItemPickedUp { slot, .. } => Some(*slot),
+                _ => None,
+            }),
+        ) {
+            use mu_protocol::game::storage::INVENTORY;
+            step(c, ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: from, item: bytes, to_storage: INVENTORY, to_slot: to }, 1.0)?;
+        }
     }
     c.send(ClientMessage::Logout { kind: 0 })?;
     println!("[{user}] fuera");
