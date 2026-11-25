@@ -1,5 +1,6 @@
 //! Talking to NPCs: the click, the walk next to the NPC, `SendRequestTalk` and the state of the
-//! dialog the server opens (no windows yet: the shop window reads [`NpcDialog`]).
+//! dialog the server opens (the windows read [`NpcDialog`]: the shop, shop.rs, and the vault,
+//! vault.rs).
 //!
 //! **The click** (`MoveHero`, ZzzInterface.cpp:7528-7571): with an NPC under the mouse
 //! (`SelectedNpc`) and neither the shop nor the vault open, the hero takes `MOVEMENT_TALK` with
@@ -308,6 +309,13 @@ fn close_dialog_with(
     fallback: Option<ClientMessage>,
 ) {
     let Some(kind) = dialog.kind() else { return };
+    // `CNewUIStorageInventory::ProcessClosing` (NewUIStorageInventory.cpp:273-276): while a move waits
+    // for its answer (`EquipmentItem`) the vault does not close (nor the inventory with it,
+    // NewUISystem.cpp:1017-1022 and 1079-1085).
+    if kind == WindowKind::Vault && inv.busy() {
+        info!("NPC: el baúl no se cierra ({why}): un movimiento espera respuesta");
+        return;
+    }
     let packet = dialog.close().or(fallback);
     info!("NPC: se cierra la ventana {kind:?} ({why}), se manda {packet:?}");
     if let Some(p) = packet

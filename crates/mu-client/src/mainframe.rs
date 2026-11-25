@@ -439,7 +439,7 @@ fn pointer_over_ui(
     chat: Res<crate::chat::Chat>,
     char_info: Res<crate::char_info::CharInfoWindow>,
     inventory: Res<crate::inventory::Inventory>,
-    shop: Res<crate::shop::NpcShop>,
+    (shop, vault): (Res<crate::shop::NpcShop>, Res<crate::vault::Vault>),
     mut over: ResMut<PointerOverUi>,
 ) {
     let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
@@ -450,6 +450,7 @@ fn pointer_over_ui(
             || char_info.blocks(c)
             || inventory.blocks(c)
             || shop.blocks(c)
+            || vault.blocks(c)
     });
     if over.0 != on_bar {
         over.0 = on_bar;

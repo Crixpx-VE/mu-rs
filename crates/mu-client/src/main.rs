@@ -71,6 +71,7 @@ mod scene;
 mod shop;
 mod sound;
 mod terrain;
+mod vault;
 mod water_terrain;
 
 use std::path::PathBuf;
@@ -288,5 +289,6 @@ fn main() {
         .add_plugins(monsters::MonstersPlugin)
         .add_plugins(npc::NpcPlugin)
         .add_plugins(shop::ShopPlugin)
+        .add_plugins(vault::VaultPlugin)
         .run();
 }
