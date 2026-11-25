@@ -776,7 +776,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
         });
 }
 
-fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
+pub(crate) fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
     Node {
         position_type: PositionType::Absolute,
         left: Val::Px(x),
@@ -789,7 +789,7 @@ fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {
 
 /// `g_hFont`/`g_hFontBold` (`CreateFont(FontHeight - 1)`, Winmain.cpp:1456-1472) in 640-screen
 /// units, using the closest resolution of the `switch (WindowWidth)`.
-fn font_size(window_width: u32) -> f32 {
+pub(crate) fn font_size(window_width: u32) -> f32 {
     let ww = [800, 1024, 1280].into_iter().min_by_key(|&c| (c - window_width as i32).abs()).unwrap_or(1024);
     let font_height = match ww {
         800 => 13,
@@ -799,7 +799,7 @@ fn font_size(window_width: u32) -> f32 {
     (font_height - 1) as f32 * 640.0 / ww as f32
 }
 
-fn label(t: &str, color: [u8; 3], bold: bool, font: f32) -> impl Bundle {
+pub(crate) fn label(t: &str, color: [u8; 3], bold: bool, font: f32) -> impl Bundle {
     let mut text_font = TextFont { font_size: FontSize::Px(font), font_smoothing: FontSmoothing::AntiAliased, ..default() };
     if bold {
         text_font.weight = FontWeight::BOLD;
