@@ -33,6 +33,42 @@ pub struct NpcDialogue {
     pub answers: [(i32, i32); MAX_ND_ANSWER],
 }
 
+/// `QM_MAX_ANSWER` (QuestMng.h:9).
+pub const MAX_ANSWER: usize = 5;
+/// `sizeof(DWORD) + sizeof(SQuestProgress)` (`#pragma pack(1)`, QuestMng.h:18-28).
+const PROGRESS_RECORD: usize = 4 + 1 + 4 + 4 + MAX_ANSWER * 4 + 4 + 4;
+
+/// `SQuestProgress` (QuestMng.h:18-28), read by `LoadQuestProgressScript` (QuestMng.cpp:68-97) from
+/// `Data/Local/QuestProgress.bmd` with the same 41-byte `BuxConvert` records. The index is the
+/// quest's `DWORD` (step number in the low word, group in the high word).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuestProgress {
+    /// `m_byUIType`: 0 `INTERFACE_QUEST_PROGRESS`, otherwise `INTERFACE_QUEST_PROGRESS_ETC`.
+    pub ui_type: u8,
+    pub npc_words: i32,
+    pub player_words: i32,
+    pub answers: [i32; MAX_ANSWER],
+    /// `m_nSubject`: the quest's title (the `[Q]` lines of the NPC dialogue's quest list).
+    pub subject: i32,
+    pub summary: i32,
+}
+
+/// Reads `QuestProgress.bmd`.
+pub fn read_progress(buf: &[u8]) -> HashMap<u32, QuestProgress> {
+    let mut out = HashMap::new();
+    for rec in buf.as_chunks::<PROGRESS_RECORD>().0 {
+        let d = bux(rec);
+        let int = |o: usize| i32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]);
+        let mut answers = [0; MAX_ANSWER];
+        for (i, a) in answers.iter_mut().enumerate() {
+            *a = int(13 + i * 4);
+        }
+        let p = QuestProgress { ui_type: d[4], npc_words: int(5), player_words: int(9), answers, subject: int(33), summary: int(37) };
+        out.entry(int(0) as u32).or_insert(p);
+    }
+    out
+}
+
 /// `BuxConvert` (XOR `FC CF AB`, restarting for each part).
 fn bux(buf: &[u8]) -> Vec<u8> {
     const BUX: [u8; 3] = [0xFC, 0xCF, 0xAB];
@@ -67,7 +103,7 @@ pub fn read_words(buf: &[u8]) -> Result<HashMap<i32, String>> {
 /// Reads `NPCDialogue.bmd`. A trailing incomplete record is ignored (`fread` returns 0).
 pub fn read_dialogues(buf: &[u8]) -> HashMap<u32, NpcDialogue> {
     let mut out = HashMap::new();
-    for rec in buf.chunks_exact(DIALOGUE_RECORD) {
+    for rec in buf.as_chunks::<DIALOGUE_RECORD>().0 {
         let d = bux(rec);
         let int = |o: usize| i32::from_le_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]]);
         let mut answers = [(0, 0); MAX_ND_ANSWER];
@@ -84,6 +120,7 @@ pub fn read_dialogues(buf: &[u8]) -> HashMap<u32, NpcDialogue> {
 pub struct QuestScripts {
     pub words: HashMap<i32, String>,
     pub dialogues: HashMap<u32, NpcDialogue>,
+    pub progress: HashMap<u32, QuestProgress>,
 }
 
 impl QuestScripts {
@@ -92,9 +129,37 @@ impl QuestScripts {
     pub fn load(data: &Path, lang: &str) -> Result<Self> {
         let local = fs::find(data, "Local").ok_or_else(|| Error::NotFound(data.join("Local")))?;
         let dialogues = read_dialogues(&fs::read(&local, "NPCDialogue.bmd")?);
+        let progress = read_progress(&fs::read(&local, "QuestProgress.bmd")?);
         let lang_dir = fs::find(&local, lang).ok_or_else(|| Error::NotFound(local.join(lang)))?;
         let words = read_words(&fs::read(&lang_dir, &format!("QuestWords_{}.bmd", lang.to_ascii_lowercase()))?)?;
-        Ok(Self { words, dialogues })
+        Ok(Self { words, dialogues, progress })
+    }
+
+    /// `GetSubject` (QuestMng.cpp:387-394).
+    pub fn subject(&self, quest: u32) -> Option<&str> {
+        self.word(self.progress.get(&quest)?.subject)
+    }
+
+    /// `GetNPCWords` (QuestMng.cpp:354-361): what the NPC says in that quest step.
+    pub fn step_npc_words(&self, quest: u32) -> Option<&str> {
+        self.word(self.progress.get(&quest)?.npc_words)
+    }
+
+    /// `GetPlayerWords` (QuestMng.cpp:363-370).
+    pub fn step_player_words(&self, quest: u32) -> Option<&str> {
+        self.word(self.progress.get(&quest)?.player_words)
+    }
+
+    /// `GetAnswer` (QuestMng.cpp:372-385): answer `answer` (0..5) of the quest step.
+    pub fn step_answer(&self, quest: u32, answer: usize) -> Option<&str> {
+        let text = *self.progress.get(&quest)?.answers.get(answer)?;
+        if text == 0 { None } else { self.word(text) }
+    }
+
+    /// `m_mapQuestProgress[dwQuestIndex].m_byUIType` (QuestMng.cpp:277): `operator[]` gives 0 for a
+    /// step that is not in the file.
+    pub fn step_ui_type(&self, quest: u32) -> u8 {
+        self.progress.get(&quest).map_or(0, |p| p.ui_type)
     }
 
     /// `GetWords` (QuestMng.cpp:291-298).
@@ -171,7 +236,15 @@ mod tests {
         rec[12..16].copy_from_slice(&903i32.to_le_bytes());
         let mut buf = bux(&rec);
         buf.extend([1, 2, 3]);
-        let s = QuestScripts { words, dialogues: read_dialogues(&buf) };
+        let mut prog = vec![0u8; PROGRESS_RECORD];
+        prog[0..4].copy_from_slice(&0x0012_0003u32.to_le_bytes());
+        prog[4] = 1;
+        prog[33..37].copy_from_slice(&1007i32.to_le_bytes());
+        let progress = read_progress(&bux(&prog));
+        assert_eq!(progress[&0x0012_0003].ui_type, 1);
+        let s = QuestScripts { words, dialogues: read_dialogues(&buf), progress };
+        assert_eq!(s.subject(0x0012_0003), Some("Go back."));
+        assert_eq!(s.subject(0x0012_0004), None);
         assert_eq!(s.npc_words(543, 3), Some("Hello"));
         assert_eq!(s.npc_words(0, 3), None);
         assert_eq!(s.answer(543, 3, 0), Some("Go back."));
@@ -204,5 +277,12 @@ mod tests {
         assert_eq!(s.word(1501), Some("Select a quest."));
         assert_eq!(s.word(1502), Some("There is no available quest. Please come back later."));
         assert_eq!(s.npc_words(543, 999), Some("NPC dialog script error!"));
+        // The Elf Soldier's first quest (OpenMU: group 18, starting number 0).
+        assert_eq!(s.subject(0x0012_0000), Some("Spider Hunt!"));
+        assert_eq!(s.progress[&0x0012_0000].answers[..2], [18003, 18004]);
+        assert!(s.step_npc_words(0x0012_0000).is_some_and(|w| w.starts_with("The elder says Spiders")));
+        assert!(s.step_answer(0x0012_0000, 1).is_some() && s.step_answer(0x0012_0000, 2).is_none());
+        assert!(s.step_answer(0x0012_0001, 0).is_none(), "the accepted step has no answers");
+        assert_eq!((s.step_ui_type(0x0001_0000), s.step_ui_type(0x0012_0000), s.step_ui_type(0xDEAD)), (1, 0, 0));
     }
 }
