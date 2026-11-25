@@ -55,6 +55,26 @@ pub enum Part {
     Item(Item),
     /// A merchant piece (`MODEL_MERCHANT_MAN_HEAD`...): see [`NpcModel::parts`].
     Npc(&'static str),
+    /// A class piece of the player skeleton: `MODEL_BODY_<slot> + n` ([`body_file`]).
+    Body(u8),
+}
+
+/// `MAX_CLASS` (_define.h:381, without `PBG_ADD_NEWCHAR_MONK`).
+const MAX_CLASS: u8 = 6;
+
+/// File of class piece `MODEL_BODY_<slot> + n` (`slot` 0 helm .. 4 boots) under `Data/Player`
+/// (ZzzOpenData.cpp:122-147): `{Part}Class{i+1:02}` for the first classes, `{Part}Class2..` and
+/// `{Part}Class3..` `MAX_CLASS` and `2 · MAX_CLASS` further on.
+pub fn body_file(slot: usize, n: u8) -> Option<String> {
+    let part = ["Helm", "Armor", "Pant", "Glove", "Boot"].get(slot)?;
+    let (tier, i) = (n / MAX_CLASS, n % MAX_CLASS);
+    let tier = match tier {
+        0 => "",
+        1 => "2",
+        2 => "3",
+        _ => return None,
+    };
+    Some(format!("{part}Class{tier}{:02}.bmd", i + 1))
 }
 
 /// Which model is drawn.
@@ -133,6 +153,9 @@ pub struct Def {
     pub life_time: Option<i32>,
     /// `c->Class` (the character-shaped Doppelganger ones).
     pub class: Option<&'static str>,
+    /// `c->PK` (`PVP_*`, 3 = `PVP_NEUTRAL`; 6 = `PVP_MURDERER2`: red weapons and wings,
+    /// ZzzCharacter.cpp:9645-9647).
+    pub pk: u8,
     pub skin: u8,
     /// `SetAction` on creation.
     pub start_action: Option<u16>,
@@ -198,6 +221,8 @@ pub const BASE: Def = Def {
     pc_room: false,
     life_time: None,
     class: None,
+    // `CreateCharacterPointer`: `c->PK = PVP_NEUTRAL` (ZzzCharacter.cpp:11299).
+    pk: 3,
     skin: 0,
     start_action: None,
     start_player_action: None,
@@ -412,6 +437,11 @@ pub fn other_model(name: &str) -> Option<(&'static str, &'static str, &'static s
         "MODEL_HALLOWEEN" => ("Skill", "Jack.bmd", "Skill"),
         // ZzzOpenData.cpp:455.
         "MODEL_GM_CHARACTER" => ("Skill", "youngza.bmd", "Skill"),
+        // ZzzOpenData.cpp:4006-4007.
+        "MODEL_CURSEDTEMPLE_ALLIED_PLAYER" => ("Skill", "unitedsoldier.bmd", "Skill"),
+        "MODEL_CURSEDTEMPLE_ILLUSION_PLAYER" => ("Skill", "illusionist.bmd", "Skill"),
+        // Event.cpp:51-52.
+        "MODEL_XMAS_EVENT_CHANGE_GIRL" => ("Skill", "santa.bmd", "Skill"),
         // ZzzOpenData.cpp:4038-4041.
         "MODEL_PANDA" => ("Item", "panda.bmd", "Item"),
         "MODEL_SKELETON_CHANGED" => ("Item", "trans_skeleton.bmd", "Item"),
@@ -478,6 +508,35 @@ mod tests {
         assert_eq!(kind(0), Kind::Monster);
         assert_eq!(kind(240), Kind::Npc);
         assert_eq!(kind(100), Kind::Trap);
+    }
+
+    #[test]
+    fn character_shaped_ones() {
+        // ZzzCharacter.cpp:13859-13869: the Lorencia guard, `MODEL_*+9` armour, crossbow and arrows.
+        let guard = defs(247, 0)[0];
+        assert_eq!(guard.model, Model::Player);
+        assert_eq!(guard.body[1], Part::Item(Item { group: 8, index: 9, level: 0, option: 0 }));
+        assert_eq!(guard.weapons, [Some(Item { group: 4, index: 11, level: 0, option: 0 }), Some(Item { group: 4, index: 7, level: 0, option: 0 })]);
+        assert_eq!(guard.pk, 3);
+        // 13303-13321: the Cursed Wizard is a murderer (red weapons) with +9 armour.
+        let wizard = defs(34, 0)[0];
+        assert_eq!((wizard.pk, wizard.body[0]), (6, Part::Item(Item { group: 7, index: 3, level: 9, option: 0 })));
+        // MakeElfHelper (12065-12083): +13 armour and wings.
+        let elf = defs(257, 0)[0];
+        assert_eq!(elf.wing, Some(Item { group: 12, index: 3, level: 0, option: 0 }));
+        // GMDoppelGanger1.cpp:143: the Magic Gladiator's head is a class piece, `MODEL_BODY_HELM + 15`.
+        let mg = defs(537, 65)[0];
+        assert_eq!((mg.class, mg.body[0]), (Some("CLASS_DARK"), Part::Body(15)));
+        assert_eq!(body_file(0, 15).as_deref(), Some("HelmClass304.bmd"));
+        assert_eq!(body_file(1, 0).as_deref(), Some("ArmorClass01.bmd"));
+        assert_eq!(body_file(4, 6).as_deref(), Some("BootClass201.bmd"));
+        assert_eq!(body_file(0, 18), None);
+        // Every `SubType` model drawn over the player skeleton has a file.
+        for d in DEFS.iter().filter(|d| d.model == Model::Player) {
+            if let SubType::Model(m) = d.sub_type {
+                assert!(other_model(m).is_some(), "{} {m}", d.number);
+            }
+        }
     }
 
     #[test]
