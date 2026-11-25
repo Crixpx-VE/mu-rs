@@ -806,8 +806,8 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
             height: Val::Px(480.0),
             ..default()
         },
-        // Over the main frame, under the windows.
-        GlobalZIndex(0),
+        // Over the main frame (the windows use 1 too and come later in the tree).
+        GlobalZIndex(1),
         Pickable::IGNORE,
     ));
 }

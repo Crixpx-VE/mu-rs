@@ -578,6 +578,23 @@ mod tests {
                 &[0xC1, 0x1C, 0xF3, 0x04, 0x8A, 0x86, 0x00, 0x00, 0x70, 0x00, 0x14, 0x00, 0x66, 0x00, 0x19, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x58, 0x00, 0x00, 0x00, 0x00],
                 ServerMessage::Respawn(Respawn { x: 138, y: 134, map: 0, direction: 0, health: 112, mana: 20, shield: 102, ability: 25, experience: 88, money: 0 }),
             ),
+            // Level 2 after another spider, and the new maximum mana.
+            (
+                &[0xC1, 0x18, 0xF3, 0x05, 0x02, 0x00, 0x05, 0x00, 0x72, 0x00, 0x15, 0x00, 0x67, 0x00, 0x19, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x00],
+                ServerMessage::LevelUp(LevelUp {
+                    level: 2,
+                    points: 5,
+                    max_health: 114,
+                    max_mana: 21,
+                    max_shield: 103,
+                    max_ability: 25,
+                    fruit_points: 0,
+                    max_fruit_points: 2,
+                    negative_fruit_points: 0,
+                    max_negative_fruit_points: 2,
+                }),
+            ),
+            (&[0xC1, 0x08, 0x27, 0xFE, 0x00, 0x15, 0x00, 0x19], ServerMessage::MaximumMana { mana: 21, ability: 25 }),
         ];
         for (wire, m) in cases {
             assert_eq!(ServerMessage::decode(wire), Some(m.clone()), "{wire:02X?}");

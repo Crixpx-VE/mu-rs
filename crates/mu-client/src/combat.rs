@@ -544,6 +544,7 @@ fn server_combat(
     mut heroes: Query<(Entity, &mut Player)>,
     mut world: ResMut<crate::fx::FxWorld>,
     mut sound: ResMut<crate::sound::SoundQueue>,
+    mut selectables: Query<&mut crate::names::Selectable>,
 ) {
     let height = |p: Vec2| terrain.as_ref().map_or(0.0, |t| t.0.height_at(p.x, p.y));
     let mu = |p: Vec2| Vec3::new(p.x * MU_SCALE, p.y * MU_SCALE, height(p));
@@ -581,7 +582,7 @@ fn server_combat(
                 if monsters.iter().any(|(_, m)| m.key == key) {
                     // Monsters: `SwordCount % 3 == 0` → ATTACK1, else ATTACK2; `SwordCount` goes up twice
                     // per call for them (ZzzCharacter.cpp:1155-1162, 1207). One count for all of them here.
-                    let a = if attack.sword_count % 3 == 0 { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
+                    let a = if attack.sword_count.is_multiple_of(3) { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
                     attack.sword_count += 2;
                     monsters_orders.turn(key, *direction);
                     monsters_orders.set_action(key, a);
@@ -608,7 +609,7 @@ fn server_combat(
                     }
                     Some(e)
                 } else if let Some((e, mo)) = monsters.iter().find(|(_, m)| m.key == src) {
-                    let a = if attack.sword_count % 3 == 0 { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
+                    let a = if attack.sword_count.is_multiple_of(3) { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
                     attack.sword_count += 2;
                     monsters_orders.set_action(mo.key, a);
                     Some(e)
@@ -641,7 +642,7 @@ fn server_combat(
                     }
                     Some(e)
                 } else if let Some((e, mo)) = monsters.iter().find(|(_, m)| m.key == src) {
-                    let a = if attack.sword_count % 3 == 0 { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
+                    let a = if attack.sword_count.is_multiple_of(3) { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
                     attack.sword_count += 2;
                     monsters_orders.set_action(mo.key, a);
                     Some(e)
@@ -657,6 +658,11 @@ fn server_combat(
             ServerMessage::ObjectKilled { killed, .. } => {
                 let key = killed & OBJECT_ID_MASK;
                 dying.0.entry(key).or_insert(1);
+                // `c->Dead`: no longer picked by the mouse (`SelectCharacter` skips the dead).
+                let entity = monsters.iter().find(|(_, m)| m.key == key).map(|(e, _)| e).or_else(|| remotes.iter().find(|(_, r)| r.id == key).map(|(e, _)| e));
+                if let Some(mut s) = entity.and_then(|e| selectables.get_mut(e).ok()) {
+                    s.dead = true;
+                }
                 if key == hero_key.0 {
                     for (_, mut p) in &mut heroes {
                         p.dead = true;
