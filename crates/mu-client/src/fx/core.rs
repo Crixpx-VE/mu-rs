@@ -992,8 +992,8 @@ impl Ctx<'_> {
         }
         // Multi Shot sends nothing (ZzzEffect.cpp:178-184).
         if skill != AT_SKILL_MULTI_SHOT {
-            // TODO(combat): SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey,
-            // SkillSerialNum) (ZzzEffect.cpp:172-182); the combat protocol does not exist yet.
+            // SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)
+            // (ZzzEffect.cpp:172-182): combat.rs sends what is queued here as `AreaSkillHit`.
             self.attack_requests.push(AttackRequest {
                 skill,
                 x: (position.x / 100.0) as i32,

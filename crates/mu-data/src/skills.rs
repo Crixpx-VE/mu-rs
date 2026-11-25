@@ -194,7 +194,8 @@ fn read_mumain(r: &[u8]) -> SkillDef {
 
 /// Reads a `skill_eng.bmd` in either layout.
 pub fn read_skills(buf: &[u8]) -> Result<SkillTable> {
-    let (len, count, read): (usize, usize, fn(&[u8]) -> SkillDef) = match buf.len() {
+    type Reader = fn(&[u8]) -> SkillDef;
+    let (len, count, read): (usize, usize, Reader) = match buf.len() {
         n if n == MAX_SKILLS_MAIN52 * 80 + 4 => (80, MAX_SKILLS_MAIN52, read_main52),
         n if n == MAX_SKILLS_MUMAIN * 108 + 4 => (108, MAX_SKILLS_MUMAIN, read_mumain),
         n => return Err(Error::Format(format!("skill.bmd: {n} bytes, unknown layout"))),
