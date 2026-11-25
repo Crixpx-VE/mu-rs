@@ -1061,16 +1061,22 @@ fn img(tex: Tex, x: f32, y: f32, w: f32, h: f32) -> Piece {
     Piece::Image { tex, x, y, w, h, sv: 0.0 }
 }
 
+/// The frame both windows draw first (`RenderBackImage`).
+fn back_image() -> Vec<Piece> {
+    vec![
+        img(Tex::Back, 0.0, 0.0, W, H),
+        img(Tex::Top, 0.0, 0.0, W, 64.0),
+        img(Tex::Left, 0.0, 64.0, 21.0, 320.0),
+        img(Tex::Right, W - 21.0, 64.0, 21.0, 320.0),
+        img(Tex::Bottom, 0.0, H - 45.0, W, 45.0),
+        img(Tex::Line, 1.0, 181.0, 188.0, 21.0),
+    ]
+}
+
 /// `Render` (226-252).
 fn pieces(d: &Dialogue, gens: u8, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
-    let mut out = Vec::new();
     // `RenderBackImage` (254-263).
-    out.push(img(Tex::Back, 0.0, 0.0, W, H));
-    out.push(img(Tex::Top, 0.0, 0.0, W, 64.0));
-    out.push(img(Tex::Left, 0.0, 64.0, 21.0, 320.0));
-    out.push(img(Tex::Right, W - 21.0, 64.0, 21.0, 320.0));
-    out.push(img(Tex::Bottom, 0.0, H - 45.0, W, 45.0));
-    out.push(img(Tex::Line, 1.0, 181.0, 188.0, 21.0));
+    let mut out = back_image();
 
     // `RenderSelTextBlock` (265-287).
     if d.lower == LowerView::SelTexts && d.sel_sel_text != 0 {
@@ -1123,14 +1129,8 @@ fn pieces(d: &Dialogue, gens: u8, cursor: Option<Vec2>, held: bool) -> Vec<Piece
 
 /// `CNewUIQuestProgress::Render` (205-233).
 fn progress_pieces(p: &Progress, hero_name: &str, cursor: Option<Vec2>, held: bool) -> Vec<Piece> {
-    let mut out = Vec::new();
     // `RenderBackImage` (235-243).
-    out.push(img(Tex::Back, 0.0, 0.0, W, H));
-    out.push(img(Tex::Top, 0.0, 0.0, W, 64.0));
-    out.push(img(Tex::Left, 0.0, 64.0, 21.0, 320.0));
-    out.push(img(Tex::Right, W - 21.0, 64.0, 21.0, 320.0));
-    out.push(img(Tex::Bottom, 0.0, H - 45.0, W, 45.0));
-    out.push(img(Tex::Line, 1.0, 181.0, 188.0, 21.0));
+    let mut out = back_image();
 
     // `RenderSelTextBlock` (245-261).
     if p.lower == ProgressView::PlayerWords && p.sel_answer != 0 {
@@ -1222,6 +1222,7 @@ fn spawn_root(mut commands: Commands, args: Res<Args>, mut images: ResMut<Assets
 }
 
 /// Rebuilds the window when what it draws changes.
+#[allow(clippy::too_many_arguments)]
 fn draw(
     mut commands: Commands,
     w: Res<NpcDialogueWindow>,

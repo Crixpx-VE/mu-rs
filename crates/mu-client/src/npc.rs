@@ -109,9 +109,13 @@ pub enum WindowKind {
     /// `INTERFACE_NPCGUILDMASTER`, opened by `ReceiveCreateGuildInterface` (C1 54,
     /// WSclient.cpp:6700-6703). No window yet.
     GuildMaster,
-    /// The rest with their own `case`: message boxes (7, 9 `INDEX_NPC_LAHAP`, 0x11, 0x12, 0x17-0x20,
-    /// 0x26), the old server division window (5), `INTERFACE_SENATUS` (0x0C) and
-    /// `SendRequestBCStatus` (0x0D).
+    /// The rest with their own `case`: message boxes (7 `CTrainerMenuMsgBoxLayout`, 9
+    /// `INDEX_NPC_LAHAP` `CGemIntegrationMsgBoxLayout`, 0x11 `CElpisMsgBoxLayout`, 0x12
+    /// `COsbourneMsgBoxLayout`, 0x17/0x18 seed master/researcher menus, 0x19
+    /// `CResetCharacterPointMsgBoxLayout`, 0x20 `CDelgardoMainMenuMsgBoxLayout`, 0x26
+    /// `CLuckyTradeMenuMsgBoxLayout`, WSclient.cpp:5863-5977), the old server division window (5),
+    /// `INTERFACE_SENATUS` (0x0C) and `SendRequestBCStatus` (0x0D). TODO: they need the message box
+    /// framework (`CNewUIMessageBoxMng`), which does not exist yet.
     Other,
 }
 
