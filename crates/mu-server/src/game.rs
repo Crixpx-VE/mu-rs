@@ -354,7 +354,13 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         | ClientMessage::NpcBuffRequest
         | ClientMessage::QuestSelect { .. }
         | ClientMessage::QuestProceed { .. }
-        | ClientMessage::LegacyQuestState { .. } => {}
+        | ClientMessage::LegacyQuestState { .. }
+        // No combat on this server yet (OpenMU is the one in use).
+        | ClientMessage::Hit { .. }
+        | ClientMessage::TargetedSkill { .. }
+        | ClientMessage::CancelSkill { .. }
+        | ClientMessage::AreaSkill { .. }
+        | ClientMessage::AreaSkillHit { .. } => {}
     }
     true
 }
