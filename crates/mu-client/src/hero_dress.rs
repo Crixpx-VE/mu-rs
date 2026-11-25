@@ -121,6 +121,7 @@ fn dress_from(inv: &Inventory, data: &ItemData, render_level: u8) -> Option<Dres
         render_level,
         // The hero's `c->Light` is `AbilityLight` = (1, 1, 1) (character.rs, `light_body`).
         white_light: true,
+        ..Dress::default()
     };
     dress.any().then_some(dress)
 }
@@ -143,6 +144,7 @@ pub fn dress_from_appearance(look: &Appearance, data: &ItemData, render_level: u
         render_level,
         // Other characters are lit by the place (remote.rs, charselect.rs), not by (1, 1, 1).
         white_light: false,
+        ..Dress::default()
     }
 }
 
@@ -159,7 +161,7 @@ fn gear_from_inventory(inv: &Inventory, data: &ItemData) -> Gear {
 }
 
 /// `ItemAttribute[Weapon[0].Type].TwoHand` is the only attribute `SetPlayerStop` / `SetPlayerWalk` read.
-fn gear(weapons: [Option<Item>; 2], wings: bool, data: &ItemData) -> Gear {
+pub fn gear(weapons: [Option<Item>; 2], wings: bool, data: &ItemData) -> Gear {
     let two_hand = weapons[0].and_then(|w| data.attr(&w)).is_some_and(|a| a.two_hand);
     Gear { weapons, two_hand, wings }
 }

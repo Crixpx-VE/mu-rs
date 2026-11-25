@@ -580,6 +580,9 @@ pub struct CharacterModel {
     pub bones: Vec<bmd::Mat34>,
     /// Equipment materials that change over time (hero_dress.rs).
     pub glow: Vec<crate::item_draw::PassAnim>,
+    /// `materials[linked_from..]` belong to the weapons and wings (`RenderLinkObject`), which a
+    /// murderer draws with its own light (ZzzCharacter.cpp:9645-9647).
+    pub linked_from: usize,
 }
 
 /// Worn equipment replacing the class pieces (`BodyPart[].Type`, `Weapon[].Type` and `Wing.Type`
@@ -597,12 +600,23 @@ pub struct Dress {
     pub render_level: u8,
     /// The character's `c->Light` is (1, 1, 1) (some items check `b->BodyLight`, ZzzObject.cpp:6961).
     pub white_light: bool,
+    /// Class pieces drawn instead of the class's own where nothing is worn (`BodyPart[].Type =
+    /// MODEL_BODY_* + n`, the Doppelganger Magic Gladiator's head, GMDoppelGanger1.cpp:143): file
+    /// under `Data/Player`.
+    pub class_parts: [Option<String>; 5],
+    /// One model drawn with the player skeleton instead of all the pieces, the character-shaped
+    /// monsters' `RenderPartObject(o, o->SubType, ...)` (skeletons, ZzzCharacter.cpp:8995-9188):
+    /// model path and texture folder, both under `Data`.
+    pub whole_body: Option<(std::path::PathBuf, String)>,
 }
 
 impl Dress {
     /// Something is worn.
     pub fn any(&self) -> bool {
-        self.parts.iter().chain(&self.weapons).any(|p| p.is_some()) || self.wing.is_some()
+        self.parts.iter().chain(&self.weapons).any(|p| p.is_some())
+            || self.wing.is_some()
+            || self.class_parts.iter().any(Option::is_some)
+            || self.whole_body.is_some()
     }
 }
 
@@ -645,9 +659,23 @@ pub fn load_character_dressed(
     let mut parts = vec![];
     let mut children = vec![];
     let mut body_materials = vec![];
+    let whole_body = dress.and_then(|d| d.whole_body.as_ref());
     for (k, part) in BODY_PARTS.into_iter().enumerate() {
-        let name = &format!("{part}Class{:02}.bmd", class.skin_file());
-        let Ok(class_model) = fs::read(&dir, name).and_then(|b| bmd::read(&b)) else {
+        // With a `SubType` model it is the only body piece.
+        if whole_body.is_some() && k > 0 {
+            break;
+        }
+        let (cdir, tdir, name) = match whole_body {
+            Some((path, tex)) => {
+                let file = path.file_name().and_then(|f| f.to_str()).unwrap_or_default().to_string();
+                (args.data.join(path.parent().unwrap_or(Path::new(""))), args.data.join(tex), file)
+            }
+            None => {
+                let own = dress.and_then(|d| d.class_parts[k].clone());
+                (dir.clone(), dir.clone(), own.unwrap_or_else(|| format!("{part}Class{:02}.bmd", class.skin_file())))
+            }
+        };
+        let Ok(class_model) = fs::read(&cdir, &name).and_then(|b| bmd::read(&b)) else {
             warn!("falta la pieza {name}");
             continue;
         };
@@ -658,7 +686,7 @@ pub fn load_character_dressed(
         });
         let (model, pdir, item) = match equipped {
             Some((m, pdir, item)) => (m, pdir, Some(item)),
-            None => (class_model.clone(), dir.clone(), None),
+            None => (class_model.clone(), tdir, None),
         };
         let model_index = models.len();
         for i in 0..model.meshes.len() {
@@ -673,6 +701,10 @@ pub fn load_character_dressed(
             let handle = meshes.add(mesh);
             let texture = crate::hero_dress::part_texture(&model.meshes[i].texture, item.is_some(), &class_model);
             let Some(texture) = texture else { continue };
+            // `hid*` textures are `BITMAP_HIDE` (LoadData.cpp:73-74), which `RenderMesh` skips.
+            if whole_body.is_some() && texture.rsplit(['\\', '/']).next().unwrap_or(&texture).starts_with("hid") {
+                continue;
+            }
             let material = materials.add(part_material(&pdir, &texture, images));
             if let (Some(item), Some(d)) = (item, dress) {
                 // The character's own `o` (not an item object): no `BlendMesh` nor `HiddenMesh`.
@@ -705,6 +737,7 @@ pub fn load_character_dressed(
 
     // Weapons and wings (`RenderLinkObject`): the equipped ones or, without equipment, the Dark
     // Knight short sword in the right hand.
+    let linked_from = body_materials.len();
     let item_dir = args.data.join("Item");
     let knight = class == crate::account::Class::Knight;
     let read = |path: &std::path::Path| -> Option<(Bmd, std::path::PathBuf)> {
@@ -809,6 +842,7 @@ pub fn load_character_dressed(
         materials: body_materials,
         bones,
         glow: glow.animated,
+        linked_from,
     })
 }
 

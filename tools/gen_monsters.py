@@ -832,6 +832,9 @@ def rs_def(n, maps, st):
             t = d.get("Type", -1)
             if isinstance(t, Sym) and t.name.startswith("MODEL_MERCHANT"):
                 items.append(f"Part::Npc({rs_str(repr(t))})")
+            elif isinstance(t, Sym) and t.name == f"MODEL_BODY_{k}":
+                # A class piece (`MODEL_BODY_HELM + n`, the 537 Doppelganger's head, GMDoppelGanger1.cpp:143).
+                items.append(f"Part::Body({t.offset})")
             elif item_of(t):
                 items.append(f"Part::Item({rs_item(d)[5:-1]})")
             else:
@@ -865,6 +868,11 @@ def rs_def(n, maps, st):
         parts.append(f"kind: Some(Kind::{ {'KIND_NPC': 'Npc', 'KIND_MONSTER': 'Monster', 'KIND_TRAP': 'Trap'}[repr(f['kind'])] })")
     if "class" in f:
         parts.append(f"class: Some({rs_str(repr(f['class']))})")
+    if "pk" in f:
+        # `c->PK = PVP_*` (_define.h:461-466).
+        pvp = {"PVP_HERO2": 1, "PVP_HERO1": 2, "PVP_NEUTRAL": 3, "PVP_CAUTION": 4, "PVP_MURDERER1": 5,
+               "PVP_MURDERER2": 6}
+        parts.append(f"pk: {pvp[repr(f['pk'])]}")
     if "life_time" in f:
         parts.append(f"life_time: Some({int(f['life_time'])})")
     if "start_action" in f and isinstance(f["start_action"], int):
