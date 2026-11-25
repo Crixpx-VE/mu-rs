@@ -41,6 +41,7 @@ mod fonts;
 mod fx;
 mod gate;
 mod grass;
+mod ground;
 mod hero_dress;
 mod hud;
 mod invasion;
@@ -292,5 +293,6 @@ fn main() {
         .add_plugins(shop::ShopPlugin)
         .add_plugins(npc_dialogue::NpcDialoguePlugin)
         .add_plugins(vault::VaultPlugin)
+        .add_plugins(ground::GroundPlugin)
         .run();
 }

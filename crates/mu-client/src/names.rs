@@ -178,10 +178,12 @@ impl Selectable {
 pub struct Hovered {
     pub character: Option<Entity>,
     pub npc: Option<Entity>,
+    /// `SelectedItem`: the key of the ground item under the mouse (ground.rs).
+    pub item: Option<u16>,
 }
 
 impl Hovered {
-    /// Is any character under the mouse? (Then nothing else is checked.)
+    /// Is any character under the mouse? (Then nothing else is checked; a ground item is not counted.)
     pub fn any(&self) -> bool {
         self.character.is_some() || self.npc.is_some()
     }
@@ -274,6 +276,7 @@ fn select_objects(
     hero: Query<&Transform, With<Player>>,
     mut hovered: ResMut<Hovered>,
     mut q: Query<(Entity, &mut Selectable, &Transform)>,
+    (mut ground, inventory): (ResMut<crate::ground::GroundItems>, Res<crate::inventory::Inventory>),
 ) {
     // With auto-attack, the picked one is only kept if it is a monster being attacked; players
     // and NPCs are searched again every frame.
@@ -297,17 +300,24 @@ fn select_objects(
     // `HeroTile` (ZzzInterface.cpp:7640-7643).
     let hero_tile = hero.single().ok().zip(terrain).map_or(0, |(h, t)| layer1_at(t, mu_position(h)));
     let mut pick = |kinds: &[Kind]| select_character(kinds, ray, eye, args.world, terrain, hero_tile, &mut q);
+    // `SelectItem` only with nothing held (`GetPickedItem() == NULL`).
+    let mut pick_item = || inventory.picked.is_none().then(|| ground.select(ray)).flatten();
     if keys.any_pressed([KeyCode::AltLeft, KeyCode::AltRight]) {
-        // (Ground items: none yet.)
-        now.npc = pick(&[Kind::Npc]);
-        if now.npc.is_none() {
-            now.character = pick(&[Kind::Monster]).or_else(|| pick(&[Kind::Player]));
+        now.item = pick_item();
+        if now.item.is_none() {
+            now.npc = pick(&[Kind::Npc]);
+            if now.npc.is_none() {
+                now.character = pick(&[Kind::Monster]).or_else(|| pick(&[Kind::Player]));
+            }
         }
     } else {
         // `CKind_1` = monsters, `CKind_2` = players (no elf/wizard support skills yet).
         now.character = pick(&[Kind::Monster]).or_else(|| pick(&[Kind::Player]));
         if now.character.is_none() {
             now.npc = pick(&[Kind::Npc]);
+            if now.npc.is_none() {
+                now.item = pick_item();
+            }
         }
     }
     hovered.set_if_neq(now);
