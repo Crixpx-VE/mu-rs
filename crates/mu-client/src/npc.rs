@@ -233,6 +233,10 @@ pub struct NpcDialog {
     pub store: Vec<(u8, [u8; 12])>,
     /// The inventory was open the last time it was looked at (to see it close).
     inventory_seen: bool,
+    /// The server still has an NPC dialog open for us: a window opened and no closing packet went
+    /// out since (Julia, the Doppelganger and Empire Guardian windows close without one, as in the
+    /// original). OpenMU ignores any other talk until it gets one (`TalkNpcAction.cs:38-50`).
+    server_open: bool,
 }
 
 impl NpcDialog {
@@ -268,7 +272,14 @@ impl NpcDialog {
         let out: Vec<ClientMessage> = self.close().into_iter().collect();
         self.kind = Some(kind);
         self.serial = self.serial.wrapping_add(1);
+        self.server_open = true;
         out
+    }
+
+    /// Safety net (not in the original): before talking to an NPC, the `SendExitInventory` the server
+    /// still waits for, if a window closed without a closing packet.
+    fn pending_exit(&mut self) -> Option<ClientMessage> {
+        std::mem::take(&mut self.server_open).then_some(ClientMessage::CloseNpc)
     }
 
     /// `Show` of a window that hides the open one with `HideAllGroupA`'s `ShowInterface(..., false)`:
@@ -278,6 +289,7 @@ impl NpcDialog {
         self.store.clear();
         self.kind = Some(kind);
         self.serial = self.serial.wrapping_add(1);
+        self.server_open = true;
     }
 
     /// `ReceiveTradeInventory`: `SubCode` 3 and 5 are Chaos Machine results (not here yet); the rest
@@ -299,7 +311,11 @@ impl NpcDialog {
         let kind = self.kind.take()?;
         self.window = None;
         self.store.clear();
-        kind.close_packet()
+        let packet = kind.close_packet();
+        if packet.is_some() {
+            self.server_open = false;
+        }
+        packet
     }
 
     /// `IsImpossibleSendMoveInterface` (NewUISystem.cpp:1568-1581): with the Chaos Machine open the
@@ -337,6 +353,9 @@ fn close_dialog_with(
         return;
     }
     let packet = dialog.close().or(fallback);
+    if packet.is_some() {
+        dialog.server_open = false;
+    }
     info!("NPC: se cierra la ventana {kind:?} ({why}), se manda {packet:?}");
     if let Some(p) = packet
         && net.connected()
@@ -502,6 +521,12 @@ fn talk_action(
             // `NpcDialogOpened` (`TalkNpcAction.cs:38-50`), so a dialog this client thinks is open is
             // closed first, with `SendExitInventory` if the window has no packet of its own.
             close_dialog_with(&mut dialog, &mut net, &mut inv, "se habla con otro NPC", Some(ClientMessage::CloseNpc));
+            if let Some(exit) = dialog.pending_exit() {
+                info!("NPC: el servidor sigue con un diálogo abierto, se manda {exit:?} antes de hablar");
+                if net.connected() {
+                    net.send(exit);
+                }
+            }
             dialog.talked(key, npc.number, repair);
             if net.connected() {
                 net.send(ClientMessage::TalkToNpc { id: key });
@@ -739,6 +764,24 @@ mod tests {
         assert_eq!((d.kind(), d.serial), (Some(WindowKind::QuestProgress), serial + 1));
         assert!(WindowKind::QuestProgress.closes_on_move() && WindowKind::QuestProgress.closes_on_esc());
         assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
+    }
+
+    /// Julia's window closes without a packet (as in the original), but OpenMU keeps the dialog open
+    /// and would ignore the next talk: `SendExitInventory` goes out before it, once.
+    #[test]
+    fn window_closed_without_packet_is_exited_before_the_next_talk() {
+        let mut d = NpcDialog::default();
+        assert!(d.open(0x25).is_empty());
+        assert_eq!(d.close(), None, "Julia sends nothing when closing");
+        assert_eq!(d.pending_exit(), Some(ClientMessage::CloseNpc));
+        assert_eq!(d.pending_exit(), None, "only once");
+        // A window that closes with its own packet leaves nothing pending.
+        d.open(0);
+        assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
+        assert_eq!(d.pending_exit(), None);
+        d.open(2);
+        assert_eq!(d.close(), Some(ClientMessage::CloseVault));
+        assert_eq!(d.pending_exit(), None);
     }
 
     #[test]
