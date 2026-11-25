@@ -295,41 +295,15 @@ pub fn load(data: &Path) -> Result<ItemTable> {
     }
 }
 
-/// Mana of each skill (`SkillAttribute[i].Mana`): `Skill.bmd`, `MAX_SKILLS` (600) records of
-/// `sizeof(SKILL_ATTRIBUTE)` = 80 bytes (_struct.h) with `BuxConvert`; mana is the `WORD` at 36.
+/// Name and mana of each skill (`SkillAttribute[i].Mana`), from the skill table in either layout
+/// (see [`crate::skills`]).
 pub fn read_skill_mana(buf: &[u8]) -> Result<Vec<(String, u16)>> {
-    const LEN: usize = 80;
-    // MuMain's `skill*.bmd` files have another format (another record size).
-    if buf.len() != 600 * LEN + 4 {
-        return Err(Error::Format(format!("skill.bmd: {} bytes, se esperaban {}", buf.len(), 600 * LEN + 4)));
-    }
-    Ok(buf
-        .chunks_exact(LEN)
-        .take(600)
-        .map(|c| {
-            let mut r = [0u8; LEN];
-            r.copy_from_slice(c);
-            bux_convert(&mut r);
-            let end = r[..32].iter().position(|&b| b == 0).unwrap_or(32);
-            (r[..end].iter().map(|&b| b as char).collect(), u16::from_le_bytes([r[36], r[37]]))
-        })
-        .collect::<Vec<(String, u16)>>())
-    .and_then(|list| {
-        // A 32-letter name without the trailing zero means the cipher was not `BuxConvert` (MuMain's
-        // `Local/Skill.bmd` has the same size but another cipher).
-        if list.iter().take(64).any(|(n, _)| n.len() >= 32) {
-            Err(Error::Format("skill.bmd: no es el formato del S6".into()))
-        } else {
-            Ok(list)
-        }
-    })
+    Ok(crate::skills::read_skills(buf)?.0.into_iter().map(|s| (s.name, s.mana)).collect())
 }
 
-/// `Local/Eng/skill_eng.bmd` (the original's) or `Local/Skill.bmd` (MuMain's).
+/// `Local/Eng/skill_eng.bmd` (Main 5.2's or MuMain's layout).
 pub fn load_skill_mana(data: &Path) -> Result<Vec<(String, u16)>> {
-    let local = data.join("Local");
-    let eng = fs::read(&local.join("Eng"), "skill_eng.bmd").and_then(|b| read_skill_mana(&b));
-    eng.or_else(|_| fs::read(&local, "Skill.bmd").and_then(|b| read_skill_mana(&b)))
+    Ok(crate::skills::load_skills(data)?.0.into_iter().map(|s| (s.name, s.mana)).collect())
 }
 
 // --- One item --------------------------------------------------------------------------------------
@@ -960,8 +934,10 @@ mod tests {
     #[test]
     fn mana_de_las_habilidades() {
         let Ok(skills) = load_skill_mana(&main52_data()) else { return };
-        // MuMain's are in another format: not read.
-        assert!(load_skill_mana(&mumain_data()).is_err());
+        // MuMain's layout is read too and agrees.
+        if let Ok(m) = load_skill_mana(&mumain_data()) {
+            assert_eq!(m[19], skills[19]);
+        }
         assert_eq!(skills.len(), 600);
         // `AT_SKILL_SWORD1` = 19 (SkillManager.h:29).
         assert_eq!(skills[19].0, "Falling Slash");
