@@ -63,13 +63,40 @@ impl Plugin for ChatPlugin {
             )
             .add_systems(OnEnter(GameScene::Game), spawn_root)
             .add_systems(OnExit(GameScene::Game), (crate::scene::despawn::<ChatRoot>, leave_game))
-            .add_systems(Update, (tick, assign_chat, draw).chain().run_if(in_state(GameScene::Game)));
+            .add_systems(Update, (tick, object_messages, assign_chat, draw).chain().run_if(in_state(GameScene::Game)));
     }
 }
 
 /// What someone said that is not yet in their overhead box: (name, text, `Flag`).
 #[derive(Resource, Default)]
 pub struct PendingSay(Vec<(String, String, u8)>);
+
+/// `ReceiveChatKey` (WSclient.cpp:1553-1575): `CreateChat(ID, ChatText, &CharactersClient[Index])`,
+/// the text over the head of the character with that scope id (NPCs and monsters too, e.g. a quest
+/// NPC turning the hero away). (The guild master case at 1559-1572 needs the guild window.)
+fn object_messages(
+    mut from: MessageReader<crate::net::FromServer>,
+    mut boxes: ResMut<crate::names::NameBoxes>,
+    monsters: Query<(Entity, &crate::monsters::Monster)>,
+    players: Query<(Entity, &crate::remote::RemotePlayer)>,
+) {
+    for m in from.read() {
+        let ServerMessage::ObjectMessage { id, message } = &m.0 else { continue };
+        // `FindCharacterIndex(((KeyH) << 8) + KeyL)`; the viewport keys have no flag bit.
+        let key = id & 0x7FFF;
+        let owner = monsters
+            .iter()
+            .find(|(_, m)| m.key == key)
+            .map(|(e, _)| e)
+            .or_else(|| players.iter().find(|(_, p)| p.id == key).map(|(e, _)| e));
+        match owner {
+            Some(e) => {
+                boxes.say(e, message, 0);
+            }
+            None => info!("chat: mensaje para {key}, que no está a la vista: {message}"),
+        }
+    }
+}
 
 /// `AssignChat` (ZzzInterface.cpp:1204-1237): the box of the player with that name (the hero too)
 /// in names.rs. With `Flag` 1 (`#`), if found, `AddChat` also writes it to the chat.

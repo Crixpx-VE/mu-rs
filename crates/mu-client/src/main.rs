@@ -60,6 +60,7 @@ mod move_window;
 mod names;
 mod notices;
 mod npc;
+mod npc_dialogue;
 mod objects;
 mod operate;
 mod options;
@@ -288,5 +289,6 @@ fn main() {
         .add_plugins(monsters::MonstersPlugin)
         .add_plugins(npc::NpcPlugin)
         .add_plugins(shop::ShopPlugin)
+        .add_plugins(npc_dialogue::NpcDialoguePlugin)
         .run();
 }

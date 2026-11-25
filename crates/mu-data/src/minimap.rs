@@ -118,7 +118,7 @@ pub fn has_minimap(data: &Path, world: u16) -> bool {
 }
 
 /// A Windows-1252 byte (names use the client's `char`).
-fn cp1252(b: u8) -> char {
+pub(crate) fn cp1252(b: u8) -> char {
     const HIGH: [char; 32] = [
         '€', '\u{81}', '‚', 'ƒ', '„', '…', '†', '‡', 'ˆ', '‰', 'Š', '‹', 'Œ', '\u{8D}', 'Ž', '\u{8F}', '\u{90}', '‘',
         '’', '“', '”', '•', '–', '—', '˜', '™', 'š', '›', 'œ', '\u{9D}', 'ž', 'Ÿ',

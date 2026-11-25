@@ -97,17 +97,25 @@ pub enum WindowKind {
     /// 0x25: `INTERFACE_UNITEDMARKETPLACE_NPC_JULIA`.
     Julia,
     /// `INTERFACE_NPC_DIALOGUE`, opened by `ReceiveNPCDlgUIStart` (C3 F9 01, WSclient.cpp:9881-9890)
-    /// instead of `ReceiveTalk`: the Gens NPCs and others with talk lines. No window yet.
+    /// instead of `ReceiveTalk`: the Gens NPCs and others with talk lines (npc_dialogue.rs).
     NpcDialogue,
+    /// `INTERFACE_QUEST_PROGRESS`, opened by `ReceiveQuestQSSelSentence` (C1 F6 0B, WSclient.cpp:
+    /// 9750-9755) over the NPC dialogue, which it hides without its closing packet (`HideAllGroupA`
+    /// uses `ShowInterface(..., false)`, NewUISystem.cpp:1345-1403); npc_dialogue.rs.
+    QuestProgress,
     /// `INTERFACE_NPCQUEST`, opened by `ReceiveQuestState` (C1 A1, WSclient.cpp:9539-9546): Sevina,
     /// Marlon, Devin... No window yet.
     NpcQuest,
     /// `INTERFACE_NPCGUILDMASTER`, opened by `ReceiveCreateGuildInterface` (C1 54,
     /// WSclient.cpp:6700-6703). No window yet.
     GuildMaster,
-    /// The rest with their own `case`: message boxes (7, 9 `INDEX_NPC_LAHAP`, 0x11, 0x12, 0x17-0x20,
-    /// 0x26), the old server division window (5), `INTERFACE_SENATUS` (0x0C) and
-    /// `SendRequestBCStatus` (0x0D).
+    /// The rest with their own `case`: message boxes (7 `CTrainerMenuMsgBoxLayout`, 9
+    /// `INDEX_NPC_LAHAP` `CGemIntegrationMsgBoxLayout`, 0x11 `CElpisMsgBoxLayout`, 0x12
+    /// `COsbourneMsgBoxLayout`, 0x17/0x18 seed master/researcher menus, 0x19
+    /// `CResetCharacterPointMsgBoxLayout`, 0x20 `CDelgardoMainMenuMsgBoxLayout`, 0x26
+    /// `CLuckyTradeMenuMsgBoxLayout`, WSclient.cpp:5863-5977), the old server division window (5),
+    /// `INTERFACE_SENATUS` (0x0C) and `SendRequestBCStatus` (0x0D). TODO: they need the message box
+    /// framework (`CNewUIMessageBoxMng`), which does not exist yet.
     Other,
 }
 
@@ -151,6 +159,8 @@ impl WindowKind {
             // `CNewUINPCDialogue::ProcessClosing` (NewUINPCDialogue.cpp:379-386) and
             // `CNewUINPCQuest::ProcessClosing` (NewUINPCQuest.cpp:463-467): `SendExitInventory`.
             Self::NpcDialogue | Self::NpcQuest => Some(ClientMessage::CloseNpc),
+            // `CNewUIQuestProgress::ProcessClosing` (NewUIQuestProgress.cpp:347-353).
+            Self::QuestProgress => Some(ClientMessage::CloseNpc),
             // `CNewUIGuildMakeWindow::ClosingProcess` (NewUIGuildMakeWindow.cpp:247-253):
             // `SendRequestGuildMaster(FALSE)`, which OpenMU also takes as closing the dialog
             // (`GuildMasterAnswerAction`).
@@ -185,6 +195,7 @@ impl WindowKind {
                 | Self::EmpireGuardian
                 | Self::Julia
                 | Self::NpcDialogue
+                | Self::QuestProgress
                 | Self::NpcQuest
                 | Self::GuildMaster
         )
@@ -257,6 +268,15 @@ impl NpcDialog {
         self.kind = Some(kind);
         self.serial = self.serial.wrapping_add(1);
         out
+    }
+
+    /// `Show` of a window that hides the open one with `HideAllGroupA`'s `ShowInterface(..., false)`:
+    /// no `ProcessClosing`, so no closing packet (the server's dialog goes on).
+    pub(crate) fn replace_kind(&mut self, kind: WindowKind) {
+        self.window = None;
+        self.store.clear();
+        self.kind = Some(kind);
+        self.serial = self.serial.wrapping_add(1);
     }
 
     /// `ReceiveTradeInventory`: `SubCode` 3 and 5 are Chaos Machine results (not here yet); the rest
@@ -543,12 +563,11 @@ fn server_messages(
             }
             ServerMessage::OpenNpcDialog { npc, contribution } => {
                 // `ReceiveNPCDlgUIStart` (WSclient.cpp:9881-9890): `Show(INTERFACE_NPC_DIALOGUE)` unless
-                // it is already open. The window itself is not implemented yet: it only counts as an
-                // open dialog, so Esc, walking or another NPC close it with `SendExitInventory`.
+                // it is already open (the window is npc_dialogue.rs').
                 if dialog.kind() != Some(WindowKind::NpcDialogue) {
                     send(dialog.open_kind(WindowKind::NpcDialogue), &mut net);
                 }
-                info!("NPC {npc}: se abre su diálogo (contribución gens {contribution}; la ventana aún no existe)");
+                info!("NPC {npc}: se abre su diálogo (contribución gens {contribution})");
             }
             ServerMessage::QuestStateDialog { quest, state } => {
                 // `ReceiveQuestState` (WSclient.cpp:9539-9546): `HideAll`, then `Show(INTERFACE_NPCQUEST)`.
@@ -613,8 +632,11 @@ fn esc_key(
     {
         return;
     }
+    // The NPC dialogue and quest progress windows play it in their `ProcessClosing` (npc_dialogue.rs).
+    if !matches!(dialog.kind(), Some(WindowKind::NpcDialogue | WindowKind::QuestProgress)) {
+        sound.play("SOUND_CLICK01");
+    }
     close_dialog(&mut dialog, &mut net, &mut inv, "Esc");
-    sound.play("SOUND_CLICK01");
     keys.clear_just_pressed(KeyCode::Escape);
 }
 
@@ -696,6 +718,19 @@ mod tests {
         d.open_kind(WindowKind::GuildMaster);
         assert_eq!(d.close(), Some(ClientMessage::GuildMasterAnswer { show_creation: false }));
         assert!(!d.is_open());
+    }
+
+    /// The quest progress window hides the NPC dialogue without its `SendExitInventory` and sends it
+    /// itself when it closes.
+    #[test]
+    fn quest_progress_replaces_the_dialogue() {
+        let mut d = NpcDialog::default();
+        d.open_kind(WindowKind::NpcDialogue);
+        let serial = d.serial;
+        d.replace_kind(WindowKind::QuestProgress);
+        assert_eq!((d.kind(), d.serial), (Some(WindowKind::QuestProgress), serial + 1));
+        assert!(WindowKind::QuestProgress.closes_on_move() && WindowKind::QuestProgress.closes_on_esc());
+        assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
     }
 
     #[test]

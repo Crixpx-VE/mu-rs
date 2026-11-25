@@ -342,7 +342,16 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         | ClientMessage::CloseVault
         | ClientMessage::CloseCrafting
         | ClientMessage::GuildMasterAnswer { .. }
-        | ClientMessage::RepairItem { .. } => {}
+        | ClientMessage::RepairItem { .. }
+        // No Gens or quest system on this server yet (OpenMU serves them).
+        | ClientMessage::GensJoin { .. }
+        | ClientMessage::GensLeave
+        | ClientMessage::GensReward { .. }
+        | ClientMessage::AvailableQuestsRequest
+        | ClientMessage::NpcBuffRequest
+        | ClientMessage::QuestSelect { .. }
+        | ClientMessage::QuestProceed { .. }
+        | ClientMessage::LegacyQuestState { .. } => {}
     }
     true
 }

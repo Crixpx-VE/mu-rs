@@ -429,6 +429,34 @@ pub enum ClientMessage {
     /// to the guild master dialog. `false` closes it (`CNewUIGuildMakeWindow::ClosingProcess`,
     /// NewUIGuildMakeWindow.cpp:247-253). OpenMU's `GuildMasterAnswer`.
     GuildMasterAnswer { show_creation: bool },
+    /// `SendRequestGensJoining(influence)` (wsclientinline.h:899-906, C1 05 F8 01, not encrypted):
+    /// join gens `gens` (1 Duprian, 2 Vanert) at its steward. OpenMU's `GensJoinRequest`.
+    GensJoin { gens: u8 },
+    /// `SendRequestGensSecession` (wsclientinline.h:908-914, C1 04 F8 03): leave the gens.
+    /// OpenMU's `GensLeaveRequest`.
+    GensLeave,
+    /// `SendRequestGensReward(influence)` (wsclientinline.h:916-923, C1 05 F8 09): the monthly
+    /// ranking reward of gens `gens`. OpenMU's `GensRewardRequest`.
+    GensReward { gens: u8 },
+    /// `SendRequestQuestByNPCEPList` (wsclientinline.h:934-940, C1 04 F6 30): the quests the open
+    /// NPC dialog offers. OpenMU's `AvailableQuestsRequest` (answered with `AvailableQuests`).
+    AvailableQuestsRequest,
+    /// `SendRequestAPDPUp` (wsclientinline.h:942-948, C1 04 F6 31): the buff of the open NPC dialog
+    /// (the Elf Soldier). OpenMU's `NpcBuffRequest`.
+    NpcBuffRequest,
+    /// `SendQuestSelection(dwQuestIndex, byResult)` (wsclientinline.h:826-834, C1 09 F6 0A): a quest
+    /// of the list was picked. `quest` is the original's `DWORD` (number in the low word, group in
+    /// the high word, OpenMU's `QuestNumber` at 4 and `QuestGroup` at 6) and `selected` the 1-based
+    /// line of the list. OpenMU's `QuestSelectRequest`.
+    QuestSelect { quest: u32, selected: u8 },
+    /// `SendQuestSelAnswer(dwQuestIndex, bySelAnswer)` (wsclientinline.h:836-844, C1 09 F6 0B): the
+    /// answer (1-based) picked in the quest progress window. OpenMU's `QuestProceedRequest`
+    /// (1 accepts the quest, 2 refuses it).
+    QuestProceed { quest: u32, answer: u8 },
+    /// `SendRequestQuestState(index, state)` (wsclientinline.h:798-804, C1 05 A2, sent encrypted):
+    /// set legacy quest `quest` to `state` (1 = start or finish it). OpenMU's
+    /// `LegacyQuestStateSetRequest`.
+    LegacyQuestState { quest: u8, state: u8 },
 }
 
 /// Item storages of [`ClientMessage::ItemMove`] and `ItemMoved` (`ItemStorageKind`, OpenMU
@@ -655,6 +683,36 @@ pub enum ServerMessage {
     /// `ReceiveCreateGuildInterface` (C1 54, WSclient.cpp:6700-6703): the guild master window opens.
     /// OpenMU's `ShowGuildMasterDialog`.
     GuildMasterDialog,
+    /// `ReceiveGensJoining` (C1 F8 02, WSclient.cpp:9830-9835, `PMSG_ANS_REG_GENS_MEMBER`): the
+    /// answer to [`ClientMessage::GensJoin`]; `result` 0 = joined `gens`. OpenMU's `GensJoinResponse`.
+    GensJoinResult { result: u8, gens: u8 },
+    /// `ReceiveGensSecession` (C1 F8 04, WSclient.cpp:9837-9842, `PMSG_ANS_SECEDE_GENS_MEMBER`): the
+    /// answer to [`ClientMessage::GensLeave`]; 0 = left. OpenMU's `GensLeaveResponse`.
+    GensLeaveResult { result: u8 },
+    /// `ReceiveReward` (C1 F8 0A, WSclient.cpp:9893-9899, `PMSG_GENS_REWARD_CODE`): the answer to
+    /// [`ClientMessage::GensReward`]. OpenMU's `GensRewardResponse`.
+    GensRewardResult { result: u8 },
+    /// `ReceivePlayerGensInfluence` (C1 F8 07, WSclient.cpp:9844-9852, `PMSG_MSG_SEND_GENS_INFO`):
+    /// the own gens (`m_byInfluence` at 4: 0 none, 1 Duprian, 2 Vanert), ranking (8), rank (12),
+    /// contribution (16) and the contribution of the next rank (20). OpenMU's `GensInfo`.
+    GensInfo { gens: u8, ranking: u32, rank: u32, contribution: u32, next_contribution: u32 },
+    /// `ReceiveQuestByNPCEPList` (C1 F6 0A, WSclient.cpp:9742-9748, `PMSG_NPCTALK_QUESTLIST`): the
+    /// quests the NPC offers (`m_wNPCIndex` at 4, `m_wQuestCount` at 6, then one `DWORD` each:
+    /// number in the low word, group in the high word). OpenMU's `AvailableQuests`.
+    AvailableQuests { npc: u16, quests: Vec<u32> },
+    /// `ReceiveQuestQSSelSentence` (C1 F6 0B, WSclient.cpp:9750-9755, `PMSG_NPC_QUESTEXP_INFO`): the
+    /// quest step to show (`m_dwQuestIndex` at 4: step number in the low word, group in the high
+    /// word). OpenMU's `QuestStepInfo`.
+    QuestStepInfo { quest: u32 },
+    /// `ReceiveQuestQSRequestReward` (C1 F6 0C, WSclient.cpp:9757-9763, `PMSG_NPC_QUESTEXP_INFO`):
+    /// the requests and rewards of a running quest step (`m_dwQuestIndex` at 4, as in
+    /// [`ServerMessage::QuestStepInfo`]). OpenMU's `QuestProgress` (251 bytes: the counts at 8-10,
+    /// 5 conditions of 26 bytes from 11 and 5 rewards of 22 from 141); only the step is decoded yet.
+    QuestRequestReward { quest: u32 },
+    /// `ReceiveChatKey` (C1 01, WSclient.cpp:1553-1575, `PCHATING_KEY`): `message` over the head of
+    /// the object with scope id `id` (an NPC too: `CreateChat`). OpenMU's `ObjectMessage`, e.g. the
+    /// quest NPC's "I have no quests for you.".
+    ObjectMessage { id: u16, message: String },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -917,6 +975,26 @@ impl ClientMessage {
             Self::SellItem { slot } => encrypted(c1(&[0x33, *slot])),
             Self::RepairItem { slot, self_repair } => encrypted(c1(&[0x34, *slot, *self_repair as u8])),
             Self::GuildMasterAnswer { show_creation } => c1(&[0x54, *show_creation as u8]),
+            // `spe.Send()`: not encrypted.
+            Self::GensJoin { gens } => c1(&[0xF8, 0x01, *gens]),
+            Self::GensLeave => c1(&[0xF8, 0x03]),
+            Self::GensReward { gens } => c1(&[0xF8, 0x09, *gens]),
+            Self::AvailableQuestsRequest => c1(&[0xF6, 0x30]),
+            Self::NpcBuffRequest => c1(&[0xF6, 0x31]),
+            Self::QuestSelect { quest, selected } => {
+                let mut body = vec![0xF6, 0x0A];
+                body.extend_from_slice(&quest.to_le_bytes());
+                body.push(*selected);
+                c1(&body)
+            }
+            Self::QuestProceed { quest, answer } => {
+                let mut body = vec![0xF6, 0x0B];
+                body.extend_from_slice(&quest.to_le_bytes());
+                body.push(*answer);
+                c1(&body)
+            }
+            // `spe.Send(TRUE)`.
+            Self::LegacyQuestState { quest, state } => encrypted(c1(&[0xA2, *quest, *state])),
         }
     }
 
@@ -957,6 +1035,7 @@ impl ClientMessage {
             0x33 => return Some(Self::SellItem { slot: *d.get(3)? }),
             0x34 => return Some(Self::RepairItem { slot: *d.get(3)?, self_repair: *d.get(4).unwrap_or(&0) != 0 }),
             0x54 => return Some(Self::GuildMasterAnswer { show_creation: *d.get(3)? != 0 }),
+            0xA2 => return Some(Self::LegacyQuestState { quest: *d.get(3)?, state: *d.get(4)? }),
             _ => {}
         }
         match (p.code(), p.sub_code()?) {
@@ -989,6 +1068,13 @@ impl ClientMessage {
                 magic_speed: get_u16_le(d, 10)?,
             }),
             (0x8E, 0x02) => Some(Self::WarpCommandRequest { key: get_u32_le(d, 4)?, index: get_u16_le(d, 8)? }),
+            (0xF8, 0x01) => Some(Self::GensJoin { gens: *d.get(4)? }),
+            (0xF8, 0x03) => Some(Self::GensLeave),
+            (0xF8, 0x09) => Some(Self::GensReward { gens: *d.get(4)? }),
+            (0xF6, 0x30) => Some(Self::AvailableQuestsRequest),
+            (0xF6, 0x31) => Some(Self::NpcBuffRequest),
+            (0xF6, 0x0A) => Some(Self::QuestSelect { quest: get_u32_le(d, 4)?, selected: *d.get(8)? }),
+            (0xF6, 0x0B) => Some(Self::QuestProceed { quest: get_u32_le(d, 4)?, answer: *d.get(8)? }),
             _ => None,
         }
     }
@@ -1304,6 +1390,46 @@ impl ServerMessage {
             }
             Self::QuestStateDialog { quest, state } => c1(&[0xA1, *quest, *state]),
             Self::GuildMasterDialog => c1(&[0x54]),
+            Self::GensJoinResult { result, gens } => c1(&[0xF8, 0x02, *result, *gens]),
+            Self::GensLeaveResult { result } => c1(&[0xF8, 0x04, *result]),
+            Self::GensRewardResult { result } => c1(&[0xF8, 0x0A, *result]),
+            Self::GensInfo { gens, ranking, rank, contribution, next_contribution } => {
+                let mut p = fixed_c1(24, 0xF8, 0x07);
+                p[4] = *gens;
+                put_u32_le(&mut p, 8, *ranking);
+                put_u32_le(&mut p, 12, *rank);
+                put_u32_le(&mut p, 16, *contribution);
+                put_u32_le(&mut p, 20, *next_contribution);
+                p
+            }
+            Self::AvailableQuests { npc, quests } => {
+                let mut body = vec![0xF6, 0x0A];
+                body.extend_from_slice(&npc.to_le_bytes());
+                body.extend_from_slice(&(quests.len() as u16).to_le_bytes());
+                for q in quests {
+                    body.extend_from_slice(&q.to_le_bytes());
+                }
+                c1(&body)
+            }
+            Self::QuestStepInfo { quest } => {
+                let mut body = vec![0xF6, 0x0B];
+                body.extend_from_slice(&quest.to_le_bytes());
+                // OpenMU's packet is 11 long; the rest of `PMSG_NPC_QUESTEXP_INFO` is unused here.
+                body.extend_from_slice(&[0, 0, 0]);
+                c1(&body)
+            }
+            Self::QuestRequestReward { quest } => {
+                let mut p = fixed_c1(251, 0xF6, 0x0C);
+                put_u32_le(&mut p, 4, *quest);
+                p
+            }
+            Self::ObjectMessage { id, message } => {
+                let mut body = vec![0x01];
+                body.extend_from_slice(&id.to_be_bytes());
+                body.extend_from_slice(truncate_utf8(message, MAX_CHAT_SIZE).as_bytes());
+                body.push(0);
+                c1(&body)
+            }
         }
     }
 
@@ -1435,6 +1561,11 @@ impl ServerMessage {
                 return Some(Self::QuestStateDialog { quest: *d.get(3)?, state: *d.get(4)? });
             }
             0x54 => return Some(Self::GuildMasterDialog),
+            // `PCHATING_KEY`: `KeyH`, `KeyL`, `ChatText`.
+            0x01 => {
+                let d = short_header(&p)?;
+                return Some(Self::ObjectMessage { id: get_u16_be(d, 3)?, message: unfixed(d.get(5..).unwrap_or(&[])) });
+            }
             _ => {}
         }
         let d = short_header(&p)?;
@@ -1485,6 +1616,24 @@ impl ServerMessage {
             // `Item[0..4]` in big endian.
             (0x22, 0xFE) => Some(Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }),
             (0xF9, 0x01) => Some(Self::OpenNpcDialog { npc: get_u16_le(d, 4)?, contribution: get_u32_le(d, 8)? }),
+            (0xF8, 0x02) => Some(Self::GensJoinResult { result: *d.get(4)?, gens: *d.get(5).unwrap_or(&0) }),
+            (0xF8, 0x04) => Some(Self::GensLeaveResult { result: *d.get(4)? }),
+            (0xF8, 0x0A) => Some(Self::GensRewardResult { result: *d.get(4)? }),
+            (0xF8, 0x07) => Some(Self::GensInfo {
+                gens: *d.get(4)?,
+                ranking: get_u32_le(d, 8)?,
+                rank: get_u32_le(d, 12)?,
+                contribution: get_u32_le(d, 16)?,
+                next_contribution: get_u32_le(d, 20)?,
+            }),
+            (0xF6, 0x0A) => {
+                let count = get_u16_le(d, 6)? as usize;
+                // The original reads `m_wQuestCount` DWORDs; a short packet is cut to what it holds.
+                let quests = (0..count).map_while(|i| get_u32_le(d, 8 + 4 * i)).collect();
+                Some(Self::AvailableQuests { npc: get_u16_le(d, 4)?, quests })
+            }
+            (0xF6, 0x0B) => Some(Self::QuestStepInfo { quest: get_u32_le(d, 4)? }),
+            (0xF6, 0x0C) => Some(Self::QuestRequestReward { quest: get_u32_le(d, 4)? }),
             _ => None,
         }
     }
@@ -2122,5 +2271,74 @@ mod tests {
         assert_eq!(ida_y_vuelta_servidor(ServerMessage::GuildMasterDialog), [0xC1, 3, 0x54]);
         // GuildMasterAnswer (ClientToServerPackets.xml): C1 04 54 <show creation dialog>.
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::GuildMasterAnswer { show_creation: false }), [0xC1, 4, 0x54, 0]);
+    }
+
+    /// The NPC dialogue window's requests (wsclientinline.h:826-948) and OpenMU's answers, captured
+    /// from the live OpenMU talking to the Gens Duprian steward with a level 1 character.
+    #[test]
+    fn npc_dialogue_packets() {
+        // Captured: C3 0C F9 01 1F 02 00 00 00 00 00 00 (543, no contribution).
+        let open = [0xC3, 12, 0xF9, 0x01, 0x1F, 0x02, 0, 0, 0, 0, 0, 0];
+        assert_eq!(ServerMessage::decode(&open), Some(ServerMessage::OpenNpcDialog { npc: 543, contribution: 0 }));
+
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::AvailableQuestsRequest), [0xC1, 4, 0xF6, 0x30]);
+        // Captured answer: no quests for the steward.
+        let none = [0xC1, 8, 0xF6, 0x0A, 0x1F, 0x02, 0, 0];
+        assert_eq!(ServerMessage::decode(&none), Some(ServerMessage::AvailableQuests { npc: 543, quests: vec![] }));
+        assert_eq!(ServerMessage::AvailableQuests { npc: 543, quests: vec![] }.encode(), none);
+        // Two quests (number in the low word, group in the high one), as OpenMU's
+        // `QuestIdentification` (number at 0, group at 2).
+        let two = ServerMessage::AvailableQuests { npc: 257, quests: vec![0x0012_0000, 0x0012_0003] };
+        assert_eq!(
+            ida_y_vuelta_servidor(two),
+            [0xC1, 16, 0xF6, 0x0A, 0x01, 0x01, 2, 0, 0, 0, 0x12, 0, 3, 0, 0x12, 0]
+        );
+        // A count larger than the packet: only what it holds.
+        let short = [0xC1, 12, 0xF6, 0x0A, 0x01, 0x01, 5, 0, 3, 0, 0x12, 0];
+        assert_eq!(ServerMessage::decode(&short), Some(ServerMessage::AvailableQuests { npc: 257, quests: vec![0x0012_0003] }));
+        // `SendQuestSelection`: DWORD then the line (OpenMU's QuestSelectRequest, 9 bytes).
+        assert_eq!(
+            ida_y_vuelta_cliente(ClientMessage::QuestSelect { quest: 0x0012_0003, selected: 2 }),
+            [0xC1, 9, 0xF6, 0x0A, 3, 0, 0x12, 0, 2]
+        );
+        // QuestStepInfo (OpenMU: 11 bytes, step at 4 and group at 6).
+        assert_eq!(
+            ida_y_vuelta_servidor(ServerMessage::QuestStepInfo { quest: 0x0012_0001 }),
+            [0xC1, 11, 0xF6, 0x0B, 1, 0, 0x12, 0, 0, 0, 0]
+        );
+        // QuestProgress (OpenMU: C1 FB F6 0C, number at 4, group at 6).
+        let reward = ida_y_vuelta_servidor(ServerMessage::QuestRequestReward { quest: 0x0012_0001 });
+        assert_eq!((reward.len(), &reward[..8]), (251, &[0xC1, 251, 0xF6, 0x0C, 1, 0, 0x12, 0][..]));
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::NpcBuffRequest), [0xC1, 4, 0xF6, 0x31]);
+        // `SendQuestSelAnswer`: accept (1) the Spider Hunt (OpenMU's QuestProceedRequest).
+        assert_eq!(
+            ida_y_vuelta_cliente(ClientMessage::QuestProceed { quest: 0x0012_0000, answer: 1 }),
+            [0xC1, 9, 0xF6, 0x0B, 0, 0, 0x12, 0, 1]
+        );
+
+        // Gens: the captured requests and answers.
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::GensJoin { gens: 1 }), [0xC1, 5, 0xF8, 0x01, 1]);
+        // 3 = `GJEC_REG_GENS_LV_ERR` (level too low).
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::GensJoinResult { result: 3, gens: 1 }), [0xC1, 6, 0xF8, 0x02, 3, 1]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::GensReward { gens: 1 }), [0xC1, 5, 0xF8, 0x09, 1]);
+        // 6 = `GENS_REWARD_NOT_REG`.
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::GensRewardResult { result: 6 }), [0xC1, 5, 0xF8, 0x0A, 6]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::GensLeave), [0xC1, 4, 0xF8, 0x03]);
+        // 1 = `GSEC_IS_NOT_REG_GENS`.
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::GensLeaveResult { result: 1 }), [0xC1, 5, 0xF8, 0x04, 1]);
+        // GensInfo (OpenMU ServerToClientPackets.xml: 24 bytes).
+        let info = ServerMessage::GensInfo { gens: 2, ranking: 7, rank: 14, contribution: 500, next_contribution: 1500 };
+        let wire = ida_y_vuelta_servidor(info);
+        assert_eq!((wire.len(), &wire[..5], &wire[16..20]), (24, &[0xC1, 24, 0xF8, 0x07, 2][..], &500u32.to_le_bytes()[..]));
+        // Legacy quest: `SendRequestQuestState` goes encrypted (C3).
+        let set = ida_y_vuelta_cliente(ClientMessage::LegacyQuestState { quest: 0, state: 1 });
+        assert_eq!(set, [0xC3, 5, 0xA2, 0, 1]);
+    }
+
+    /// OpenMU's `ObjectMessage` (C1 len 01 <id BE> <text with its 00>, ServerToClientPackets.xml).
+    #[test]
+    fn object_message() {
+        let wire = ida_y_vuelta_servidor(ServerMessage::ObjectMessage { id: 0x020A, message: "Hi".into() });
+        assert_eq!(wire, [0xC1, 8, 0x01, 0x02, 0x0A, b'H', b'i', 0]);
     }
 }

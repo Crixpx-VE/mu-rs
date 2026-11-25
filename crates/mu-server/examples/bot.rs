@@ -11,6 +11,14 @@
 //! as the client does when stepping on it and asks to cross it with `EnterGateRequest`, like the destination) →
 //! (waits, says, whispers and plays the requested animation, e.g. 128 = sit) → waits
 //! showing what arrives (other players, chat, whispers, notices, animations) → exits.
+//!
+//! NPC dialogs: `--npc <number>` talks to the first NPC with that monster number that comes into
+//! view; then each `--npc-paso <step>` is sent in order, one second apart:
+//! `lista` (AvailableQuestsRequest), `buff` (NpcBuffRequest), `unirse:<gens>` (GensJoin), `dejar`
+//! (GensLeave), `premio:<gens>` (GensReward), `mision:<quest hex>:<line>` (QuestSelect),
+//! `estado:<quest>:<state>` (LegacyQuestStateSet), `cerrar` (CloseNpc).
+//! `--hex` also prints the raw bytes of every packet that arrives; `--andar x,y` first walks in a
+//! straight line to that tile (8 steps per `Walk`).
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -26,6 +34,10 @@ struct Conn {
     buf: PacketBuffer,
     out: ClientCrypto,
     inp: ClientCrypto,
+    /// `--hex`: print the raw bytes of what arrives.
+    hex: bool,
+    /// Every monster or NPC that came into view: (scope id, number, x, y).
+    seen: Vec<(u16, u16, u8, u8)>,
 }
 
 impl Conn {
@@ -34,7 +46,15 @@ impl Conn {
         loop {
             if let Some(p) = self.buf.next_packet().map_err(|e| std::io::Error::other(format!("{:#04X}", e.0)))? {
                 let plain = self.inp.decrypt(&p).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
-                return Ok(ServerMessage::decode(&plain));
+                if self.hex {
+                    let bytes: Vec<String> = plain.iter().map(|b| format!("{b:02X}")).collect();
+                    println!("  < {}", bytes.join(" "));
+                }
+                let m = ServerMessage::decode(&plain);
+                if let Some(ServerMessage::AddMonstersToScope(list)) = &m {
+                    self.seen.extend(list.iter().map(|s| (s.id & 0x7FFF, s.number, s.x, s.y)));
+                }
+                return Ok(m);
             }
             let n = self.sock.read(&mut chunk)?;
             if n == 0 {
@@ -98,9 +118,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pause = 0.0f32;
     let mut gates: Vec<(u8, u8, u16)> = Vec::new();
     let mut animation: Option<u8> = None;
+    let mut npc: Option<u16> = None;
+    let mut npc_steps: Vec<String> = Vec::new();
+    let mut hex = false;
+    let mut walk_to: Option<(u8, u8)> = None;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
+            "--andar" if i + 1 < a.len() => {
+                let v: Vec<u8> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                if let [x, y] = v[..] {
+                    walk_to = Some((x, y));
+                }
+                a.remove(i);
+            }
+            "--npc" if i + 1 < a.len() => {
+                npc = a.remove(i + 1).parse().ok();
+                a.remove(i);
+            }
+            "--npc-paso" if i + 1 < a.len() => {
+                npc_steps.push(a.remove(i + 1));
+                a.remove(i);
+            }
+            "--hex" => {
+                hex = true;
+                a.remove(i);
+            }
             "--puerta" if i + 1 < a.len() => {
                 let v: Vec<u16> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
                 if let [x, y, g] = v[..] {
@@ -147,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sock = TcpStream::connect((ip.as_str(), port))?;
     sock.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut c = Conn { sock, buf: PacketBuffer::default(), out: ClientCrypto::default(), inp: ClientCrypto::default() };
+    let mut c = Conn { sock, buf: PacketBuffer::default(), out: ClientCrypto::default(), inp: ClientCrypto::default(), hex, seen: Vec::new() };
     let id = c.wait(|m| match m {
         ServerMessage::GameServerEntered { player_id, .. } => Some(*player_id),
         _ => None,
@@ -187,12 +230,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
     println!("[{user}] dentro: mapa {} ({}, {}) vida {}/{} maná {}/{}", info.map, info.x, info.y, info.health, info.max_health, info.mana, info.max_mana);
     // Arrives right after the information (`ReceiveMoveMapChecksum`).
-    let mut key = c.wait(|m| match m {
+    // (Not always sent: without it only the `M` destination fails.)
+    let mut key = match c.wait(|m| match m {
         ServerMessage::MapMoveChecksumKey { key } => Some(*key),
         _ => None,
-    })?;
+    }) {
+        Ok(key) => key,
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => 0,
+        Err(e) => return Err(e.into()),
+    };
     println!("[{user}] clave de mover {key:#010X}, zen {}", info.money);
-    c.send(ClientMessage::Walk { source_x: info.x, source_y: info.y, rotation: 3, directions: vec![3, 3, 3] })?;
+    if walk_to.is_none() {
+        c.send(ClientMessage::Walk { source_x: info.x, source_y: info.y, rotation: 3, directions: vec![3, 3, 3] })?;
+    }
     if let Some(index) = warp {
         // `GetMoveCommandKey` + `SendRequestMoveMap`.
         key = map_move_key(key);
@@ -234,6 +284,90 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 c.send(ClientMessage::ClientReadyAfterMapChange)?;
             }
             (false, map, x, y) => println!("[{user}] no cruza la puerta {gate}: se queda en el mapa {map} ({x}, {y})"),
+        }
+    }
+    if let Some((tx, ty)) = walk_to {
+        // Straight toward the tile, 8 steps per `Walk` (a bit over a second each).
+        let (mut x, mut y) = (info.x, info.y);
+        c.sock.set_read_timeout(Some(Duration::from_millis(100)))?;
+        while (x, y) != (tx, ty) {
+            let mut dirs = Vec::new();
+            let (sx, sy) = (x, y);
+            while dirs.len() < 8 && (x, y) != (tx, ty) {
+                let next = ((x as i16 + (tx as i16 - x as i16).signum()) as u8, (y as i16 + (ty as i16 - y as i16).signum()) as u8);
+                dirs.extend(mu_protocol::game::direction_between((x, y), next));
+                (x, y) = next;
+            }
+            let rotation = *dirs.last().unwrap_or(&0);
+            c.send(ClientMessage::Walk { source_x: sx, source_y: sy, rotation, directions: dirs })?;
+            let until = Instant::now() + Duration::from_millis(1300);
+            while Instant::now() < until {
+                match c.recv() {
+                    Ok(_) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        }
+        println!("[{user}] camina hasta ({tx}, {ty})");
+        c.sock.set_read_timeout(Some(Duration::from_secs(5)))?;
+    }
+    if let Some(number) = npc {
+        // The NPC's scope id and tile, from the `AddMonstersToScope` that shows it.
+        let found = |c: &Conn| c.seen.iter().find(|s| s.1 == number).map(|s| (s.0, s.2, s.3));
+        let (id, x, y) = match found(&c) {
+            Some(f) => f,
+            None => c.wait(|m| match m {
+                ServerMessage::AddMonstersToScope(list) => {
+                    list.iter().find(|s| s.number == number).map(|s| (s.id & 0x7FFF, s.x, s.y))
+                }
+                _ => None,
+            })?,
+        };
+        println!("[{user}] NPC {number}: id {id} en ({x}, {y})");
+        // OpenMU does not check the distance to the NPC (`TalkNpcHandlerPlugInBase`).
+        c.send(ClientMessage::TalkToNpc { id })?;
+        println!("[{user}] habla con el NPC {id}");
+        c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+        let mut steps = npc_steps.iter();
+        let mut next = Instant::now() + Duration::from_secs(1);
+        let until = Instant::now() + Duration::from_secs(1 + npc_steps.len() as u64 + 2);
+        while Instant::now() < until {
+            if Instant::now() >= next {
+                next += Duration::from_secs(1);
+                if let Some(step) = steps.next() {
+                    let parts: Vec<&str> = step.split(':').collect();
+                    let n = |i: usize| parts.get(i).and_then(|s| s.parse::<u8>().ok()).unwrap_or(0);
+                    let msg = match parts[0] {
+                        "lista" => Some(ClientMessage::AvailableQuestsRequest),
+                        "buff" => Some(ClientMessage::NpcBuffRequest),
+                        "unirse" => Some(ClientMessage::GensJoin { gens: n(1) }),
+                        "dejar" => Some(ClientMessage::GensLeave),
+                        "premio" => Some(ClientMessage::GensReward { gens: n(1) }),
+                        "mision" => parts
+                            .get(1)
+                            .and_then(|q| u32::from_str_radix(q.trim_start_matches("0x"), 16).ok())
+                            .map(|quest| ClientMessage::QuestSelect { quest, selected: n(2) }),
+                        "estado" => Some(ClientMessage::LegacyQuestState { quest: n(1), state: n(2) }),
+                        "cerrar" => Some(ClientMessage::CloseNpc),
+                        _ => None,
+                    };
+                    match msg {
+                        Some(m) => {
+                            let bytes: Vec<String> = m.encode().iter().map(|b| format!("{b:02X}")).collect();
+                            println!("[{user}] manda {m:?} ({})", bytes.join(" "));
+                            c.send(m)?;
+                        }
+                        None => println!("[{user}] paso desconocido: {step}"),
+                    }
+                }
+            }
+            match c.recv() {
+                Ok(Some(m)) => show(user, &m),
+                Ok(None) => println!("  (paquete sin traducir)"),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => return Err(e.into()),
+            }
         }
     }
     c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
