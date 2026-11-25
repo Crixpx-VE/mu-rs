@@ -4,6 +4,7 @@
 //!                                           [M destination] [--decir <text>] [--susurrar <name> <text>]
 //!                                           [--esperar <seconds before speaking>]
 //!                                           [--puerta x,y,gate ...] [--accion <AT_*>] [--baul] [--suelo]
+//!                                           [--mover from,to]
 //!
 //! Connect Server → Game Server → login → list → (creates the character if missing) → enters →
 //! walks 3 steps → (with a destination: requests it like the `M` window, waits for `MapChanged` and replies
@@ -302,6 +303,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut walk_to: Option<(u8, u8)> = None;
     let mut vault = false;
     let mut ground = false;
+    let mut move_item: Option<(u8, u8)> = None;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
@@ -330,6 +332,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--suelo" => {
                 ground = true;
+                a.remove(i);
+            }
+            "--mover" if i + 1 < a.len() => {
+                let v: Vec<u8> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                if let [from, to] = v[..] {
+                    move_item = Some((from, to));
+                }
                 a.remove(i);
             }
             "--puerta" if i + 1 < a.len() => {
@@ -424,6 +433,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if ground {
         println!("[{user}] zen {}", info.money);
         return Ok(ground_script(&mut c, user, (info.x, info.y))?);
+    }
+    if let Some((from, to)) = move_item {
+        // `--mover from,to`: an inventory item to another inventory slot (e.g. back to the equipment).
+        c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+        let list = c.collect(user, 2.0)?;
+        let item = list.iter().find_map(|m| match m {
+            ServerMessage::InventoryList(l) => l.iter().find(|(s, _)| *s == from).map(|(_, b)| *b),
+            _ => None,
+        });
+        if let Some(item) = item {
+            use mu_protocol::game::storage::INVENTORY;
+            c.send(ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: from, item, to_storage: INVENTORY, to_slot: to })?;
+            c.collect(user, 1.5)?;
+        } else {
+            println!("[{user}] nothing in slot {from}");
+        }
+        c.send(ClientMessage::Logout { kind: 0 })?;
+        return Ok(());
     }
     // Arrives right after the information (`ReceiveMoveMapChecksum`).
     // (Not always sent: without it only the `M` destination fails.)
