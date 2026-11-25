@@ -441,6 +441,7 @@ fn pointer_over_ui(
     inventory: Res<crate::inventory::Inventory>,
     (shop, vault): (Res<crate::shop::NpcShop>, Res<crate::vault::Vault>),
     npc_dialogue: Res<crate::npc_dialogue::NpcDialogueWindow>,
+    (skills, skill_table): (Res<crate::skills::HeroSkills>, Option<Res<crate::skills::Skills>>),
     mut over: ResMut<PointerOverUi>,
 ) {
     let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
@@ -453,6 +454,7 @@ fn pointer_over_ui(
             || shop.blocks(c)
             || npc_dialogue.blocks(c)
             || vault.blocks(c)
+            || skill_table.as_ref().is_some_and(|t| skills.blocks(c, &t.0))
     });
     if over.0 != on_bar {
         over.0 = on_bar;

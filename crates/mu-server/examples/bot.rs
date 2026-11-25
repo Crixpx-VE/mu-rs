@@ -4,6 +4,7 @@
 //!                                           [M destination] [--decir <text>] [--susurrar <name> <text>]
 //!                                           [--esperar <seconds before speaking>]
 //!                                           [--puerta x,y,gate ...] [--accion <AT_*>] [--baul]
+//!                                           [--atacar [--andar x,y]]
 //!
 //! Connect Server → Game Server → login → list → (creates the character if missing) → enters →
 //! walks 3 steps → (with a destination: requests it like the `M` window, waits for `MapChanged` and replies
@@ -38,6 +39,9 @@ struct Conn {
     hex: bool,
     /// Every monster or NPC that came into view: (scope id, number, x, y).
     seen: Vec<(u16, u16, u8, u8)>,
+    /// Our id and the tile the server says we are on (ObjectMoved/ObjectWalked of ourselves).
+    me: u16,
+    pos: (u8, u8),
 }
 
 impl Conn {
@@ -71,6 +75,23 @@ impl Conn {
             if let Some(p) = self.buf.next_packet().map_err(|e| std::io::Error::other(format!("{:#04X}", e.0)))? {
                 let plain = self.inp.decrypt(&p).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
                 let m = ServerMessage::decode(&plain);
+                match &m {
+                    Some(ServerMessage::AddMonstersToScope(list)) => {
+                        self.seen.extend(list.iter().map(|s| (s.id & 0x7FFF, s.number, s.x, s.y)));
+                    }
+                    Some(ServerMessage::ObjectMoved { id, x, y }) if id & 0x7FFF == self.me => self.pos = (*x, *y),
+                    Some(ServerMessage::ObjectWalked { id, target_x, target_y, .. }) => {
+                        if id & 0x7FFF == self.me {
+                            self.pos = (*target_x, *target_y);
+                        }
+                        for s in self.seen.iter_mut().filter(|s| s.0 == id & 0x7FFF) {
+                            (s.2, s.3) = (*target_x, *target_y);
+                        }
+                    }
+                    Some(ServerMessage::MapObjectOutOfScope(ids)) => self.seen.retain(|s| !ids.contains(&s.0)),
+                    Some(ServerMessage::ObjectKilled { killed, .. }) => self.seen.retain(|s| s.0 != killed & 0x7FFF),
+                    _ => {}
+                }
                 return Ok((plain, m));
             }
             let n = self.sock.read(&mut chunk)?;
@@ -216,6 +237,114 @@ fn vault_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<(
     Ok(())
 }
 
+/// `--atacar`: walks next to the nearest monster in view (numbers below 200, not NPCs), hits it a
+/// few times (`Hit`), then casts each skill of the list on it (`TargetedSkill`, and `AreaSkill` +
+/// `AreaSkillHit` with the same skill), printing the bytes of everything sent and received (to
+/// capture OpenMU's combat packets).
+fn attack_script(c: &mut Conn, user: &str, (x, y): (u8, u8), walk_to: Option<(u8, u8)>) -> std::io::Result<()> {
+    use mu_protocol::game::direction_between;
+    c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let sent = |m: &ClientMessage| {
+        let hex: Vec<String> = m.encode().iter().map(|b| format!("{b:02X}")).collect();
+        println!("[{user}] -> {} = {m:?}", hex.join(" "));
+    };
+    // `BOT_DECIR`: a chat line first (e.g. OpenMU's "/addene 5").
+    if let Ok(text) = std::env::var("BOT_DECIR") {
+        let name = std::env::var("BOT_NOMBRE").unwrap_or_default();
+        c.send(ClientMessage::PublicChat { name, message: text })?;
+    }
+    let got = c.collect(user, 2.0)?;
+    let skills: Vec<u16> = got
+        .iter()
+        .filter_map(|m| match m {
+            ServerMessage::SkillList { skills, .. } => Some(skills.iter().map(|s| s.number).collect::<Vec<_>>()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    println!("[{user}] habilidades {skills:?}");
+    c.pos = (x, y);
+    let (mut hx, mut hy) = (x, y);
+    // First toward `walk_to` (where the monsters are) along a path over Lorencia's tiles (`MU_DATA`
+    // or ../dist/cliente/Data), 8 steps per Walk.
+    if let Some((wx, wy)) = walk_to {
+        let data = std::env::var_os("MU_DATA").map(std::path::PathBuf::from).unwrap_or_else(|| "../dist/cliente/Data".into());
+        let attrs = mu_data::terrain::load_attributes(&data, 1).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+        let walkable = |x: usize, y: usize| x < 256 && y < 256 && attrs[y * 256 + x] & 0x0C == 0;
+        let path = mu_data::path::find_path((hx as usize, hy as usize), (wx as usize, wy as usize), walkable, 200_000).unwrap_or_default();
+        for chunk in path.windows(2).collect::<Vec<_>>().chunks(8) {
+            let (sx, sy) = (chunk[0][0].0 as u8, chunk[0][0].1 as u8);
+            let dirs: Vec<u8> = chunk.iter().filter_map(|w| direction_between((w[0].0 as u8, w[0].1 as u8), (w[1].0 as u8, w[1].1 as u8))).collect();
+            c.send(ClientMessage::Walk { source_x: sx, source_y: sy, rotation: *dirs.last().unwrap_or(&0), directions: dirs })?;
+            c.collect(user, 1.3)?;
+            (hx, hy) = c.pos;
+        }
+        println!("[{user}] en ({hx}, {hy})");
+    }
+    let mut round = 0;
+    let rounds: usize = std::env::var("BOT_RONDAS").ok().and_then(|v| v.parse().ok()).unwrap_or(3);
+    let mut attempts = 0;
+    while round < rounds && attempts < rounds * 6 {
+        attempts += 1;
+        let target = c
+            .seen
+            .iter()
+            .filter(|s| s.1 < 200)
+            .min_by_key(|s| (s.2 as i32 - hx as i32).abs().max((s.3 as i32 - hy as i32).abs()))
+            .copied();
+        let Some((id, number, tx, ty)) = target else {
+            println!("[{user}] ningún monstruo a la vista");
+            c.collect(user, 3.0)?;
+            continue;
+        };
+        println!("[{user}] objetivo {id} (monstruo {number}) en ({tx}, {ty}), ronda {round}");
+        // Walk until next to it (straight line, 8 steps per Walk).
+        let mut dirs = Vec::new();
+        let (sx, sy) = (hx, hy);
+        while dirs.len() < 8 && (hx.abs_diff(tx) > 1 || hy.abs_diff(ty) > 1) {
+            let next = ((hx as i16 + (tx as i16 - hx as i16).signum()) as u8, (hy as i16 + (ty as i16 - hy as i16).signum()) as u8);
+            dirs.extend(direction_between((hx, hy), next));
+            (hx, hy) = next;
+        }
+        if !dirs.is_empty() {
+            let walk = ClientMessage::Walk { source_x: sx, source_y: sy, rotation: *dirs.last().unwrap_or(&0), directions: dirs };
+            sent(&walk);
+            c.send(walk)?;
+            c.collect(user, 1.5)?;
+            (hx, hy) = c.pos;
+            if hx.abs_diff(tx) > 1 || hy.abs_diff(ty) > 1 {
+                continue;
+            }
+        }
+        round += 1;
+        // `facing_direction` of the step direction is the step direction itself.
+        let direction = direction_between((hx, hy), (tx, ty));
+        for _ in 0..3 {
+            let hit = ClientMessage::Hit { target: id, action: mu_protocol::game::action::ATTACK1, direction: direction.unwrap_or(0) };
+            sent(&hit);
+            c.send(hit)?;
+            c.collect(user, 1.0)?;
+        }
+        for &skill in &skills {
+            let m = ClientMessage::TargetedSkill { skill, target: id };
+            sent(&m);
+            c.send(m)?;
+            c.collect(user, 1.5)?;
+            let m = ClientMessage::AreaSkill { skill, x: tx, y: ty, rotation: 0, dest: 0x88, target_position: 0, target: id, serial: 1 };
+            sent(&m);
+            c.send(m)?;
+            let m = ClientMessage::AreaSkillHit { skill, x: tx, y: ty, serial: 1, targets: vec![(id, 1)] };
+            sent(&m);
+            c.send(m)?;
+            c.collect(user, 1.5)?;
+        }
+    }
+    c.collect(user, 2.0)?;
+    c.send(ClientMessage::Logout { kind: 0 })?;
+    println!("[{user}] fuera");
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut a: Vec<String> = std::env::args().skip(1).collect();
     // Named options (removed from the positional ones).
@@ -229,6 +358,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hex = false;
     let mut walk_to: Option<(u8, u8)> = None;
     let mut vault = false;
+    let mut attack = false;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
@@ -253,6 +383,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--baul" => {
                 vault = true;
+                a.remove(i);
+            }
+            "--atacar" => {
+                attack = true;
                 a.remove(i);
             }
             "--puerta" if i + 1 < a.len() => {
@@ -301,12 +435,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let sock = TcpStream::connect((ip.as_str(), port))?;
     sock.set_read_timeout(Some(Duration::from_secs(5)))?;
-    let mut c = Conn { sock, buf: PacketBuffer::default(), out: ClientCrypto::default(), inp: ClientCrypto::default(), hex, seen: Vec::new() };
+    let mut c = Conn { sock, buf: PacketBuffer::default(), out: ClientCrypto::default(), inp: ClientCrypto::default(), hex, seen: Vec::new(), me: 0, pos: (0, 0) };
     let id = c.wait(|m| match m {
         ServerMessage::GameServerEntered { player_id, .. } => Some(*player_id),
         _ => None,
     })?;
     println!("[{user}] saludo, id {id}");
+    c.me = id & 0x7FFF;
     c.send(ClientMessage::login(user, pass, 0))?;
     let r = c.wait(|m| match m {
         ServerMessage::LoginResponse(r) => Some(*r),
@@ -343,6 +478,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if vault {
         println!("[{user}] zen {}", info.money);
         return Ok(vault_script(&mut c, user, (info.x, info.y))?);
+    }
+    if attack {
+        return Ok(attack_script(&mut c, user, (info.x, info.y), walk_to)?);
     }
     // Arrives right after the information (`ReceiveMoveMapChecksum`).
     // (Not always sent: without it only the `M` destination fails.)

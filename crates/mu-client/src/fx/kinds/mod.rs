@@ -8,9 +8,9 @@
 //! test of `AttackCharacterRange`), effect models' own bones/vertices/action lengths, the
 //! `RENDER_*` modes and the per-map models are in. What remains is marked in the kinds and waits
 //! for systems outside the effects engine:
-//! - `TODO(combat)`: `SendRequestMagicAttack` (requests are queued in `FxWorld::attack_requests`),
-//!   `CharacterMachine->PacketSerial`, `Hero->CurrentSkill`/`Object.Weapon`; the client does not
-//!   fill `FxWorld::hero_skills` (`CharacterAttribute->Skill[]`) yet;
+//! - `TODO(combat)`: `CharacterMachine->PacketSerial` and `Object.Weapon` (the hits queued in
+//!   `FxWorld::attack_requests` are sent by combat.rs as `AreaSkillHit`; skills.rs fills
+//!   `FxWorld::hero_skills`);
 //! - data the client does not track yet (the plumbing reads it): buffs, `m_sTargetIndex`,
 //!   `m_bySkillCount`, attack/magic speed, a character owner's `LifeTime`, prior action/frame for
 //!   sub-frame poses, terrain light and the render-level option while drawing;
@@ -36,6 +36,7 @@ pub mod joints_3;
 pub mod effects_dk1;
 pub mod effects_dk2;
 pub mod skills_dk;
+pub mod skills_magic;
 pub mod objects_1;
 pub mod objects_2;
 pub mod objects_login;
@@ -72,6 +73,7 @@ pub fn register_all(r: &mut Registry) {
     effects_dk1::register(r);
     effects_dk2::register(r);
     skills_dk::register(r);
+    skills_magic::register(r);
     objects_1::register(r);
     objects_2::register(r);
     objects_login::register(r);

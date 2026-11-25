@@ -17,6 +17,7 @@ pub mod objects;
 pub mod path;
 pub mod quest;
 pub mod reader;
+pub mod skills;
 pub mod terrain;
 pub mod texture;
 pub mod warps;

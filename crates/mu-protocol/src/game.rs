@@ -473,6 +473,18 @@ pub enum ClientMessage {
     /// set legacy quest `quest` to `state` (1 = start or finish it). OpenMU's
     /// `LegacyQuestStateSetRequest`.
     LegacyQuestState { quest: u8, state: u8 },
+    /// `SendRequestAttack` (C1 11, see [`crate::combat`]): a normal attack on `target` with the
+    /// `AT_ATTACK1` action, facing `direction` (as in [`ClientMessage::Animation`]).
+    Hit { target: u16, action: u8, direction: u8 },
+    /// `SendRequestMagic` (C3 19): skill `skill` (`AT_SKILL_*`) on `target`.
+    TargetedSkill { skill: u16, target: u16 },
+    /// `SendRequestCancelMagic` (C3 1B): ends a lasting skill (`AT_SKILL_*`) of `target`.
+    CancelSkill { skill: u16, target: u16 },
+    /// `SendRequestMagicContinue` (C3 1E): an area skill at tile (`x`, `y`) with the hero's angle
+    /// (`Angle / 360 * 256`), `dest` (`GetDestValue`), `target_position` and the targeted object.
+    AreaSkill { skill: u16, x: u8, y: u8, rotation: u8, dest: u8, target_position: u8, target: u16, serial: u8 },
+    /// `SendRequestMagicAttack` (C3 DB): what an area skill hit; each target with its skill serial.
+    AreaSkillHit { skill: u16, x: u8, y: u8, serial: u8, targets: Vec<(u16, u8)> },
 }
 
 /// Item storages of [`ClientMessage::ItemMove`] and `ItemMoved` (`ItemStorageKind`, OpenMU
@@ -764,6 +776,50 @@ pub enum ServerMessage {
     /// the object with scope id `id` (an NPC too: `CreateChat`). OpenMU's `ObjectMessage`, e.g. the
     /// quest NPC's "I have no quests for you.".
     ObjectMessage { id: u16, message: String },
+    /// `ReceiveMagicList` (C1 F3 11, see [`crate::combat`]): the hero's skills by slot; `list_type`
+    /// [`crate::combat::skill_list::REPLACE`] is the whole list.
+    SkillList { list_type: u8, skills: Vec<crate::combat::SkillSlot> },
+    /// `ReceiveMagicList` with `Value` 0xFE: one skill learned.
+    SkillAdded(crate::combat::SkillSlot),
+    /// `ReceiveMagicList` with `Value` 0xFF: the skill in slot `index` is gone.
+    SkillRemoved { index: u8, number: u16 },
+    /// `ReceiveAttackDamage` (C1 11): `id` took `damage` (`damage_type`: see
+    /// [`crate::combat::damage_type`]) and `shield_damage`.
+    ObjectHit { id: u16, damage: u16, damage_type: u8, shield_damage: u16 },
+    /// `ReceiveMagic` (C3 19): `source` used `skill` on `target`.
+    SkillAnimation { skill: u16, source: u16, target: u16 },
+    /// `ReceiveMagicContinue` (C3 1E): `source` used the area skill `skill` at (`x`, `y`) turned
+    /// `rotation` (`Angle / 360 * 256`).
+    AreaSkillAnimation { skill: u16, source: u16, x: u8, y: u8, rotation: u8 },
+    /// `ReceiveMagicPosition` (C1 1A): `source` used `skill` at (`x`, `y`) on `targets`.
+    SkillTargetsAnimation { source: u16, skill: u16, x: u8, y: u8, targets: Vec<u16> },
+    /// `ReceiveMagicFinish` (C1 1B): the lasting effect of `skill` on `target` ended.
+    MagicEffectCancelled { skill: u16, target: u16 },
+    /// `ReceiveSkillStatus` (C1 07): buff `effect` (`eBuffState`) starts or ends on `id`.
+    MagicEffectStatus { active: bool, id: u16, effect: u8 },
+    /// `ReceiveDie` (C1 17): `killed` died by `killer`'s `skill`.
+    ObjectKilled { killed: u16, skill: u16, killer: u16 },
+    /// `ReceiveDieExp` (C3 16): the hero killed `killed` with a last hit of `damage` and earned
+    /// `experience`.
+    ExperienceGained { killed: u16, experience: u16, damage: u16 },
+    /// `ReceiveDieExpLarge` (C1 9C): the same with a 32-bit experience.
+    ExperienceGainedLarge { killed: u16, experience: u32, damage: u16 },
+    /// `ReceiveLife` with `Index` 0xFF (C1 26 FF): the hero's life and shield.
+    CurrentHealth { health: u16, shield: u16 },
+    /// `ReceiveLife` with `Index` 0xFE: the maximum life and shield.
+    MaximumHealth { health: u16, shield: u16 },
+    /// `ReceiveMana` with `Index` 0xFF (C1 27 FF): mana and AG (`SkillMana`).
+    CurrentMana { mana: u16, ability: u16 },
+    /// `ReceiveMana` with `Index` 0xFE: the maximum mana and AG.
+    MaximumMana { mana: u16, ability: u16 },
+    /// `ReceiveDamage` (C1 F3 07): poison damage to the hero.
+    PoisonDamage { damage: u16, shield: u16 },
+    /// `ReceiveRevival` (C1 F3 04): the hero comes back after dying.
+    Respawn(crate::combat::Respawn),
+    /// `ReceiveLevelUp` (C1 F3 05).
+    LevelUp(crate::combat::LevelUp),
+    /// `ReceiveMonsterSkill` (C1 69): a monster used its skill `skill` on `target`.
+    MonsterSkillAnimation { skill: u16, attacker: u16, target: u16 },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -938,6 +994,9 @@ impl ClientMessage {
     }
 
     pub fn encode(&self) -> Vec<u8> {
+        if let Some(p) = crate::combat::encode_client(self) {
+            return p;
+        }
         match self {
             Self::Login { username, password, tick_count, version, serial } => {
                 let mut user = fixed::<10>(username);
@@ -1059,11 +1118,17 @@ impl ClientMessage {
             }
             // `spe.Send(TRUE)`.
             Self::LegacyQuestState { quest, state } => encrypted(c1(&[0xA2, *quest, *state])),
+            Self::Hit { .. } | Self::TargetedSkill { .. } | Self::CancelSkill { .. } | Self::AreaSkill { .. } | Self::AreaSkillHit { .. } => {
+                unreachable!("encoded by combat::encode_client")
+            }
         }
     }
 
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let p = Packet::parse(bytes)?;
+        if let Some(m) = crate::combat::decode_client(&p) {
+            return Some(m);
+        }
         let d = short_header(&p)?;
         // Packets without a subcode.
         match p.code() {
@@ -1289,6 +1354,9 @@ impl ScopeCharacter {
 
 impl ServerMessage {
     pub fn encode(&self) -> Vec<u8> {
+        if let Some(p) = crate::combat::encode_server(self) {
+            return p;
+        }
         match self {
             Self::GameServerEntered { success, player_id, version } => {
                 let mut body = vec![0xF1, 0x00, *success as u8];
@@ -1506,11 +1574,15 @@ impl ServerMessage {
                 body.push(0);
                 c1(&body)
             }
+            _ => unreachable!("encoded by combat::encode_server"),
         }
     }
 
     pub fn decode(bytes: &[u8]) -> Option<Self> {
         let p = Packet::parse(bytes)?;
+        if let Some(m) = crate::combat::decode_server(&p) {
+            return Some(m);
+        }
         // Packets without a subcode.
         match p.code() {
             0x12 => {
