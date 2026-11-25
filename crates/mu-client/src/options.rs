@@ -123,6 +123,9 @@ pub struct GameUi {
     /// `INTERFACE_MINI_MAP` and its `m_bSuccess` (the map has a minimap); managed by minimap.rs.
     pub minimap: bool,
     pub minimap_ok: bool,
+    /// A message box of another window is up (the vault's zen boxes, vault.rs): like the system menu
+    /// box it takes the mouse and the keys (`CNewUIMessageBoxMng`, the first in the original's order).
+    pub msg_box: bool,
 }
 
 impl GameUi {
@@ -138,14 +141,14 @@ impl GameUi {
         self.menu_selected = None;
     }
 
-    /// `g_pNewUISystem->HideAll()` (on map change, WSclient.cpp:1830).
+    /// `g_pNewUISystem->HideAll()` (on map change, WSclient.cpp:1830); message boxes stay.
     pub fn hide_all(&mut self) {
-        *self = Self { minimap_ok: self.minimap_ok, ..Self::default() };
+        *self = Self { minimap_ok: self.minimap_ok, msg_box: self.msg_box, ..Self::default() };
     }
 
     /// A message box is open: it takes all the mouse input.
     pub fn modal(&self) -> bool {
-        self.sys_menu
+        self.sys_menu || self.msg_box
     }
 
     /// `INTERFACE_OPTION` is open (it takes Esc before the minimap).
@@ -157,6 +160,7 @@ impl GameUi {
     /// walk (what the `UpdateMouseEvent`s return as false).
     pub fn blocks(&self, c: Vec2) -> bool {
         self.sys_menu
+            || self.msg_box
             || (self.option && inside(c, OPT_X, OPT_Y, OPT_W, OPT_H))
             || (self.window_menu && inside(c, MENU_X, MENU_Y + 20.0, MENU_W, 95.0 + 20.0 * (MENU_ITEMS as f32 - 5.0)))
             || (self.minimap && inside(c, 0.0, 0.0, 640.0, 430.0))
@@ -192,6 +196,10 @@ fn update_game_ui(
     let (press, held, release) =
         (mouse.just_pressed(MouseButton::Left), mouse.pressed(MouseButton::Left), mouse.just_released(MouseButton::Left));
     let at = |x: f32, y: f32, w: f32, h: f32| cursor.is_some_and(|c| inside(c, x, y, w, h));
+    // Another window's message box has the keys and the mouse (vault.rs).
+    if ui.msg_box {
+        return;
+    }
 
     // Keyboard (`UpdateKeyEvent`): first the message box, then options and window menu,
     // and finally the hotkeys.

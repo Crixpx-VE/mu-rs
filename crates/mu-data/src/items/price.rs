@@ -585,6 +585,26 @@ pub fn is_selling_ban(item: &Item) -> bool {
         || item_action_ban(t, true)
 }
 
+/// `IsStoreBan` (ZzzInventory.cpp:8197-8230) without period items (`bPeriodItem`, not kept by
+/// [`Item`]): these cannot go into the vault. `Check_ItemAction(item, eITEM_STORE)` bans the lucky
+/// armor (row 1 of `Set_ItemActOption`, store 0) but not the lucky tickets (row 0, store 1).
+pub fn is_store_ban(item: &Item) -> bool {
+    let t = item.kind();
+    let level = item.level;
+    let (p, h) = (|i| k(POTION, i), |i| k(HELPER, i));
+    (p(23)..=p(26)).contains(&t)
+        || (t == p(21) && level != 3)
+        || t == h(19)
+        || (t == p(11) && level == 13)
+        || (h(43)..=h(45)).contains(&t)
+        || t == h(93)
+        || t == h(94)
+        || (t == h(20) && level != 0)
+        || (p(65)..=p(68)).contains(&t)
+        || (t == h(70) && item.durability == 1)
+        || [HELM, ARMOR, PANTS, GLOVES, BOOTS].iter().any(|&g| (k(g, 62)..=k(g, 73)).contains(&t))
+}
+
 /// `IsRepairBan` (ZzzInventory.cpp:8443-8513). (Its `MODEL_HELPER+43` to `+45` compare an item type
 /// with a model number and never match; those are cash shop items anyway.)
 pub fn is_repair_ban(item: &Item) -> bool {
@@ -851,6 +871,14 @@ mod tests {
         assert!(is_selling_ban(&it(HELPER, 135, 0, 0)), "lucky ticket");
         assert!(!is_selling_ban(&it(ARMOR, 62, 0, 0)), "lucky armor can be sold");
         assert!(is_repair_ban(&it(ARMOR, 62, 0, 0)), "but not repaired");
+        // `IsStoreBan`: lucky armor stays out of the vault, lucky tickets go in.
+        assert!(is_store_ban(&it(ARMOR, 62, 0, 0)));
+        assert!(!is_store_ban(&it(HELPER, 135, 0, 0)));
+        assert!(is_store_ban(&it(HELPER, 20, 1, 0)), "Wizard's Ring +1 and up");
+        assert!(!is_store_ban(&it(HELPER, 20, 0, 0)));
+        assert!(is_store_ban(&it(POTION, 21, 0, 0)) && !is_store_ban(&it(POTION, 21, 3, 0)));
+        assert!(is_store_ban(&it(HELPER, 70, 0, 1)) && !is_store_ban(&it(HELPER, 70, 0, 2)));
+        assert!(!is_store_ban(&it(SWORD, 1, 0, 22)));
         assert!(is_repair_ban(&it(HELPER, 10, 0, 0)), "transformation ring");
         assert!(!is_repair_ban(&it(SWORD, 1, 0, 0)));
         assert!(is_high_value_item(&it(SWORD, 1, 7, 0)));

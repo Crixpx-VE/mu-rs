@@ -199,6 +199,13 @@ impl Net {
         self.game.is_some()
     }
 
+    /// Without a connection (for tests: what is sent goes nowhere).
+    #[cfg(test)]
+    pub(crate) fn offline() -> Self {
+        let (tx, rx) = channel();
+        Net { events_tx: tx, events: Mutex::new(rx), game: None, generation: 0, cs_busy: false }
+    }
+
     /// Closes the Game Server connection (anything still arriving from it is discarded).
     pub fn close(&mut self) {
         self.generation += 1;

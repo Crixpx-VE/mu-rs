@@ -44,6 +44,13 @@
 //! server → client  MapChanged                   C3 0F 1C 0F <map change> <map u16 BE> <x> <y>
 //!                                                           <rotation> 00 00 00 00 00
 //! server → client  InventoryMoneyUpdate         C3 08 22 FE <zen u32 BE>
+//! client → server  VaultMoveMoneyRequest        C1 08 81 <0 deposit, 1 withdraw> <zen u32 LE>
+//! server → client  VaultMoneyUpdate             C1 0C 81 <ok> <vault zen u32 LE> <inventory zen u32 LE>
+//! client → server  VaultClosed                  C1 03 82
+//! server → client  VaultClosed                  C1 03 82
+//! client → server  UnlockVault / SetVaultPin /  C3 1A 83 <0, 1, 2> <pin u16 LE> <password 20>
+//!                  RemoveVaultPin
+//! server → client  VaultProtectionInformation   C1 04 83 <state>
 //! client → server  PublicChatMessage            C1 len 00 <name 10> <text, UTF-8 with its 00, at most 90>
 //! client → server  WhisperMessage               C1 len 02 <recipient 10> <text, UTF-8 with its 00, at most 90>
 //! server → client  ChatMessage                  C1 len 00 <speaker 10> <text with its 00>
@@ -414,6 +421,15 @@ pub enum ClientMessage {
     /// `SendRequestStorageExit` (wsclientinline.h:1238-1246, C1 82, not encrypted): close the vault
     /// (`CNewUIStorageInventory::ProcessClosing`). OpenMU's `VaultClosed`.
     CloseVault,
+    /// `SendRequestStorageGold(Flag, Gold)` (wsclientinline.h:1228-1236, C1 08 81, not encrypted):
+    /// move `amount` zen from the inventory to the vault (`withdraw` false, `Flag` 0) or back
+    /// (`Flag` 1). OpenMU's `VaultMoveMoneyRequest`; it answers with [`ServerMessage::VaultMoney`].
+    VaultMoveMoney { withdraw: bool, amount: u32 },
+    /// `SendStoragePassword(type, password, residentNumber)` (wsclientinline.h:1248-1255, C1 1A 83,
+    /// encrypted): `kind` (see [`vault_password`]), the 4-digit `pin` and the account password (20
+    /// bytes). OpenMU's `UnlockVault` / `SetVaultPin` / `RemoveVaultPin`; it answers with
+    /// [`ServerMessage::VaultProtection`].
+    VaultPassword { kind: u8, pin: u16, password: String },
     /// `SendRequestMixExit` (wsclientinline.h:1477-1485, C1 87, not encrypted): close the Chaos
     /// Machine (`CNewUIMixInventory::ClosingProcess`, NewUIMixInventory.cpp:136-168). OpenMU's
     /// `CraftingDialogCloseRequest`.
@@ -468,6 +484,30 @@ pub mod storage {
     pub const CHAOS_MACHINE: u8 = 3;
     pub const PERSONAL_SHOP: u8 = 4;
 }
+
+/// `kind` of [`ClientMessage::VaultPassword`] (OpenMU ClientToServerPackets.xml `UnlockVault`,
+/// `SetVaultPin`, `RemoveVaultPin`: the subcodes 00, 01 and 02 of C1 83).
+pub mod vault_password {
+    pub const UNLOCK: u8 = 0;
+    pub const SET_PIN: u8 = 1;
+    pub const REMOVE_PIN: u8 = 2;
+}
+
+/// `state` of [`ServerMessage::VaultProtection`] (`ProcessToReceiveStorageStatus`,
+/// NewUIStorageInventory.cpp:530-596; OpenMU's `VaultProtectionState`).
+pub mod vault_state {
+    pub const UNPROTECTED: u8 = 0;
+    pub const LOCKED: u8 = 1;
+    pub const UNLOCK_FAILED_WRONG_PIN: u8 = 10;
+    pub const SET_PIN_FAILED_LOCKED: u8 = 11;
+    pub const UNLOCKED: u8 = 12;
+    pub const REMOVE_PIN_FAILED_WRONG_PASSWORD: u8 = 13;
+}
+
+/// Vault slots: an 8×15 grid, `y · 8 + x` (`CNewUIStorageInventory`, `Create(..., 8, 15)`,
+/// NewUIStorageInventory.cpp:42-43). OpenMU's extended vault (slots 120-239) has no window in the
+/// Season 6 client.
+pub const VAULT_SLOTS: u8 = 120;
 
 /// Inventory slots: equipment 0-11, the 8×8 grid 12-75 (`MAX_EQUIPMENT_INDEX`, `MAX_MY_INVENTORY_INDEX`).
 pub const FIRST_GRID_SLOT: u8 = 12;
@@ -669,6 +709,17 @@ pub enum ServerMessage {
     /// refused with a message, 0xFE = refused and the store closes, anything else = sold; `money` is
     /// the zen after the sale (OpenMU sends 0 or 1).
     SellResult { result: u8, money: u32 },
+    /// `ReceiveStorageGold` (C1 0C 81, `PRECEIVE_STORAGE_GOLD`, WSclient.h:1180-1186 and
+    /// WSclient.cpp:6463-6473): with `success` the vault holds `vault` zen and the inventory
+    /// `inventory`. OpenMU's `VaultMoneyUpdate`, sent when the vault opens and after every
+    /// [`ClientMessage::VaultMoveMoney`] (always with `success`, the values unchanged if refused).
+    VaultMoney { success: bool, vault: u32, inventory: u32 },
+    /// `ReceiveStorageExit` (C1 03 82, WSclient.cpp:6475-6478): the server confirms the vault closed
+    /// (the original only logs it). OpenMU's `VaultClosed`.
+    VaultClosed,
+    /// `ReceiveStorageStatus` (C1 04 83, WSclient.cpp:6480-6485): the vault's lock `state` (see
+    /// [`vault_state`]). OpenMU's `VaultProtectionInformation`, sent when the vault opens.
+    VaultProtection { state: u8 },
     /// `ReceiveChangePlayer` (C1 25, `PCHANGE_CHARACTER`, WSclient.cpp:1871): a player in view changed
     /// what it shows in `slot` (see [`appearance::slot`]); `None` = took it off. Apply it with
     /// [`Appearance::apply_change`]. OpenMU's `AppearanceChanged`.
@@ -970,6 +1021,19 @@ impl ClientMessage {
             }
             Self::CloseNpc => c1(&[0x31]),
             Self::CloseVault => c1(&[0x82]),
+            // `spe << (BYTE)Flag << (DWORD)Gold; spe.Send()`.
+            Self::VaultMoveMoney { withdraw, amount } => {
+                let mut p = fixed_c1(8, 0x81, *withdraw as u8);
+                put_u32_le(&mut p, 4, *amount);
+                p
+            }
+            // `spe << (BYTE)type << (WORD)password; spe.AddData(residentNumber, 20); spe.Send(TRUE)`.
+            Self::VaultPassword { kind, pin, password } => {
+                let mut p = fixed_c3(26, 0x83, *kind);
+                put_u16_le(&mut p, 4, *pin);
+                p[6..26].copy_from_slice(&fixed::<20>(password));
+                p
+            }
             Self::CloseCrafting => c1(&[0x87]),
             Self::BuyItem { slot } => encrypted(c1(&[0x32, *slot])),
             Self::SellItem { slot } => encrypted(c1(&[0x33, *slot])),
@@ -1030,6 +1094,10 @@ impl ClientMessage {
             0x30 => return Some(Self::TalkToNpc { id: get_u16_be(d, 3)? }),
             0x31 => return Some(Self::CloseNpc),
             0x82 => return Some(Self::CloseVault),
+            0x81 => return Some(Self::VaultMoveMoney { withdraw: *d.get(3)? != 0, amount: get_u32_le(d, 4)? }),
+            0x83 => {
+                return Some(Self::VaultPassword { kind: *d.get(3)?, pin: get_u16_le(d, 4)?, password: unfixed(d.get(6..26)?) });
+            }
             0x87 => return Some(Self::CloseCrafting),
             0x32 => return Some(Self::BuyItem { slot: *d.get(3)? }),
             0x33 => return Some(Self::SellItem { slot: *d.get(3)? }),
@@ -1376,6 +1444,14 @@ impl ServerMessage {
                 put_u32_le(&mut p, 4, *money);
                 p
             }
+            Self::VaultMoney { success, vault, inventory } => {
+                let mut p = fixed_c1(12, 0x81, *success as u8);
+                put_u32_le(&mut p, 4, *vault);
+                put_u32_le(&mut p, 8, *inventory);
+                p
+            }
+            Self::VaultClosed => c1(&[0x82]),
+            Self::VaultProtection { state } => c1(&[0x83, *state]),
             Self::AppearanceChanged { id, slot, item } => {
                 let mut body = vec![0x25];
                 body.extend_from_slice(&id.to_be_bytes());
@@ -1549,6 +1625,14 @@ impl ServerMessage {
                 let d = short_header(&p)?;
                 return Some(Self::SellResult { result: *d.get(3)?, money: get_u32_le(d, 4).unwrap_or(0) });
             }
+            // `PRECEIVE_STORAGE_GOLD`: `Result`, `StorageGold` and `Gold` (DWORDs at 4 and 8).
+            0x81 => {
+                let d = short_header(&p)?;
+                return Some(Self::VaultMoney { success: *d.get(3)? != 0, vault: get_u32_le(d, 4)?, inventory: get_u32_le(d, 8)? });
+            }
+            0x82 => return Some(Self::VaultClosed),
+            // `PHEADER_DEFAULT::Value`.
+            0x83 => return Some(Self::VaultProtection { state: *short_header(&p)?.get(3)? }),
             // `PCHANGE_CHARACTER`: `KeyH`, `KeyL`, `Item[PACKET_ITEM_LENGTH]`.
             0x25 => {
                 let d = short_header(&p)?;
@@ -2254,6 +2338,69 @@ mod tests {
             ida_y_vuelta_servidor(ServerMessage::SellResult { result: 1, money: 0x0001_E240 }),
             [0xC3, 8, 0x33, 1, 0x40, 0xE2, 0x01, 0x00]
         );
+    }
+
+    /// The vault, with bytes captured from OpenMU (the `--baul` bot, 2026-11-24): talking to the Safety
+    /// Guardian sends `NpcWindowResponse` 2, `StoreItemList` 0 with the vault items,
+    /// `VaultMoneyUpdate` and `VaultProtectionInformation`.
+    #[test]
+    fn vault_packets() {
+        // VaultMoneyUpdate: success, the vault's zen and the inventory's (10 000 000), little endian.
+        let open = [0xC1, 0x0C, 0x81, 0x01, 0, 0, 0, 0, 0x80, 0x96, 0x98, 0x00];
+        let msg = ServerMessage::VaultMoney { success: true, vault: 0, inventory: 10_000_000 };
+        assert_eq!(ServerMessage::decode(&open), Some(msg.clone()));
+        assert_eq!(msg.encode(), open);
+        // After depositing 1 zen (preceded by `InventoryMoneyUpdate`, C3 08 22 FE 00 98 96 7F).
+        let deposited = [0xC1, 0x0C, 0x81, 0x01, 0x01, 0, 0, 0, 0x7F, 0x96, 0x98, 0x00];
+        assert_eq!(ServerMessage::decode(&deposited), Some(ServerMessage::VaultMoney { success: true, vault: 1, inventory: 9_999_999 }));
+        assert_eq!(
+            ServerMessage::decode(&[0xC3, 0x08, 0x22, 0xFE, 0x00, 0x98, 0x96, 0x7F]),
+            Some(ServerMessage::InventoryMoneyUpdate { money: 9_999_999 })
+        );
+        // VaultProtectionInformation: unprotected.
+        assert_eq!(ServerMessage::decode(&[0xC1, 0x04, 0x83, 0x00]), Some(ServerMessage::VaultProtection { state: vault_state::UNPROTECTED }));
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::VaultProtection { state: vault_state::LOCKED }), [0xC1, 4, 0x83, 1]);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::VaultClosed), [0xC1, 3, 0x82]);
+        // The vault list: kind 0, the vault slot (`y · 8 + x`) and the item.
+        let mut list = vec![0xC2, 0x00, 0x20, 0x31, 0x00, 0x02, 0x21];
+        list.extend_from_slice(&[0x13, 0x38, 0x01, 0x00, 0x00, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        list.push(0x25);
+        list.extend_from_slice(&[0x13, 0x28, 0x01, 0x00, 0x00, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        let Some(ServerMessage::StoreItemList { kind: 0, items }) = ServerMessage::decode(&list) else { panic!("vault list") };
+        assert_eq!(items.iter().map(|(s, _)| *s).collect::<Vec<_>>(), [33, 37]);
+
+        // VaultMoveMoneyRequest: deposit 1 and withdraw 2 000 000 000 (`SendRequestStorageGold`).
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::VaultMoveMoney { withdraw: false, amount: 1 }), [0xC1, 8, 0x81, 0, 1, 0, 0, 0]);
+        assert_eq!(
+            ida_y_vuelta_cliente(ClientMessage::VaultMoveMoney { withdraw: true, amount: 2_000_000_000 }),
+            [0xC1, 8, 0x81, 1, 0x00, 0x94, 0x35, 0x77]
+        );
+        // A move into vault slot 119 and its answer.
+        let to_vault = ClientMessage::ItemMove {
+            from_storage: storage::INVENTORY,
+            from_slot: 12,
+            item: [0x0D, 0x00, 0x01, 0x00, 0x00, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF],
+            to_storage: storage::VAULT,
+            to_slot: 119,
+        };
+        assert_eq!(
+            ida_y_vuelta_cliente(to_vault),
+            [0xC3, 0x13, 0x24, 0x00, 0x0C, 0x0D, 0x00, 0x01, 0x00, 0x00, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x02, 0x77]
+        );
+        let moved = [0xC3, 0x11, 0x24, 0x02, 0x77, 0x0D, 0x00, 0x01, 0x00, 0x00, 0xE0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(
+            ServerMessage::decode(&moved),
+            Some(ServerMessage::ItemMoved { storage: storage::VAULT, slot: 119, item: moved[5..17].try_into().unwrap() })
+        );
+        // An item OpenMU does not store: a notice, then the refusal.
+        let refused = [0xC3, 0x11, 0x24, 0xFF, 0x00, 0x14, 0x08, 0x1E, 0x00, 0x00, 0xD0, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        assert_eq!(ServerMessage::decode(&refused), Some(ServerMessage::ItemMoveFailed));
+
+        // `SendStoragePassword` (26 bytes, encrypted): unlock with pin 1234.
+        let unlock = ida_y_vuelta_cliente(ClientMessage::VaultPassword { kind: vault_password::UNLOCK, pin: 1234, password: String::new() });
+        assert_eq!((unlock.len(), &unlock[..6]), (26, &[0xC3, 26, 0x83, 0, 0xD2, 0x04][..]));
+        let remove = ida_y_vuelta_cliente(ClientMessage::VaultPassword { kind: vault_password::REMOVE_PIN, pin: 0, password: "test1".into() });
+        assert_eq!(&remove[6..11], b"test1");
     }
 
     /// The other NPC dialogs OpenMU opens instead of `NpcWindowResponse` (C3 30).

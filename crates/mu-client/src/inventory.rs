@@ -32,6 +32,10 @@
 //!   paying the self-repair price (`p_AddGold` 1). Durability and zen change when the server says so.
 //! - **NPC shop**: with it open, the tooltips show the selling price (`RenderItemInfo`,
 //!   ZzzInventory.cpp:2189-2213) and an item dropped on the shop is sold (shop.rs).
+//! - **Vault** (vault.rs): its items are kept here ([`VaultGrid`]) because the held item and the
+//!   server's move answers are shared; an item picked up from the vault and dropped on the inventory
+//!   asks to move it back (`SendRequestItemToMyInven`), and the inventory does not close while a move
+//!   waits for its answer.
 //!
 //! Missing: personal store, the window's ancient sets and sockets, potion hotkeys, item stacking
 //! (jewels on items, `IsOverlayItem`) and the grid's durability colors.
@@ -95,12 +99,21 @@ pub(crate) fn grid_slot(x: u8, y: u8) -> u8 {
     FIRST_GRID_SLOT + y * COLUMNS as u8 + x
 }
 
-/// Inventory slot the held item came from (`MAX_EQUIPMENT_INDEX + GetSourceLinealPos()` or the
-/// equipment `lineal_pos`).
+/// Slot the held item came from: in the inventory `MAX_EQUIPMENT_INDEX + GetSourceLinealPos()` or the
+/// equipment `lineal_pos`; in the vault its `GetSourceLinealPos()` (`y · 8 + x`).
 pub(crate) fn source_slot(from: Source) -> u8 {
     match from {
         Source::Grid { x, y } => grid_slot(x, y),
         Source::Equipment(s) => s,
+        Source::Vault { x, y } => y * VAULT_COLUMNS as u8 + x,
+    }
+}
+
+/// Storage the held item came from (`REQUEST_EQUIPMENT_INVENTORY` or `_STORAGE`).
+pub(crate) fn source_storage(from: Source) -> u8 {
+    match from {
+        Source::Grid { .. } | Source::Equipment(_) => storage::INVENTORY,
+        Source::Vault { .. } => storage::VAULT,
     }
 }
 
@@ -196,6 +209,84 @@ pub struct GridItem {
 pub enum Source {
     Grid { x: u8, y: u8 },
     Equipment(u8),
+    /// The vault's grid (`g_pStorageInventory->GetInventoryCtrl()`).
+    Vault { x: u8, y: u8 },
+}
+
+/// The vault grid: `CNewUIStorageInventory`'s `Create(..., 8, 15)` (NewUIStorageInventory.cpp:42-43).
+pub const VAULT_COLUMNS: usize = 8;
+pub const VAULT_ROWS: usize = 15;
+
+/// The vault's items (`CNewUIStorageInventory::m_pNewInventoryCtrl`) and what the moves between it and
+/// the inventory need. They live here because the held item (`CNewUIPickedItem`) and the server's move
+/// answers (`ReceiveEquipmentItem`) are shared by both windows; vault.rs runs the window itself.
+#[derive(Default, Debug)]
+pub struct VaultGrid {
+    /// `IsVisible(INTERFACE_STORAGE)`.
+    pub open: bool,
+    /// By top-left cell.
+    pub items: Vec<GridItem>,
+    /// `m_bItemAutoMove` with the cell of the item it moves (the original keeps the mouse position,
+    /// `m_nBackupMouseX/Y`, and looks the item up there): a right click sent the item to the other
+    /// window and it leaves its own grid when the server says where it went.
+    pub(crate) auto_move: Option<Source>,
+}
+
+impl VaultGrid {
+    /// The vault item covering a cell.
+    pub(crate) fn owner(&self, data: &ItemData, x: usize, y: usize) -> Option<usize> {
+        owner_in(&self.items, data, x, y)
+    }
+
+    /// `CanMove` / `CheckSlot` in the vault grid.
+    pub(crate) fn fits(&self, data: &ItemData, x: i32, y: i32, w: u8, h: u8) -> bool {
+        fits_in(&self.items, data, VAULT_COLUMNS, VAULT_ROWS, x, y, w, h)
+    }
+
+    /// `CNewUIStorageInventory::FindEmptySlot` (NewUIStorageInventory.cpp:517-528): a vault slot.
+    pub(crate) fn find_empty(&self, data: &ItemData, item: &Item) -> Option<u8> {
+        let (w, h) = Inventory::size(data, item);
+        find_empty_in(&self.items, data, VAULT_COLUMNS, VAULT_ROWS, w, h).map(|(x, y)| y * VAULT_COLUMNS as u8 + x)
+    }
+
+    /// `InsertItem(index, packet)` (`AddItem`: the cell is `index % 8, index / 8`); slots past the
+    /// 8×15 grid (OpenMU's extended vault) are dropped.
+    pub(crate) fn insert(&mut self, slot: u8, item: Item) {
+        let i = slot as usize;
+        if i >= VAULT_COLUMNS * VAULT_ROWS {
+            return;
+        }
+        let (x, y) = ((i % VAULT_COLUMNS) as u8, (i / VAULT_COLUMNS) as u8);
+        self.items.retain(|g| (g.x, g.y) != (x, y));
+        self.items.push(GridItem { x, y, item });
+    }
+}
+
+/// The grid item covering a cell (`m_pdwItemCheckBox`).
+fn owner_in(items: &[GridItem], data: &ItemData, x: usize, y: usize) -> Option<usize> {
+    items.iter().position(|g| {
+        let (w, h) = Inventory::size(data, &g.item);
+        (g.x as usize..g.x as usize + w as usize).contains(&x) && (g.y as usize..g.y as usize + h as usize).contains(&y)
+    })
+}
+
+/// `CheckSlot`: whether a `w`×`h` item fits at (x, y) of a `cols`×`rows` grid. (The original counts
+/// consecutive cells and, past the right edge, wraps to the next row; the server rejects that. Here
+/// it must stay inside.)
+#[allow(clippy::too_many_arguments)]
+fn fits_in(items: &[GridItem], data: &ItemData, cols: usize, rows: usize, x: i32, y: i32, w: u8, h: u8) -> bool {
+    if x < 0 || y < 0 || x as usize + w as usize > cols || y as usize + h as usize > rows {
+        return false;
+    }
+    (0..h as usize).all(|dy| (0..w as usize).all(|dx| owner_in(items, data, x as usize + dx, y as usize + dy).is_none()))
+}
+
+/// `FindEmptySlot`: the first cell (row by row) where a `w`×`h` item fits.
+fn find_empty_in(items: &[GridItem], data: &ItemData, cols: usize, rows: usize, w: u8, h: u8) -> Option<(u8, u8)> {
+    (0..rows as i32)
+        .flat_map(|y| (0..cols as i32).map(move |x| (x, y)))
+        .find(|&(x, y)| fits_in(items, data, cols, rows, x, y, w, h))
+        .map(|(x, y)| (x as u8, y as u8))
 }
 
 /// `CNewUIPickedItem`.
@@ -247,6 +338,8 @@ pub struct Inventory {
     /// `640-190*2` (`SetPos`, NewUISystem.cpp:590-609) and back to `640-190` on close (974).
     /// Everything is computed at `POS` and shifted when reading the mouse and drawing.
     pub dx: f32,
+    /// The vault's grid while it is open (vault.rs).
+    pub vault: VaultGrid,
 }
 
 impl Inventory {
@@ -257,28 +350,29 @@ impl Inventory {
 
     /// The item occupying the cell (`m_pdwItemCheckBox`).
     fn owner(&self, data: &ItemData, x: usize, y: usize) -> Option<usize> {
-        self.grid.iter().position(|g| {
-            let (w, h) = Self::size(data, &g.item);
-            (g.x as usize..g.x as usize + w as usize).contains(&x) && (g.y as usize..g.y as usize + h as usize).contains(&y)
-        })
+        owner_in(&self.grid, data, x, y)
     }
 
-    /// `CheckSlot`: whether a `w`×`h` item fits at (x, y). (The original counts consecutive cells and,
-    /// past the right edge, wraps to the next row; the server rejects that. Here it must stay inside.)
+    /// `CheckSlot` in the inventory grid (see [`fits_in`]).
     fn fits(&self, data: &ItemData, x: i32, y: i32, w: u8, h: u8) -> bool {
-        if x < 0 || y < 0 || x as usize + w as usize > COLUMNS || y as usize + h as usize > ROWS {
-            return false;
-        }
-        (0..h as usize).all(|dy| (0..w as usize).all(|dx| self.owner(data, x as usize + dx, y as usize + dy).is_none()))
+        fits_in(&self.grid, data, COLUMNS, ROWS, x, y, w, h)
     }
 
     /// `FindEmptySlot`: the first cell (row by row) where it fits.
     pub fn find_empty(&self, data: &ItemData, item: &Item) -> Option<(u8, u8)> {
         let (w, h) = Self::size(data, item);
-        (0..ROWS as i32)
-            .flat_map(|y| (0..COLUMNS as i32).map(move |x| (x, y)))
-            .find(|&(x, y)| self.fits(data, x, y, w, h))
-            .map(|(x, y)| (x as u8, y as u8))
+        find_empty_in(&self.grid, data, COLUMNS, ROWS, w, h)
+    }
+
+    /// `EquipmentItem`: a move was sent and its answer has not arrived yet.
+    pub(crate) fn busy(&self) -> bool {
+        self.pending
+    }
+
+    /// The inventory grid item under the mouse (640×480 screen): `FindItemAtPt` (index into `grid`).
+    pub(crate) fn grid_item_at(&self, data: &ItemData, c: Vec2) -> Option<usize> {
+        let s = square_at(self.local(c))?;
+        self.owner(data, s % COLUMNS, s / COLUMNS)
     }
 
     /// Puts the item in the first free cell (for the test inventory).
@@ -350,20 +444,46 @@ impl Inventory {
         match msg {
             ServerMessage::InventoryList(list) => self.set_items(list),
             ServerMessage::ItemMoved { storage: to, slot, item } => {
-                // `DeletePickedItem` and then `EquipItem` / `InsertItem` at the server's slot.
+                // `ReceiveEquipmentItem` (WSclient.cpp:5735-5764): `DeletePickedItem` and then
+                // `EquipItem` / `InsertItem` at the server's slot.
                 self.pending = false;
                 self.picked = None;
                 self.event = CtrlEvent::None;
-                if *to == storage::INVENTORY
-                    && let Some(item) = Item::from_bytes(item)
-                {
-                    self.place(*slot, item);
+                let item = Item::from_bytes(item);
+                match *to {
+                    storage::INVENTORY => {
+                        // A right click from the vault: the item leaves the vault grid
+                        // (`ProcessStorageItemAutoMoveSuccess`, only for a grid slot).
+                        if grid_cell(*slot).is_some()
+                            && let Some(Source::Vault { x, y }) = self.vault.auto_move
+                        {
+                            self.vault.auto_move = None;
+                            self.vault.items.retain(|g| (g.x, g.y) != (x, y));
+                        }
+                        if let Some(item) = item {
+                            self.place(*slot, item);
+                        }
+                    }
+                    // `ProcessToReceiveStorageItems` (NewUIStorageInventory.cpp:598-616): an item
+                    // moved by a right click leaves the inventory grid, then the vault shows it.
+                    storage::VAULT if (*slot as usize) < VAULT_COLUMNS * VAULT_ROWS => {
+                        if let Some(Source::Grid { x, y }) = self.vault.auto_move.take() {
+                            self.grid.retain(|g| (g.x, g.y) != (x, y));
+                            self.tooltip = None;
+                        }
+                        if let Some(item) = item {
+                            self.vault.insert(*slot, item);
+                        }
+                    }
+                    _ => {}
                 }
                 return Some("SOUND_GET_ITEM01");
             }
             ServerMessage::ItemMoveFailed => {
+                // `BackupPickedItem` and `ProcessStorageItemAutoMoveFailure`.
                 self.pending = false;
                 self.backup_picked();
+                self.vault.auto_move = None;
             }
             ServerMessage::ItemBought { slot, item } => {
                 // `ReceiveBuy` (WSclient.cpp:6003-6030): `InsertItem` for a grid slot and
@@ -402,19 +522,36 @@ impl Inventory {
     /// `SendRequestEquipmentItem(REQUEST_EQUIPMENT_INVENTORY, source, item, REQUEST_EQUIPMENT_INVENTORY,
     /// target)`: asks to move the held item to inventory slot `to`. Ignored while another move is
     /// pending (`if(EquipmentItem ...) return false`).
-    fn request_move(&mut self, net: &mut crate::net::Net, to: u8) {
-        let Some(p) = self.picked else { return };
+    /// The held item goes to `to_storage`/`to_slot` from where it was picked up (its storage and
+    /// slot, see [`source_storage`]).
+    pub(crate) fn request_move_to(&mut self, net: &mut crate::net::Net, to_storage: u8, to_slot: u8) -> bool {
+        let Some(p) = self.picked else { return false };
+        self.send_move(net, source_storage(p.from), source_slot(p.from), p.item, to_storage, to_slot)
+    }
+
+    /// `SendRequestEquipmentItem` (wsclientinline.h:950-954): nothing while another move waits for its
+    /// answer (`EquipmentItem`). Returns whether it was sent.
+    pub(crate) fn send_move(&mut self, net: &mut crate::net::Net, from_storage: u8, from_slot: u8, item: Item, to_storage: u8, to_slot: u8) -> bool {
         if self.pending {
+            return false;
+        }
+        net.send(ClientMessage::ItemMove { from_storage, from_slot, item: item.to_bytes(), to_storage, to_slot });
+        self.pending = true;
+        true
+    }
+
+    /// Dropping the held item on inventory slot `to`: from the vault through
+    /// `CNewUIStorageInventory::SendRequestItemToMyInven` (NewUIStorageInventory.cpp:407-424), which
+    /// asks for the vault pin first when the vault is locked (`needs_pin`).
+    fn request_to_inventory(&mut self, net: &mut crate::net::Net, to: u8, needs_pin: bool) {
+        let Some(p) = self.picked else { return };
+        if matches!(p.from, Source::Vault { .. }) && needs_pin {
+            // TODO: `HidePickedItem` and the `CPasswordKeyPadMsgBoxLayout` keypad; without it this is
+            // the keypad's Cancel (`ShowPickedItem`): the item stays on the mouse.
+            warn!("baúl: está cerrado con clave; falta el teclado numérico para sacar objetos");
             return;
         }
-        net.send(ClientMessage::ItemMove {
-            from_storage: storage::INVENTORY,
-            from_slot: source_slot(p.from),
-            item: p.item.to_bytes(),
-            to_storage: storage::INVENTORY,
-            to_slot: to,
-        });
-        self.pending = true;
+        self.request_move_to(net, storage::INVENTORY, to);
     }
 
     /// `BackupPickedItem`: the held item returns to its place. Not while a move waits for its answer
@@ -430,13 +567,19 @@ impl Inventory {
                 self.equipment[s as usize] = Some(p.item);
                 self.equipment_rev += 1;
             }
+            Source::Vault { x, y } => self.vault.items.push(GridItem { x, y, item: p.item }),
         }
         self.event = CtrlEvent::None;
     }
 
     /// `ClosingProcess` (NewUIMyInventory.cpp:818-823): the held item goes back, `RepairEnable = 0`
-    /// and repair mode off.
+    /// and repair mode off. With the vault open, `Hide(INTERFACE_INVENTORY)` stops first if the vault's
+    /// `ProcessClosing` refuses (a move waiting for its answer, NewUISystem.cpp:1017-1022 and
+    /// NewUIStorageInventory.cpp:273-276): nothing closes.
     fn close(&mut self) {
+        if self.vault.open && self.pending {
+            return;
+        }
         self.backup_picked();
         self.open = false;
         self.tooltip = None;
@@ -556,7 +699,7 @@ fn is_equipable(inv: &Inventory, data: &ItemData, hero: &HeroView, slot_index: u
 }
 
 /// The character viewing the inventory (`Hero->Class` and `CharacterAttribute`).
-fn hero_view(hero: Option<&crate::account::Hero>, info: Option<&crate::account::HeroInfo>) -> HeroView {
+pub(crate) fn hero_view(hero: Option<&crate::account::Hero>, info: Option<&crate::account::HeroInfo>) -> HeroView {
     HeroView {
         class: hero.map_or(1, |h| h.class.index() as u8),
         // Class evolution is not known yet: always the first step.
@@ -689,7 +832,7 @@ fn update_mouse(
     game_ui: Res<crate::options::GameUi>,
     hero: Option<Res<crate::account::Hero>>,
     info: Option<Res<crate::account::HeroInfo>>,
-    (shop, dialog): (Res<crate::shop::NpcShop>, Res<crate::npc::NpcDialog>),
+    (shop, dialog, vault): (Res<crate::shop::NpcShop>, Res<crate::npc::NpcDialog>, Res<crate::vault::Vault>),
     mut inv: ResMut<Inventory>,
     mut sound: ResMut<SoundQueue>,
     mut net: ResMut<crate::net::Net>,
@@ -698,6 +841,7 @@ fn update_mouse(
         return;
     }
     let online = net.connected();
+    let needs_pin = vault.needs_pin();
     let Some(m) = windows.single().ok().and_then(crate::mainframe::cursor_virtual).filter(|_| !game_ui.modal()) else {
         return;
     };
@@ -769,7 +913,7 @@ fn update_mouse(
                     match p.from {
                         // Same slot: put it back (`BackupPickedItem`).
                         Source::Equipment(from) if from as usize == s => inv.backup_picked(),
-                        _ if online => inv.request_move(&mut net, s as u8),
+                        _ if online => inv.request_to_inventory(&mut net, s as u8, needs_pin),
                         // No server (`--inventario-prueba`): what its reply would do.
                         _ => {
                             inv.equipment[s] = Some(p.item);
@@ -814,7 +958,7 @@ fn update_mouse(
                 if p.from == (Source::Grid { x, y }) {
                     inv.backup_picked();
                 } else if online {
-                    inv.request_move(&mut net, grid_slot(x, y));
+                    inv.request_to_inventory(&mut net, grid_slot(x, y), needs_pin);
                 } else {
                     inv.grid.push(GridItem { x, y, item: p.item });
                     inv.picked = None;
@@ -882,7 +1026,7 @@ fn request_views(
     data: Res<ItemData>,
     opts: Res<crate::options::GameOptions>,
     inv: Res<Inventory>,
-    shop: Res<crate::shop::ShopDraw>,
+    (shop, vault): (Res<crate::shop::ShopDraw>, Res<crate::vault::VaultDraw>),
     mut views: ResMut<ItemViews>,
 ) {
     let mut out = Vec::new();
@@ -914,8 +1058,9 @@ fn request_views(
         for v in &mut out {
             v.rect[0] += inv.dx;
         }
-        // The NPC shop's items, already on the screen (shop.rs).
+        // The NPC shop's and the vault's items, already on the screen (shop.rs, vault.rs).
         out.extend(shop.views.iter().copied());
+        out.extend(vault.views.iter().copied());
     }
     if views.views != out {
         views.views = out;
@@ -960,10 +1105,24 @@ pub(crate) enum Tex {
     TableRight,
     /// IMAGE_NPCSHOP_REPAIR_MONEY (NewUINPCShop.cpp:292).
     Money2,
+    /// `CNewUIStorageInventory::LoadImages` (NewUIStorageInventory.cpp:230-242): its top
+    /// (`IMAGE_STORAGE_TOP`, loaded from `newui_item_back01`), the zen box and the buttons.
+    StorageTop,
+    StorageMoney,
+    BtnInsertZen,
+    BtnTakeZen,
+    BtnUnlock,
+    BtnLock,
+    /// `CNewUIMessageBoxMng::LoadImages` (NewUIMessageBox.cpp:447-462) for the vault's message boxes.
+    MsgTop,
+    MsgMiddle,
+    MsgBottom,
+    MsgOk,
+    MsgCancel,
 }
 
 impl Tex {
-    const ALL: [Tex; 30] = [
+    const ALL: [Tex; 41] = [
         Tex::Back,
         Tex::Top,
         Tex::Left,
@@ -994,6 +1153,17 @@ impl Tex {
         Tex::TableLeft,
         Tex::TableRight,
         Tex::Money2,
+        Tex::StorageTop,
+        Tex::StorageMoney,
+        Tex::BtnInsertZen,
+        Tex::BtnTakeZen,
+        Tex::BtnUnlock,
+        Tex::BtnLock,
+        Tex::MsgTop,
+        Tex::MsgMiddle,
+        Tex::MsgBottom,
+        Tex::MsgOk,
+        Tex::MsgCancel,
     ];
 
     /// `CNewUIMyInventory::LoadImages` (NewUIMyInventory.cpp:1153-1177) and
@@ -1032,6 +1202,17 @@ impl Tex {
             Tex::TableLeft => "newui_item_table03(L).tga",
             Tex::TableRight => "newui_item_table03(R).tga",
             Tex::Money2 => "newui_item_money2.tga",
+            Tex::StorageTop => "newui_item_back01.tga",
+            Tex::StorageMoney => "newui_item_money3.tga",
+            Tex::BtnInsertZen => "newui_Bt_money01.tga",
+            Tex::BtnTakeZen => "newui_Bt_money02.tga",
+            Tex::BtnUnlock => "newui_Bt_lock02.tga",
+            Tex::BtnLock => "newui_Bt_lock.tga",
+            Tex::MsgTop => "newui_msgbox_top.tga",
+            Tex::MsgMiddle => "newui_msgbox_middle.tga",
+            Tex::MsgBottom => "newui_msgbox_bottom.tga",
+            Tex::MsgOk => "newui_button_ok.tga",
+            Tex::MsgCancel => "newui_button_cancel.tga",
         }
     }
 }
@@ -1048,6 +1229,8 @@ pub(crate) enum Piece {
     Color { x: f32, y: f32, w: f32, h: f32, rgba: [f32; 4] },
     /// Text with its top-left corner at (x, y); with a width, centered in it.
     Text { x: f32, y: f32, w: Option<f32>, text: String, color: [f32; 3], bold: bool, bg: Option<[f32; 4]> },
+    /// Text ending at `x` (`RT3_WRITE_RIGHT_TO_LEFT`), its top at `y`.
+    TextRight { x: f32, y: f32, text: String, color: [f32; 3], bold: bool },
 }
 
 impl Piece {
@@ -1055,7 +1238,7 @@ impl Piece {
     pub(crate) fn shifted(&self, dx: f32) -> Piece {
         let mut p = self.clone();
         match &mut p {
-            Piece::Image { x, .. } | Piece::Color { x, .. } | Piece::Text { x, .. } => *x += dx,
+            Piece::Image { x, .. } | Piece::Color { x, .. } | Piece::Text { x, .. } | Piece::TextRight { x, .. } => *x += dx,
         }
         p
     }
@@ -1515,6 +1698,17 @@ fn spawn_pieces(p: &mut ChildSpawnerCommands, pieces: &[Piece], textures: &Inven
                     c.spawn(label);
                 });
             }
+            Piece::TextRight { x, y, text, color, bold } => {
+                let mut font = TextFont { font_size: FontSize::Px(FONT), font_smoothing: FontSmoothing::AntiAliased, ..default() };
+                if *bold {
+                    font.weight = FontWeight::BOLD;
+                }
+                // The layers are 640 wide: `right` counts from their right edge.
+                let node = Node { position_type: PositionType::Absolute, right: Val::Px(640.0 - *x), top: Val::Px(*y), ..default() };
+                p.spawn(node).with_children(|c| {
+                    c.spawn((Text::new(text.clone()), font, LineHeight::Px(FONT), TextColor(rgb(*color)), TextLayout::no_wrap()));
+                });
+            }
         }
     }
 }
@@ -1531,7 +1725,7 @@ fn draw(
     metrics: Res<crate::chat::TextMetrics>,
     hero: Option<Res<crate::account::Hero>>,
     info: Option<Res<crate::account::HeroInfo>>,
-    (shop, shop_draw, dialog): (Res<crate::shop::NpcShop>, Res<crate::shop::ShopDraw>, Res<crate::npc::NpcDialog>),
+    (shop, shop_draw, dialog, vault_draw): (Res<crate::shop::NpcShop>, Res<crate::shop::ShopDraw>, Res<crate::npc::NpcDialog>, Res<crate::vault::VaultDraw>),
     mut roots: Query<&mut Visibility, With<InventoryRoot>>,
     mut layers: Query<(Entity, &Layer, Option<&mut ImageNode>, &mut Node)>,
     mut last: Local<(Vec<Piece>, Vec<Piece>, bool)>,
@@ -1554,6 +1748,9 @@ fn draw(
     // tooltips); its pieces are on the screen, the layers are shifted by `dx`.
     back.extend(shop_draw.back.iter().map(|p| p.shifted(-inv.dx)));
     front.extend(shop_draw.front.iter().map(|p| p.shifted(-inv.dx)));
+    // The vault likewise (vault.rs), with its message boxes on top of everything.
+    back.extend(vault_draw.back.iter().map(|p| p.shifted(-inv.dx)));
+    front.extend(vault_draw.front.iter().map(|p| p.shifted(-inv.dx)));
     // Layers are created once (`spawn_root`); the first time they are drawn even if nothing changed.
     let fresh = !last.2;
     for (e, layer, image, mut node) in &mut layers {
