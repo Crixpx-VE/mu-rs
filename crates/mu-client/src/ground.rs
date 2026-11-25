@@ -618,19 +618,20 @@ fn draw_items(
     let size = mu_data::terrain::SIZE;
     for (&id, g) in ground.items.iter_mut() {
         let Some((before, now)) = g.pos else { continue };
-        if g.drawn.as_ref().is_none_or(|d| d.copies.is_empty()) {
-            if let Some(old) = g.drawn.take() {
-                commands.entity(old.root).despawn();
-            }
-            g.drawn = spawn_item(&mut commands, &args.data, id, g, &random, &data, opts.render_level, &mut cache, (&mut meshes, &mut materials, &mut images), world_time);
-        }
-        let Some(d) = g.drawn.as_mut() else { continue };
         let mut p = before.lerp(now, alpha);
         let angle: [f32; 3] = std::array::from_fn(|k| g.angle.0[k] + (g.angle.1[k] - g.angle.0[k]) * alpha);
         // `WD_10HEAVEN` (Icarus, folder 11): they bob.
         if args.world == 11 {
             p.z += 10.0 * ((id as f32 * 1237.0 + world_time) * 0.002).sin();
         }
+        if g.drawn.as_ref().is_none_or(|d| d.copies.is_empty()) {
+            if let Some(old) = g.drawn.take() {
+                commands.entity(old.root).despawn();
+            }
+            let at = (p, angle);
+            g.drawn = spawn_item(&mut commands, &args.data, id, g, at, &random, &data, opts.render_level, &mut cache, (&mut meshes, &mut materials, &mut images), world_time);
+        }
+        let Some(d) = g.drawn.as_mut() else { continue };
         if let Ok(mut tf) = roots.get_mut(d.root) {
             let to_bevy = Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2);
             tf.translation = to_bevy * p / MU_SCALE;
@@ -668,6 +669,7 @@ fn spawn_item(
     data_dir: &Path,
     id: u16,
     g: &GroundItem,
+    (at, angle): (Vec3, [f32; 3]),
     random: &[i32],
     data: &ItemData,
     render_level: u8,
@@ -740,11 +742,11 @@ fn spawn_item(
         }
         None => vec![Vec3::ZERO],
     };
-    let root = commands.spawn((Name::new(format!("Objeto en el suelo {id}")), GroundEntity, Transform::default(), Visibility::default())).id();
+    let root = commands.spawn((Name::new(format!("Objeto en el suelo {id}")), GroundEntity, Transform::from_translation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2) * at / MU_SCALE), Visibility::default())).id();
     let mut copies = Vec::new();
     for offset in offsets {
         let copy = commands
-            .spawn((GroundCopy, crate::objects::mu_transform(offset, Vec3::from_array(g.pose.angle), g.pose.scale), Visibility::default()))
+            .spawn((GroundCopy, crate::objects::mu_transform(offset, Vec3::from_array(angle), g.pose.scale), Visibility::default()))
             .with_children(|c| {
                 for (mesh, mat) in &looks {
                     c.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(mat.clone())));
