@@ -189,7 +189,7 @@ fn select_operate(
     let (Ok(window), Ok((camera, cam_tf))) = (windows.single(), cameras.single()) else { return };
     let in_area = crate::mainframe::cursor_virtual(window).is_some_and(|c| c.y < 429.0);
     // With a character under the mouse `SelectOperate` is not called: the lights stay as they were.
-    if over_ui.0 || !in_area || hovered.any() {
+    if over_ui.0 || !in_area || hovered.any() || hovered.item.is_some() {
         return;
     }
     let Some((origin, dir)) = mouse_ray_mu(window, camera, cam_tf) else { return };

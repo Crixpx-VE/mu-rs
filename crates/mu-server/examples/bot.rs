@@ -3,8 +3,8 @@
 //!   cargo run -p mu-server --example bot -- <account> <password> <character> [connect=127.0.0.1:44405] [seconds=3]
 //!                                           [M destination] [--decir <text>] [--susurrar <name> <text>]
 //!                                           [--esperar <seconds before speaking>]
-//!                                           [--puerta x,y,gate ...] [--accion <AT_*>] [--baul]
-//!                                           [--atacar [--andar x,y]]
+//!                                           [--puerta x,y,gate ...] [--accion <AT_*>] [--baul] [--suelo]
+//!                                           [--atacar [--andar x,y]] [--mover from,to]
 //!
 //! Connect Server → Game Server → login → list → (creates the character if missing) → enters →
 //! walks 3 steps → (with a destination: requests it like the `M` window, waits for `MapChanged` and replies
@@ -345,6 +345,78 @@ fn attack_script(c: &mut Conn, user: &str, (x, y): (u8, u8), walk_to: Option<(u8
     Ok(())
 }
 
+/// `--suelo`: drops and picks up ground items, printing every packet's bytes (to capture OpenMU's
+/// ground item packets): picks up an id that does not exist, drops the first inventory grid item on
+/// tile (0, 0) (not walkable), drops it on its own tile and picks it up, drops it 4 tiles east,
+/// tries to pick it up from there, walks next to it and picks it up again.
+fn ground_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<()> {
+    c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let sent = |m: &ClientMessage| {
+        let hex: Vec<String> = m.encode().iter().map(|b| format!("{b:02X}")).collect();
+        println!("[{user}] -> {} = {m:?}", hex.join(" "));
+    };
+    let step = |c: &mut Conn, m: ClientMessage, secs: f32| -> std::io::Result<Vec<ServerMessage>> {
+        sent(&m);
+        c.send(m)?;
+        c.collect(user, secs)
+    };
+    let first = c.collect(user, 2.0)?;
+    // Not a box or a potion (OpenMU opens a box when it is dropped): a weapon or armor, also an
+    // equipped one (it comes back to the grid and is put on again at the end).
+    let item = first.iter().find_map(|m| match m {
+        ServerMessage::InventoryList(list) => list.iter().find(|(s, b)| *s < 76 && (b[5] >> 4) < 12).copied(),
+        _ => None,
+    });
+    let equipped = item.filter(|(s, _)| *s < 12);
+    step(c, ClientMessage::PickUpItem { id: 0x7FFE }, 1.0)?;
+    let Some((slot, _)) = item else {
+        println!("[{user}] no item in the inventory grid to drop");
+        return Ok(());
+    };
+    // The drop of our item at (tx, ty) among what arrived.
+    let dropped_at = |msgs: &[ServerMessage], tx: u8, ty: u8| {
+        msgs.iter().find_map(|m| match m {
+            ServerMessage::ItemsDropped(list) => list.iter().find(|d| (d.x, d.y) == (tx, ty)).map(|d| d.id),
+            _ => None,
+        })
+    };
+    step(c, ClientMessage::DropItem { x: 0, y: 0, slot }, 1.0)?;
+    let mut got = step(c, ClientMessage::DropItem { x, y, slot }, 1.5)?;
+    if let Some(id) = dropped_at(&got, x, y) {
+        got = step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+    }
+    // Where it went back to (the server picks the slot).
+    let slot = got
+        .iter()
+        .find_map(|m| match m {
+            ServerMessage::ItemPickedUp { slot, .. } => Some(*slot),
+            _ => None,
+        })
+        .unwrap_or(slot);
+    let far = (x.saturating_add(4), y);
+    let got = step(c, ClientMessage::DropItem { x: far.0, y: far.1, slot }, 1.5)?;
+    if let Some(id) = dropped_at(&got, far.0, far.1) {
+        step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+        // Two steps east: then it is 2 tiles away (OpenMU's `MaximumPickupDistance` is 3).
+        let dirs: Vec<u8> = [(x, y), (x + 1, y), (x + 2, y)].windows(2).filter_map(|w| mu_protocol::game::direction_between(w[0], w[1])).collect();
+        step(c, ClientMessage::Walk { source_x: x, source_y: y, rotation: dirs[0], directions: dirs }, 1.5)?;
+        let got = step(c, ClientMessage::PickUpItem { id }, 1.5)?;
+        if let (Some((to, bytes)), Some(from)) = (
+            equipped,
+            got.iter().find_map(|m| match m {
+                ServerMessage::ItemPickedUp { slot, .. } => Some(*slot),
+                _ => None,
+            }),
+        ) {
+            use mu_protocol::game::storage::INVENTORY;
+            step(c, ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: from, item: bytes, to_storage: INVENTORY, to_slot: to }, 1.0)?;
+        }
+    }
+    c.send(ClientMessage::Logout { kind: 0 })?;
+    println!("[{user}] fuera");
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut a: Vec<String> = std::env::args().skip(1).collect();
     // Named options (removed from the positional ones).
@@ -359,6 +431,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut walk_to: Option<(u8, u8)> = None;
     let mut vault = false;
     let mut attack = false;
+    let mut ground = false;
+    let mut move_item: Option<(u8, u8)> = None;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
@@ -387,6 +461,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             "--atacar" => {
                 attack = true;
+                a.remove(i);
+            }
+            "--suelo" => {
+                ground = true;
+                a.remove(i);
+            }
+            "--mover" if i + 1 < a.len() => {
+                let v: Vec<u8> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
+                if let [from, to] = v[..] {
+                    move_item = Some((from, to));
+                }
                 a.remove(i);
             }
             "--puerta" if i + 1 < a.len() => {
@@ -481,6 +566,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if attack {
         return Ok(attack_script(&mut c, user, (info.x, info.y), walk_to)?);
+    }
+    if ground {
+        println!("[{user}] zen {}", info.money);
+        return Ok(ground_script(&mut c, user, (info.x, info.y))?);
+    }
+    if let Some((from, to)) = move_item {
+        // `--mover from,to`: an inventory item to another inventory slot (e.g. back to the equipment).
+        c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+        let list = c.collect(user, 2.0)?;
+        let item = list.iter().find_map(|m| match m {
+            ServerMessage::InventoryList(l) => l.iter().find(|(s, _)| *s == from).map(|(_, b)| *b),
+            _ => None,
+        });
+        if let Some(item) = item {
+            use mu_protocol::game::storage::INVENTORY;
+            c.send(ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: from, item, to_storage: INVENTORY, to_slot: to })?;
+            c.collect(user, 1.5)?;
+        } else {
+            println!("[{user}] nothing in slot {from}");
+        }
+        c.send(ClientMessage::Logout { kind: 0 })?;
+        return Ok(());
     }
     // Arrives right after the information (`ReceiveMoveMapChecksum`).
     // (Not always sent: without it only the `M` destination fails.)

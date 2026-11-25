@@ -337,6 +337,10 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::ItemMove { .. } => s.send(ServerMessage::ItemMoveFailed),
         ClientMessage::BuyItem { .. } => s.send(ServerMessage::BuyFailed { closed: false }),
         ClientMessage::SellItem { .. } => s.send(ServerMessage::SellResult { result: 0, money: 0 }),
+        // No ground items either: a drop is refused (the client puts the item back) and nothing can
+        // be picked up (OpenMU's answer for a drop id that does not exist).
+        ClientMessage::DropItem { slot, .. } => s.send(ServerMessage::ItemDropResult { success: false, slot }),
+        ClientMessage::PickUpItem { .. } => s.send(ServerMessage::ItemPickUpFailed { reason: mu_protocol::game::pick_up::FAILED }),
         ClientMessage::TalkToNpc { .. }
         | ClientMessage::CloseNpc
         | ClientMessage::CloseVault

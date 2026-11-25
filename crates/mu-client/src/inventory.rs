@@ -17,8 +17,8 @@
 //!   `BackupPickedItem` does nothing meanwhile): `ItemMoved` puts it where the server says,
 //!   `ItemMoveFailed` sends it back (`ReceiveEquipmentItem`, WSclient.cpp:5693-5797). The server is the
 //!   only authority over items (AGENTS.md); only without a connection (`--inventario-prueba`) are moves
-//!   applied locally. Items are not dropped on the ground yet: with one held, a click in the game does
-//!   nothing.
+//!   applied locally. With an item held, a click in the game asks to drop it there (ground.rs); it
+//!   leaves the mouse when the server says so (`ReceiveDropItem`).
 //! - **Contents**: the server sends the whole inventory after entering the world (`ReceiveInventory`,
 //!   C4 F3 10, WSclient.cpp:1270-1320), removes items (`ReceiveDeleteInventory`, 0x28) and changes
 //!   durability or stack size (`ReceiveDurability`, 0x2A). `--inventario-prueba` sets up a test
@@ -63,6 +63,7 @@ impl Plugin for InventoryPlugin {
                 (crate::scene::despawn::<InventoryRoot>, |mut inv: ResMut<Inventory>| {
                     // No answer will come for a pending move: the server keeps the item in its slot.
                     inv.pending = false;
+                    inv.drop_pending = None;
                     inv.close();
                 }),
             )
@@ -318,6 +319,8 @@ pub struct Inventory {
     pub equipment_rev: u32,
     /// `EquipmentItem`: a move was sent and its answer has not arrived yet.
     pending: bool,
+    /// `SendDropItem`: the slot whose drop on the ground (ground.rs) waits for `ReceiveDropItem`.
+    pub(crate) drop_pending: Option<u8>,
     event: CtrlEvent,
     /// `m_iPointedSquareIndex` and `m_iPointedSlot`.
     pointed_square: Option<usize>,
@@ -393,6 +396,7 @@ impl Inventory {
         self.equipment = [None; slot::COUNT];
         self.picked = None;
         self.pending = false;
+        self.drop_pending = None;
         self.event = CtrlEvent::None;
         self.tooltip = None;
         for (s, bytes) in list {
@@ -509,6 +513,32 @@ impl Inventory {
                 }
             },
             ServerMessage::ItemRemoved { slot } => self.remove(*slot),
+            ServerMessage::ItemDropResult { success, slot } => {
+                // `ReceiveDropItem` (WSclient.cpp:5663-5685): dropped, `UnequipItem` / `DeleteItem` of
+                // the slot (it is there if the item went back meanwhile, e.g. the window closed) and
+                // `DeletePickedItem`; refused, `BackupPickedItem`. `SendDropItem = -1` either way.
+                self.drop_pending = None;
+                if *success {
+                    self.remove(*slot);
+                    // Only the dropped item (the original deletes whatever is held, even another one
+                    // picked up after this one went back).
+                    if self.picked.is_some_and(|p| source_storage(p.from) == storage::INVENTORY && source_slot(p.from) == *slot) {
+                        self.picked = None;
+                        self.event = CtrlEvent::None;
+                    }
+                } else if self.picked.is_some_and(|p| source_storage(p.from) == storage::INVENTORY && source_slot(p.from) == *slot) {
+                    self.backup_picked();
+                }
+            }
+            // `ReceiveGetItem` (WSclient.cpp:5629-5633): a picked up item goes into its grid slot
+            // (`InsertItem`); the message and the sound are ground.rs'.
+            ServerMessage::ItemPickedUp { slot, item } => {
+                if grid_cell(*slot).is_some()
+                    && let Some(item) = Item::from_bytes(item)
+                {
+                    self.place(*slot, item);
+                }
+            }
             ServerMessage::ItemDurability { slot, durability, .. } => {
                 if let Some(item) = self.item_in(*slot) {
                     item.durability = *durability;
@@ -532,7 +562,9 @@ impl Inventory {
     /// `SendRequestEquipmentItem` (wsclientinline.h:950-954): nothing while another move waits for its
     /// answer (`EquipmentItem`). Returns whether it was sent.
     pub(crate) fn send_move(&mut self, net: &mut crate::net::Net, from_storage: u8, from_slot: u8, item: Item, to_storage: u8, to_slot: u8) -> bool {
-        if self.pending {
+        // Also not while the held item's drop on the ground waits for its answer: the original allows
+        // it (`SendDropItem` is not checked), but then both answers would act on the same item.
+        if self.pending || self.drop_pending.is_some() {
             return false;
         }
         net.send(ClientMessage::ItemMove { from_storage, from_slot, item: item.to_bytes(), to_storage, to_slot });
@@ -1921,5 +1953,56 @@ mod tests {
         assert!(inv.grid.is_empty());
         inv.apply(&ServerMessage::ItemRemoved { slot: 2 });
         assert_eq!(inv.equipment[2], None);
+    }
+
+    /// A drop on the ground (ground.rs) waits for `ReceiveDropItem`: accepted, the held item is gone;
+    /// refused, it goes back; meanwhile it cannot be moved.
+    #[test]
+    fn drop_waits_for_the_server() {
+        let mut inv = Inventory { open: true, ..Default::default() };
+        let mut net = crate::net::Net::offline();
+        inv.picked = Some(Picked { item: kris(5), from: Source::Grid { x: 3, y: 2 } });
+        inv.drop_pending = Some(31);
+        assert!(!inv.send_move(&mut net, storage::INVENTORY, 31, kris(5), storage::INVENTORY, 12), "no move while the drop waits");
+        // Refused: back to its cell.
+        inv.apply(&ServerMessage::ItemDropResult { success: false, slot: 31 });
+        assert_eq!((inv.picked, inv.drop_pending), (None, None));
+        assert_eq!(inv.grid, vec![GridItem { x: 3, y: 2, item: kris(5) }]);
+
+        // Accepted: gone from the mouse and from the inventory.
+        let g = inv.grid.remove(0);
+        inv.picked = Some(Picked { item: g.item, from: Source::Grid { x: g.x, y: g.y } });
+        inv.drop_pending = Some(31);
+        inv.apply(&ServerMessage::ItemDropResult { success: true, slot: 31 });
+        assert_eq!((inv.picked, inv.drop_pending), (None, None));
+        assert!(inv.grid.is_empty());
+
+        // The window closed while it waited (`BackupPickedItem`): the answer removes it from its cell.
+        inv.grid.push(GridItem { x: 3, y: 2, item: kris(5) });
+        inv.drop_pending = Some(31);
+        inv.apply(&ServerMessage::ItemDropResult { success: true, slot: 31 });
+        assert!(inv.grid.is_empty());
+
+        // An equipped item: the slot is already empty since it was picked up.
+        inv.picked = Some(Picked { item: kris(5), from: Source::Equipment(0) });
+        inv.drop_pending = Some(0);
+        inv.apply(&ServerMessage::ItemDropResult { success: true, slot: 0 });
+        assert_eq!((inv.picked, inv.equipment[0]), (None, None));
+
+        // Another item held after the dropped one went back stays on the mouse.
+        inv.picked = Some(Picked { item: kris(1), from: Source::Grid { x: 0, y: 0 } });
+        inv.apply(&ServerMessage::ItemDropResult { success: true, slot: 31 });
+        assert!(inv.picked.is_some());
+    }
+
+    /// `ReceiveGetItem` with a slot: `InsertItem` (WSclient.cpp:5629-5633).
+    #[test]
+    fn picked_up_into_the_grid() {
+        let mut inv = Inventory::default();
+        inv.apply(&ServerMessage::ItemPickedUp { slot: 14, item: kris(2).to_bytes() });
+        assert_eq!(inv.grid, vec![GridItem { x: 2, y: 0, item: kris(2) }]);
+        // Equipment slots are not filled by a pick-up.
+        inv.apply(&ServerMessage::ItemPickedUp { slot: 0, item: kris(2).to_bytes() });
+        assert_eq!(inv.equipment[0], None);
     }
 }

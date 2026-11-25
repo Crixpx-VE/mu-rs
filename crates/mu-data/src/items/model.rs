@@ -682,6 +682,367 @@ pub fn item_object_meshes(item: &Item) -> (i32, i32) {
     (blend, hidden)
 }
 
+// --- On the ground --------------------------------------------------------------------------------
+
+/// The model a ground item draws (`o->Type` after `CreateItem`, ZzzObject.cpp:6141-6290): its own,
+/// another item's, or one of the `MODEL_EVENT` models.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroundModel {
+    /// `MODEL_ITEM + kind`.
+    Item(usize),
+    /// `MODEL_EVENT + n`.
+    Event(u8),
+}
+
+/// `CreateItem`'s `o->Type` remaps (ZzzObject.cpp:6141-6290) and the level the item keeps (the
+/// event rings `ITEM_HELPER+19` become the weapon they stand for with `n->Level = 0`).
+pub fn ground_model(item: &Item) -> (GroundModel, u8) {
+    let t = item.kind();
+    let level = item.level;
+    let p = |i| kind(POTION, i);
+    let h = |i| kind(HELPER, i);
+    let own = (GroundModel::Item(t), level);
+    let event = |n| (GroundModel::Event(n), level);
+    // The first `if` (6141-6177), on its own.
+    if t == p(11) {
+        let e = match level {
+            1 => Some(4),
+            2 | 14 | 15 => Some(5),
+            3 | 13 => Some(6),
+            5 => Some(8),
+            6 => Some(9),
+            8..=12 => Some(10),
+            _ => None,
+        };
+        return e.map_or(own, event);
+    }
+    // `ITEM_POTION+46..=48` (6178-6181) keep `MODEL_ITEM + Type`, which is their own model.
+    if (p(32)..=p(34)).contains(&t) {
+        return if level == 1 { event(21 + (t - p(32)) as u8) } else { own };
+    }
+    match t {
+        _ if t == p(21) && (level == 1 || level == 2) => event(11),
+        _ if t == h(19) => match level {
+            0 => (GroundModel::Item(kind(STAFF, 10)), 0),
+            1 => (GroundModel::Item(kind(SWORD, 19)), 0),
+            2 => (GroundModel::Item(kind(BOW, 18)), 0),
+            _ => own,
+        },
+        _ if t == p(23) && level == 1 => event(12),
+        _ if t == p(24) && level == 1 => event(13),
+        _ if t == h(20) => match level {
+            0 => event(15),
+            1..=3 => event(14),
+            _ => own,
+        },
+        _ if t == p(9) && level == 1 => event(7),
+        _ if t == h(14) && level == 1 => event(16),
+        _ if t == h(11) && level == 1 => event(18),
+        _ => own,
+    }
+}
+
+/// `AccessModel` of the `MODEL_EVENT` models a ground item can draw (ZzzOpenData.cpp:1005-1121).
+/// `MODEL_EVENT+11` and `+18` are not loaded there (`None`).
+pub fn event_model_file(n: u8) -> Option<ModelFile> {
+    match n {
+        0 => item("Event", 2),
+        1 => item("Event", 3),
+        4 => item("MagicBox", 2),
+        5 => item("MagicBox", 3),
+        6 => item("MagicBox", 5),
+        7 => item("Beer", 2),
+        8 => item("MagicBox", 6),
+        9 => item("MagicBox", 7),
+        10 => item("MagicBox", 8),
+        12 => item("QuestItem3RD", 0),
+        13 => item("QuestItem3RD", 1),
+        14 => item("RingOfLordEvent", 0),
+        15 => item("MagicRing", 0),
+        16 => item("DarkLordSleeve", -1),
+        21 => item("p03box", -1),
+        22 => item("obox02", -1),
+        23 => item("blue01", -1),
+        _ => None,
+    }
+}
+
+/// How a ground item lies: `o->Angle` (degrees, `AngleMatrix`) and `o->Scale` from
+/// `ItemObjectAttribute` and `ItemAngle` (ZzzObject.cpp:5286-5435 and 5437-6109), and the
+/// `player.bmd` pose of armor (`RenderItems`, 6389-6411: `MODEL_PLAYER` with `ItemHeight`'s
+/// `BodyHeight`, 6370-6386).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GroundPose {
+    pub angle: [f32; 3],
+    pub scale: f32,
+    pub body_height: f32,
+    pub player_skeleton: bool,
+}
+
+/// `ItemObjectAttribute`'s `o->Scale` (ZzzObject.cpp:5309-5311 and the `case`s that set it).
+fn attribute_scale(m: GroundModel) -> f32 {
+    let GroundModel::Item(t) = m else { return 0.8 };
+    if t == kind(ETC, 0) || (kind(SPEAR, 0)..=kind(STAFF, 13)).contains(&t) {
+        0.7
+    } else if t == kind(POTION, 1) {
+        1.0
+    } else if t == kind(POTION, 21) || t == kind(WING, 3) {
+        0.5
+    } else {
+        0.8
+    }
+}
+
+/// `ItemAngle` (ZzzObject.cpp:5437-6109): `(angle, scale)` from `Angle = (0, 0, -45)` and the
+/// attribute's scale. `Check_LuckyItem` is active (`LEM_ADD_LUCKYITEM`); the Rage Fighter's items
+/// (`PBG_ADD_NEWCHAR_MONK_ITEM`) are not.
+fn item_angle(m: GroundModel, scale: f32) -> ([f32; 3], f32) {
+    let mut a = [0.0, 0.0, -45.0];
+    let mut s = scale;
+    let mut set = |a0: Option<f32>, a1: Option<f32>, a2: Option<f32>, sc: Option<f32>| {
+        if let Some(v) = a0 {
+            a[0] = v;
+        }
+        if let Some(v) = a1 {
+            a[1] = v;
+        }
+        if let Some(v) = a2 {
+            a[2] = v;
+        }
+        if let Some(v) = sc {
+            s = v;
+        }
+    };
+    let (n, y) = (None, Some);
+    let t = match m {
+        GroundModel::Event(e) => {
+            match e {
+                21..=23 => set(y(0.0), n, y(90.0), y(0.7)),
+                4 | 5 => set(y(90.0), n, n, n),
+                8 | 9 => set(y(270.0), n, y(45.0), n),
+                10 => set(n, n, n, y(0.2)),
+                11 => set(y(115.0), y(75.0), y(8.0), y(0.4)),
+                16 => set(n, n, y(45.0), y(0.5)),
+                12 => set(y(160.0), y(-183.0), y(198.0), y(0.38)),
+                13 => set(y(160.0), y(-183.0), y(198.0), y(0.54)),
+                7 => set(n, n, y(45.0), n),
+                _ => set(y(0.0), n, n, n),
+            }
+            return (a, s);
+        }
+        GroundModel::Item(t) => t,
+    };
+    let g = (t / super::MAX_ITEM_INDEX) as u8;
+    let i = (t % super::MAX_ITEM_INDEX) as u16;
+    let (p, h) = (|x| kind(POTION, x), |x| kind(HELPER, x));
+    let pi = |a: u16, b: u16| g == POTION && (a..=b).contains(&i);
+    let hi = |a: u16, b: u16| g == HELPER && (a..=b).contains(&i);
+    let wi = |a: u16, b: u16| g == WING && (a..=b).contains(&i);
+    let r90 = (y(0.0), n, y(90.0));
+    if g <= AXE {
+        set(y(60.0), n, n, (t == kind(SWORD, 19)).then_some(0.7));
+    } else if g == BOW && (20..=22).contains(&i) {
+        set(y(0.0), y(0.0), n, n);
+    } else if g == BOW && ((8..17).contains(&i) || (18..20).contains(&i)) {
+        set(y(90.0), y(0.0), n, n);
+    } else if (MACE..=STAFF).contains(&g) {
+        set(y(0.0), y(270.0), n, n);
+    } else if g == SHIELD {
+        set(n, y(270.0), y(270.0 - 45.0), n);
+    } else if g == HELM && (39..=44).contains(&i) {
+        set(n, n, y(45.0), y(1.5));
+    } else if (ARMOR..=GLOVES).contains(&g) {
+        set(y(270.0), n, n, n);
+    } else if wi(32, 34) {
+        set(r90.0, r90.1, r90.2, y(0.3));
+    } else if wi(60, 65) || wi(70, 74) || wi(100, 129) {
+        set(y(0.0), n, n, y(0.6));
+    } else if t == p(45) || t == p(49) {
+        set(r90.0, r90.1, r90.2, y(0.9));
+    } else if pi(46, 48) {
+        set(y(90.0), n, n, y(0.7));
+    } else if t == p(50) {
+        set(r90.0, r90.1, r90.2, y(0.26));
+    } else if pi(32, 34) {
+        set(r90.0, r90.1, r90.2, y(0.7));
+    } else if hi(46, 48) || t == p(54) {
+        set(y(90.0), n, n, y(0.5));
+    } else if t == p(58) {
+        set(n, n, y(90.0), y(0.3));
+    } else if t == p(59) || t == p(60) {
+        set(y(90.0), y(90.0), n, y(0.3));
+    } else if t == p(61) || t == p(62) {
+        set(y(90.0), n, n, y(0.3));
+    } else if t == p(53) {
+        set(n, n, y(90.0), y(0.2));
+    } else if hi(43, 45) {
+        set(y(90.0), n, n, y(0.5));
+    } else if pi(70, 71) {
+        set(n, n, y(90.0), y(0.6));
+    } else if pi(72, 77) {
+        set(n, n, y(90.0), y(0.5));
+    } else if t == h(59) {
+        set(n, n, y(90.0), y(0.2));
+    } else if hi(54, 58) {
+        set(n, n, y(90.0), y(0.7));
+    } else if pi(78, 82) {
+        set(n, n, y(90.0), y(0.5));
+    } else if t == h(60) {
+        set(n, n, y(90.0), y(1.5));
+    } else if t == h(61) {
+        set(y(90.0), n, n, y(0.5));
+    } else if t == p(83) || pi(145, 150) {
+        set(y(90.0), n, n, y(0.3));
+    } else if hi(125, 127) || [p(91), p(92), p(93), p(95)].contains(&t) {
+        set(y(90.0), n, n, y(0.5));
+    } else if t == p(94) {
+        set(n, n, y(90.0), y(0.6));
+    } else if t == p(84) {
+        set(n, n, y(90.0), y(0.8));
+    } else if t == p(85) {
+        set(n, n, y(90.0), y(0.9));
+    } else if t == p(86) {
+        set(n, n, y(90.0), y(0.7));
+    } else if t == p(87) {
+        set(n, n, y(90.0), y(1.3));
+    } else if t == p(88) {
+        set(y(180.0), y(180.0), n, y(0.7));
+    } else if t == p(89) || t == p(90) {
+        set(y(30.0), n, y(90.0), y(0.7));
+    } else if hi(62, 63) {
+        set(y(90.0), n, n, y(0.5));
+    } else if pi(97, 98) || t == p(140) {
+        set(n, n, y(90.0), y(0.5));
+    } else if t == p(96) {
+        set(n, n, y(90.0), y(0.2));
+    } else if hi(64, 65) {
+        set(n, n, y(70.0), y(if t == h(64) { 0.21 } else { 0.5 }));
+    } else if t == h(49) {
+        set(y(90.0), y(0.0), n, y(0.3));
+    } else if t == h(50) {
+        set(y(0.0), n, n, y(0.6));
+    } else if t == h(51) {
+        set(y(90.0), n, n, y(0.45));
+    } else if t == p(64) {
+        set(y(0.0), n, n, y(0.8));
+    } else if t == h(52) || t == h(53) {
+        set(y(0.0), n, n, y(1.2));
+    } else if t == p(65) {
+        set(y(90.0), n, n, y(0.6));
+    } else if t == p(66) {
+        set(y(90.0), n, n, y(0.8));
+    } else if t == p(67) {
+        set(y(270.0), n, n, y(0.8));
+    } else if t == p(68) {
+        set(n, n, y(-135.0), y(0.6));
+    } else if t == p(23) {
+        set(n, y(45.0), y(45.0), n);
+    } else if t == p(24) || pi(25, 26) || t == h(14) || t == p(20) {
+        set(n, n, y(45.0), n);
+    } else if t == p(17) {
+        set(y(90.0), n, n, n);
+    } else if t == p(63) {
+        set(y(70.0), n, n, y(1.5));
+    } else if t == p(99) {
+        set(y(70.0), n, y(0.0), y(1.0));
+    } else if t == p(52) {
+        set(n, n, y(-10.0), y(0.4));
+    } else if t == p(18) {
+        set(y(270.0), n, y(270.0), n);
+    } else if t == p(19) || t == p(21) {
+        set(y(270.0), n, y(90.0), n);
+    } else if t == p(29) {
+        set(y(90.0), n, y(70.0), n);
+    } else if hi(16, 17) {
+        set(y(-45.0), y(-5.0), y(18.0), y(0.48));
+    } else if t == h(18) {
+        set(y(165.0), y(-168.0), y(198.0), y(0.48));
+    } else if t == h(30) {
+        set(y(-45.0), y(0.0), y(45.0), y(0.5));
+    } else if hi(21, 24) {
+        set(n, n, y(20.0), n);
+    } else if t == h(33) {
+        set(n, n, y(45.0), y(1.2));
+    } else if t == h(34) {
+        set(y(90.0), n, n, n);
+    } else if t == h(35) {
+        set(n, n, y(90.0), n);
+    } else if t == h(36) {
+        set(n, n, y(90.0), y(1.3));
+    } else if t == h(37) {
+        set(n, n, y(180.0), n);
+    } else if t == p(16) {
+        set(y(270.0), n, y(90.0 - 45.0), n);
+    } else if t == p(42) {
+        set(y(270.0), n, y(-15.0), y(1.3));
+    } else if t == p(43) || t == p(44) {
+        set(y(270.0), n, y(-15.0), y(1.0));
+    } else if g == ETC && (19..=27).contains(&i) {
+        set(y(270.0), n, n, y(0.8));
+    } else if t == h(66) || [h(97), h(98), h(99), p(110), p(111), h(107), h(104), h(105), p(133), p(112), p(113)].contains(&t) || hi(109, 115) {
+        set(y(270.0), n, n, y(1.0));
+    } else if t == p(100) {
+        set(y(180.0), n, n, y(1.0));
+    } else if hi(83, 93) {
+        // `MODEL_TYPE_CHARM_MIXWING + EWS_BEGIN..EWS_END`.
+        set(n, n, y(90.0), y(0.5));
+    } else if t == h(103) {
+        set(y(0.0), n, n, y(1.0));
+    } else if t == h(116) || t == h(121) {
+        set(y(90.0), n, n, y(0.5));
+    } else if t == h(123) {
+        set(y(30.0), n, n, y(0.4));
+    } else if g == WING {
+        set(y(270.0), n, y(90.0 - 45.0), n);
+    } else if hi(135, 145) || pi(160, 161) {
+        set(y(90.0), n, n, y(0.2));
+    } else if (g == HELM || g == BOOTS) && (62..=72).contains(&i) {
+        // `Check_LuckyItem` (ZzzInventory.cpp:8284-8292): `ITEM_HELM..=ITEM_WING` with index 62-72
+        // (the armor, pants and gloves were caught above).
+        set(y(250.0), y(180.0), y(45.0), n);
+    } else {
+        set(y(0.0), n, n, n);
+    }
+    (a, s)
+}
+
+/// How `item` lies on the ground once it has landed.
+pub fn ground_pose(item: &Item) -> GroundPose {
+    let (m, _) = ground_model(item);
+    let (angle, scale) = item_angle(m, attribute_scale(m));
+    let (player_skeleton, body_height) = match m {
+        GroundModel::Item(t) => {
+            let g = (t / super::MAX_ITEM_INDEX) as u8;
+            // `ItemHeight` (ZzzObject.cpp:6370-6386).
+            let bh = match g {
+                HELM => -160.0,
+                ARMOR => -100.0,
+                GLOVES => -70.0,
+                PANTS => -50.0,
+                _ => 0.0,
+            };
+            ((HELM..=BOOTS).contains(&g), bh)
+        }
+        GroundModel::Event(_) => (false, 0.0),
+    };
+    GroundPose { angle, scale, body_height, player_skeleton }
+}
+
+/// `MoveItems` (ZzzObject.cpp:6344-6368): the height above the terrain where an item stops falling
+/// (30, and 40 more for weapons `MODEL_SWORD..MODEL_STAFF+MAX_ITEM_INDEX`).
+pub fn ground_lift(item: &Item) -> f32 {
+    match ground_model(item).0 {
+        GroundModel::Item(t) if t < kind(SHIELD, 0) => 70.0,
+        _ => 30.0,
+    }
+}
+
+/// While falling, `MoveItems` turns shields around `Angle[1]` and everything else around
+/// `Angle[0]` by `-Gravity · 10`.
+pub fn falls_on_second_axis(item: &Item) -> bool {
+    matches!(ground_model(item).0, GroundModel::Item(t) if (kind(SHIELD, 0)..kind(HELM, 0)).contains(&t))
+}
+
 /// How `item` is drawn in an inventory slot (`two_hand` = `ItemAttribute.TwoHand`).
 pub fn screen_pose(item: &Item, two_hand: bool) -> ScreenPose {
     let anchor = anchor(item);

@@ -315,6 +315,8 @@ pub struct Player {
     pub operate: Option<usize>,
     /// `MOVEMENT_TALK` with `TargetNpc`: heading to the NPC with this scope key (npc.rs).
     pub talk: Option<u16>,
+    /// `MOVEMENT_GET` with `ItemKey`: heading to the ground item with this key (ground.rs).
+    pub get: Option<u16>,
     pub class: crate::account::Class,
     /// Stand and walk animations: of its class and gear where it stands (`SetPlayerStop` /
     /// `SetPlayerWalk`, updated every frame by `walk`).
@@ -383,6 +385,7 @@ fn server_moves(
             p.path.clear();
             p.operate = None;
             p.talk = None;
+            p.get = None;
         }
     }
 }
@@ -904,6 +907,7 @@ fn spawn_player(
         casting: None,
         operate: None,
         talk: None,
+        get: None,
         class,
         stop,
         walk,
@@ -1284,6 +1288,7 @@ fn hero_input(
     gate: Res<crate::gate::GateState>,
     mut npc: crate::npc::NpcTalk,
     mut attack: crate::combat::AttackInput,
+    mut ground: crate::ground::GroundClick,
 ) {
     use mu_data::terrain::attr;
     let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
@@ -1328,6 +1333,7 @@ fn hero_input(
                 if (wall == attr::HEIGHT || wall < attr::CHARACTER) && !moving {
                     player.operate = Some(i);
                     player.talk = None;
+                    player.get = None;
                     match hero_path(&t.0, here, (tx as usize, ty as usize)) {
                         Some(p) => send_move(&mut player, p, &mut timer, &mut net, &mut npc),
                         None => operate_action(&mut player, op, &mut sound, &mut net),
@@ -1357,6 +1363,7 @@ fn hero_input(
                 // (`MODEL_KANTURU2ND_ENTER_NPC`, 7543-7563).
                 // (`Action` sets `TargetNpc = -1`, 3584: a talk done now leaves nothing pending.)
                 player.operate = None;
+                player.get = None;
                 match npc.path_to(&t.0, here, tile) {
                     Some(p) => {
                         player.talk = Some(key);
@@ -1367,6 +1374,21 @@ fn hero_input(
                         npc.act(key);
                     }
                 }
+            } else if let Some((id, tile)) = ground.clicked_item() {
+                // `SelectedItem` (ZzzInterface.cpp:7572-7584): `MOVEMENT_GET` with `ItemKey`, walking to
+                // the item's tile, or `Action(c, o, true)` at once if there is no path (ground.rs).
+                player.operate = None;
+                player.talk = None;
+                match hero_path(&t.0, here, tile) {
+                    Some(p) => {
+                        player.get = Some(id);
+                        send_move(&mut player, p, &mut timer, &mut net, &mut npc);
+                    }
+                    None => {
+                        player.get = None;
+                        ground.act(id);
+                    }
+                }
             } else if let Some(hit) = ray.and_then(|r| raycast_terrain(&t.0, r)) {
                 let to = (hit.x.max(0.0) as usize, hit.y.max(0.0) as usize);
                 let a = t.0.attribute(to.0, to.1);
@@ -1374,6 +1396,7 @@ fn hero_input(
                 if let Some(p) = (here != to || !moving).then(|| hero_path(&t.0, here, to)).flatten() {
                     player.operate = None;
                     player.talk = None;
+                    player.get = None;
                     send_move(&mut player, p, &mut timer, &mut net, &mut npc);
                 }
             }
@@ -1475,6 +1498,7 @@ fn walk(
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut net: ResMut<crate::net::Net>,
     mut talk: ResMut<crate::npc::TalkRequest>,
+    mut get: ResMut<crate::ground::GetRequest>,
     mut commands: Commands,
     mut q: Query<(Entity, &mut Player, &mut Transform, Option<&mut Jump>)>,
 ) {
@@ -1528,6 +1552,10 @@ fn walk(
             // arrows only stops (`!CheckArrow()`, 7292-7293); equipment is not checked here yet.
             if let Some(key) = p.talk.take() {
                 talk.0 = Some(key);
+            }
+            // `MOVEMENT_GET` (3368-3394, ground.rs).
+            if let Some(id) = p.get.take() {
+                get.0 = Some((id, false));
             }
         }
         *tf = player_transform(&p, terrain.as_deref());

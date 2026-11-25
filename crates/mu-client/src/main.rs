@@ -42,6 +42,7 @@ mod fonts;
 mod fx;
 mod gate;
 mod grass;
+mod ground;
 mod hero_dress;
 mod hud;
 mod invasion;
@@ -296,5 +297,6 @@ fn main() {
         .add_plugins(vault::VaultPlugin)
         .add_plugins(skills::SkillsPlugin)
         .add_plugins(combat::CombatPlugin)
+        .add_plugins(ground::GroundPlugin)
         .run();
 }

@@ -605,6 +605,28 @@ pub fn is_store_ban(item: &Item) -> bool {
         || [HELM, ARMOR, PANTS, GLOVES, BOOTS].iter().any(|&g| (k(g, 62)..=k(g, 73)).contains(&t))
 }
 
+/// `IsDropBan` (ZzzInventory.cpp:8312-8361) without period items (`bPeriodItem`, not kept by
+/// [`Item`]): these cannot be dropped on the ground. `Check_ItemAction(item, eITEM_DROP)` bans both
+/// rows of `Set_ItemActOption` (the drop column is 0 in both, 8236-8238, and the default `_bType`
+/// false turns it into `true`): the lucky tickets and the lucky armor.
+pub fn is_drop_ban(item: &Item) -> bool {
+    let t = item.kind();
+    let (p, h) = (|i| k(POTION, i), |i| k(HELPER, i));
+    // Not period items (8314-8325): never banned.
+    if [p(96), p(54), h(64), h(65), h(80), h(76), h(122), h(123)].contains(&t) || (t == h(20) && item.level == 0) {
+        return false;
+    }
+    if t == p(123) || t == p(124) {
+        return false;
+    }
+    (p(23)..=p(26)).contains(&t)
+        || (p(65)..=p(68)).contains(&t)
+        || is_part_charge_item(t)
+        || wing_charm(t)
+        || [h(97), h(98), p(91), h(99), h(80), h(76), h(122), h(123), p(121), p(122)].contains(&t)
+        || item_action_ban(t, false)
+}
+
 /// `IsRepairBan` (ZzzInventory.cpp:8443-8513). (Its `MODEL_HELPER+43` to `+45` compare an item type
 /// with a model number and never match; those are cash shop items anyway.)
 pub fn is_repair_ban(item: &Item) -> bool {

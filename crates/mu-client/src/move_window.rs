@@ -355,7 +355,7 @@ fn inside(c: Vec2, x: i32, y: i32, w: i32, h: i32) -> bool {
 
 /// `ClientReadyAfterMapChange` must be sent once the map finishes loading.
 #[derive(Resource, Default)]
-struct MapChangePending(bool);
+pub(crate) struct MapChangePending(bool);
 
 fn load_list(args: Res<Args>, mut commands: Commands) {
     let list = mu_data::warps::load(&args.data).unwrap_or_else(|e| {
@@ -529,7 +529,7 @@ fn update(
 
 /// `ReceiveMoveMapChecksum`, the zen (`ReceiveGetItem` with `GET_ITEM_ZEN`) and `ReceiveTeleport`.
 #[allow(clippy::too_many_arguments)]
-fn net_messages(
+pub(crate) fn net_messages(
     mut commands: Commands,
     mut from: MessageReader<crate::net::FromServer>,
     mut w: ResMut<MoveWindow>,

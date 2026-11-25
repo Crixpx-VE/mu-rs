@@ -141,15 +141,15 @@ struct ItemEntity {
     animated: Vec<PassAnim>,
 }
 
-/// An already posed model mesh.
-struct Part {
-    mesh: Handle<Mesh>,
-    info: MeshInfo,
-    image: Option<Handle<Image>>,
+/// An already posed model mesh (also used by the ground items, ground.rs).
+pub(crate) struct Part {
+    pub(crate) mesh: Handle<Mesh>,
+    pub(crate) info: MeshInfo,
+    pub(crate) image: Option<Handle<Image>>,
 }
 
 #[derive(Resource, Default)]
-struct ViewCache {
+pub(crate) struct ViewCache {
     player: Option<Option<Bmd>>,
     /// (path, character skeleton, `BodyHeight`) → meshes.
     models: HashMap<(PathBuf, bool, i32), Option<Arc<Vec<Part>>>>,
@@ -290,12 +290,13 @@ fn sync_views(
 }
 
 impl ViewCache {
-    fn bitmap(&mut self, data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+    pub(crate) fn bitmap(&mut self, data: &Path, b: Bitmap, images: &mut Assets<Image>) -> Option<Handle<Image>> {
         self.bitmaps.entry(b).or_insert_with(|| crate::objects::load_bitmap(data, b, images)).clone()
     }
 
-    /// The meshes of model `path` (relative to `Data`), posed as `pose` asks.
-    fn parts(
+    /// The meshes of model `path` (relative to `Data`), posed as `pose` asks (only its skeleton and
+    /// `BodyHeight` matter).
+    pub(crate) fn parts(
         &mut self,
         data: &Path,
         path: &Path,

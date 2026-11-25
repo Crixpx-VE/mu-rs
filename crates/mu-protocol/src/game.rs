@@ -485,6 +485,70 @@ pub enum ClientMessage {
     AreaSkill { skill: u16, x: u8, y: u8, rotation: u8, dest: u8, target_position: u8, target: u16, serial: u8 },
     /// `SendRequestMagicAttack` (C3 DB): what an area skill hit; each target with its skill serial.
     AreaSkillHit { skill: u16, x: u8, y: u8, serial: u8, targets: Vec<(u16, u8)> },
+    /// `SendRequestDropItem(p_InventoryIndex, p_x, p_y)` (wsclientinline.h:1135-1142, C1 23 sent
+    /// encrypted, `PREQUEST_DROP_ITEM`, WSclient.h:637-643): drop inventory slot `slot` (0-11
+    /// equipment, 12-75 grid) on tile (`x`, `y`). OpenMU's `DropItemRequest`; it answers with
+    /// [`ServerMessage::ItemDropResult`].
+    DropItem { x: u8, y: u8, slot: u8 },
+    /// `SendRequestGetItem(p_Key)` (wsclientinline.h:1122-1133, C1 22 sent encrypted): pick up the
+    /// ground item with scope id `id` (big endian). OpenMU's `PickupItemRequest`; it answers with
+    /// [`ServerMessage::ItemPickedUp`], [`ServerMessage::InventoryMoneyUpdate`] (zen) or
+    /// [`ServerMessage::ItemPickUpFailed`].
+    PickUpItem { id: u16 },
+}
+
+/// `Result` of a C3 22 the client cannot use as a slot (`ReceiveGetItem`, WSclient.cpp:5603-5605;
+/// OpenMU's `ItemPickUpFailReason`).
+pub mod pick_up {
+    /// `GET_ITEM_MULTI`: the item was stacked onto one in the inventory (OpenMU's `ItemStacked`; a
+    /// durability update follows).
+    pub const STACKED: u8 = 0xFD;
+    /// `GET_ITEM_ZEN`: with 8 bytes it is the new zen ([`super::ServerMessage::InventoryMoneyUpdate`]);
+    /// OpenMU also sends it 4 bytes long when the inventory zen limit was reached
+    /// (`__MaximumInventoryMoneyReached`).
+    pub const ZEN: u8 = 0xFE;
+    /// `NOT_GET_ITEM`: refused (OpenMU's `General`).
+    pub const FAILED: u8 = 0xFF;
+}
+
+/// A ground item entering the view (`PCREATE_ITEM`, WSclient.h:629-635: 16 bytes in C2 20).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DroppedItem {
+    /// Scope id of the drop (`Key & 0x7FFF`).
+    pub id: u16,
+    /// `CreateFlag = Key >> 15` (OpenMU's `IsFreshDrop`): it falls with a sound, otherwise it was
+    /// already lying there.
+    pub fresh: bool,
+    pub x: u8,
+    pub y: u8,
+    /// The 12 item bytes; zen is `ITEM_POTION+15` with the amount in bytes 1, 2 and 4
+    /// ([`DroppedItem::zen`]).
+    pub item: [u8; 12],
+}
+
+/// Bytes of a [`DroppedItem`] (`sizeof(PCREATE_ITEM)` with `PACKET_ITEM_LENGTH` 12).
+const DROPPED_ITEM_LEN: usize = 16;
+
+impl DroppedItem {
+    /// Dropped zen as OpenMU's `MoneyDropped` writes it (21 bytes: `MoneyNumber` 15 at 9, the
+    /// amount at 10, 11 and 13 and `MoneyGroup` 14 in the high nibble of 14).
+    pub fn money(id: u16, fresh: bool, x: u8, y: u8, amount: u32) -> Self {
+        let mut item = [0u8; 12];
+        item[0] = 15;
+        item[1] = (amount >> 16) as u8;
+        item[2] = (amount >> 8) as u8;
+        item[4] = amount as u8;
+        item[5] = 14 << 4;
+        Self { id, fresh, x, y, item }
+    }
+
+    /// The amount of a zen drop: `n->Level = (Item[1]<<16)+(Item[2]<<8)+(Item[4])` when
+    /// `ConvertItemType` is `ITEM_POTION+15` (`CreateItem`, ZzzObject.cpp:6111-6120).
+    pub fn zen(&self) -> Option<u32> {
+        let b = &self.item;
+        let kind = b[0] as u32 + (b[3] as u32 & 128) * 2 + (b[5] as u32 & 240) * 32;
+        (kind == 14 * 512 + 15).then(|| ((b[1] as u32) << 16) + ((b[2] as u32) << 8) + b[4] as u32)
+    }
 }
 
 /// Item storages of [`ClientMessage::ItemMove`] and `ItemMoved` (`ItemStorageKind`, OpenMU
@@ -820,6 +884,22 @@ pub enum ServerMessage {
     LevelUp(crate::combat::LevelUp),
     /// `ReceiveMonsterSkill` (C1 69): a monster used its skill `skill` on `target`.
     MonsterSkillAnimation { skill: u16, attacker: u16, target: u16 },
+    /// `ReceiveCreateItemViewport` (C2 20, WSclient.cpp:5558-5586): items (and zen) lying on the
+    /// ground that came into view. OpenMU's `ItemsDropped` and `MoneyDropped` (one zen drop per packet).
+    ItemsDropped(Vec<DroppedItem>),
+    /// `ReceiveDeleteItemViewport` (C2 21, WSclient.cpp:5588-5601): these ground items are gone
+    /// (picked up, timed out or out of view). OpenMU's `ItemDropRemoved`.
+    ItemDropRemoved(Vec<u16>),
+    /// `ReceiveDropItem` (C1 23, `PHEADER_DEFAULT_KEY`, WSclient.cpp:5663-5685): the answer to
+    /// [`ClientMessage::DropItem`]; `KeyH` = `success` and `KeyL` the inventory `slot`. OpenMU's
+    /// `ItemDropResponse`.
+    ItemDropResult { success: bool, slot: u8 },
+    /// `ReceiveGetItem` (C3 22, `PRECEIVE_GET_ITEM`, WSclient.cpp:5607-5661) with a slot: the picked
+    /// up item went to inventory slot `slot`. OpenMU's `ItemAddedToInventory`.
+    ItemPickedUp { slot: u8, item: [u8; 12] },
+    /// `ReceiveGetItem` with `Result` 0xFF (refused) or 0xFD (stacked onto an inventory item), or the
+    /// 4-byte 0xFE of OpenMU's zen limit (see [`pick_up`]). OpenMU's `ItemPickUpRequestFailed`.
+    ItemPickUpFailed { reason: u8 },
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1118,6 +1198,12 @@ impl ClientMessage {
             }
             // `spe.Send(TRUE)`.
             Self::LegacyQuestState { quest, state } => encrypted(c1(&[0xA2, *quest, *state])),
+            // `spe << x << y << index; spe.Send(TRUE)`.
+            Self::DropItem { x, y, slot } => encrypted(c1(&[0x23, *x, *y, *slot])),
+            Self::PickUpItem { id } => {
+                let [h, l] = id.to_be_bytes();
+                encrypted(c1(&[0x22, h, l]))
+            }
             Self::Hit { .. } | Self::TargetedSkill { .. } | Self::CancelSkill { .. } | Self::AreaSkill { .. } | Self::AreaSkillHit { .. } => {
                 unreachable!("encoded by combat::encode_client")
             }
@@ -1169,6 +1255,8 @@ impl ClientMessage {
             0x34 => return Some(Self::RepairItem { slot: *d.get(3)?, self_repair: *d.get(4).unwrap_or(&0) != 0 }),
             0x54 => return Some(Self::GuildMasterAnswer { show_creation: *d.get(3)? != 0 }),
             0xA2 => return Some(Self::LegacyQuestState { quest: *d.get(3)?, state: *d.get(4)? }),
+            0x23 => return Some(Self::DropItem { x: *d.get(3)?, y: *d.get(4)?, slot: *d.get(5)? }),
+            0x22 => return Some(Self::PickUpItem { id: get_u16_be(d, 3)? }),
             _ => {}
         }
         match (p.code(), p.sub_code()?) {
@@ -1574,6 +1662,32 @@ impl ServerMessage {
                 body.push(0);
                 c1(&body)
             }
+            Self::ItemsDropped(items) => {
+                let items = &items[..items.len().min(255)];
+                let mut body = Vec::with_capacity(2 + items.len() * DROPPED_ITEM_LEN);
+                body.extend_from_slice(&[0x20, items.len() as u8]);
+                for i in items {
+                    body.extend_from_slice(&((i.id & OBJECT_ID_MASK) | if i.fresh { NEW_OBJECT_FLAG } else { 0 }).to_be_bytes());
+                    body.extend_from_slice(&[i.x, i.y]);
+                    body.extend_from_slice(&i.item);
+                }
+                c2(&body)
+            }
+            Self::ItemDropRemoved(ids) => {
+                let ids = &ids[..ids.len().min(255)];
+                let mut body = vec![0x21, ids.len() as u8];
+                for id in ids {
+                    body.extend_from_slice(&id.to_be_bytes());
+                }
+                c2(&body)
+            }
+            Self::ItemDropResult { success, slot } => c1(&[0x23, *success as u8, *slot]),
+            Self::ItemPickedUp { slot, item } => {
+                let mut body = vec![0x22, *slot];
+                body.extend_from_slice(item);
+                encrypted(c1(&body))
+            }
+            Self::ItemPickUpFailed { reason } => encrypted(c1(&[0x22, *reason])),
             _ => unreachable!("encoded by combat::encode_server"),
         }
     }
@@ -1717,6 +1831,49 @@ impl ServerMessage {
                 return Some(Self::QuestStateDialog { quest: *d.get(3)?, state: *d.get(4)? });
             }
             0x54 => return Some(Self::GuildMasterDialog),
+            // `PWHEADER_DEFAULT_WORD` (`Value` = count at 4) and `PCREATE_ITEM`s from 5.
+            0x20 => {
+                let d = long_header(&p)?;
+                let count = *d.get(4)? as usize;
+                let items = (0..count)
+                    .map(|k| {
+                        let e = d.get(5 + k * DROPPED_ITEM_LEN..5 + (k + 1) * DROPPED_ITEM_LEN)?;
+                        let key = u16::from_be_bytes([e[0], e[1]]);
+                        Some(DroppedItem {
+                            id: key & OBJECT_ID_MASK,
+                            fresh: key & NEW_OBJECT_FLAG != 0,
+                            x: e[2],
+                            y: e[3],
+                            item: e[4..16].try_into().ok()?,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()?;
+                return Some(Self::ItemsDropped(items));
+            }
+            // `PWHEADER_DEFAULT_WORD` and `PDELETE_CHARACTER`s (`KeyH`, `KeyL`).
+            0x21 => {
+                let d = long_header(&p)?;
+                let count = *d.get(4)? as usize;
+                let ids = (0..count).map(|k| get_u16_be(d, 5 + 2 * k)).collect::<Option<Vec<u16>>>()?;
+                return Some(Self::ItemDropRemoved(ids));
+            }
+            // `PHEADER_DEFAULT_KEY`: `KeyH` = success, `KeyL` = slot.
+            0x23 => {
+                let d = short_header(&p)?;
+                return Some(Self::ItemDropResult { success: *d.get(3)? != 0, slot: *d.get(4)? });
+            }
+            // `PRECEIVE_GET_ITEM`: `Result` and `Item[0..12]`.
+            0x22 => {
+                let d = short_header(&p)?;
+                return Some(match *d.get(3)? {
+                    // `Item[0..4]` in big endian.
+                    pick_up::ZEN if d.len() >= 8 => {
+                        Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }
+                    }
+                    reason @ (pick_up::STACKED | pick_up::ZEN | pick_up::FAILED) => Self::ItemPickUpFailed { reason },
+                    slot => Self::ItemPickedUp { slot, item: d.get(4..16)?.try_into().ok()? },
+                });
+            }
             // `PCHATING_KEY`: `KeyH`, `KeyL`, `ChatText`.
             0x01 => {
                 let d = short_header(&p)?;
@@ -1769,8 +1926,6 @@ impl ServerMessage {
                 y: d[8],
                 rotation: d[9],
             }),
-            // `Item[0..4]` in big endian.
-            (0x22, 0xFE) => Some(Self::InventoryMoneyUpdate { money: u32::from_be_bytes(d.get(4..8)?.try_into().ok()?) }),
             (0xF9, 0x01) => Some(Self::OpenNpcDialog { npc: get_u16_le(d, 4)?, contribution: get_u32_le(d, 8)? }),
             (0xF8, 0x02) => Some(Self::GensJoinResult { result: *d.get(4)?, gens: *d.get(5).unwrap_or(&0) }),
             (0xF8, 0x04) => Some(Self::GensLeaveResult { result: *d.get(4)? }),
@@ -2559,5 +2714,57 @@ mod tests {
     fn object_message() {
         let wire = ida_y_vuelta_servidor(ServerMessage::ObjectMessage { id: 0x020A, message: "Hi".into() });
         assert_eq!(wire, [0xC1, 8, 0x01, 0x02, 0x0A, b'H', b'i', 0]);
+    }
+
+    /// Dropping and picking up (wsclientinline.h:1122-1142) and OpenMU's answers
+    /// (ServerToClientPackets.xml `ItemsDropped`, `MoneyDropped`, `ItemDropRemoved`,
+    /// `ItemAddedToInventory`, `ItemDropResponse`, `ItemPickUpRequestFailed`). The bytes marked
+    /// "captured" come from the live OpenMU (`bot --suelo`, a Small Axe in Lorencia at (178, 124)).
+    #[test]
+    fn ground_item_packets() {
+        // Captured requests: drop slot 14 at (178, 124), pick up drop 1 (both encrypted).
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::DropItem { x: 178, y: 124, slot: 14 }), [0xC3, 0x06, 0x23, 0xB2, 0x7C, 0x0E]);
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::PickUpItem { id: 1 }), [0xC3, 0x05, 0x22, 0x00, 0x01]);
+
+        // Captured ItemDropResponse: dropped, and refused on (0, 0) (not walkable).
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: true, slot: 14 }), [0xC1, 0x05, 0x23, 0x01, 0x0E]);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropResult { success: false, slot: 14 }), [0xC1, 0x05, 0x23, 0x00, 0x0E]);
+
+        // Captured ItemsDropped: the axe, a fresh drop (0x8000 on id 1) at (178, 124).
+        let axe = [0x00, 0x00, 0x12, 0x00, 0x00, 0x10, 0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+        let mut wire = vec![0xC2, 0x00, 0x15, 0x20, 0x01, 0x80, 0x01, 0xB2, 0x7C];
+        wire.extend_from_slice(&axe);
+        let drop = DroppedItem { id: 1, fresh: true, x: 178, y: 124, item: axe };
+        assert_eq!(ServerMessage::decode(&wire), Some(ServerMessage::ItemsDropped(vec![drop])));
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemsDropped(vec![drop])), wire);
+        assert_eq!(drop.zen(), None);
+
+        // MoneyDropped (21 bytes): 1 234 567 zen = 0x12D687 at 10, 11 and 13; 15 at 9 and 0xE0 at 14.
+        let money = [0xC2, 0x00, 0x15, 0x20, 0x01, 0x00, 0x34, 10, 20, 15, 0x12, 0xD6, 0x00, 0x87, 0xE0, 0, 0, 0, 0, 0, 0];
+        let Some(ServerMessage::ItemsDropped(list)) = ServerMessage::decode(&money) else { panic!("money drop") };
+        assert_eq!(list, [DroppedItem::money(0x34, false, 10, 20, 1_234_567)]);
+        assert_eq!(list[0].zen(), Some(1_234_567));
+
+        // Captured ItemDropRemoved (it comes before the pick-up answer), and two ids.
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemDropRemoved(vec![1])), [0xC2, 0x00, 0x07, 0x21, 0x01, 0x00, 0x01]);
+        let gone = [0xC2, 0x00, 0x09, 0x21, 0x02, 0x00, 0x12, 0x00, 0x34];
+        assert_eq!(ServerMessage::decode(&gone), Some(ServerMessage::ItemDropRemoved(vec![0x12, 0x34])));
+        assert_eq!(ServerMessage::ItemDropRemoved(vec![0x12, 0x34]).encode(), gone);
+
+        // Captured ItemAddedToInventory: slot 14 and the item (16 bytes, encrypted).
+        let mut added = vec![0xC3, 0x10, 0x22, 0x0E];
+        added.extend_from_slice(&axe);
+        assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemPickedUp { slot: 14, item: axe }), added);
+        // Captured ItemPickUpRequestFailed: a drop id that does not exist, or 4 tiles away.
+        assert_eq!(ServerMessage::decode(&[0xC3, 0x04, 0x22, 0xFF]), Some(ServerMessage::ItemPickUpFailed { reason: pick_up::FAILED }));
+        // Stacked and OpenMU's zen limit (4 bytes).
+        for reason in [pick_up::FAILED, pick_up::STACKED, pick_up::ZEN] {
+            assert_eq!(ida_y_vuelta_servidor(ServerMessage::ItemPickUpFailed { reason }), [0xC3, 4, 0x22, reason]);
+        }
+        // The 8-byte 0xFE is still the zen after picking it up.
+        assert_eq!(
+            ServerMessage::decode(&[0xC3, 0x08, 0x22, 0xFE, 0x00, 0x00, 0x30, 0x39]),
+            Some(ServerMessage::InventoryMoneyUpdate { money: 12345 })
+        );
     }
 }
