@@ -3,7 +3,7 @@
 //!   cargo run -p mu-server --example bot -- <account> <password> <character> [connect=127.0.0.1:44405] [seconds=3]
 //!                                           [M destination] [--decir <text>] [--susurrar <name> <text>]
 //!                                           [--esperar <seconds before speaking>]
-//!                                           [--puerta x,y,gate ...] [--accion <AT_*>]
+//!                                           [--puerta x,y,gate ...] [--accion <AT_*>] [--baul]
 //!
 //! Connect Server → Game Server → login → list → (creates the character if missing) → enters →
 //! walks 3 steps → (with a destination: requests it like the `M` window, waits for `MapChanged` and replies
@@ -42,6 +42,41 @@ impl Conn {
             }
             self.buf.extend(&chunk[..n]);
         }
+    }
+
+    /// Like [`Conn::recv`], with the decrypted bytes.
+    fn recv_raw(&mut self) -> std::io::Result<(Vec<u8>, Option<ServerMessage>)> {
+        let mut chunk = [0u8; 4096];
+        loop {
+            if let Some(p) = self.buf.next_packet().map_err(|e| std::io::Error::other(format!("{:#04X}", e.0)))? {
+                let plain = self.inp.decrypt(&p).map_err(|e| std::io::Error::other(format!("{e:?}")))?;
+                let m = ServerMessage::decode(&plain);
+                return Ok((plain, m));
+            }
+            let n = self.sock.read(&mut chunk)?;
+            if n == 0 {
+                return Err(std::io::Error::other("conexión cerrada"));
+            }
+            self.buf.extend(&chunk[..n]);
+        }
+    }
+
+    /// Shows (with their bytes) what arrives during `secs` seconds; returns the decoded messages.
+    fn collect(&mut self, user: &str, secs: f32) -> std::io::Result<Vec<ServerMessage>> {
+        let end = Instant::now() + Duration::from_secs_f32(secs);
+        let mut out = Vec::new();
+        while Instant::now() < end {
+            match self.recv_raw() {
+                Ok((raw, m)) => {
+                    let hex: Vec<String> = raw.iter().map(|b| format!("{b:02X}")).collect();
+                    println!("[{user}] <- {} = {m:?}", hex.join(" "));
+                    out.extend(m);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock || e.kind() == std::io::ErrorKind::TimedOut => {}
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(out)
     }
 
     fn send(&mut self, m: ClientMessage) -> std::io::Result<()> {
@@ -90,6 +125,77 @@ fn show(user: &str, m: &ServerMessage) {
     }
 }
 
+/// `--baul`: talks to the Safety Guardian (NPC 240, it must be in view), moves the first inventory
+/// grid item into vault slot 119 and back, deposits and withdraws 1 zen, asks for more than there is
+/// and closes the vault, printing every packet's bytes (to capture OpenMU's vault packets).
+fn vault_script(c: &mut Conn, user: &str, (x, y): (u8, u8)) -> std::io::Result<()> {
+    c.sock.set_read_timeout(Some(Duration::from_millis(200)))?;
+    let sent = |m: &ClientMessage| {
+        let hex: Vec<String> = m.encode().iter().map(|b| format!("{b:02X}")).collect();
+        println!("[{user}] -> {} = {m:?}", hex.join(" "));
+    };
+    let mut first = c.collect(user, 2.0)?;
+    let find = |msgs: &[ServerMessage]| {
+        msgs.iter().find_map(|m| match m {
+            ServerMessage::AddMonstersToScope(list) => list.iter().find(|n| n.number == 240).map(|n| n.id & 0x7FFF),
+            _ => None,
+        })
+    };
+    if find(&first).is_none() {
+        // Toward the Lorencia guardian at (147, 145), first south and then east, at most 15 steps.
+        let (mut px, mut py) = (x as i32, y as i32);
+        let mut directions = Vec::new();
+        while directions.len() < mu_protocol::game::MAX_WALK_STEPS && (px.abs_diff(147) > 1 || py.abs_diff(145) > 2) {
+            let (dx, dy) = if py != 140 { (0, (140 - py).signum()) } else { ((147 - px).signum(), 0) };
+            let Some(d) = mu_protocol::game::DIRECTIONS.iter().position(|&(a, b)| (a as i32, b as i32) == (dx, dy)) else { break };
+            directions.push(d as u8);
+            (px, py) = (px + dx, py + dy);
+        }
+        let walk = ClientMessage::Walk { source_x: x, source_y: y, rotation: 5, directions };
+        sent(&walk);
+        c.send(walk)?;
+        first.extend(c.collect(user, 3.0)?);
+    }
+    let guardian = find(&first);
+    let item = first.iter().find_map(|m| match m {
+        ServerMessage::InventoryList(list) => list.iter().find(|(s, _)| (12..76).contains(s)).copied(),
+        _ => None,
+    });
+    let Some(id) = guardian else {
+        println!("[{user}] el guardián del baúl (240) no está a la vista");
+        return Ok(());
+    };
+    let step = |c: &mut Conn, m: ClientMessage, secs: f32| -> std::io::Result<()> {
+        sent(&m);
+        c.send(m)?;
+        c.collect(user, secs).map(|_| ())
+    };
+    sent(&ClientMessage::TalkToNpc { id });
+    c.send(ClientMessage::TalkToNpc { id })?;
+    let opened = c.collect(user, 2.0)?;
+    use mu_protocol::game::storage::{INVENTORY, VAULT};
+    if let Some((slot, bytes)) = item {
+        step(c, ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: slot, item: bytes, to_storage: VAULT, to_slot: 119 }, 1.5)?;
+        step(c, ClientMessage::ItemMove { from_storage: VAULT, from_slot: 119, item: bytes, to_storage: INVENTORY, to_slot: slot }, 1.5)?;
+    }
+    // The first vault item to the last inventory cell (slot 75) and back.
+    let stored = opened.iter().find_map(|m| match m {
+        ServerMessage::StoreItemList { items, .. } => items.first().copied(),
+        _ => None,
+    });
+    if let Some((slot, bytes)) = stored {
+        step(c, ClientMessage::ItemMove { from_storage: VAULT, from_slot: slot, item: bytes, to_storage: INVENTORY, to_slot: 75 }, 1.5)?;
+        step(c, ClientMessage::ItemMove { from_storage: INVENTORY, from_slot: 75, item: bytes, to_storage: VAULT, to_slot: slot }, 1.5)?;
+    }
+    step(c, ClientMessage::VaultMoveMoney { withdraw: false, amount: 1 }, 1.0)?;
+    step(c, ClientMessage::VaultMoveMoney { withdraw: true, amount: 1 }, 1.0)?;
+    step(c, ClientMessage::VaultMoveMoney { withdraw: true, amount: 2_000_000_000 }, 1.0)?;
+    step(c, ClientMessage::CloseVault, 1.0)?;
+    c.send(ClientMessage::Logout { kind: 0 })?;
+    println!("[{user}] fuera");
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut a: Vec<String> = std::env::args().skip(1).collect();
     // Named options (removed from the positional ones).
@@ -98,9 +204,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut pause = 0.0f32;
     let mut gates: Vec<(u8, u8, u16)> = Vec::new();
     let mut animation: Option<u8> = None;
+    let mut vault = false;
     let mut i = 0;
     while i < a.len() {
         match a[i].as_str() {
+            "--baul" => {
+                vault = true;
+                a.remove(i);
+            }
             "--puerta" if i + 1 < a.len() => {
                 let v: Vec<u16> = a.remove(i + 1).split(',').filter_map(|n| n.trim().parse().ok()).collect();
                 if let [x, y, g] = v[..] {
@@ -186,6 +297,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         _ => None,
     })?;
     println!("[{user}] dentro: mapa {} ({}, {}) vida {}/{} maná {}/{}", info.map, info.x, info.y, info.health, info.max_health, info.mana, info.max_mana);
+    if vault {
+        println!("[{user}] zen {}", info.money);
+        return Ok(vault_script(&mut c, user, (info.x, info.y))?);
+    }
     // Arrives right after the information (`ReceiveMoveMapChecksum`).
     let mut key = c.wait(|m| match m {
         ServerMessage::MapMoveChecksumKey { key } => Some(*key),

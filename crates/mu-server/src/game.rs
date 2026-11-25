@@ -340,6 +340,9 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         ClientMessage::TalkToNpc { .. }
         | ClientMessage::CloseNpc
         | ClientMessage::CloseVault
+        // No vault yet (it never opens here): nothing to move or unlock.
+        | ClientMessage::VaultMoveMoney { .. }
+        | ClientMessage::VaultPassword { .. }
         | ClientMessage::CloseCrafting
         | ClientMessage::GuildMasterAnswer { .. }
         | ClientMessage::RepairItem { .. } => {}
