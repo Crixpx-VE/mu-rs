@@ -1000,11 +1000,19 @@ fn edges(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut cache: Local<EdgeMaterials>,
-    q: Query<(Entity, &Selectable, &Skinned, &Transform, Option<&crate::remote::RemotePlayer>, Option<&EdgeShells>)>,
+    q: Query<(
+        Entity,
+        &Selectable,
+        &Skinned,
+        &Transform,
+        Option<&crate::remote::RemotePlayer>,
+        Option<&crate::monsters::Monster>,
+        Option<&EdgeShells>,
+    )>,
     mut vis: Query<&mut Visibility, With<EdgeShell>>,
 ) {
     let chaos = in_chaos_castle(args.world);
-    for (e, s, skinned, tf, remote, shells) in &q {
+    for (e, s, skinned, tf, remote, monster, shells) in &q {
         let selected = hovered.character == Some(e) || hovered.npc == Some(e);
         let Some(shells) = shells else {
             if selected {
@@ -1022,7 +1030,8 @@ fn edges(
         if !selected {
             continue;
         }
-        let Some((action, frame)) = remote.map(|r| r.pose_state()) else { continue };
+        // Other players and the character-shaped monsters (monsters.rs).
+        let Some((action, frame)) = remote.map(|r| r.pose_state()).or_else(|| monster.map(|m| m.pose_state())) else { continue };
         let bones = skinned.bones_at(action, frame);
         let scales = edge_scales(s.edge_scale, tf.scale.x * MU_SCALE, chaos);
         let scaled = [scale_bones(&bones, scales[0]), scale_bones(&bones, scales[1])];

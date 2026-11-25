@@ -11,9 +11,14 @@
 //! is interpolated between frames. When an animation ends, `BMD::PlayAnimation`
 //! (ZzzBMD.cpp:408-479) and `EtcStopAnimationSetting` (ZzzCharacter.cpp:3290-3335) apply.
 //!
-//! Not yet: weapons in the hands (only type and level are stored), the armor of character-shaped
-//! NPCs (comes with the class parts), each monster's own effects (`MoveMonsterVisual`,
-//! named bones, `CreateJoint`...), sounds and head turning (`BoneHead`).
+//! Character-shaped ones (`MODEL_PLAYER`: guards, helpers, skeletons, Doppelgangers...) are dressed
+//! like a player ([`player_dress`], character.rs): their `c->BodyPart[]` items with the level glow, or
+//! their `SubType` model (skeletons...), the weapons in hand (on the back in a safe zone) and the
+//! wings; they stand, walk and attack with the `player.bmd` actions their class and gear pick.
+//!
+//! Not yet: the weapons of the other monsters (only type and level are stored), the pets and mounts
+//! (`c->Helper`, `CreateBug`), each monster's own effects (`MoveMonsterVisual`, named bones,
+//! `CreateJoint`...), sounds and head turning (`BoneHead`).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::f32::consts::FRAC_PI_2;
@@ -31,7 +36,10 @@ use mu_data::texture::AlphaKind;
 use mu_data::{fs, texture};
 
 use crate::Args;
+use crate::account::Class;
+use crate::character::{Dress, Gear, Skinned};
 use crate::fx::tables::ids;
+use crate::item_view::ItemData;
 use crate::model_light::{ModelLight, ModelMaterial, model_material};
 use crate::scene::GameScene;
 use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
@@ -205,6 +213,8 @@ pub struct Monster {
     /// `o->Timer` (rises 0.15 per tick while moving, `MoveCharacterPosition`).
     timer: f32,
     shadow: bool,
+    /// `c->SafeZone`: its tile is a safe zone (`MoveCharacterVisual`, ZzzCharacter.cpp:5468-5473).
+    safe: bool,
 }
 
 /// A mesh of the model (or of a part) posed with the skeleton's bones.
@@ -315,22 +325,8 @@ fn sources(def: &Def, world_active: i32) -> Option<((String, String), Vec<Piece>
             let file = rel.file_name()?.to_str()?.to_string();
             ((dir.clone(), file.clone()), vec![piece(&dir, &file, &[&dir])], Speeds::Unset)
         }
-        Model::Player => {
-            let mut pieces = Vec::new();
-            if let SubType::Model(name) = def.sub_type
-                && let Some((dir, file, tex)) = data::other_model(name)
-            {
-                // `RenderPartObject(o, o->SubType, ...)` with the player's bones (ZzzCharacter.cpp:9185-9188).
-                pieces.push(piece(dir, file, &[tex]));
-            } else {
-                // Armor (`BodyPart`) are items: until they are loaded, the class 0 unequipped
-                // parts (`Class` of `CreateCharacterPointer`).
-                for part in ["Helm", "Armor", "Pant", "Glove", "Boot"] {
-                    pieces.push(piece("Player", &format!("{part}Class01.bmd"), &["Player"]));
-                }
-            }
-            (("Player".into(), "player.bmd".into()), pieces, Speeds::Player)
-        }
+        // Dressed like a player instead ([`build_player`]).
+        Model::Player => (("Player".into(), "player.bmd".into()), Vec::new(), Speeds::Player),
     })
 }
 
@@ -422,6 +418,93 @@ fn build(
     Some(out)
 }
 
+/// An item of the monster table as the item code sees it (`Option1` is the excellent option).
+fn monster_item(i: data::Item) -> mu_data::items::Item {
+    mu_data::items::Item { group: i.group, index: i.index, level: i.level, excellent: i.option, ..Default::default() }
+}
+
+/// `c->Class` of a character-shaped monster: `CreateCharacterPointer` sets 0, the Dark Wizard
+/// (ZzzCharacter.cpp:11331-11339), and the Doppelganger ones their own (GMDoppelGanger1.cpp:99-178).
+fn monster_class(def: &Def) -> Class {
+    match def.class {
+        Some("CLASS_KNIGHT") => Class::Knight,
+        Some("CLASS_ELF") => Class::Elf,
+        Some("CLASS_DARK") => Class::Gladiator,
+        Some("CLASS_DARK_LORD") => Class::Lord,
+        Some("CLASS_SUMMONER") => Class::Summoner,
+        _ => Class::Wizard,
+    }
+}
+
+/// What a character-shaped monster wears, as `CreateMonster` leaves it: its `SubType` model, which
+/// `RenderCharacter` draws instead of the pieces (skeletons, ZzzCharacter.cpp:8995-9188), or its
+/// `c->BodyPart[]` (items with their level, `RenderPartObject(..., p->Level << 3, ...)`, 9226-9305;
+/// or `MODEL_BODY_*` class pieces), and in both cases `c->Weapon[]` and `c->Wing` (`RenderLinkObject`,
+/// 9762-9810 and 14792-14827). Lit by the place (`c->Light`, 8909), not by (1, 1, 1).
+fn player_dress(def: &Def, data: &ItemData, render_level: u8) -> Dress {
+    let piece = |i: data::Item| {
+        let item = monster_item(i);
+        data.model_path(&item).map(|p| (p, item))
+    };
+    let mut dress = Dress {
+        weapons: def.weapons.map(|w| w.and_then(piece)),
+        wing: def.wing.and_then(piece),
+        render_level,
+        white_light: false,
+        ..Dress::default()
+    };
+    if let SubType::Model(name) = def.sub_type
+        && let Some((dir, file, tex)) = data::other_model(name)
+    {
+        dress.whole_body = Some((Path::new(dir).join(file), tex.to_string()));
+    } else {
+        for (k, part) in def.body.iter().enumerate() {
+            match *part {
+                Part::Item(i) => dress.parts[k] = piece(i),
+                Part::Body(n) => dress.class_parts[k] = data::body_file(k, n),
+                Part::None | Part::Npc(_) => {}
+            }
+        }
+    }
+    dress
+}
+
+/// `c->PK >= PVP_MURDERER2`: the weapons and wings are drawn with `c->Light` = (1, 0.1, 0.1)
+/// (ZzzCharacter.cpp:9645-9647), whatever the light of the place.
+const MURDERER_LIGHT: Vec3 = Vec3::new(1.0, 0.1, 0.1);
+
+/// A character-shaped monster (`MODEL_PLAYER`) dressed by the player code ([`player_dress`]); the
+/// animated equipment materials go to `EquipmentGlow`.
+#[allow(clippy::too_many_arguments)]
+fn build_player(
+    def: &Def,
+    args: &Args,
+    item_data: &ItemData,
+    render_level: u8,
+    cache: &mut Cache,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<ModelMaterial>,
+    images: &mut Assets<Image>,
+    start_action: usize,
+) -> Option<(Built, Skinned, Vec<crate::item_draw::PassAnim>)> {
+    let skeleton = cache.bmd(&args.data, "Player", "player.bmd")?;
+    let dress = player_dress(def, item_data, render_level);
+    let model = crate::character::load_character_dressed(args, monster_class(def), start_action, Some(&dress), meshes, materials, images)?;
+    let (body, linked) = model.materials.split_at(model.linked_from.min(model.materials.len()));
+    let mut lit: Vec<_> = body.iter().map(|h| (h.clone(), LookColor::Lit)).collect();
+    if def.pk >= crate::names::PVP_MURDERER2 {
+        for h in linked {
+            if let Some(mut m) = materials.get_mut(h) {
+                m.extension.light = MURDERER_LIGHT.extend(1.0);
+            }
+        }
+    } else {
+        lit.extend(linked.iter().map(|h| (h.clone(), LookColor::Lit)));
+    }
+    let built = Built { skeleton, parts: Vec::new(), children: model.children, materials: lit, speeds: Speeds::Player };
+    Some((built, model.skinned, model.glow))
+}
+
 /// Material of a mesh in one pass (like `objects::object_material`, with the light set later).
 fn look_material(image: Option<Handle<Image>>, look: &MeshLook, pass: usize) -> ModelMaterial {
     let alpha_mode = match look.blend {
@@ -444,12 +527,31 @@ fn look_material(image: Option<Handle<Image>>, look: &MeshLook, pass: usize) -> 
     model_material(base, light.with_chrome(look.chrome).with_subtract(look.blend == LookBlend::Subtract))
 }
 
-/// The `player.bmd` actions of a character-shaped monster, depending on its weapons.
+/// What a character-shaped monster's `SetPlayerStop` / `SetPlayerWalk` / `SetPlayerAttack` read: its
+/// class, weapons (with `TwoHand`) and wings.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct PlayerActions {
-    stop: usize,
-    walk: usize,
+    class: Class,
+    gear: Gear,
+    /// `MonsterIndex == 257` stands flying even without wings out (ZzzCharacter.cpp:245-246).
+    always_fly: bool,
+    /// The two attacks it alternates (`SetPlayerAttack` picks by `SwordCount` or `rand()`).
     attack: [usize; 2],
+}
+
+impl PlayerActions {
+    /// `SetPlayerStop` (ZzzCharacter.cpp:233-361): flying, by its weapons or unarmed (in a safe zone too).
+    fn stop(&self, safe_zone: bool) -> usize {
+        if self.always_fly {
+            return crate::character::stand_action(self.class, &Gear { wings: true, ..self.gear }, false);
+        }
+        crate::character::stand_action(self.class, &self.gear, safe_zone)
+    }
+
+    /// `SetPlayerWalk` (ZzzCharacter.cpp:576-662), walking (`Run` < 40).
+    fn walk(&self, safe_zone: bool) -> usize {
+        crate::character::walk_action_with(self.class, &self.gear, safe_zone)
+    }
 }
 
 /// `GetEquipedBowType` (CharacterManager.cpp:281-292): bow in the left hand (except the quiver, `BOW+7`) or
@@ -465,72 +567,40 @@ fn bow_type(def: &Def) -> u8 {
     }
 }
 
-/// `SetPlayerStop`, `SetPlayerWalk` and `SetPlayerAttack` (ZzzCharacter.cpp:173-395, 399-946, 948-1107) for
-/// a monster without mount or wings, `Class` 0 and `Run` < 40. `TwoHand` comes from the item table
-/// (`ItemAttribute`), not read yet: all count as one-handed.
-fn player_actions(def: &Def, safe_zone: bool) -> PlayerActions {
+/// The actions of a character-shaped monster without a mount and `Run` < 40: stand and walk from
+/// character.rs, attacks from `SetPlayerAttack` (ZzzCharacter.cpp:948-1107). TODO: the mounts
+/// (`c->Helper`: the 538 Doppelganger's Dark Horse) come first in all three; they are not drawn
+/// yet (`CreateBug`), so neither are their riding actions.
+fn player_actions(def: &Def, item_data: &ItemData) -> PlayerActions {
+    let weapons = def.weapons.map(|w| w.map(monster_item));
+    let gear = crate::hero_dress::gear(weapons, def.wing.is_some(), item_data);
     let [w0, w1] = def.weapons;
-    let two_hand = false;
     let g0 = w0.map(|w| (w.group, w.index));
+    // `MODEL_SWORD <= Type < MODEL_MACE + MAX_ITEM_INDEX`.
     let sword_like = |g: Option<(u8, u16)>| g.is_some_and(|(g, _)| g <= 2);
-    let id = |v: i32| v as usize;
-    // 257 flies (`MonsterIndex == 257`, ZzzCharacter.cpp:245).
-    if def.number == 257 {
-        return PlayerActions { stop: id(ids::PLAYER_STOP_FLY), walk: id(ids::PLAYER_FLY), attack: [id(ids::PLAYER_ATTACK_FIST); 2] };
-    }
     let bow = bow_type(def);
-    let unarmed = (w0.is_none() && w1.is_none()) || safe_zone;
-    let stop = if unarmed {
-        ids::PLAYER_STOP_MALE
-    } else if sword_like(g0) {
-        if !two_hand { ids::PLAYER_STOP_SWORD } else { ids::PLAYER_STOP_TWO_HAND_SWORD }
-    } else if matches!(g0, Some((3, 1 | 2))) {
-        ids::PLAYER_STOP_SPEAR
-    } else if matches!(g0, Some((3, _))) {
-        if !two_hand { ids::PLAYER_STOP_SWORD } else { ids::PLAYER_STOP_SCYTHE }
-    } else if matches!(g0, Some((5, 14..=20))) {
-        ids::PLAYER_STOP_WAND
-    } else if matches!(g0, Some((5, _))) {
-        if !two_hand { ids::PLAYER_STOP_SWORD } else { ids::PLAYER_STOP_SCYTHE }
-    } else if bow == 1 {
-        ids::PLAYER_STOP_BOW
-    } else if bow == 2 {
-        ids::PLAYER_STOP_CROSSBOW
-    } else {
-        ids::PLAYER_STOP_MALE
-    };
-    let walk = if unarmed {
-        ids::PLAYER_WALK_MALE
-    } else if sword_like(g0) {
-        if !two_hand { ids::PLAYER_WALK_SWORD } else { ids::PLAYER_WALK_TWO_HAND_SWORD }
-    } else if matches!(g0, Some((5, 14..=20))) {
-        ids::PLAYER_WALK_WAND
-    } else if matches!(g0, Some((5, _))) {
-        if !two_hand { ids::PLAYER_WALK_SWORD } else { ids::PLAYER_WALK_SCYTHE }
-    } else if matches!(g0, Some((3, 1))) {
-        // ZzzCharacter.cpp:641: `MODEL_SPEAR+2+MAX_ITEM_INDEX` never matches: only `SPEAR+1`.
-        ids::PLAYER_WALK_SPEAR
-    } else if matches!(g0, Some((3, _))) {
-        ids::PLAYER_WALK_SCYTHE
-    } else if bow == 1 {
-        ids::PLAYER_WALK_BOW
-    } else if bow == 2 {
-        ids::PLAYER_WALK_CROSSBOW
-    } else {
-        ids::PLAYER_WALK_MALE
-    };
     let attack = if w0.is_none() && w1.is_none() {
         [ids::PLAYER_ATTACK_FIST; 2]
     } else if sword_like(g0) {
-        if sword_like(w1.map(|w| (w.group, w.index))) {
-            [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_LEFT1]
+        if !gear.two_hand {
+            if sword_like(w1.map(|w| (w.group, w.index))) {
+                [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_LEFT1]
+            } else {
+                [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_RIGHT1 + 1]
+            }
+        } else if matches!(g0, Some((0, 21 | 23 | 25 | 31))) {
+            [ids::PLAYER_ATTACK_TWO_HAND_SWORD_TWO; 2]
         } else {
-            [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_RIGHT1 + 1]
+            [ids::PLAYER_ATTACK_TWO_HAND_SWORD1, ids::PLAYER_ATTACK_TWO_HAND_SWORD1 + 1]
         }
     } else if sword_like(w1.map(|w| (w.group, w.index))) {
         [ids::PLAYER_ATTACK_SWORD_LEFT1, ids::PLAYER_ATTACK_SWORD_LEFT1 + 1]
     } else if matches!(g0, Some((5, _))) {
-        [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_RIGHT1 + 1]
+        if !gear.two_hand {
+            [ids::PLAYER_ATTACK_SWORD_RIGHT1, ids::PLAYER_ATTACK_SWORD_RIGHT1 + 1]
+        } else {
+            [ids::PLAYER_SKILL_WEAPON1, ids::PLAYER_SKILL_WEAPON1 + 1]
+        }
     } else if matches!(g0, Some((3, 1 | 2))) {
         [ids::PLAYER_ATTACK_SPEAR1; 2]
     } else if matches!(g0, Some((3, _))) {
@@ -542,7 +612,7 @@ fn player_actions(def: &Def, safe_zone: bool) -> PlayerActions {
     } else {
         [ids::PLAYER_ATTACK_FIST; 2]
     };
-    PlayerActions { stop: id(stop), walk: id(walk), attack: attack.map(id) }
+    PlayerActions { class: monster_class(def), gear, always_fly: def.number == 257, attack: attack.map(|a| a as usize) }
 }
 
 impl Monster {
@@ -578,11 +648,17 @@ impl Monster {
     }
 
     fn stop_action(&self) -> usize {
-        self.player.map_or(action::STOP1, |p| p.stop)
+        self.player.map_or(action::STOP1, |p| p.stop(self.safe))
     }
 
     fn walk_action(&self) -> usize {
-        self.player.map_or(action::WALK, |p| p.walk)
+        self.player.map_or(action::WALK, |p| p.walk(self.safe))
+    }
+
+    /// Current animation and the frame it is drawn at (to pose its parts again, e.g. the highlight).
+    pub fn pose_state(&self) -> (usize, f32) {
+        let frames = self.skeleton.actions.get(self.action).map_or(0, |a| a.frames);
+        (self.action, pose_frame(self.frame, frames, self.held))
     }
 
     /// `SetAction`: changes the action (if the model has it) and starts at frame 0.
@@ -602,7 +678,7 @@ impl Monster {
         let id = match (a, pa) {
             (MonsterAction::Stop, _) => self.stop_action(),
             (MonsterAction::Stop2, None) => action::STOP2,
-            (MonsterAction::Stop2, Some(p)) => p.stop,
+            (MonsterAction::Stop2, Some(p)) => p.stop(self.safe),
             (MonsterAction::Attack1, None) => action::ATTACK1,
             (MonsterAction::Attack2, None) => action::ATTACK2,
             (MonsterAction::Attack1, Some(p)) => p.attack[0],
@@ -714,6 +790,8 @@ fn apply(
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
     shadow_material: Res<crate::shadow::ShadowMaterial>,
+    item_data: Res<ItemData>,
+    opts: Res<crate::options::GameOptions>,
     mut rng: Local<u32>,
 ) {
     let Some(terrain) = terrain else { return };
@@ -746,10 +824,18 @@ fn apply(
                 let variants = data::defs(number, world_active);
                 let def = &variants[(next_rand(&mut rng) as usize) % variants.len()];
                 let safe = terrain.0.attribute(x as usize, y as usize) & mu_data::terrain::attr::SAFE_ZONE != 0;
-                let player = (def.model == Model::Player).then(|| player_actions(def, safe));
-                let start = def.start_action.map(|a| a as usize).unwrap_or_else(|| player.map_or(action::STOP1, |p| p.stop));
-                let Some(built) = build(def, world_active, &args.data, &mut cache, &mut meshes, &mut materials, &mut images, start)
-                else {
+                let player = (def.model == Model::Player).then(|| player_actions(def, &item_data));
+                let start = def.start_action.map(|a| a as usize).unwrap_or_else(|| player.map_or(action::STOP1, |p| p.stop(safe)));
+                let (built, dressed) = if def.model == Model::Player {
+                    let level = opts.render_level;
+                    match build_player(def, &args, &item_data, level, &mut cache, &mut meshes, &mut materials, &mut images, start) {
+                        Some((built, skinned, glow)) => (Some(built), Some((skinned, glow))),
+                        None => (None, None),
+                    }
+                } else {
+                    (build(def, world_active, &args.data, &mut cache, &mut meshes, &mut materials, &mut images, start), None)
+                };
+                let Some(built) = built else {
                     warn!("monstruo {number} ({}): sin modelo ({:?})", def.display_name(), def.model);
                     continue;
                 };
@@ -760,7 +846,9 @@ fn apply(
                     && kind != data::Kind::Trap
                     && !matches!(number, 25 | 22 | 42 | 242 | 59 | 63 | 152)
                     && !matches!(def.model, Model::Monster(60 | 61))
-                    && !(def.model == Model::Player && def.hide_shadow);
+                    && !(def.model == Model::Player && def.hide_shadow)
+                    // `c->HideShadow = true` of the Doppelganger ones (ZzzCharacter.cpp:8915-8917).
+                    && !(529..=539).contains(&number);
                 let facing = def.angle[2].map_or_else(|| crate::character::direction_facing(direction), f32::to_radians);
                 let mut m = Monster {
                     key,
@@ -784,6 +872,7 @@ fn apply(
                     speed: def.move_speed as f32 * crate::fx::sim::TICKS_PER_SECOND / MU_SCALE,
                     timer: 0.0,
                     shadow: shadow_on,
+                    safe,
                 };
                 if start >= m.skeleton.actions.len() {
                     m.action = 0;
@@ -801,7 +890,7 @@ fn apply(
                     crate::names::Selectable {
                         kind: if kind == data::Kind::Npc { crate::names::Kind::Npc } else { crate::names::Kind::Monster },
                         name: def.display_name().to_string(),
-                        pk: 3,
+                        pk: def.pk,
                         level: def.level_in(world_active),
                         gm: false,
                         dead: false,
@@ -814,6 +903,9 @@ fn apply(
                 ));
                 for child in built.children {
                     e.with_child(child);
+                }
+                if let Some((skinned, glow)) = dressed {
+                    e.insert((skinned, crate::hero_dress::EquipmentGlow(glow)));
                 }
                 // The snapshot is filled by `animate` (not live until its first pose).
                 e.insert((m, crate::fx::ActorState(crate::fx::Actor { live: false, ..Default::default() })));
@@ -972,6 +1064,7 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
                 budget = 0.0;
             }
         }
+        m.safe = crate::character::in_safe_zone(m.pos, Some(&terrain));
         if moving {
             m.timer += 0.15 * crate::fx::sim::TICKS_PER_SECOND * dt;
             // Monster `SetPlayerWalk`: `MONSTER01_WALK` (ZzzCharacter.cpp:725).
@@ -995,12 +1088,18 @@ fn animate(
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
-    mut q: Query<(&mut Monster, &crate::shadow::Shadow, Option<&crate::names::Selectable>, Option<&mut crate::fx::ActorState>)>,
+    mut q: Query<(
+        &mut Monster,
+        &crate::shadow::Shadow,
+        Option<&crate::names::Selectable>,
+        Option<&mut crate::fx::ActorState>,
+        Option<&Skinned>,
+    )>,
     mut visibility: Query<&mut Visibility, Without<Monster>>,
 ) {
     let Some(terrain) = terrain else { return };
     let dt = time.delta_secs();
-    for (mut m, shadow, selectable, actor) in &mut q {
+    for (mut m, shadow, selectable, actor, skinned) in &mut q {
         let Some(act) = m.skeleton.actions.get(m.action) else { continue };
         let (frames, locked) = (act.frames, act.lock_positions.is_some());
         if !m.held {
@@ -1029,28 +1128,47 @@ fn animate(
             }
         }
         let frame = pose_frame(m.frame, frames, m.held);
-        let bones = m.skeleton.bone_matrices_at(m.action, frame);
         let h = monster_height(&m, &terrain);
-        if let Some(mut actor) = actor {
-            actor.0 = actor_state(&m, &bones, h);
-        }
         let mut sh = crate::shadow::Builder::new(
             Some(&terrain.0),
             Vec3::new(m.pos.x * MU_SCALE, m.pos.y * MU_SCALE, h),
             Quat::from_rotation_z(m.facing),
             m.scale,
         );
-        for part in &m.parts {
-            let posed = part.model.pose_with(part.mesh, &bones);
-            if m.shadow && part.shadow {
-                sh.add(&posed.positions);
+        let bones = match skinned {
+            // Character-shaped: the pieces, the weapons (on the back in a safe zone,
+            // `RenderCharacterBackItem`, ZzzCharacter.cpp:14636-14645) and the wings.
+            Some(s) => {
+                let links = crate::character::LinkState {
+                    weapons_on_back: m.safe,
+                    safe_zone: m.safe,
+                    time: time.elapsed_secs(),
+                    ..default()
+                };
+                s.pose(m.action, frame, links, &mut meshes, &mut sh)
             }
-            if let Some(mut mesh) = meshes.get_mut(&part.handle) {
-                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
-                mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
+            None => {
+                let bones = m.skeleton.bone_matrices_at(m.action, frame);
+                for part in &m.parts {
+                    let posed = part.model.pose_with(part.mesh, &bones);
+                    if m.shadow && part.shadow {
+                        sh.add(&posed.positions);
+                    }
+                    if let Some(mut mesh) = meshes.get_mut(&part.handle) {
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, posed.positions);
+                        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, posed.normals);
+                    }
+                }
+                bones
             }
+        };
+        if let Some(mut actor) = actor {
+            actor.0 = actor_state(&m, &bones, h);
         }
-        sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
+        // `Skinned::pose` adds every piece to the shadow: without one it is left hidden.
+        if m.shadow || skinned.is_none() {
+            sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
+        }
 
         // `c->Light` = terrain light + `o->Light` (ZzzCharacter.cpp:8906-8913); 55 is fixed at 0.6.
         let size = mu_data::terrain::SIZE;
@@ -1193,20 +1311,68 @@ mod tests {
 
     #[test]
     fn acciones_de_los_esqueletos() {
+        let items = ItemData::default();
         // 14: sword and shield → stop and walk with sword, sword attacks.
         let skel = data::defs(14, 0)[0];
-        let a = player_actions(&skel, false);
-        assert_eq!(a.stop, ids::PLAYER_STOP_SWORD as usize);
-        assert_eq!(a.walk, ids::PLAYER_WALK_SWORD as usize);
+        let a = player_actions(&skel, &items);
+        assert_eq!(a.stop(false), ids::PLAYER_STOP_SWORD as usize);
+        assert_eq!(a.walk(false), ids::PLAYER_WALK_SWORD as usize);
         assert_eq!(a.attack[0], ids::PLAYER_ATTACK_SWORD_RIGHT1 as usize);
         // In a safe zone, no weapons in hand.
-        assert_eq!(player_actions(&skel, true).stop, ids::PLAYER_STOP_MALE as usize);
+        assert_eq!(a.stop(true), ids::PLAYER_STOP_MALE as usize);
         // 15: bow in the left hand.
         let archer = data::defs(15, 0)[0];
-        let a = player_actions(&archer, false);
-        assert_eq!((a.stop, a.walk, a.attack[0]), (ids::PLAYER_STOP_BOW as usize, ids::PLAYER_WALK_BOW as usize, ids::PLAYER_ATTACK_BOW as usize));
+        let a = player_actions(&archer, &items);
+        let got = (a.stop(false), a.walk(false), a.attack[0]);
+        assert_eq!(got, (ids::PLAYER_STOP_BOW as usize, ids::PLAYER_WALK_BOW as usize, ids::PLAYER_ATTACK_BOW as usize));
         assert!(vanishes_on_death(&skel));
         assert!(!vanishes_on_death(&data::defs(0, 0)[0]));
+        // 257 stands flying, in a safe zone too; outside it flies with its wings.
+        let elf = player_actions(&data::defs(257, 0)[0], &items);
+        assert_eq!(elf.stop(true), ids::PLAYER_STOP_FLY as usize);
+        assert_eq!(elf.walk(false), ids::PLAYER_FLY as usize);
+        // 375 (wings): flies outside a safe zone (ZzzCharacter.cpp:237-238).
+        let card = player_actions(&data::defs(375, 0)[0], &items);
+        assert_eq!((card.stop(false), card.stop(true)), (ids::PLAYER_STOP_FLY as usize, ids::PLAYER_STOP_MALE as usize));
+        // The Doppelganger elf stands as a woman (`CLASS_ELF`).
+        let delf = player_actions(&data::defs(534, 65)[0], &items);
+        assert_eq!(delf.stop(true), ids::PLAYER_STOP_FEMALE as usize);
+    }
+
+    /// What the character-shaped ones wear, against `CreateMonster`.
+    #[test]
+    fn dress_of_the_character_shaped_ones() {
+        let items = ItemData::default();
+        // ZzzCharacter.cpp:13859-13869: the guard wears `MODEL_*+9` and carries a crossbow and arrows.
+        let guard = player_dress(&data::defs(247, 0)[0], &items, 4);
+        let file = |p: &Option<(std::path::PathBuf, mu_data::items::Item)>| {
+            p.as_ref().map(|(path, item)| (path.file_name().unwrap().to_string_lossy().to_lowercase(), item.level))
+        };
+        assert_eq!(file(&guard.parts[0]), Some(("helmmale10.bmd".into(), 0)));
+        assert_eq!(file(&guard.parts[4]), Some(("bootmale10.bmd".into(), 0)));
+        assert_eq!(file(&guard.weapons[0]), Some(("crossbow04.bmd".into(), 0)));
+        assert_eq!(file(&guard.weapons[1]), Some(("arrows01.bmd".into(), 0)));
+        assert!(guard.whole_body.is_none() && !guard.white_light);
+        // 13711-13724: Marlon, +7 armour and a +8 spear.
+        let marlon = player_dress(&data::defs(229, 0)[0], &items, 4);
+        assert_eq!(marlon.parts[1].as_ref().map(|p| p.1.level), Some(7));
+        assert_eq!(marlon.weapons[0].as_ref().map(|p| (p.1.group, p.1.index, p.1.level)), Some((3, 7, 8)));
+        // 257: +13 armour and wings.
+        let elf = player_dress(&data::defs(257, 0)[0], &items, 4);
+        assert_eq!(elf.parts[2].as_ref().map(|p| (p.1.index, p.1.level)), Some((24, 13)));
+        assert_eq!(elf.wing.as_ref().map(|p| (p.1.group, p.1.index)), Some((12, 3)));
+        // A skeleton: its `SubType` model instead of the pieces, and its sword and shield.
+        let skel = player_dress(&data::defs(14, 0)[0], &items, 4);
+        let whole = skel.whole_body.clone().unwrap();
+        assert_eq!((whole.0, whole.1.as_str()), (Path::new("Skill").join("Skeleton01.bmd"), "Skill"));
+        assert!(skel.parts.iter().all(Option::is_none));
+        assert!(skel.weapons.iter().all(Option::is_some));
+        // GMDoppelGanger1.cpp:138-149: the Magic Gladiator's head is `HelmClass304`.
+        let mg = player_dress(&data::defs(537, 65)[0], &items, 4);
+        assert_eq!(mg.class_parts[0].as_deref(), Some("HelmClass304.bmd"));
+        assert!(mg.parts[0].is_none() && mg.parts[1].is_some());
+        assert_eq!(monster_class(&data::defs(537, 65)[0]), Class::Gladiator);
+        assert_eq!(monster_class(&data::defs(247, 0)[0]), Class::Wizard);
     }
 
     /// Every number in the table has a source for its model.
@@ -1214,7 +1380,7 @@ mod tests {
     fn todos_tienen_modelo() {
         for d in data::DEFS.iter() {
             let ok = sources(d, 0).is_some() || matches!(d.model, Model::Object(_));
-            assert!(ok || matches!(d.model, Model::Other("MODEL_XMAS_EVENT_CHANGE_GIRL")), "{} {:?}", d.number, d.model);
+            assert!(ok, "{} {:?}", d.number, d.model);
         }
     }
 }
