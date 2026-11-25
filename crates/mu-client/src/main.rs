@@ -34,6 +34,7 @@ mod charselect;
 mod chat;
 mod chat_log;
 mod clipboard;
+mod combat;
 mod cursor;
 mod effects;
 mod fish;
@@ -70,6 +71,7 @@ mod settings;
 mod shadow;
 mod scene;
 mod shop;
+mod skills;
 mod sound;
 mod terrain;
 mod vault;
@@ -292,5 +294,7 @@ fn main() {
         .add_plugins(shop::ShopPlugin)
         .add_plugins(npc_dialogue::NpcDialoguePlugin)
         .add_plugins(vault::VaultPlugin)
+        .add_plugins(skills::SkillsPlugin)
+        .add_plugins(combat::CombatPlugin)
         .run();
 }

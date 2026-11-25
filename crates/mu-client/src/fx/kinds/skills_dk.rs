@@ -229,8 +229,8 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
     c.user[LAST_EFFECT] = 0.0;
     // TODO(original): o->PKKey = getTargetCharacterKey(c, SelectedCharacter) (no targets → -1).
     let pk_key = -1;
-    // TODO(original): FindHotKey(Skill) (index of the skill in the list; only used by the network).
-    let hot_key = 0;
+    // `FindHotKey(Skill)`: the slot the hits are reported with.
+    let hot_key = ctx.find_hot_key(c.skill);
     // The character's o->Light: not available, white.
     let light = Vec3::ONE;
 

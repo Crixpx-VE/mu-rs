@@ -248,6 +248,11 @@ fn attack_script(c: &mut Conn, user: &str, (x, y): (u8, u8), walk_to: Option<(u8
         let hex: Vec<String> = m.encode().iter().map(|b| format!("{b:02X}")).collect();
         println!("[{user}] -> {} = {m:?}", hex.join(" "));
     };
+    // `BOT_DECIR`: a chat line first (e.g. OpenMU's "/addene 5").
+    if let Ok(text) = std::env::var("BOT_DECIR") {
+        let name = std::env::var("BOT_NOMBRE").unwrap_or_default();
+        c.send(ClientMessage::PublicChat { name, message: text })?;
+    }
     let got = c.collect(user, 2.0)?;
     let skills: Vec<u16> = got
         .iter()

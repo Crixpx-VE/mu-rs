@@ -229,6 +229,10 @@ pub fn walk_action(class: crate::account::Class) -> usize {
 /// (ZzzOpenData.cpp ≈330-361; `SetPlayerWalk` sets 0.33 for the walking ones).
 pub fn play_speed(a: usize) -> f32 {
     use crate::fx::tables::ids;
+    // The attack and skill actions: `SetAttackSpeed` (combat.rs).
+    if let Some(s) = crate::combat::attack_play_speed(a) {
+        return s;
+    }
     let a = a as i32;
     if a == ids::PLAYER_STOP_SWORD {
         0.26
@@ -285,8 +289,7 @@ pub struct CharacterPlugin;
 
 impl Plugin for CharacterPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<CurrentSkill>()
-            .add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
+        app.add_systems(Update, spawn_player.run_if(crate::scene::load_step(crate::scene::Step::Player)))
             .init_resource::<MouseTimer>()
             .add_systems(
                 Update,
@@ -319,6 +322,8 @@ pub struct Player {
     pub walk: usize,
     /// What it wears that changes those animations (hero_dress.rs fills it from the inventory).
     pub gear: Gear,
+    /// `Hero->Dead`: killed, until `ReceiveRevival` (combat.rs).
+    pub dead: bool,
 }
 
 /// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
@@ -400,59 +405,22 @@ const SKILL_KEYS: [(KeyCode, i32, usize, f32); 10] = {
     ]
 };
 
-/// Selected skill (`Hero->CurrentSkill`): index in `SKILL_KEYS`.
-#[derive(Resource, Default)]
-pub struct CurrentSkill(pub Option<usize>);
-
-/// Like the original: `1`-`0` select that hotkey's skill (`UseHotKey`) and the right button
-/// casts it toward the mouse; not usable in a safe zone (`CheckAttack`). Without the skill
-/// list yet, the hotkeys hold the Dark Knight's in order.
-#[allow(clippy::too_many_arguments)]
+/// `--probar-habilidades`: the Dark Knight skills one after another in place, without a server (to
+/// look at their effects). The real casting is combat.rs's.
 fn cast_skill(
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Res<ButtonInput<MouseButton>>,
     args: Res<Args>,
-    over_ui: Res<crate::mainframe::PointerOverUi>,
-    windows: Query<&Window>,
-    cameras: Query<(&Camera, &GlobalTransform), With<IsDefaultUiCamera>>,
-    terrain: Option<Res<LoadedTerrain>>,
-    mut current: ResMut<CurrentSkill>,
     mut auto: Local<usize>,
     mut world: ResMut<crate::fx::FxWorld>,
     mut players: Query<(Entity, &mut Player)>,
 ) {
     let Ok((entity, mut p)) = players.single_mut() else { return };
-    // The hotkey skills are the Dark Knight's.
-    if p.class != crate::account::Class::Knight {
-        return;
-    }
-    if let Some(i) = SKILL_KEYS.iter().position(|(k, ..)| keys.just_pressed(*k)) {
-        current.0 = Some(i);
-    }
-    if p.casting.is_some() {
+    if !args.skill_test || p.class != crate::account::Class::Knight || p.casting.is_some() {
         return;
     }
     // `--probar-habilidades`: one after another, no mouse, anywhere.
-    let (index, target) = if args.skill_test {
+    let (index, target): (usize, Option<Vec2>) = {
         *auto += 1;
         ((*auto - 1) % SKILL_KEYS.len(), None)
-    } else {
-        let Some(i) = current.0 else { return };
-        if !buttons.just_pressed(MouseButton::Right) || over_ui.0 {
-            return;
-        }
-        let safe = terrain.as_ref().is_some_and(|t| {
-            t.0.attribute((p.pos.x as usize).min(255), (p.pos.y as usize).min(255)) & mu_data::terrain::attr::SAFE_ZONE != 0
-        });
-        if safe {
-            return;
-        }
-        // Ground point under the mouse.
-        let hit = windows.single().ok().zip(cameras.single().ok()).zip(terrain.as_ref()).and_then(|((w, (cam, tf)), t)| {
-            let ray = cam.viewport_to_world(tf, w.cursor_position()?).ok()?;
-            raycast_terrain(&t.0, ray)
-        });
-        (i, hit)
     };
     let (_, skill, action, speed) = SKILL_KEYS[index];
     p.path.clear();
@@ -906,6 +874,7 @@ fn spawn_player(
         stop,
         walk,
         gear: Gear::default(),
+        dead: false,
     };
     let actor = actor_state(&player, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
@@ -1280,6 +1249,7 @@ fn hero_input(
     mut net: ResMut<crate::net::Net>,
     gate: Res<crate::gate::GateState>,
     mut npc: crate::npc::NpcTalk,
+    mut attack: crate::combat::AttackInput,
 ) {
     use mu_data::terrain::attr;
     let (Some(t), Ok(mut player)) = (terrain, players.single_mut()) else { return };
@@ -1313,7 +1283,7 @@ fn hero_input(
         }
         // Not over the UI (`MouseOnWindow`), nor while casting a skill, nor while crossing a
         // gate (`LoadingWorld > 30`, ZzzInterface.cpp:7192-7195).
-        if success && !over_ui.0 && player.casting.is_none() && !gate.blocks_input() {
+        if success && !over_ui.0 && player.casting.is_none() && !player.dead && !gate.blocks_input() {
             timer.time = 0;
             let here = (player.pos.x as usize, player.pos.y as usize);
             let moving = !player.path.is_empty();
@@ -1327,6 +1297,22 @@ fn hero_input(
                     match hero_path(&t.0, here, (tx as usize, ty as usize)) {
                         Some(p) => send_move(&mut player, p, &mut timer, &mut net, &mut npc),
                         None => operate_action(&mut player, op, &mut sound, &mut net),
+                    }
+                }
+            } else if let Some((target, tile)) = attack.clicked_monster() {
+                // A monster under the mouse (`MoveHero`, ZzzInterface.cpp:7451-7506): `Attacking = 1`,
+                // `MOVEMENT_ATTACK` toward it; if a wall is in the way nothing happens; without a path
+                // (next to it) or with a bow, `Action(c, o, true)` at once, otherwise walk there and
+                // act on arriving (combat.rs `hero_action`).
+                player.operate = None;
+                player.talk = None;
+                let (hx, hy) = (here.0 as i32, here.1 as i32);
+                if crate::combat::check_wall(&t.0, (hx, hy), (tile.0 as i32, tile.1 as i32)) {
+                    attack.start(target);
+                    let bow = player.gear.weapons.iter().flatten().any(|w| w.group == mu_data::items::group::BOW);
+                    match npc.path_to(&t.0, here, tile) {
+                        Some(p) if !bow => send_move(&mut player, p, &mut timer, &mut net, &mut npc),
+                        _ => player.path.clear(),
                     }
                 }
             } else if let Some((key, tile)) = npc.clicked_npc() {
@@ -1426,7 +1412,7 @@ pub fn chat_emote(p: &mut Player, at: u8, net: &mut crate::net::Net) {
 }
 
 /// Terrain point (in MU tiles) under a camera ray.
-fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Option<Vec2> {
+pub(crate) fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Option<Vec2> {
     let ground = |p: Vec3| t.height_at(p.x, -p.z) / MU_SCALE;
     let mut prev = 0.0;
     let mut d = 0.0;
@@ -1494,7 +1480,8 @@ fn walk(
         } else {
             p.stop
         };
-        if p.casting.is_none() && action != p.action {
+        // The dead keep their death action (`SetPlayerDie`).
+        if p.casting.is_none() && action != p.action && !p.dead {
             p.action = action;
             p.frame = 0.0;
         }
@@ -1557,6 +1544,11 @@ fn animate(
         }
         // The skill ends when its animation ends: back to standing. So does an emote
         // (`PlayerStopAnimationSetting`).
+        if p.dead {
+            // `PLAYER_DIE1` stays on its last frame (`Loop`, ZzzOpenData.cpp:380-381).
+            let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
+            p.frame = p.frame.min((frames - 1.0).max(0.0));
+        }
         if p.casting.is_some() || action::emote(p.action) {
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
             if p.frame >= frames - 1.0 {

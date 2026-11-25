@@ -93,12 +93,34 @@ pub struct RemotePlayer {
     light: Vec3,
     /// What it shows (`ChangeCharacterExt` / `ReceiveChangePlayer`).
     look: Appearance,
+    /// `c->SwordCount` (`SetPlayerAttack`).
+    sword_count: u32,
 }
 
 impl RemotePlayer {
     /// Current animation and frame (to pose its parts again, e.g. the highlight).
     pub fn pose_state(&self) -> (usize, f32) {
         (self.action, self.frame)
+    }
+
+    /// Its tile position (fractional while walking).
+    pub fn position(&self) -> Vec2 {
+        self.pos
+    }
+
+    pub fn class(&self) -> Class {
+        self.class
+    }
+
+    /// `SetAction`: a new action from its first frame; it stops walking (combat.rs).
+    pub fn set_action(&mut self, a: usize) {
+        self.action = a;
+        self.frame = 0.0;
+        self.path.clear();
+    }
+
+    pub fn set_facing(&mut self, facing: f32) {
+        self.facing = facing;
     }
 
     /// `SetPlayerStop`: unarmed in a safe zone; outside, flying with wings or by its weapons.
@@ -190,6 +212,7 @@ fn apply(
                         materials: model.materials,
                         light: Vec3::splat(-1.0),
                         look,
+                        sword_count: 0,
                     };
                     info!("aparece {} ({})", r.name, class.name());
                     let transform = remote_transform(&r, &terrain);
@@ -253,6 +276,13 @@ fn apply(
                 r.facing = rotation_facing(direction);
                 r.path.clear();
                 r.pos = Vec2::new(r.target.0 as f32 + 0.5, r.target.1 as f32 + 0.5);
+                // `AT_ATTACK1/2`: `SetPlayerAttack` with its weapons (WSclient.cpp:3148-3157).
+                if matches!(action, game::action::ATTACK1 | game::action::ATTACK2) {
+                    r.sword_count += 1;
+                    r.action = crate::combat::player_attack_action(&r.gear, r.sword_count - 1, 0);
+                    r.frame = 0.0;
+                    continue;
+                }
                 match crate::character::action::for_at(action, r.class.female()) {
                     Some(a) => {
                         // `SetAction` does not restart the current action.
@@ -378,7 +408,11 @@ fn walk(
             }
         }
         // Sitting, leaning or emoting continues while not walking (like the hero).
-        let keep = crate::character::action::resting(r.action) || crate::character::action::emote(r.action);
+        let keep = crate::character::action::resting(r.action)
+            || crate::character::action::emote(r.action)
+            || crate::combat::is_attack_action(r.action)
+            || r.action == crate::fx::tables::ids::PLAYER_SHOCK as usize
+            || r.action == crate::fx::tables::ids::PLAYER_DIE1 as usize;
         let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
         let action = if !r.path.is_empty() {
             r.walk_for(safe)
@@ -418,7 +452,11 @@ pub(crate) fn animate(
         // lacks (any number from the server).
         let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
         let frames = skinned.action_frames(r.action) as f32;
-        if frames == 0.0 || (crate::character::action::emote(r.action) && r.frame >= frames - 1.0) {
+        // Attacks and hits end in a stand too (`PlayerStopAnimationSetting`); the death stays.
+        let ends = crate::character::action::emote(r.action) || crate::combat::is_attack_action(r.action) || r.action == crate::fx::tables::ids::PLAYER_SHOCK as usize;
+        if r.action == crate::fx::tables::ids::PLAYER_DIE1 as usize {
+            r.frame = r.frame.min((frames - 1.0).max(0.0));
+        } else if frames == 0.0 || (ends && r.frame >= frames - 1.0) {
             r.action = r.stop_for(safe);
             r.frame = 0.0;
         }

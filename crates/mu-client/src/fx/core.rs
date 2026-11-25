@@ -951,6 +951,11 @@ impl Ctx<'_> {
         })
     }
 
+    /// `FindHotKey(Skill)` (ZzzInterface.cpp:7995-8009): the hero's slot of that skill, 0 if it has none.
+    pub fn find_hot_key(&self, skill: i32) -> i32 {
+        self.hero_skills.iter().take(64).position(|&s| s == skill).unwrap_or(0) as i32
+    }
+
     /// `CharacterAttribute->Skill[index]`: the hero's skill in that slot (0 if unknown).
     pub fn hero_skill(&self, index: i32) -> i32 {
         usize::try_from(index).ok().and_then(|i| self.hero_skills.get(i)).copied().unwrap_or(0)
