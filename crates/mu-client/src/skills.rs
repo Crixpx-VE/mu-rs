@@ -956,7 +956,9 @@ fn draw(
         Res<crate::mainframe::CharacterStats>,
     ),
     roots: Query<Entity, With<SkillBarRoot>>,
-    mut last: Local<Vec<Piece>>,
+    // The root is part of the key: it is respawned on every map change (`OnEnter(Game)`), empty,
+    // and must be filled again even if the pieces did not change.
+    mut last: Local<(Option<Entity>, Vec<Piece>)>,
 ) {
     let (Some(table), Some(textures), Ok(root)) = (table, textures, roots.single()) else { return };
     let (gear, d) = hero_gear(hero.as_deref(), info.as_deref(), &eq, &inv);
@@ -972,7 +974,7 @@ fn draw(
         mana_max: stats.mp_max as i32,
     };
     let now = pieces(&skills, &table.0, &gear, &st, &textures, &metrics);
-    if now == *last {
+    if last.0 == Some(root) && last.1 == now {
         return;
     }
     commands.entity(root).despawn_children();
@@ -1007,7 +1009,7 @@ fn draw(
             }
         }
     });
-    *last = now;
+    *last = (Some(root), now);
 }
 
 fn absolute(x: f32, y: f32, w: f32, h: f32) -> Node {

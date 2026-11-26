@@ -1758,12 +1758,13 @@ fn draw(
     hero: Option<Res<crate::account::Hero>>,
     info: Option<Res<crate::account::HeroInfo>>,
     (shop, shop_draw, dialog, vault_draw): (Res<crate::shop::NpcShop>, Res<crate::shop::ShopDraw>, Res<crate::npc::NpcDialog>, Res<crate::vault::VaultDraw>),
-    mut roots: Query<&mut Visibility, With<InventoryRoot>>,
+    mut roots: Query<(Entity, &mut Visibility), With<InventoryRoot>>,
     mut layers: Query<(Entity, &Layer, Option<&mut ImageNode>, &mut Node)>,
-    mut last: Local<(Vec<Piece>, Vec<Piece>, bool)>,
+    // Back and front pieces last drawn, and the root they were drawn into.
+    mut last: Local<(Vec<Piece>, Vec<Piece>, Option<Entity>)>,
 ) {
     let Some(textures) = textures else { return };
-    let Ok(mut vis) = roots.single_mut() else { return };
+    let Ok((root, mut vis)) = roots.single_mut() else { return };
     let want = if inv.open { Visibility::Inherited } else { Visibility::Hidden };
     if *vis != want {
         *vis = want;
@@ -1783,8 +1784,9 @@ fn draw(
     // The vault likewise (vault.rs), with its message boxes on top of everything.
     back.extend(vault_draw.back.iter().map(|p| p.shifted(-inv.dx)));
     front.extend(vault_draw.front.iter().map(|p| p.shifted(-inv.dx)));
-    // Layers are created once (`spawn_root`); the first time they are drawn even if nothing changed.
-    let fresh = !last.2;
+    // Layers are created with the root (`spawn_root`, again on every map change); new ones are
+    // drawn even if nothing changed.
+    let fresh = last.2 != Some(root);
     for (e, layer, image, mut node) in &mut layers {
         // Background and foreground move with the window; the items image is already shifted.
         let left = Val::Px(if *layer == Layer::Items { 0.0 } else { inv.dx });
@@ -1811,7 +1813,7 @@ fn draw(
             _ => {}
         }
     }
-    *last = (back, front, true);
+    *last = (back, front, Some(root));
 }
 
 #[cfg(test)]
