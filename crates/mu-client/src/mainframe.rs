@@ -440,7 +440,7 @@ fn pointer_over_ui(
     char_info: Res<crate::char_info::CharInfoWindow>,
     inventory: Res<crate::inventory::Inventory>,
     (shop, vault): (Res<crate::shop::NpcShop>, Res<crate::vault::Vault>),
-    npc_dialogue: Res<crate::npc_dialogue::NpcDialogueWindow>,
+    (npc_dialogue, market): (Res<crate::npc_dialogue::NpcDialogueWindow>, Res<crate::market_window::MarketWindow>),
     (skills, skill_table): (Res<crate::skills::HeroSkills>, Option<Res<crate::skills::Skills>>),
     mut over: ResMut<PointerOverUi>,
 ) {
@@ -453,6 +453,7 @@ fn pointer_over_ui(
             || inventory.blocks(c)
             || shop.blocks(c)
             || npc_dialogue.blocks(c)
+            || market.blocks(c)
             || vault.blocks(c)
             || skill_table.as_ref().is_some_and(|t| skills.blocks(c, &t.0))
     });

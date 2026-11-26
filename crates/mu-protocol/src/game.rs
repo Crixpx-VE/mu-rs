@@ -61,6 +61,7 @@
 //! client → server  EnterGateRequest             C3 08 1C 00 <gate u16 LE> <x> <y>
 //! client → server  AnimationRequest             C1 05 18 <direction> <action AT_*>
 //! server → client  ObjectAnimation              C1 09 18 <id u16 BE> <direction> <action AT_*> <target id u16 BE>
+//! client → server  EnterMarketPlaceRequest      C1 04 BF 17
 //! ```
 //!
 //! # Walk-in gates
@@ -460,6 +461,12 @@ pub enum ClientMessage {
     /// `SendRequestAPDPUp` (wsclientinline.h:942-948, C1 04 F6 31): the buff of the open NPC dialog
     /// (the Elf Soldier). OpenMU's `NpcBuffRequest`.
     NpcBuffRequest,
+    /// `SendRequestEnterUnitedMarketPlaceEvent` (wsclientinline.h:2312-2318, C1 04 BF 17, not
+    /// encrypted): the Enter button of Market Union Member Julia's window
+    /// (NewUIUnitedMarketPlaceWindow.cpp:287-295). OpenMU's `EnterMarketPlaceRequest`; it warps
+    /// between Lorencia and Loren Market (`EnterMarketPlaceAction`) and answers with
+    /// [`ServerMessage::MapChanged`].
+    EnterMarketPlace,
     /// `SendQuestSelection(dwQuestIndex, byResult)` (wsclientinline.h:826-834, C1 09 F6 0A): a quest
     /// of the list was picked. `quest` is the original's `DWORD` (number in the low word, group in
     /// the high word, OpenMU's `QuestNumber` at 4 and `QuestGroup` at 6) and `selected` the 1-based
@@ -1184,6 +1191,7 @@ impl ClientMessage {
             Self::GensReward { gens } => c1(&[0xF8, 0x09, *gens]),
             Self::AvailableQuestsRequest => c1(&[0xF6, 0x30]),
             Self::NpcBuffRequest => c1(&[0xF6, 0x31]),
+            Self::EnterMarketPlace => c1(&[0xBF, 0x17]),
             Self::QuestSelect { quest, selected } => {
                 let mut body = vec![0xF6, 0x0A];
                 body.extend_from_slice(&quest.to_le_bytes());
@@ -1294,6 +1302,7 @@ impl ClientMessage {
             (0xF8, 0x09) => Some(Self::GensReward { gens: *d.get(4)? }),
             (0xF6, 0x30) => Some(Self::AvailableQuestsRequest),
             (0xF6, 0x31) => Some(Self::NpcBuffRequest),
+            (0xBF, 0x17) => Some(Self::EnterMarketPlace),
             (0xF6, 0x0A) => Some(Self::QuestSelect { quest: get_u32_le(d, 4)?, selected: *d.get(8)? }),
             (0xF6, 0x0B) => Some(Self::QuestProceed { quest: get_u32_le(d, 4)?, answer: *d.get(8)? }),
             _ => None,
@@ -2684,6 +2693,9 @@ mod tests {
         let reward = ida_y_vuelta_servidor(ServerMessage::QuestRequestReward { quest: 0x0012_0001 });
         assert_eq!((reward.len(), &reward[..8]), (251, &[0xC1, 251, 0xF6, 0x0C, 1, 0, 0x12, 0][..]));
         assert_eq!(ida_y_vuelta_cliente(ClientMessage::NpcBuffRequest), [0xC1, 4, 0xF6, 0x31]);
+        // `SendRequestEnterUnitedMarketPlaceEvent` (wsclientinline.h:2312-2318): OpenMU's
+        // EnterMarketPlaceRequest (ClientToServerPackets.xml: C1HeaderWithSubCode BF 17, length 4).
+        assert_eq!(ida_y_vuelta_cliente(ClientMessage::EnterMarketPlace), [0xC1, 4, 0xBF, 0x17]);
         // `SendQuestSelAnswer`: accept (1) the Spider Hunt (OpenMU's QuestProceedRequest).
         assert_eq!(
             ida_y_vuelta_cliente(ClientMessage::QuestProceed { quest: 0x0012_0000, answer: 1 }),

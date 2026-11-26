@@ -359,6 +359,9 @@ fn handle(msg: ClientMessage, s: &mut Session, shared: &Arc<Shared>) -> bool {
         | ClientMessage::QuestSelect { .. }
         | ClientMessage::QuestProceed { .. }
         | ClientMessage::LegacyQuestState { .. }
+        // No Julia NPC dialog here (it never opens), so no Loren Market warp (OpenMU serves it,
+        // `EnterMarketPlaceAction`, only while her window is open).
+        | ClientMessage::EnterMarketPlace
         // No combat on this server yet (OpenMU is the one in use).
         | ClientMessage::Hit { .. }
         | ClientMessage::TargetedSkill { .. }

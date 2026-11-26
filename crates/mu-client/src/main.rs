@@ -54,6 +54,7 @@ mod logfile;
 mod login;
 mod login_ui;
 mod mainframe;
+mod market_window;
 mod minimap;
 mod net;
 mod model_light;
@@ -293,7 +294,7 @@ fn main() {
         .add_plugins(monsters::MonstersPlugin)
         .add_plugins(npc::NpcPlugin)
         .add_plugins(shop::ShopPlugin)
-        .add_plugins(npc_dialogue::NpcDialoguePlugin)
+        .add_plugins((npc_dialogue::NpcDialoguePlugin, market_window::MarketWindowPlugin))
         .add_plugins(vault::VaultPlugin)
         .add_plugins(skills::SkillsPlugin)
         .add_plugins(combat::CombatPlugin)
