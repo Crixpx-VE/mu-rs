@@ -56,7 +56,7 @@ fn tex_info(_id: i32) -> Option<TexInfo> {
 fn run(world: &mut FxWorld, registry: &Registry, actors: &Actors, world_active: i32, what: &str) {
     let mut lights = TerrainLights::default();
     let models = super::model_data::ModelData::default();
-    let draw_ctx = DrawCtx { world_time: 0.0, tex_info: &tex_info, actors: &actors.map, world_active, models: &models };
+    let draw_ctx = DrawCtx { world_time: 0.0, tex_info: &tex_info, actors: &actors.map, world_active, models: &models, terrain: None, render_level: 4 };
     for t in 0..TICKS {
         sim::step(world, registry, actors, None, &mut lights, t as f32 * 40.0, world_active);
         let mut out = DrawList::default();

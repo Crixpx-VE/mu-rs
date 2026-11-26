@@ -194,20 +194,21 @@ fn interpolate(segments: &[(f32, f32, Vec3, Vec3)], rate: f32) -> Option<Vec3> {
 // --- Drawing helpers ------------------------------------------------------------------------------
 
 /// `RenderObject(o)` with `o`'s state: nothing when `Alpha < 0.01` (`Calc_RenderObject`,
-/// ZzzObject.cpp:245). `BodyLight(o,b)` adds the terrain light to `o->Light`.
-/// TODO(original): no terrain light at draw time (only `o->Light` is used, like the other kinds).
+/// ZzzObject.cpp:245). `BodyLight(o,b)` adds the terrain light to `o->Light` ([`DrawCtx::body_light`]).
 /// `HeadAngle` has no effect on these models (see the file header).
-fn object_draw(e: &Effect) -> Option<ModelDraw> {
+fn object_draw(e: &Effect, ctx: &DrawCtx) -> Option<ModelDraw> {
     if e.alpha < 0.01 {
         return None;
     }
-    Some(ModelDraw::of_effect(e))
+    let mut d = ModelDraw::of_effect(e);
+    d.light = ctx.body_light(e);
+    Some(d)
 }
 
 /// `RenderObject(o)` → `RenderBody(RENDER_TEXTURE, ...)` (the generic `else` of
 /// `Draw_RenderObject`, ZzzObject.cpp:2612).
-fn draw_plain(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    out.models.extend(object_draw(e));
+fn draw_plain(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    out.models.extend(object_draw(e, ctx));
 }
 
 // --- MODEL_DARK_SCREAM / MODEL_DARK_SCREAM_FIRE (Fire Scream) ----------------------------------------
@@ -270,8 +271,8 @@ fn scream_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// ZzzObject.cpp:1537-1544: `RenderBody` with `BlendMeshLight` 1; the fire is
 /// `RENDER_TEXTURE|RENDER_BRIGHT`.
-fn scream_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn scream_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     d.blend_mesh_light = 1.0;
     if e.ty == MODEL_DARK_SCREAM_FIRE {
         d.render_flags = RENDER_TEXTURE | RENDER_BRIGHT;
@@ -492,8 +493,8 @@ fn deasuler_step(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzObject.cpp:528-533: `RenderMesh(0, RENDER_TEXTURE)` with `BodyLight(o,b)`, then
 /// `RenderMesh(1, RENDER_TEXTURE|RENDER_BRIGHT)` with (0.3, 0.4, 1). `RenderMesh` ignores
 /// `HiddenMesh`.
-fn deasuler_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(base) = object_draw(e) else { return };
+fn deasuler_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(base) = object_draw(e, ctx) else { return };
     let mut mesh0 = base;
     mesh0.mesh = 0;
     mesh0.hidden_mesh = -1;
@@ -752,8 +753,8 @@ fn javelin_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// ZzzObject.cpp:1595-1600: body light (1, 0.6, 0.3), `RENDER_TEXTURE`, then
 /// `RENDER_BRIGHT|RENDER_CHROME` with HiddenMesh 1.
-fn javelin_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn javelin_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     d.light = Vec3::new(1.0, 0.6, 0.3);
     out.models.push(d);
     d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
@@ -823,8 +824,8 @@ fn sword_force_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// ZzzObject.cpp:2600-2610: subtypes 2/3 render with the texture `BITMAP_KNIGHTST_BLUE`.
-fn sword_force_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn sword_force_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     if e.sub_type == 2 || e.sub_type == 3 {
         d.texture = BITMAP_KNIGHTST_BLUE;
     }
@@ -895,8 +896,8 @@ fn stun_stone_step(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzObject.cpp:746-752: `RENDER_TEXTURE` with `BodyLight(o,b)`, then `RENDER_CHROME` with alpha
 /// 0.5, body light 1, `BITMAP_CHROME`, UV offset ×5/×2 and no hidden mesh. The spin written to
 /// `HeadAngle` is not visible (see the file header), as in the original.
-fn stun_stone_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn stun_stone_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     out.models.push(d);
     d.render_flags = RENDER_CHROME;
     d.alpha = 0.5;
@@ -954,8 +955,8 @@ fn skin_shell_step(e: &mut Effect, ctx: &mut Ctx) {
 /// ZzzObject.cpp:733-745: subtype 0 `RENDER_TEXTURE` with `BodyLight = o->Light`, subtype 1
 /// `RENDER_TEXTURE|RENDER_BRIGHT` with (0.1, 0.5, 1), both with the texture `BITMAP_CHROME`; other
 /// subtypes draw nothing.
-fn skin_shell_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn skin_shell_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     d.texture = BITMAP_CHROME;
     match e.sub_type {
         0 => out.models.push(d),
@@ -1027,8 +1028,8 @@ fn mana_rune_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// ZzzObject.cpp:1589-1594: subtype 0 `RENDER_TEXTURE` then `RENDER_BRIGHT|RENDER_CHROME`, both
 /// with body light (0.3, 0.6, 1); the rest generic.
-fn mana_rune_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn mana_rune_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     if e.sub_type == 0 {
         d.light = Vec3::new(0.3, 0.6, 1.0);
         out.models.push(d);
@@ -1190,8 +1191,8 @@ fn waves_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// ZzzObject.cpp:1567-1575: subtypes 3-5 render with HiddenMesh -1 and the texture
 /// `BITMAP_PINK_WAVE`.
-fn waves_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn waves_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     if matches!(e.sub_type, 3..=5) {
         d.hidden_mesh = -1;
         d.texture = BITMAP_PINK_WAVE;
@@ -1452,7 +1453,7 @@ fn foot_thunder_step(e: &mut Effect, ctx: &mut Ctx) {
 
 /// RenderEffects 18604-18610: `RenderTerrainAlphaBitmap(BITMAP_FENRIR_FOOT_THUNDER1 + anim%5, x, y,
 /// 0.6, 0.6, Light)` with `EnableAlphaBlend`.
-fn foot_thunder_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+fn foot_thunder_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let frame = (e.user[SLOT_ANIMATION] as i32).rem_euclid(5);
     common::terrain_bitmap(out, BITMAP_FENRIR_FOOT_THUNDER1 + frame, e.position.x, e.position.y, 0.6, 0.6, e.light, 0.0, 1.0, 5.0, Blend::Glow);
 }
@@ -1515,7 +1516,7 @@ fn twintail_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// RenderEffects 18611-18626 (`EnableAlphaBlend`).
-fn twintail_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
+fn twintail_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     if e.sub_type == 0 {
         common::terrain_bitmap(out, BITMAP_SPARK + 1, e.position.x, e.position.y, e.scale, e.scale, e.light, 0.0, e.alpha, 5.0, Blend::Glow);
     } else if e.sub_type == 1 || e.sub_type == 2 {
@@ -1645,8 +1646,8 @@ fn protect_guild_step(e: &mut Effect, ctx: &mut Ctx) {
 }
 
 /// ZzzObject.cpp:1576-1581: two `RENDER_BRIGHT|RENDER_CHROME` passes with body light (0.4, 0.6, 1).
-fn protect_guild_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
-    let Some(mut d) = object_draw(e) else { return };
+fn protect_guild_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
+    let Some(mut d) = object_draw(e, ctx) else { return };
     d.light = Vec3::new(0.4, 0.6, 1.0);
     d.render_flags = RENDER_BRIGHT | RENDER_CHROME;
     out.models.push(d);

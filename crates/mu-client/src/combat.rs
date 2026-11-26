@@ -73,6 +73,11 @@ pub fn set_attack_speed(attack: u16, magic: u16) {
     MAGIC_SPEED.store(magic as u32, Ordering::Relaxed);
 }
 
+/// `CharacterAttribute->AttackSpeed` and `MagicSpeed` as [`set_attack_speed`] last stored them.
+pub fn hero_speeds() -> (u16, u16) {
+    (ATTACK_SPEED.load(Ordering::Relaxed) as u16, MAGIC_SPEED.load(Ordering::Relaxed) as u16)
+}
+
 /// The `PlaySpeed` `SetAttackSpeed` gives an attack or skill action of `player.bmd` (frames per tick),
 /// or `None` for the actions it does not touch.
 pub fn attack_play_speed(a: usize) -> Option<f32> {

@@ -31,10 +31,6 @@ use crate::fx::core::*;
 /// the `rand()` sequence; with the file, its own bones are used.
 const FISSURE_BONES: usize = 149;
 
-/// `Models[MODEL_PLAYER].Actions[PLAYER_SKILL_FLAMESTRIKE].PlaySpeed = 0.69f + MagicSpeed2`
-/// (`SetAttackSpeed`, ZzzCharacter.cpp:870) without the hero's `MagicSpeed2`.
-const FLAME_STRIKE_PLAY_SPEED: f32 = 0.69;
-
 pub fn register(r: &mut Registry) {
     let k = |create: EffectCreate, step: EffectStep, draw: EffectDraw| EffectKind { create: Some(create), step: Some(step), draw: Some(draw) };
 
@@ -813,9 +809,9 @@ fn flame_strike_create(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.alpha = 0.0;
         e.life_time = 35.0;
-        // TODO(original): `Velocity = Models[Owner->Type].Actions[PLAYER_SKILL_FLAMESTRIKE].PlaySpeed`,
-        // i.e. 0.69 + the hero's MagicSpeed2 (attack speed is not known to effects).
-        e.velocity = FLAME_STRIKE_PLAY_SPEED;
+        // `Velocity = Models[Owner->Type].Actions[PLAYER_SKILL_FLAMESTRIKE].PlaySpeed`: `0.69 +
+        // MagicSpeed2` as `SetAttackSpeed` sets it (ZzzCharacter.cpp:870; combat.rs). Its owner is a player.
+        e.velocity = crate::combat::attack_play_speed(PLAYER_SKILL_FLAMESTRIKE as usize).unwrap_or(0.69);
         e.ai = 0;
         e.user[0] = ctx.rand() as f32;
     }

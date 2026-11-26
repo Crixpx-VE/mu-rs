@@ -1355,11 +1355,29 @@ pub struct DrawCtx<'a> {
     pub world_active: i32,
     /// Effect model files already loaded by the simulation.
     pub models: &'a super::model_data::ModelData,
+    /// The map and this tick's terrain lights, for `RequestTerrainLight` while drawing.
+    pub terrain: Option<(&'a Terrain, &'a TerrainLights)>,
+    /// `g_pOption->GetRenderLevel()` (0 to 4, `options::GameOptions::render_level`).
+    pub render_level: u8,
 }
 
 impl DrawCtx<'_> {
     pub fn tex(&self, id: i32) -> Option<TexInfo> {
         (self.tex_info)(id)
+    }
+
+    /// `b->BodyLight` of `RenderObject` for an effect (MuMain ZzzObject.cpp:272-285): the terrain
+    /// light plus `o->Light`, the terrain light at a tenth without `LightEnable`.
+    /// (`RequestModelTerrainLight` is `RequestTerrainLight` without MuMain's per-pixel lights.)
+    pub fn body_light(&self, e: &Effect) -> Vec3 {
+        let t = self.terrain_light(e.position.x, e.position.y);
+        if e.light_enable { t + e.light } else { t * 0.1 + e.light }
+    }
+
+    /// `RequestTerrainLight(x, y)` with x, y in MU (`terrain::request_terrain_light`); (0, 0, 0)
+    /// without a map, like the original off the terrain.
+    pub fn terrain_light(&self, x: f32, y: f32) -> Vec3 {
+        self.terrain.map_or(Vec3::ZERO, |(t, l)| crate::terrain::request_terrain_light(t, l, x, y))
     }
 
     /// The bones of an effect's own model in its (interpolated) pose, if the simulation has

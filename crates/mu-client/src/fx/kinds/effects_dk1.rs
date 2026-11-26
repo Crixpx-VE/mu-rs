@@ -34,10 +34,6 @@ pub fn register(r: &mut Registry) {
 /// `MAX_ITEM_INDEX`: items per group.
 const MAX_ITEM_INDEX: i32 = 512;
 
-/// `g_pOption->GetRenderLevel()` for the weapon glow.
-/// TODO(engine): `DrawCtx` does not carry the option; this is its default (options.rs:59).
-const RENDER_LEVEL: u8 = 4;
-
 /// `ItemObjectAttribute(o)` on the effect drawn as a weapon (ZzzObject.cpp:5306-5309): scale 0.8,
 /// 0.7 for `MODEL_SPEAR..=MODEL_STAFF+13`.
 pub(super) fn weapon_scale(model: i32) -> f32 {
@@ -67,7 +63,7 @@ pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level
     let (blend_mesh, hidden_mesh) = item_object_meshes(&item);
     // `num_meshes` only matters for the inventory armour textures (`body.rs`), never a weapon.
     let item_ctx = ItemCtx { hide_skin: false, num_meshes: 0, white_light: false };
-    for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), RENDER_LEVEL, &item_ctx) {
+    for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), ctx.render_level, &item_ctx) {
         // A pass whose texture has no `BITMAP_*` id here is skipped rather than drawn with the
         // wrong texture (only the inventory armour skins, never a weapon).
         let texture = match pass.texture {
@@ -225,9 +221,7 @@ fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     // `ItemObjectAttribute`: scale 0.8 (0.7 for spears through staffs), light 0.3, frame 0.
     let scale = weapon_scale(model);
     // `RequestTerrainLight + o->Light(0.3)`.
-    // TODO(original): no terrain light at draw time; approximated with 0.7.
-    const TERRAIN_LIGHT: f32 = 0.7;
-    let light = Vec3::splat(TERRAIN_LIGHT + 0.3);
+    let light = ctx.terrain_light(e.position.x, e.position.y) + Vec3::splat(0.3);
     // `Alpha` = `o->Alpha` saved before `ItemObjectAttribute`.
     render_weapon(out, ctx, model, level, position, angle, scale, light, e.alpha);
 }

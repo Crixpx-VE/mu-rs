@@ -813,6 +813,45 @@ impl TerrainLights {
     }
 }
 
+/// `PrimaryTerrainLight` at a terrain corner: the map's light plus this tick's lights, with the
+/// falloff [`apply_lights`] gives the ground.
+fn corner_light(t: &Terrain, lights: &[DynamicLight], x: usize, y: usize) -> [f32; 3] {
+    let mut l = t.light[y * SIZE + x];
+    for light in lights {
+        let d = (light.pos - Vec2::new(x as f32, y as f32)).length();
+        let falloff = (light.range - d) / light.range;
+        if falloff > 0.0 {
+            for k in 0..3 {
+                l[k] = (l[k] + light.color[k] * falloff).max(0.0);
+            }
+        }
+    }
+    l
+}
+
+/// `RequestTerrainLight(x, y)` (ZzzLodTerrain.cpp:933; MuMain ZzzLodTerrain.cpp:1209-1217) with x,
+/// y in MU: `PrimaryTerrainLight` (the map's light and this tick's `AddTerrainLight`s) interpolated
+/// between the four corners; (0, 0, 0) off the map.
+pub fn request_terrain_light(t: &Terrain, lights: &TerrainLights, x: f32, y: f32) -> Vec3 {
+    let (xf, yf) = (x / MU_SCALE, y / MU_SCALE);
+    let (xi, yi) = (xf.floor() as i32, yf.floor() as i32);
+    if xi < 0 || yi < 0 || xi > SIZE as i32 - 2 || yi > SIZE as i32 - 2 {
+        return Vec3::ZERO;
+    }
+    let (xi, yi) = (xi as usize, yi as usize);
+    let near: Vec<DynamicLight> = lights
+        .lights
+        .iter()
+        .filter(|l| (l.pos.x - xf).abs() <= l.range + 1.0 && (l.pos.y - yf).abs() <= l.range + 1.0)
+        .copied()
+        .collect();
+    let l = |x: usize, y: usize| Vec3::from_array(corner_light(t, &near, x, y));
+    let (xd, yd) = (xf - xi as f32, yf - yi as f32);
+    let left = l(xi, yi) + (l(xi, yi + 1) - l(xi, yi)) * yd;
+    let right = l(xi + 1, yi) + (l(xi + 1, yi + 1) - l(xi + 1, yi)) * yd;
+    left + (right - left) * xd
+}
+
 /// At the start of each tick, the previous tick's lights go away (like `InitTerrainLight`).
 pub fn clear_lights(mut lights: ResMut<TerrainLights>) {
     lights.lights.clear();
@@ -837,7 +876,7 @@ fn apply_lights(
             continue;
         }
         let [x0, y0, x1, y1] = c.area;
-        let touching: Vec<&DynamicLight> = lights
+        let touching: Vec<DynamicLight> = lights
             .lights
             .iter()
             .filter(|l| {
@@ -846,6 +885,7 @@ fn apply_lights(
                     && l.pos.y + l.range >= y0 as f32
                     && l.pos.y - l.range <= y1 as f32
             })
+            .copied()
             .collect();
         if touching.is_empty() && !c.lit {
             continue;
@@ -855,19 +895,7 @@ fn apply_lights(
             .corners
             .iter()
             .zip(&c.alpha)
-            .map(|(&[x, y], &a)| {
-                let mut l = t.0.light[y as usize * SIZE + x as usize];
-                for light in &touching {
-                    let d = (light.pos - Vec2::new(x as f32, y as f32)).length();
-                    let falloff = (light.range - d) / light.range;
-                    if falloff > 0.0 {
-                        for k in 0..3 {
-                            l[k] = (l[k] + light.color[k] * falloff).max(0.0);
-                        }
-                    }
-                }
-                vertex_color(l, a)
-            })
+            .map(|(&[x, y], &a)| vertex_color(corner_light(&t.0, &touching, x as usize, y as usize), a))
             .collect();
         if let Some(mut m) = meshes.get_mut(&c.mesh) {
             m.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);

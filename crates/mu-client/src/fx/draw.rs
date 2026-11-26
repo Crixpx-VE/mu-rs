@@ -29,6 +29,9 @@ pub fn collect(
     mut images: ResMut<Assets<Image>>,
     mut frame: ResMut<FrameDraw>,
     args: Res<crate::Args>,
+    terrain: Option<Res<LoadedTerrain>>,
+    lights: Res<crate::terrain::TerrainLights>,
+    options: Option<Res<crate::options::GameOptions>>,
 ) {
     let a = fixed.overstep_fraction();
     let tex = RefCell::new((&mut *textures, &mut *images));
@@ -43,6 +46,8 @@ pub fn collect(
         actors: &actors.map,
         world_active: args.world as i32 - 1,
         models: &world.models,
+        terrain: terrain.as_deref().map(|t| (&t.0, &*lights)),
+        render_level: options.map_or(crate::options::GameOptions::default().render_level, |o| o.render_level),
     };
     let mut out = DrawList::default();
 

@@ -17,7 +17,6 @@
 //! action speeds of `SetAttackSpeed` (`ZzzCharacter.cpp` 893-901). MuMain (`MoveHandlers.cpp`) matches.
 //!
 //! Engine gaps (each one has a `TODO(original)` where it is used):
-//! - `CharacterAttribute->AttackSpeed` (the Rage Fighter action speeds): [`hero_attack_speed`] = 0.
 //! - Writes to the owner (`o->Owner->Velocity += ..`): not possible on actor snapshots. The owner
 //!   angle shake of the wolf heads is reproduced locally (the original restores it in the same block).
 //! - Where the original dereferences `o->Owner` without checking it (it would crash), a missing
@@ -80,9 +79,9 @@ fn int_life(x: f32) -> f32 {
     x as i32 as f32
 }
 
-/// `CharacterAttribute->AttackSpeed` (the hero's). TODO(original): not available here; 0.
+/// `CharacterAttribute->AttackSpeed` (the hero's, from combat.rs's `SetAttackSpeed`).
 fn hero_attack_speed(_ctx: &Ctx) -> f32 {
-    0.0
+    crate::combat::hero_speeds().0 as f32
 }
 
 /// `Models[MODEL_PLAYER].Actions[a].PlaySpeed` of a Rage Fighter skill action as set by
