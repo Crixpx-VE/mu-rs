@@ -734,7 +734,7 @@ impl NpcDialogueWindow {
 pub struct GensInfluence(pub u8);
 
 /// `CheckMouseIn` (integer mouse position).
-fn inside(c: Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> bool {
+pub(crate) fn inside(c: Vec2, (x, y, w, h): (f32, f32, f32, f32)) -> bool {
     let (mx, my) = (c.x.floor(), c.y.floor());
     mx >= x && mx < x + w && my >= y && my < y + h
 }

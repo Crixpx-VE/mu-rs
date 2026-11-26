@@ -82,6 +82,15 @@ impl GateState {
         self.loading_world > LOADING_ARRIVED
     }
 
+    /// `LoadingWorld = 9999999` set by a window that asked the server for a warp (Julia's Warp
+    /// button, MuMain UI/Inventory/UnitedMarketPlaceWindow.cpp:104-109): the hero stops and ignores
+    /// the mouse until `MapChanged`, or [`NO_REPLY`] seconds if nothing arrives (OpenMU only
+    /// shows a message when the target map is inactive, `EnterMarketPlaceAction.cs:52-56`).
+    pub fn warp_requested(&mut self, now: f64) {
+        self.loading_world = LOADING_SENT;
+        self.sent_at = Some(now);
+    }
+
     /// `SendRequestFinishLoading` (wsclientinline.h:314-323): the new map has finished loading.
     pub fn finish_loading(&mut self, now: f64) {
         self.latest_zone_moving = Some(now);

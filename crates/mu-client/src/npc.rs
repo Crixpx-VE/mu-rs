@@ -166,9 +166,12 @@ impl WindowKind {
             // `SendRequestGuildMaster(FALSE)`, which OpenMU also takes as closing the dialog
             // (`GuildMasterAnswerAction`).
             Self::GuildMaster => Some(ClientMessage::GuildMasterAnswer { show_creation: false }),
-            // Commented out in NewUIDoppelGangerWindow.cpp:212-215 and NewUIUnitedMarketPlaceWindow.cpp:
-            // 227-230; empty in NewUIEmpireGuardianNPC.cpp.
-            Self::Doppelganger | Self::Julia | Self::EmpireGuardian => None,
+            // MuMain's `CUnitedMarketPlaceWindow::ClosingProcess` sends `SendCloseNpcRequest`
+            // (UI/Inventory/UnitedMarketPlaceWindow.cpp:133-136); Main 5.2 had it commented out
+            // (NewUIUnitedMarketPlaceWindow.cpp:227-230). MuMain is followed.
+            Self::Julia => Some(ClientMessage::CloseNpc),
+            // Commented out in NewUIDoppelGangerWindow.cpp:212-215; empty in NewUIEmpireGuardianNPC.cpp.
+            Self::Doppelganger | Self::EmpireGuardian => None,
             // TODO: each of these closes in its own way (message boxes, NewUICursedTempleEnter.cpp,
             // `CNewUICastleWindow::ClosingProcess`); not checked yet, so nothing is sent.
             Self::CursedTemple | Self::Other => None,
@@ -234,7 +237,7 @@ pub struct NpcDialog {
     /// The inventory was open the last time it was looked at (to see it close).
     inventory_seen: bool,
     /// The server still has an NPC dialog open for us: a window opened and no closing packet went
-    /// out since (Julia, the Doppelganger and Empire Guardian windows close without one, as in the
+    /// out since (the Doppelganger and Empire Guardian windows close without one, as in the
     /// original). OpenMU ignores any other talk until it gets one (`TalkNpcAction.cs:38-50`).
     server_open: bool,
 }
@@ -766,16 +769,19 @@ mod tests {
         assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
     }
 
-    /// Julia's window closes without a packet (as in the original), but OpenMU keeps the dialog open
-    /// and would ignore the next talk: `SendExitInventory` goes out before it, once.
+    /// The Empire Guardian window closes without a packet (as in the original), but OpenMU keeps the
+    /// dialog open and would ignore the next talk: `SendExitInventory` goes out before it, once.
     #[test]
     fn window_closed_without_packet_is_exited_before_the_next_talk() {
         let mut d = NpcDialog::default();
-        assert!(d.open(0x25).is_empty());
-        assert_eq!(d.close(), None, "Julia sends nothing when closing");
+        assert!(d.open(0x24).is_empty());
+        assert_eq!(d.close(), None, "the Empire Guardian window sends nothing when closing");
         assert_eq!(d.pending_exit(), Some(ClientMessage::CloseNpc));
         assert_eq!(d.pending_exit(), None, "only once");
-        // A window that closes with its own packet leaves nothing pending.
+        // A window that closes with its own packet leaves nothing pending: Julia's (MuMain).
+        assert!(d.open(0x25).is_empty());
+        assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
+        assert_eq!(d.pending_exit(), None);
         d.open(0);
         assert_eq!(d.close(), Some(ClientMessage::CloseNpc));
         assert_eq!(d.pending_exit(), None);
