@@ -178,18 +178,19 @@ fn redress(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
     mut images: ResMut<Assets<Image>>,
-    mut last: Local<Option<(u32, u8)>>,
+    mut last: Local<Option<(Entity, u32, u8)>>,
 ) {
     let Ok((e, mut p, children)) = players.single_mut() else {
-        // No character (loading another map): it gets dressed again when it reappears.
-        *last = None;
         return;
     };
-    let key = (inv.equipment_rev, opts.render_level);
+    // The entity is part of the key: a map change respawns the hero (`Step::Player`) while this
+    // system is paused (it only runs in `GameScene::Game`), so the new one must be dressed again
+    // even though the equipment did not change.
+    let key = (e, inv.equipment_rev, opts.render_level);
     if *last == Some(key) {
         return;
     }
-    let first = last.is_none();
+    let first = last.is_none_or(|(prev, ..)| prev != e);
     *last = Some(key);
     p.gear = gear_from_inventory(&inv, &data);
     let dress = dress_from(&inv, &data, opts.render_level);
