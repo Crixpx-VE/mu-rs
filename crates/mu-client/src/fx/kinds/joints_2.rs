@@ -858,9 +858,14 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                 }
             }
             if sub == 4 || sub == 9 {
-                // TODO(original): only stays alive while HasDefenseAura(Target) (Defense /
-                // HelpNpc buffs without Cloaking); without a buff system it's assumed active and whoever
-                // created it must kill it when the buff ends.
+                // Only while `HasDefenseAura(Target)`: Defense or HelpNpc, without Cloaking
+                // (MuMain ZzzEffectJoint.cpp:2858-2862, 4498-4510; the buffs come from buffs.rs).
+                let aura = ctx.actor(j.target).is_some_and(|a| (a.has_buff(eBuff_Defense) || a.has_buff(eBuff_HelpNpc)) && !a.has_buff(eBuff_Cloaking));
+                if !aura {
+                    j.life_time = 0.0;
+                    j.live = false;
+                    return;
+                }
                 j.life_time = 100.0;
             }
 

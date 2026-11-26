@@ -89,6 +89,7 @@ impl InWorld {
             rotation: self.rotation,
             // `CharacterHeroState::Normal` (3): no PK (with 0 the client paints it as an NPC).
             hero_state: 3,
+            effects: Vec::new(),
         }
     }
 }

@@ -666,10 +666,13 @@ pub struct ScopeCharacter {
     pub rotation: u8,
     /// `CharacterHeroState`, low nibble of byte 34.
     pub hero_state: u8,
+    /// Active effects (`s_BuffCount` then one `eBuffState` byte each, WSclient.cpp
+    /// `ReceiveCreatePlayerViewport`).
+    pub effects: Vec<u8>,
 }
 
 /// A monster or NPC entering the view area (`PCREATE_MONSTER` from `ReceiveCreateMonsterViewport`,
-/// WSclient.cpp:2512-2639), without effects (`s_BuffCount` 0).
+/// WSclient.cpp:2512-2639).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ScopeMonster {
     /// Object id as it travels on the wire: [`NEW_OBJECT_FLAG`] = just appeared (`AppearMonster`).
@@ -683,6 +686,8 @@ pub struct ScopeMonster {
     pub target_y: u8,
     /// `Path >> 4`: the client turns `(rotation - 1) * 45` degrees.
     pub rotation: u8,
+    /// Active effects (`s_BuffCount` then one `eBuffState` byte each).
+    pub effects: Vec<u8>,
 }
 
 /// Bytes of a [`ScopeMonster`] without effects.
@@ -693,7 +698,8 @@ impl ScopeMonster {
         out.extend_from_slice(&self.id.to_be_bytes());
         out.push(((self.number >> 8) & 0x03) as u8);
         out.push(self.number as u8);
-        out.extend_from_slice(&[self.x, self.y, self.target_x, self.target_y, self.rotation << 4, 0]);
+        out.extend_from_slice(&[self.x, self.y, self.target_x, self.target_y, self.rotation << 4, self.effects.len() as u8]);
+        out.extend_from_slice(&self.effects);
     }
 
     fn read(d: &[u8], i: usize) -> Option<(Self, usize)> {
@@ -706,6 +712,7 @@ impl ScopeMonster {
             target_x: e[6],
             target_y: e[7],
             rotation: e[8] >> 4,
+            effects: d.get(i + SCOPE_MONSTER_LEN..i + SCOPE_MONSTER_LEN + e[9] as usize)?.to_vec(),
         };
         Some((m, i + SCOPE_MONSTER_LEN + e[9] as usize))
     }
@@ -728,7 +735,7 @@ pub enum ServerMessage {
     /// `result`: see [`delete_result`] (0 failure, 1 deleted, 2 wrong code).
     CharacterDeleteResponse { result: u8 },
     CharacterInformation(CharacterInformation),
-    /// At most [`MAX_SCOPE_CHARACTERS`]; sent without effects.
+    /// At most [`MAX_SCOPE_CHARACTERS`], each with its effects.
     AddCharactersToScope(Vec<ScopeCharacter>),
     /// In S6 the client only uses the destination and rotation (it recomputes the path with
     /// `PathFinding2`); `directions` may be empty. If present, it is packed as in `Walk`.
@@ -1414,7 +1421,8 @@ impl ScopeCharacter {
         out.push(self.target_x);
         out.push(self.target_y);
         out.push((self.rotation << 4) | (self.hero_state & 0x0F));
-        out.push(0); // without effects
+        out.push(self.effects.len() as u8);
+        out.extend_from_slice(&self.effects);
     }
 
     /// Reads a character at `d[i..]`; also returns where the next one starts.
@@ -1435,6 +1443,7 @@ impl ScopeCharacter {
             target_y: e[33],
             rotation: e[34] >> 4,
             hero_state: e[34] & 0x0F,
+            effects: d[i + SCOPE_CHARACTER_LEN..next].to_vec(),
         };
         Some((c, next))
     }
@@ -2206,9 +2215,9 @@ mod tests {
     #[test]
     fn monstruos_que_entran_en_vista() {
         let bichos = vec![
-            ScopeMonster { id: 0x8000 | 5, number: 3, x: 180, y: 90, target_x: 182, target_y: 91, rotation: 2 },
+            ScopeMonster { id: 0x8000 | 5, number: 3, x: 180, y: 90, target_x: 182, target_y: 91, rotation: 2, effects: vec![] },
             // 10-bit number (S6 ones go above 255).
-            ScopeMonster { id: 0x0102, number: 0x0215, x: 1, y: 2, target_x: 1, target_y: 2, rotation: 7 },
+            ScopeMonster { id: 0x0102, number: 0x0215, x: 1, y: 2, target_x: 1, target_y: 2, rotation: 7, effects: vec![] },
         ];
         let wire = ida_y_vuelta_servidor(ServerMessage::AddMonstersToScope(bichos));
         assert_eq!(wire.len(), 5 + 2 * 10);
@@ -2222,9 +2231,13 @@ mod tests {
             Some(ServerMessage::AddMonstersToScope(v)) => {
                 assert_eq!(v.len(), 2);
                 assert_eq!((v[1].id, v[1].number, v[1].rotation), (2, 4, 3));
+                assert_eq!((v[0].effects.as_slice(), v[1].effects.as_slice()), (&[7u8, 8][..], &[][..]));
             }
             otro => panic!("{otro:?}"),
         }
+        // And they are written back (`s_BuffCount`, then the `eBuffState` bytes).
+        let con = ida_y_vuelta_servidor(ServerMessage::AddMonstersToScope(vec![ScopeMonster { effects: vec![2, 55], ..Default::default() }]));
+        assert_eq!(&con[5 + 9..], &[2, 2, 55]);
     }
 
     #[test]
@@ -2240,6 +2253,7 @@ mod tests {
                 target_y: 127,
                 rotation: 3,
                 hero_state: 3,
+                effects: vec![],
             },
             ScopeCharacter {
                 id: 456,
@@ -2251,6 +2265,7 @@ mod tests {
                 target_y: 2,
                 rotation: 0,
                 hero_state: 0,
+                effects: vec![],
             },
         ];
         let wire = ida_y_vuelta_servidor(ServerMessage::AddCharactersToScope(jugadores));
@@ -2269,7 +2284,7 @@ mod tests {
         con_efectos.extend_from_slice(&[10, 20]);
         let paquete = c2(&con_efectos);
         match ServerMessage::decode(&paquete) {
-            Some(ServerMessage::AddCharactersToScope(v)) => assert_eq!(v[0].name, "Guerrero"),
+            Some(ServerMessage::AddCharactersToScope(v)) => assert_eq!((v[0].name.as_str(), v[0].effects.as_slice()), ("Guerrero", &[10u8, 20][..])),
             otro => panic!("{otro:?}"),
         }
 

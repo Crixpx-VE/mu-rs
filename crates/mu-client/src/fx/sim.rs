@@ -93,10 +93,24 @@ pub struct Actors {
 #[derive(Component, Clone)]
 pub struct ActorState(pub Actor);
 
-pub fn gather_actors(mut actors: ResMut<Actors>, world: Res<FxWorld>, q: Query<(Entity, &ActorState, Has<crate::character::Player>)>) {
+pub fn gather_actors(
+    mut actors: ResMut<Actors>,
+    world: Res<FxWorld>,
+    buffs: Option<Res<crate::buffs::Buffs>>,
+    hero_key: Option<Res<crate::remote::HeroKey>>,
+    q: Query<(Entity, &ActorState, Has<crate::character::Player>)>,
+) {
     actors.map.clear();
     for (e, s, is_hero) in &q {
         let mut a = s.0.clone();
+        // `g_isCharacterBuff`: what the server said of this object (buffs.rs).
+        let key = if is_hero { hero_key.as_ref().map(|k| k.0 as i32) } else { (a.key >= 0).then_some(a.key) };
+        if let (Some(b), Some(key)) = (buffs.as_ref(), key) {
+            let list = b.of(key as u16);
+            if !list.is_empty() {
+                a.buffs = std::sync::Arc::new(list.to_vec());
+            }
+        }
         // `m_vPosSword`: computed by the character's skill in progress.
         if let Some(c) = world.casts.iter().find(|c| c.owner == e) {
             a.pos_sword = c.pos_sword;

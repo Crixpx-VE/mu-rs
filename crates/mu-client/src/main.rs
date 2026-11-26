@@ -34,6 +34,7 @@ mod charselect;
 mod chat;
 mod chat_log;
 mod clipboard;
+mod buffs;
 mod combat;
 mod cursor;
 mod effects;
@@ -291,6 +292,7 @@ fn main() {
         .add_plugins(char_info::CharInfoPlugin)
         .add_plugins((item_view::ItemViewPlugin, inventory::InventoryPlugin, hero_dress::HeroDressPlugin))
         .add_plugins(monsters::MonstersPlugin)
+        .add_plugins(buffs::BuffsPlugin)
         .add_plugins(npc::NpcPlugin)
         .add_plugins(shop::ShopPlugin)
         .add_plugins(npc_dialogue::NpcDialoguePlugin)
