@@ -13,11 +13,13 @@
 //!
 //! Not yet (each marked where it goes): mounts and pets in the animation choices, Castle Siege /
 //! Chaos Castle / Blood Castle rules, auto-attack, potions used when mana is short
-//! (`SendRequestUse`), the party skills on other players, Nova's charge, Teleport, Multi-Shot,
-//! Chaotic Diseier and the Summoner's curses, the release effects of the non-Dark-Knight skills
-//! (the `switch` on `g_iLimitAttackTime`, ZzzCharacter.cpp:3932-5070, beyond what `fx` registers), the
-//! corpse fading and sinking (`DeadCharacter`: the monsters' materials have no alpha yet; they
-//! vanish when the original sets `Live = false`).
+//! (`SendRequestUse`), the party skills on other players, Nova's charge, Multi-Shot, Chaotic
+//! Diseier and the Summoner's curses, the release effects of the non-Dark-Knight skills (the
+//! `switch` on `g_iLimitAttackTime`, ZzzCharacter.cpp:3932-5070, beyond what `fx` registers).
+//!
+//! Characters' `o->Alpha` ([`Fade`]): the wizard's Teleport fades out and back in
+//! (`CreateTeleportBegin/End`), corpses fade and sink (`DeadCharacter`), and the hero fades in on
+//! entering a map. The materials follow it through `model_light::set_alpha`.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -47,7 +49,7 @@ impl Plugin for CombatPlugin {
                 p.0.clear();
                 d.0.clear();
             }))
-            .add_systems(FixedUpdate, (move_points, dying_tick).run_if(in_state(GameScene::Game)))
+            .add_systems(FixedUpdate, (move_points, (dying_tick, fade_tick).chain()).run_if(in_state(GameScene::Game)))
             .add_systems(
                 Update,
                 (stats_from_server, server_combat, hero_action, hero_cast, send_attack_requests)
@@ -404,6 +406,10 @@ fn stats_from_server(
                     p.pos = Vec2::new(r.x as f32 + 0.5, r.y as f32 + 0.5);
                     p.path.clear();
                     p.dead = false;
+                    // `ReceiveRevival` makes the hero again (`CreateCharacter`: `Alpha = AlphaTarget = 1`,
+                    // `Teleport = TELEPORT_NONE`, MuMain ZzzCharacter.cpp:12630-12631, 12684), unsunk.
+                    p.fade = Fade::default();
+                    p.fade.reapply();
                     p.casting = None;
                     p.action = p.stop;
                     p.frame = 0.0;
@@ -433,6 +439,94 @@ struct Dying(HashMap<u16, u32>);
 
 const DIE_AT: u32 = 15;
 const GONE_AT: u32 = 100;
+
+/// `DeadCharacter` (MuMain ZzzCharacter.cpp:3220-3257) at `c->Dead` = `t`: `Rot += 0.02` per tick; from
+/// `Rot >= 1` the alpha is `1 - (Rot - 1)` and, while it is at least 0.01, the body sinks 0.4 per tick.
+/// Returns (alpha, sink).
+pub fn corpse_fade(t: u32) -> (f32, f32) {
+    let alpha_at = |k: u32| {
+        let rot = 0.02 * k as f32;
+        if rot >= 1.0 { 1.0 - (rot - 1.0) } else { 1.0 }
+    };
+    let sinking = (1..=t).filter(|&k| 0.02 * k as f32 >= 1.0 && alpha_at(k) >= 0.01).count();
+    (alpha_at(t).max(0.0), 0.4 * sinking as f32)
+}
+
+/// `o->Teleport` (`_define.h:121-124`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Teleport {
+    #[default]
+    None,
+    Begin,
+    /// `TELEPORT`: faded out, waiting for the server's `MapChanged`.
+    Hidden,
+    End,
+}
+
+/// A character's `o->Alpha` / `o->AlphaTarget` / `o->Teleport` and how far its corpse sank, with the
+/// alpha its materials have now (each module applies it with `model_light::set_alpha`).
+#[derive(Clone, Copy, Debug)]
+pub struct Fade {
+    pub alpha: f32,
+    pub target: f32,
+    pub teleport: Teleport,
+    pub sink: f32,
+    applied: f32,
+}
+
+impl Default for Fade {
+    fn default() -> Self {
+        Self { alpha: 1.0, target: 1.0, teleport: Teleport::None, sink: 0.0, applied: 1.0 }
+    }
+}
+
+impl Fade {
+    /// `Alpha = 0` with `AlphaTarget = 1`: it fades in.
+    pub fn appearing() -> Self {
+        Self { alpha: 0.0, ..Default::default() }
+    }
+
+    /// `Alpha(o)` with `AlphaEnable` (on for characters, MuMain ZzzCharacter.cpp:12612; ZzzAI.cpp:83-104):
+    /// 0.05 per tick toward `AlphaTarget`.
+    pub fn tick(&mut self) {
+        if self.target > self.alpha {
+            self.alpha = (self.alpha + 0.05).min(1.0);
+        } else if self.target < self.alpha {
+            self.alpha = (self.alpha - 0.05).max(0.0);
+        }
+    }
+
+    /// `CreateTeleportBegin` (MuMain ZzzEffectMagicSkill.cpp:162-170): fading out.
+    pub fn teleport_begin(&mut self) {
+        self.target = 0.0;
+        self.teleport = Teleport::Begin;
+    }
+
+    /// `CreateTeleportEnd` (ZzzEffectMagicSkill.cpp:172-181): fading back in.
+    pub fn teleport_end(&mut self) {
+        self.target = 1.0;
+        self.teleport = Teleport::End;
+    }
+
+    /// `o->Teleport != TELEPORT_BEGIN && o->Teleport != TELEPORT && o->Alpha >= 0.7f`
+    /// (ClassAttack.cpp:1550): it can teleport again.
+    pub fn can_teleport(&self) -> bool {
+        !matches!(self.teleport, Teleport::Begin | Teleport::Hidden) && self.alpha >= 0.7
+    }
+
+    /// The alpha to give the materials, if it changed since the last call.
+    pub fn take_change(&mut self) -> Option<f32> {
+        (self.alpha != self.applied).then(|| {
+            self.applied = self.alpha;
+            self.alpha
+        })
+    }
+
+    /// New materials (the model was rebuilt): give them the alpha again.
+    pub fn reapply(&mut self) {
+        self.applied = f32::NAN;
+    }
+}
 
 /// `Points[]` (`MAX_POINTS` 100): the floating numbers.
 #[derive(Resource, Default)]
@@ -624,6 +718,25 @@ fn server_combat(
                     // AT_SKILL_THUNDER: `PlayBuffer(SOUND_THUNDER01)` (3840-3845).
                     sound.play_object("SOUND_THUNDER01");
                 }
+                // `case AT_SKILL_TELEPORT: CreateTeleportBegin(so)` (MuMain WSclient.cpp:4418-4430).
+                // TODO(original): Kanturu 3's Dark Skull Soldier 5 fades with its own sound instead.
+                if *skill == crate::skills::skill::TELEPORT {
+                    if src == hero_key.0 {
+                        for (_, mut p) in &mut heroes {
+                            // `SetAction` keeps the frame of an action already playing.
+                            if p.action != ids::PLAYER_SKILL_TELEPORT as usize {
+                                play(&mut p, ids::PLAYER_SKILL_TELEPORT as usize);
+                            }
+                            p.fade.teleport_begin();
+                            teleport_fx(&mut world, &mut sound, mu(p.pos), p.facing, Vec3::ONE);
+                        }
+                    } else if let Some((_, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == src) {
+                        r.set_action(ids::PLAYER_SKILL_TELEPORT as usize);
+                        r.fade.teleport_begin();
+                        let (pos, facing, light) = (r.position(), r.facing(), r.light());
+                        teleport_fx(&mut world, &mut sound, mu(pos), facing, light);
+                    }
+                }
             }
             // `ReceiveMagicContinue` (WSclient.cpp:4725-5188): the angle for everyone (the hero too),
             // the action for other players and monsters, then `AttackTime = 1` with `SkillX/Y`.
@@ -696,6 +809,14 @@ fn server_combat(
             _ => {}
         }
     }
+}
+
+/// What `CreateTeleportBegin` / `CreateTeleportEnd` (MuMain ZzzEffectMagicSkill.cpp:162-181) add to
+/// the action and `Fade`: `CreateEffect(BITMAP_SPARK + 1, Position, Angle, Light)` and
+/// `PlayBuffer(SOUND_MAGIC)`. `position` in MU units, `facing` the MU heading in radians.
+pub fn teleport_fx(world: &mut crate::fx::FxWorld, sound: &mut crate::sound::SoundQueue, position: Vec3, facing: f32, light: Vec3) {
+    crate::fx::request_effect(world, ids::BITMAP_SPARK + 1, position, Vec3::new(0.0, 0.0, facing.to_degrees()), light, 0, None);
+    sound.play_object("SOUND_MAGIC");
 }
 
 /// The skills whose character side `fx` has (`registry.skills`): their `AttackTime` starts here.
@@ -780,6 +901,21 @@ fn dying_tick(
                 monsters_orders.set_action(key, MonsterAction::Die);
             }
         }
+        // `DeadCharacter`: the corpse fades and sinks (the hero's too, ZzzCharacter.cpp:3247).
+        let (alpha, sink) = corpse_fade(*t);
+        if sink > 0.0 {
+            if key == hero_key.0 {
+                for mut p in &mut heroes {
+                    (p.fade.alpha, p.fade.sink) = (alpha, sink);
+                }
+            } else if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == key) {
+                (r.fade.alpha, r.fade.sink) = (alpha, sink);
+            } else {
+                // `Alpha(o)` runs right after `DeadCharacter` with `AlphaTarget` 1 (`fade_tick` does
+                // it for the hero and other players).
+                monsters_orders.corpse(key, (alpha + 0.05).min(1.0), sink);
+            }
+        }
         // The hero stays dead until `ReceiveRevival`.
         if *t >= GONE_AT && key != hero_key.0 {
             gone.push(key);
@@ -793,6 +929,25 @@ fn dying_tick(
         } else {
             monsters_orders.despawn(key);
         }
+    }
+}
+
+/// Every tick, after `dying_tick`: `MoveHero`'s teleport fade-out (MuMain ZzzInterface.cpp:2644-2651:
+/// 0.1 per tick until below 0.1, then `TELEPORT`) and `Alpha(o)` (`MoveCharacter`, ZzzCharacter.cpp:4083)
+/// for the hero and the other players.
+fn fade_tick(mut heroes: Query<&mut Player>, mut remotes: Query<&mut crate::remote::RemotePlayer>) {
+    for mut p in &mut heroes {
+        let f = &mut p.fade;
+        if f.teleport == Teleport::Begin {
+            f.alpha -= 0.1;
+            if f.alpha < 0.1 {
+                f.teleport = Teleport::Hidden;
+            }
+        }
+        f.tick();
+    }
+    for mut r in &mut remotes {
+        r.fade.tick();
     }
 }
 
@@ -869,6 +1024,16 @@ fn hero_action(
     }
 }
 
+/// `CreateTeleportEnd` for the hero (`ReceiveTeleport` with `Flag` 0, MuMain WSclient.cpp:2352-2355):
+/// `PLAYER_SKILL_TELEPORT` from frame 5, fading back in, the spark and the sound.
+pub fn hero_teleport_end(p: &mut Player, world: &mut crate::fx::FxWorld, sound: &mut crate::sound::SoundQueue, terrain: Option<&LoadedTerrain>) {
+    play(p, ids::PLAYER_SKILL_TELEPORT as usize);
+    p.frame = 5.0;
+    p.fade.teleport_end();
+    let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+    teleport_fx(world, sound, Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h), p.facing, Vec3::ONE);
+}
+
 /// Starts an attack or skill action on the hero with its `SetAttackSpeed` speed.
 fn play(p: &mut Player, a: usize) {
     p.action = a;
@@ -891,6 +1056,8 @@ pub struct CastContext<'w> {
     info: Option<Res<'w, crate::account::HeroInfo>>,
     eq: Res<'w, crate::char_info::CharEquipment>,
     inv: Res<'w, crate::inventory::Inventory>,
+    gate: Res<'w, crate::gate::GateState>,
+    real: Res<'w, Time<Real>>,
 }
 
 /// How a skill goes to the server.
@@ -902,6 +1069,8 @@ pub enum Send {
     MagicTarget,
     /// `SendRequestMagicContinue(Skill, x, y, angle, dest, tpos, key, serial)`.
     Continue { at_target: bool, angle255: bool, dest: bool, tpos: Tpos, target_key: bool, serial: bool },
+    /// The wizard's Teleport: `SendEnterGateRequest(0, TargetX, TargetY)` (MuMain ClassAttack.cpp:1518-1588).
+    Teleport,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -951,6 +1120,9 @@ pub fn plan(skill: u16, class: Class) -> Option<Plan> {
         10 if wizardish => p(cont(false, false, false, Tpos::Zero, false, false), Anim::Action(ids::PLAYER_SKILL_HELL), 0.0, false, false),
         14 if wizardish => p(cont(false, false, false, Tpos::Zero, false, false), Anim::Action(ids::PLAYER_SKILL_INFERNO), 0.0, false, false),
         16 if wizardish => p(Send::MagicSelf, Anim::Magic, 0.0, false, false),
+        // `SetPlayerTeleport`: `PLAYER_SKILL_TELEPORT` (MuMain ZzzCharacter.cpp:1374-1385); no range
+        // check on the client (the server decides).
+        6 if wizardish => p(Send::Teleport, Anim::Action(ids::PLAYER_SKILL_TELEPORT), 0.0, false, false),
         1 | 2 | 3 | 17 | 11 | 7 | 4 | 45 if wizardish => p(Send::MagicTarget, Anim::Magic, 1.0, true, true),
         73 if wizardish => p(Send::MagicTarget, Anim::Action(ids::PLAYER_ATTACK_DEATH_CANNON), 1.0, true, true),
         13 if wizardish => p(cont(true, false, false, Tpos::Zero, true, false), Anim::Magic, 1.0, true, true),
@@ -1188,6 +1360,7 @@ fn cast_skill(
             }
             true
         }
+        Send::Teleport => teleport(p, target_tile, ctx, net, terrain),
     };
     if !sent {
         return;
@@ -1207,6 +1380,38 @@ fn cast_skill(
         Anim::Action(a) => play(p, a as usize),
     }
     p.path.clear();
+}
+
+/// `case AT_SKILL_TELEPORT` of `AttackWizard` (MuMain ClassAttack.cpp:1518-1588): not with an item
+/// on the cursor, not while already teleporting (the action, `Teleport` BEGIN/TELEPORT or `Alpha` below
+/// 0.7), only onto a free tile (`TerrainWall` without `TW_ACTION`/`TW_HEIGHT` must be 0: no wall, no
+/// safe zone, nobody there) and not while changing map; then face the point and
+/// `SendEnterGateRequest(0, TargetX, TargetY)`. The fade-out starts when the server echoes the skill
+/// (`ReceiveMagic` → `CreateTeleportBegin`), the fade-in with its `MapChanged` (`CreateTeleportEnd`).
+/// TODO(original): the stun/sleep checks and their removal (the client does not track buffs yet), and
+/// Nova's release (`HeroPriorSkill == AT_SKILL_NOVA`: Nova is not ported yet).
+fn teleport(p: &mut Player, target: (i32, i32), ctx: &CastContext, net: &mut crate::net::Net, terrain: Option<&LoadedTerrain>) -> bool {
+    if ctx.inv.picked.is_some() || p.action == ids::PLAYER_SKILL_TELEPORT as usize || !p.fade.can_teleport() {
+        return false;
+    }
+    let Some(t) = terrain else { return false };
+    let (x, y) = (target.0.clamp(0, 255) as usize, target.1.clamp(0, 255) as usize);
+    use mu_data::terrain::attr;
+    let wall = t.0.attribute(x, y) & !(attr::ACTION | attr::HEIGHT);
+    if wall != 0 {
+        return false;
+    }
+    let d = Vec2::new(x as f32 + 0.5, y as f32 + 0.5) - p.pos;
+    if d.length() > 1e-3 {
+        p.facing = d.x.atan2(-d.y);
+    }
+    if ctx.gate.zone_moving(ctx.real.elapsed_secs_f64()) {
+        return false;
+    }
+    if net.connected() {
+        net.send(ClientMessage::EnterGate { gate: 0, x: x as u8, y: y as u8 });
+    }
+    true
 }
 
 fn hero_tile_usize(p: Vec2) -> (usize, usize) {
@@ -1352,6 +1557,69 @@ fn draw_points(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `DeadCharacter`: whole for 49 ticks, then 0.02 less per tick and 0.4 lower while the alpha is
+    /// at least 0.01; gone by `GONE_AT`.
+    #[test]
+    fn corpse_fades_and_sinks() {
+        assert_eq!(corpse_fade(DIE_AT), (1.0, 0.0));
+        assert_eq!(corpse_fade(49), (1.0, 0.0));
+        let (a, s) = corpse_fade(50);
+        assert!((a - 1.0).abs() < 1e-5 && (s - 0.4).abs() < 1e-5);
+        let (a, s) = corpse_fade(75);
+        assert!((a - 0.5).abs() < 1e-4 && (s - 0.4 * 26.0).abs() < 1e-3);
+        let (a, s) = corpse_fade(GONE_AT);
+        assert!(a < 0.01, "{a}");
+        // Tick 100 (alpha 0) no longer sinks: 50..=99.
+        assert!((s - 0.4 * 50.0).abs() < 1e-3, "{s}");
+    }
+
+    /// `CreateTeleportBegin` → `Alpha(o)` 0.05 per tick to 0 (the hero also loses 0.1 per tick in
+    /// `MoveHero`); `CreateTeleportEnd` → back to 1; no new teleport until then.
+    #[test]
+    fn teleport_fade_cycle() {
+        let mut f = Fade::default();
+        assert!(f.can_teleport());
+        f.teleport_begin();
+        assert!(!f.can_teleport());
+        for _ in 0..20 {
+            f.tick();
+        }
+        assert_eq!(f.alpha, 0.0);
+        f.teleport_end();
+        assert!(!f.can_teleport(), "still see-through");
+        for _ in 0..15 {
+            f.tick();
+        }
+        assert!(f.alpha >= 0.7 && f.can_teleport());
+        for _ in 0..10 {
+            f.tick();
+        }
+        assert_eq!(f.alpha, 1.0);
+    }
+
+    /// The materials get the alpha only when it changed, or again after `reapply` (new materials).
+    #[test]
+    fn fade_changes_reach_the_materials_once() {
+        let mut f = Fade::default();
+        assert_eq!(f.take_change(), None);
+        f.alpha = 0.5;
+        assert_eq!(f.take_change(), Some(0.5));
+        assert_eq!(f.take_change(), None);
+        f.reapply();
+        assert_eq!(f.take_change(), Some(0.5));
+        assert_eq!(Fade::appearing().take_change(), Some(0.0));
+    }
+
+    #[test]
+    fn teleport_plan() {
+        let p = plan(6, Class::Wizard).unwrap();
+        assert_eq!(p.send, Send::Teleport);
+        assert_eq!(p.anim, Anim::Action(ids::PLAYER_SKILL_TELEPORT));
+        // Not a knight skill, and not usable in a safe zone (`Attack`'s whitelist).
+        assert!(plan(6, Class::Knight).is_none());
+        assert!(!allowed_in_safe_zone(6));
+    }
 
     #[test]
     fn packet_bytes() {

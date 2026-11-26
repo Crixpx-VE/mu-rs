@@ -71,6 +71,31 @@ pub struct ModelLight {
     pub params: ModelParams,
     /// `RENDER_DARK` (subtractive).
     pub subtract: bool,
+    /// While the object is see-through ([`set_alpha`]): the `AlphaMode` it had before.
+    pub fade_mode: Option<AlphaMode>,
+}
+
+/// `o->Alpha` of a character (teleport, corpse fading): `glColor4f(..., Alpha)` with blending on
+/// (`RenderBody` → `RenderMesh`, ZzzBMD.cpp, `Alpha < 0.99` enables alpha blending). An opaque or
+/// cut-out material turns `Blend` while below 1 and gets its own mode back at 1; an additive one
+/// keeps `Add` (the alpha scales what it adds); a subtractive one is left alone.
+pub fn set_alpha(m: &mut ModelMaterial, alpha: f32) {
+    if m.extension.subtract {
+        return;
+    }
+    let alpha = alpha.clamp(0.0, 1.0);
+    let additive = matches!(m.base.alpha_mode, AlphaMode::Add) && m.extension.fade_mode.is_none();
+    if !additive {
+        if alpha >= 0.99 {
+            if let Some(mode) = m.extension.fade_mode.take() {
+                m.base.alpha_mode = mode;
+            }
+        } else if m.extension.fade_mode.is_none() {
+            m.extension.fade_mode = Some(m.base.alpha_mode);
+            m.base.alpha_mode = AlphaMode::Blend;
+        }
+    }
+    m.base.base_color.set_alpha(if alpha >= 0.99 { 1.0 } else { alpha });
 }
 
 impl Default for ModelLight {
@@ -94,12 +119,12 @@ impl From<&ModelLight> for ModelLightKey {
 impl ModelLight {
     /// Lit by the normal with the original's `light` (0..1 per channel).
     pub fn lit(light: [f32; 3]) -> Self {
-        Self { light: Vec4::new(light[0], light[1], light[2], 1.0), params: ModelParams::default(), subtract: false }
+        Self { light: Vec4::new(light[0], light[1], light[2], 1.0), params: ModelParams::default(), subtract: false, fade_mode: None }
     }
 
     /// Unlit (additive meshes: they are their own light).
     pub fn unlit() -> Self {
-        Self { light: Vec4::ZERO, params: ModelParams::default(), subtract: false }
+        Self { light: Vec4::ZERO, params: ModelParams::default(), subtract: false, fade_mode: None }
     }
 
     /// Flat color `glColor3fv(color)`, no normal lighting (`StreamMesh`, chrome, `BlendMesh`).

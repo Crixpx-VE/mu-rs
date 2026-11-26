@@ -79,3 +79,11 @@ pub fn reset(mut world: ResMut<FxWorld>, mut actors: ResMut<sim::Actors>) {
 pub fn request(world: &mut FxWorld, spawn: core::Spawn) {
     world.pending.push(spawn);
 }
+
+/// `CreateEffect(Type, Position, Angle, Light, SubType, Owner)` from outside the engine (MU
+/// coordinates, angles in degrees): created on the next tick, with its own id.
+pub fn request_effect(world: &mut FxWorld, ty: i32, position: Vec3, angle: Vec3, light: Vec3, sub_type: i32, owner: Option<core::Target>) {
+    world.next_effect_id += 1;
+    let e = core::Effect::new(world.next_effect_id, ty, position, angle, light, sub_type, owner, -1, 0, 0, 1.0);
+    world.pending.push(core::Spawn::Effect(e));
+}

@@ -82,6 +82,12 @@ impl GateState {
         self.loading_world > LOADING_ARRIVED
     }
 
+    /// `g_bWhileMovingZone || GetTickCount() - g_dwLatestZoneMoving < 3000`: the wizard's teleport is
+    /// not sent either (MuMain ClassAttack.cpp:1561).
+    pub fn zone_moving(&self, now: f64) -> bool {
+        self.while_moving_zone || self.latest_zone_moving.is_some_and(|t| now - t < ZONE_MOVING_WAIT)
+    }
+
     /// `SendRequestFinishLoading` (wsclientinline.h:314-323): the new map has finished loading.
     pub fn finish_loading(&mut self, now: f64) {
         self.latest_zone_moving = Some(now);

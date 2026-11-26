@@ -72,6 +72,8 @@ pub enum MonsterOrder {
     Walk { key: u16, directions: Vec<u8> },
     /// Face this direction (0..7).
     Turn { key: u16, direction: u8 },
+    /// The corpse's `o->Alpha` and how far it sank (`DeadCharacter`, combat.rs).
+    Corpse { key: u16, alpha: f32, sink: f32 },
     Despawn { key: u16 },
 }
 
@@ -83,6 +85,7 @@ impl MonsterOrder {
             | Self::WalkTo { key, .. }
             | Self::Walk { key, .. }
             | Self::Turn { key, .. }
+            | Self::Corpse { key, .. }
             | Self::Despawn { key } => *key,
         }
     }
@@ -129,6 +132,9 @@ impl Monsters<'_> {
     }
     pub fn despawn(&mut self, key: u16) {
         self.orders.write(MonsterOrder::Despawn { key });
+    }
+    pub fn corpse(&mut self, key: u16, alpha: f32, sink: f32) {
+        self.orders.write(MonsterOrder::Corpse { key, alpha, sink });
     }
 }
 
@@ -215,6 +221,11 @@ pub struct Monster {
     shadow: bool,
     /// `c->SafeZone`: its tile is a safe zone (`MoveCharacterVisual`, ZzzCharacter.cpp:5468-5473).
     safe: bool,
+    /// `o->Alpha` (the corpse fading, `DeadCharacter`) and the alpha its materials have now.
+    alpha: f32,
+    applied_alpha: f32,
+    /// How far the corpse sank (`o->Position[2] -= 0.4f` per tick, `DeadCharacter`).
+    sink: f32,
 }
 
 /// A mesh of the model (or of a part) posed with the skeleton's bones.
@@ -873,6 +884,9 @@ fn apply(
                     timer: 0.0,
                     shadow: shadow_on,
                     safe,
+                    alpha: 1.0,
+                    applied_alpha: 1.0,
+                    sink: 0.0,
                 };
                 if start >= m.skeleton.actions.len() {
                     m.action = 0;
@@ -959,6 +973,14 @@ fn apply(
                     }
                 }
             }
+            MonsterOrder::Corpse { key, alpha, sink } => {
+                for (e, mut m, _) in &mut monsters {
+                    if m.key == key && !gone.contains(&e) {
+                        m.alpha = alpha;
+                        m.sink = sink;
+                    }
+                }
+            }
             MonsterOrder::Despawn { key } => {
                 for (e, m, shadow) in &monsters {
                     if m.key == key && gone.insert(e) {
@@ -1027,7 +1049,7 @@ fn monster_height(m: &Monster, terrain: &LoadedTerrain) -> f32 {
     if m.def.model == Model::Monster(2) {
         h += -m.timer.sin().abs() * 70.0 + 70.0;
     }
-    h
+    h - m.sink
 }
 
 fn monster_transform(m: &Monster, terrain: &LoadedTerrain) -> Transform {
@@ -1181,6 +1203,14 @@ fn animate(
         let mut light = Vec3::from_array(terrain.0.light[y * size + x]) + selectable.map_or(Vec3::ZERO, |s| s.light);
         if m.def.model == Model::Monster(55) {
             light = Vec3::splat(0.6);
+        }
+        if m.alpha != m.applied_alpha {
+            m.applied_alpha = m.alpha;
+            for (h, _) in &m.materials {
+                if let Some(mut mat) = materials.get_mut(h) {
+                    crate::model_light::set_alpha(&mut mat, m.alpha);
+                }
+            }
         }
         if light != m.light {
             m.light = light;

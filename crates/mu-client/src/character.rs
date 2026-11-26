@@ -326,6 +326,8 @@ pub struct Player {
     pub gear: Gear,
     /// `Hero->Dead`: killed, until `ReceiveRevival` (combat.rs).
     pub dead: bool,
+    /// `o->Alpha` / `o->AlphaTarget` / `o->Teleport` and the corpse sinking (combat.rs).
+    pub fade: crate::combat::Fade,
 }
 
 /// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
@@ -927,6 +929,9 @@ fn spawn_player(
         walk,
         gear: Gear::default(),
         dead: false,
+        // `ReceiveJoinMapServer` / `ReceiveTeleport` to another map: `o->Alpha = 0` (MuMain
+        // WSclient.cpp:1325, 2475), so it fades in (`Alpha(o)`).
+        fade: crate::combat::Fade::appearing(),
     };
     let actor = actor_state(&player, &skinned, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
@@ -1198,11 +1203,23 @@ pub(crate) struct BodyMaterials(pub(crate) Vec<Handle<crate::model_light::ModelM
 /// (ZzzCharacter.cpp:8967-8993; the skills that tint it do not exist yet). Other
 /// characters do get the terrain light (remote.rs).
 fn light_body(
-    players: Query<&BodyMaterials, With<Player>>,
+    mut players: Query<(Ref<BodyMaterials>, &mut Player)>,
     mut materials: ResMut<Assets<crate::model_light::ModelMaterial>>,
     mut last: Local<Vec4>,
 ) {
-    let Ok(body) = players.single() else { return };
+    let Ok((body, mut p)) = players.single_mut() else { return };
+    // `o->Alpha` (teleport, corpse): new equipment materials get it too.
+    if body.is_changed() {
+        p.fade.reapply();
+        *last = Vec4::ZERO;
+    }
+    if let Some(alpha) = p.fade.take_change() {
+        for h in &body.0 {
+            if let Some(mut m) = materials.get_mut(h) {
+                crate::model_light::set_alpha(&mut m, alpha);
+            }
+        }
+    }
     let light = Vec4::ONE;
     if light == *last {
         return;
@@ -1673,7 +1690,7 @@ fn footsteps(p: &Player, before: f32, s: &Skinned, terrain: Option<&LoadedTerrai
 
 /// Character transform: position on the terrain and rotation toward its facing.
 pub fn player_transform(p: &Player, terrain: Option<&LoadedTerrain>) -> Transform {
-    let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+    let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y)) - p.fade.sink;
     let to_bevy = Quat::from_rotation_x(-FRAC_PI_2);
     Transform {
         translation: Vec3::new(p.pos.x, h / MU_SCALE, -p.pos.y),

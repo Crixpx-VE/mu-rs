@@ -545,6 +545,7 @@ pub(crate) fn net_messages(
     mut net: ResMut<crate::net::Net>,
     mut gate: ResMut<crate::gate::GateState>,
     real: Res<Time<Real>>,
+    (mut fx, mut sound, terrain): (ResMut<crate::fx::FxWorld>, ResMut<crate::sound::SoundQueue>, Option<Res<crate::terrain::LoadedTerrain>>),
 ) {
     for m in from.read() {
         match m.0 {
@@ -564,6 +565,7 @@ pub(crate) fn net_messages(
                     // `Flag` 0: teleport within the same map (`CreateTeleportEnd`).
                     for mut p in &mut players {
                         place(&mut p, x, y, facing);
+                        crate::combat::hero_teleport_end(&mut p, &mut fx, &mut sound, terrain.as_deref());
                     }
                     continue;
                 }
@@ -588,6 +590,8 @@ pub(crate) fn net_messages(
                     }
                     for mut p in &mut players {
                         place(&mut p, x, y, facing);
+                        // `o->Alpha = 0` (MuMain WSclient.cpp:2475): it fades in again.
+                        p.fade.alpha = 0.0;
                     }
                     net.send(ClientMessage::ClientReadyAfterMapChange);
                     gate.finish_loading(real.elapsed_secs_f64());

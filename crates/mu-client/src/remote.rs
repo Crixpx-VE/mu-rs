@@ -95,6 +95,8 @@ pub struct RemotePlayer {
     look: Appearance,
     /// `c->SwordCount` (`SetPlayerAttack`).
     sword_count: u32,
+    /// `o->Alpha` / `o->AlphaTarget` (teleport, corpse fading) and the alpha its materials have now.
+    pub(crate) fade: crate::combat::Fade,
 }
 
 impl RemotePlayer {
@@ -121,6 +123,16 @@ impl RemotePlayer {
 
     pub fn set_facing(&mut self, facing: f32) {
         self.facing = facing;
+    }
+
+    /// MU heading in radians.
+    pub fn facing(&self) -> f32 {
+        self.facing
+    }
+
+    /// `o->Light` (terrain light plus the highlight).
+    pub fn light(&self) -> Vec3 {
+        self.light.max(Vec3::ZERO)
     }
 
     /// `SetPlayerStop`: unarmed in a safe zone; outside, flying with wings or by its weapons.
@@ -159,6 +171,7 @@ fn apply(
     shadow_material: Res<crate::shadow::ShadowMaterial>,
     data: Res<ItemData>,
     opts: Res<crate::options::GameOptions>,
+    (mut fx, mut sound): (ResMut<crate::fx::FxWorld>, ResMut<crate::sound::SoundQueue>),
 ) {
     // Until the map is loaded.
     let Some(terrain) = terrain else { return };
@@ -189,8 +202,7 @@ fn apply(
                         continue;
                     };
                     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
-                    // `Class & 0x07`: 2 sitting, 3 leaning, 4 healing (1, appearing with
-                    // `CreateTeleportEnd`, not drawn yet).
+                    // `Class & 0x07`: 2 sitting, 3 leaning, 4 healing (1, just teleported: below).
                     let pose = match look.pose {
                         2 => Some(game::action::SIT1),
                         3 => Some(game::action::POSE1),
@@ -198,7 +210,7 @@ fn apply(
                         _ => None,
                     };
                     let action = pose.and_then(|at| crate::character::action::for_at(at, class.female()).flatten()).unwrap_or(stand);
-                    let r = RemotePlayer {
+                    let mut r = RemotePlayer {
                         id: c.id,
                         name: c.name.clone(),
                         class,
@@ -213,7 +225,17 @@ fn apply(
                         light: Vec3::splat(-1.0),
                         look,
                         sword_count: 0,
+                        fade: Default::default(),
                     };
+                    // `case 1: CreateTeleportEnd(o)` (MuMain WSclient.cpp:2804-2809): it just teleported.
+                    if look.pose == 1 {
+                        r.action = crate::fx::tables::ids::PLAYER_SKILL_TELEPORT as usize;
+                        r.frame = 5.0;
+                        r.fade.teleport_end();
+                        let h = terrain.0.height_at(r.pos.x, r.pos.y);
+                        let at = Vec3::new(r.pos.x * MU_SCALE, r.pos.y * MU_SCALE, h);
+                        crate::combat::teleport_fx(&mut fx, &mut sound, at, r.facing, Vec3::ONE);
+                    }
                     info!("aparece {} ({})", r.name, class.name());
                     let transform = remote_transform(&r, &terrain);
                     let mut e = commands.spawn((
@@ -332,6 +354,7 @@ fn apply(
                 }
                 r.materials = model.materials;
                 r.light = Vec3::splat(-1.0);
+                r.fade.reapply();
                 // The highlight shells (names.rs) were children too: they are made again.
                 commands.entity(e).remove::<crate::names::EdgeShells>().insert((model.skinned, crate::hero_dress::EquipmentGlow(model.glow)));
                 for child in model.children {
@@ -358,7 +381,7 @@ fn rotation_facing(rotation: u8) -> f32 {
 }
 
 fn remote_transform(r: &RemotePlayer, terrain: &LoadedTerrain) -> Transform {
-    let h = terrain.0.height_at(r.pos.x, r.pos.y);
+    let h = terrain.0.height_at(r.pos.x, r.pos.y) - r.fade.sink;
     Transform {
         translation: Vec3::new(r.pos.x, h / MU_SCALE, -r.pos.y),
         rotation: Quat::from_rotation_x(-FRAC_PI_2) * Quat::from_rotation_z(r.facing),
@@ -499,6 +522,13 @@ pub(crate) fn animate(
         let size = mu_data::terrain::SIZE;
         let (x, y) = ((r.pos.x.max(0.0) as usize).min(size - 1), (r.pos.y.max(0.0) as usize).min(size - 1));
         let light = Vec3::from_array(terrain.0.light[y * size + x]) + selectable.map_or(Vec3::ZERO, |s| s.light);
+        if let Some(alpha) = r.fade.take_change() {
+            for h in &r.materials {
+                if let Some(mut m) = materials.get_mut(h) {
+                    crate::model_light::set_alpha(&mut m, alpha);
+                }
+            }
+        }
         if light != r.light {
             r.light = light;
             for h in &r.materials {
