@@ -75,7 +75,7 @@ fn create_fury(e: &mut Effect, ctx: &mut Ctx) {
     e.head_angle.x += 80.0;
     e.head_angle.z += 180.0;
     e.gravity = 50.0;
-    // TODO(combat): o->Weapon = CharacterMachine->PacketSerial++ (the attack serial).
+    e.weapon = ctx.next_packet_serial();
 }
 
 /// ZzzEffect.cpp:10016-10241.

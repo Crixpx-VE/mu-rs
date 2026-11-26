@@ -111,9 +111,9 @@ fn bitmap_id(b: mu_data::objects::render::Bitmap) -> Option<i32> {
 // --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------
 
 /// ZzzEffect.cpp:2039-2042.
-fn wheel1_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn wheel1_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 5.0;
-    // TODO(combat): CharacterMachine->PacketSerial++ (the attack serial; no combat protocol yet).
+    ctx.next_packet_serial();
 }
 
 /// ZzzEffect.cpp:9887-9889.
@@ -127,9 +127,9 @@ fn wheel1_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_SKILL_WHEEL2 (Twisting Slash: the spinning ghost sword) ---------------------------------
 
 /// ZzzEffect.cpp:2043-2046.
-fn wheel2_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn wheel2_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 25.0;
-    // TODO(combat): o->Weapon = CharacterMachine->PacketSerial (the attack serial).
+    e.weapon = ctx.packet_serial();
     // user[0] = Direction[2] of the previous tick; user[1] = Angle[2] after the tick (to interpolate when drawing).
     e.user[0] = e.direction.z;
     e.user[1] = e.angle.z;

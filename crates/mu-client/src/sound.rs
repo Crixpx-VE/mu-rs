@@ -275,8 +275,24 @@ fn volume(level: u8) -> Volume {
 
 /// What the effects engine requested during its ticks.
 fn take_fx_sounds(mut world: ResMut<crate::fx::FxWorld>, mut queue: ResMut<SoundQueue>) {
-    for id in world.sounds.drain(..) {
-        queue.play(id);
+    use crate::fx::core::FxSound;
+    let mut seen: Vec<FxSound> = Vec::new();
+    for s in world.sounds.drain(..) {
+        // An object-bound or looping sound does not restart while it plays, but `play_queue` only
+        // sees the players of earlier frames: one request per frame (several objects, or two ticks
+        // in one frame, ask for the same one).
+        if matches!(s, FxSound::Object(_) | FxSound::Loop(_)) {
+            if seen.contains(&s) {
+                continue;
+            }
+            seen.push(s);
+        }
+        match s {
+            FxSound::Play(id) => queue.play(id),
+            FxSound::Object(id) => queue.play_object(id),
+            FxSound::Loop(id) => queue.play_loop(id),
+            FxSound::Stop(id) => queue.stop(id),
+        }
     }
 }
 

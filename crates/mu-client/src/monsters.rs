@@ -215,6 +215,8 @@ pub struct Monster {
     shadow: bool,
     /// `c->SafeZone`: its tile is a safe zone (`MoveCharacterVisual`, ZzzCharacter.cpp:5468-5473).
     safe: bool,
+    /// Ticks since a tornado caught it (`c->StormTime` counting down from 10), if it still spins.
+    storm: Option<f32>,
 }
 
 /// A mesh of the model (or of a part) posed with the skeleton's bones.
@@ -705,6 +707,28 @@ impl Monster {
     }
 }
 
+/// Ticks a tornado makes a monster spin (`TornadoSpinTime`, MuMain ZzzEffect.cpp:61).
+const STORM_TICKS: f32 = 10.0;
+
+/// Degrees turned after `n` ticks of `PushingCharacter` (MuMain ZzzCharacter.cpp:3133-3139:
+/// `Angle[2] += StormTime * 10; StormTime -= 1` from 10): `10 · (10n − n(n−1)/2)`, exact at whole
+/// ticks and smooth between them, so the spin is drawn interpolated (550° in all).
+fn storm_spin(n: f32) -> f32 {
+    10.0 * (STORM_TICKS * n - n * (n - 1.0) / 2.0)
+}
+
+impl Monster {
+    /// `c->StormTime = TornadoSpinTime` (`SpinMonstersInTornado`), unless `CanSpinInTornado` is
+    /// false (MuMain ZzzEffect.cpp:63-85): `m_bFixForm` (`NotRotateOnMagicHit`), Selupan (459), its
+    /// spider eggs (460-462) and the Imperial Guardian gates and statue (524-528).
+    pub fn spin_in_tornado(&mut self) {
+        if self.def.fix_form || matches!(self.number, 459..=462 | 524..=528) {
+            return;
+        }
+        self.storm = Some(0.0);
+    }
+}
+
 /// `SetPlayerDie` (ZzzCharacter.cpp:1359-1395): skeletons and models 25 and 30 have no death
 /// animation: they vanish (`o->Live = false`) and bones or stones fly out (effects not translated yet).
 fn vanishes_on_death(def: &Def) -> bool {
@@ -873,6 +897,7 @@ fn apply(
                     timer: 0.0,
                     shadow: shadow_on,
                     safe,
+                    storm: None,
                 };
                 if start >= m.skeleton.actions.len() {
                     m.action = 0;
@@ -1065,6 +1090,11 @@ fn walk(time: Res<Time>, terrain: Option<Res<LoadedTerrain>>, mut q: Query<(&mut
             }
         }
         m.safe = crate::character::in_safe_zone(m.pos, Some(&terrain));
+        if let Some(t) = m.storm {
+            let t2 = (t + dt * crate::fx::sim::TICKS_PER_SECOND).min(STORM_TICKS);
+            m.facing += (storm_spin(t2) - storm_spin(t)).to_radians();
+            m.storm = (t2 < STORM_TICKS).then_some(t2);
+        }
         if moving {
             m.timer += 0.15 * crate::fx::sim::TICKS_PER_SECOND * dt;
             // Monster `SetPlayerWalk`: `MONSTER01_WALK` (ZzzCharacter.cpp:725).
@@ -1292,6 +1322,19 @@ struct TestState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `PushingCharacter` from `StormTime = 10`: +100, +90, ... +10 degrees, one per tick.
+    #[test]
+    fn tornado_spin_matches_the_ticks() {
+        let mut storm = 10.0_f32;
+        let mut angle = 0.0;
+        for n in 1..=10 {
+            angle += storm * 10.0;
+            storm -= 1.0;
+            assert!((storm_spin(n as f32) - angle).abs() < 1e-3, "tick {n}");
+        }
+        assert_eq!(storm_spin(STORM_TICKS), 550.0);
+    }
 
     #[test]
     fn animacion_como_play_animation() {

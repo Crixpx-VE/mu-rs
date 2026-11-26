@@ -127,10 +127,15 @@ fn check_client_arrow(e: &mut Effect, ctx: &mut Ctx) {
     // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 2 and return
     // (ZzzEffect.cpp:6761-6771). There is no siege state yet.
 
-    // TODO(original): MODEL_DARK_SCREAM: AttackCharacterRange(Hero->CurrentSkill, Position, 100,
-    // Hero->Object.Weapon, PKKey, AttackPoint[0]) (ZzzEffect.cpp:6773-6779; the result is unused).
-    // `Ctx` has neither the hero's selected skill slot (`Hero->CurrentSkill`) nor its
-    // `Object.Weapon`, so the request cannot be built; the call consumes no rand().
+    // MODEL_DARK_SCREAM: AttackCharacterRange(Hero->CurrentSkill, Position, 100, Hero->Object.Weapon,
+    // PKKey, AttackPoint[0]) (ZzzEffect.cpp:6773-6779; the result is unused). Its `Serial` never
+    // reaches the packet (`MakeSkillSerialNumber` overwrites it, ZzzInterface.cpp:4628-4637), so
+    // the hero's `Object.Weapon` is passed as 0. (MuMain's `AttackCharacterRange` is an empty stub,
+    // MuMain ZzzEffect.cpp:118-121; the hits are kept because OpenMU still takes them,
+    // AreaSkillHitHandlerPlugIn.cs.)
+    if e.ty == MODEL_DARK_SCREAM {
+        ctx.attack_character_range(ctx.hero_current_skill, e.position, 100.0, 0, e.pk_key);
+    }
 
     if e.kind == 0 || e.sub_type == 99 {
         // ZzzEffect.cpp:6781-6823 (`CheckCharacterRange`'s `Kind` defaults to 0).
@@ -240,7 +245,7 @@ fn scream_create(e: &mut Effect, ctx: &mut Ctx) {
         e.user[SLOT_ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
 /// ZzzEffect.cpp:12011-12035, then the common tail (PlayAnimation + MoveParticle(o, true)).

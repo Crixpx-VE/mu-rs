@@ -293,9 +293,9 @@ fn devil_square(o: &mut MapObject, ctx: &mut Ctx) {
             let y = hero.y + (ctx.rand() % 1200) as f32 - 600.0;
             ctx.add_terrain_light(x, y, light, 12.0);
         }
-        // TODO(original): PlayBuffer(SOUND_THUNDER01) (commented out in the original).
+        // (`PlayBuffer(SOUND_THUNDER01)` is commented out in the original.)
     }
-    // TODO(original): PlayBuffer(SOUND_RAIN01, NULL, true).
+    ctx.play_sound_loop("SOUND_RAIN01");
 
     // UpdateObjectVisual: drops falling from the statue.
     if o.ty == 2 {

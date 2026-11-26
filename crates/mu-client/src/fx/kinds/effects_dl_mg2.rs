@@ -175,7 +175,10 @@ fn change_up_eff_step(e: &mut Effect, ctx: &mut Ctx) {
         }
     }
     if life(e) <= 1 && e.sub_type == 0 {
-        // TODO(original): SetPlayerStop(Hero) (the hero returns to the standing action).
+        // SetPlayerStop(Hero): the hero returns to the standing action.
+        if let Some(hero) = ctx.hero {
+            ctx.change_actor(hero, ActorChange::Stop);
+        }
     }
     // `b->PlayAnimation(..., Velocity/3, ...)` (10437-10446); its result is not used. (The
     // original does not set `b->CurrentAction` first; this effect's action 0 is used.)

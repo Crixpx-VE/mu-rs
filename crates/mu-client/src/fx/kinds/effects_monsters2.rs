@@ -1297,7 +1297,7 @@ fn skura_step(e: &mut Effect, ctx: &mut Ctx) {
                 let mut pos = owner.bone_world(20, Vec3::ZERO);
                 pos.z += 70.0;
                 ctx.create_sprite(BITMAP_SHINY + 1, pos, 1.8, e.light, -ctx.world_time() * 0.08, 0);
-                // TODO(original): StopBuffer(SOUND_CHERRYBLOSSOM_EFFECT1, true) before playing it again.
+                ctx.stop_sound("SOUND_CHERRYBLOSSOM_EFFECT1");
                 ctx.play_sound("SOUND_CHERRYBLOSSOM_EFFECT1");
             }
             // b->PlayAnimation(..., Velocity / 3) (ZzzEffect.cpp:15141; its result is not read).

@@ -568,8 +568,7 @@ fn storm_create(e: &mut Effect, ctx: &mut Ctx) {
             e.blend_mesh = 0;
             e.direction = Vec3::new(0.0, -10.0, 0.0);
             e.position.z = ctx.terrain_height(e.position.x, e.position.y);
-            // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network packet
-            // counter, not in the engine); `weapon` stays 0 and is the serial of the attack.
+            e.weapon = ctx.next_packet_serial();
         }
         1 => {
             e.life_time = 30.0;
@@ -636,8 +635,11 @@ fn storm_step(e: &mut Effect, ctx: &mut Ctx) {
             // TW_NOATTACKZONE tile: Velocity = 0, Direction = 0, LifeTime /= 5 and `break` before
             // the attack below (ZzzEffect.cpp:10579-10589); there is no siege state yet.
             // ZzzEffect.cpp:10590-10592 (the result is not used).
+            // MuMain (MoveHandlers.cpp:3454-3456) spins the monsters in reach instead of the hit
+            // (its `AttackCharacterRange` is a stub); both are done here.
             if (e.life_time as i32) % 15 == 0 && owner_is_hero(e, ctx) {
                 ctx.attack_character_range(e.skill, e.position, 150.0, e.weapon, e.pk_key);
+                ctx.spin_monsters_in_tornado(e.position, 150.0);
             }
         }
         1 => {
@@ -888,8 +890,7 @@ fn inferno_create(e: &mut Effect, ctx: &mut Ctx) {
     }
     // ZzzEffect.cpp:1617-1622 (the result is not used).
     if owner_is_hero(e, ctx) && e.sub_type < 2 {
-        // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network packet counter,
-        // not in the engine); `weapon` stays 0.
+        e.weapon = ctx.packet_serial();
         ctx.attack_character_range(e.skill, e.position, 400.0, e.weapon, e.pk_key);
     }
 }
@@ -975,8 +976,7 @@ fn blast_create(e: &mut Effect, ctx: &mut Ctx) {
     e.angle = Vec3::new(0.0, 20.0, 0.0);
     // (`EyeLeft = Position`: only read by the joint, which follows the effect position here.)
     ctx.create_joint(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 5, Some(Target::Effect(e.id)), 100.0);
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network packet counter, not in
-    // the engine); `weapon` stays 0 and is the serial of the attack in `blast_step`.
+    e.weapon = ctx.packet_serial();
 }
 
 /// ZzzEffect.cpp:9693.
@@ -1138,8 +1138,7 @@ fn circle_create(e: &mut Effect, ctx: &mut Ctx) {
         0 => {
             // ZzzEffect.cpp:2352-2356 (the result is not used).
             if owner_is_hero(e, ctx) {
-                // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network packet
-                // counter, not in the engine); `weapon` stays 0.
+                e.weapon = ctx.next_packet_serial();
                 ctx.attack_character_range(e.skill, e.position, 300.0, e.weapon, e.pk_key);
             }
         }

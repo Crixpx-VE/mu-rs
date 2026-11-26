@@ -22,7 +22,6 @@
 //!   angle shake of the wolf heads is reproduced locally (the original restores it in the same block).
 //! - Where the original dereferences `o->Owner` without checking it (it would crash), a missing
 //!   owner character kills the effect.
-//! - `StopBuffer` does not exist: only the `PlayBuffer` is requested.
 //! - The owner's pose at Dragon Kick's sub-frames (needs `PriorAction`/`PriorAnimationFrame`).
 //!
 //! Without the game data (tests) the model-dependent parts fall back: action lengths are unknown
@@ -337,7 +336,7 @@ fn sbumb_move(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_SBUMB, Vec3::new(x, y, z), e.angle, light, 0, scale * e.scale, e.owner);
     }
     if matches!(life(e), 15 | 9 | 6) {
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_THRUST_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_THRUST_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_THRUST_ATTACK");
     }
 }
@@ -387,7 +386,7 @@ fn down_dummy_move(e: &mut Effect, ctx: &mut Ctx, right: bool) {
     if e.animation_frame >= hit_frame && e.life_time > 50.0 {
         let Some(t) = owner_target_position(e, ctx) else { return };
         common::create_bomb3(ctx, t, 3, 0.9);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_STAMP_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_STAMP_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_STAMP_ATTACK");
         e.life_time = 40.0;
     }
@@ -435,7 +434,7 @@ fn swordeff_move(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, e.position, e.angle, e.light, 3, e.owner, -1, 0, 0, 0.0);
         let Some(t) = owner_target_position(e, ctx) else { return };
         ctx.create_effect(BITMAP_DAMAGE1, t, angle, light, 0, e.owner, -1, 0, 0, 1.4);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_GIANTSWING_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         e.life_time = 45.0;
     }
@@ -455,7 +454,7 @@ fn swordeff_move(e: &mut Effect, ctx: &mut Ctx) {
 
         let Some(t) = owner_target_position(e, ctx) else { return };
         ctx.create_effect(BITMAP_SHINY + 4, t, e.angle, light, 0, e.owner, -1, 0, 0, 1.9);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_GIANTSWING_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         e.life_time = 20.0;
     }

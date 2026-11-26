@@ -272,7 +272,7 @@ fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
                 undo_generic_move(j);
             }
             let p = Vec3::new(0.0, -145.0, 0.0);
-            for _k in 0..8 {
+            for k in 0..8 {
                 if num_tails(j) < j.max_tails as i32 - 1 {
                     let prev = j.position;
                     j.position = j.target_position + rotate(j.direction, p);
@@ -295,9 +295,14 @@ fn joint_force_step(j: &mut Joint, ctx: &mut Ctx) {
                         create_joint_pk(ctx, BITMAP_JOINT_THUNDER, prev, j.position, j.angle, 3, s, 5, 10);
                     }
                 }
-                // TODO(original): subtypes 0 and 10, if the hero's and LifeTime > 18, every 5 laps
-                // AttackCharacterRange(Skill, Position, 150 (0) / 225 (10), Weapon, PKKey); in Battle
-                // Castle, in a no-attack zone: Velocity = 0, LifeTime /= 5 and the loop breaks.
+                // Subtypes 0 and 10 on the hero, LifeTime > 18, laps 0 and 5 (MuMain
+                // ZzzEffectJoint.cpp:6334-6352, 6406-6427; `SV_RANGE_ATTACK_CHECK` is not defined).
+                // TODO(original): in Castle Siege during the battle, in a `TW_NOATTACKZONE` tile,
+                // `Velocity = 0`, `LifeTime /= 5` and the loop breaks first (no siege state yet).
+                if matches!(j.sub_type, 0 | 10) && ctx.is_hero(j.target) && j.life_time > 18.0 && k % 5 == 0 {
+                    let range = if j.sub_type == 0 { 150.0 } else { 225.0 };
+                    ctx.attack_character_range(j.skill, j.position, range, j.weapon as i32, j.pk_key);
+                }
             }
             match j.sub_type {
                 10 => {

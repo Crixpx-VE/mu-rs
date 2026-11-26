@@ -944,7 +944,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
     j.render_type = JointRender::AlphaBlendMinus;
     match j.sub_type {
         0 => {
-            // TODO(original): Weapon = CharacterMachine->PacketSerial.
+            j.weapon = ctx.packet_serial() as f32;
             j.velocity = 70.0;
             j.life_time = 49.0;
             j.max_tails = 6;
@@ -997,7 +997,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
         }
         5 => {
             j.render_type = JointRender::AlphaBlend;
-            // TODO(original): Weapon = CharacterMachine->PacketSerial.
+            j.weapon = ctx.packet_serial() as f32;
             j.velocity = 30.0;
             j.life_time = 49.0;
             j.max_tails = 12;
@@ -1183,7 +1183,14 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
                 ctx.create_effect(MODEL_LASER, j.position, j.angle, j.light, laser_sub, None, -1, 0, 0, 0.0);
                 // TODO(original): in Battle Castle, inside a no-attack zone, Velocity = 0 and
                 // LifeTime /= 5 (and nothing else this tick).
-                // TODO(original): every 15 ticks, if the target is the hero, SpinMonstersInTornado(150).
+                // Every 15 ticks on the hero: Main 5.2 `AttackCharacterRange(Skill, Position, 150,
+                // Weapon, PKKey, m_bySkillSerialNum)` (ZzzEffectJoint.cpp:3782-3788), MuMain
+                // `SpinMonstersInTornado(Position, 150)` (ZzzEffectJoint.cpp:3843-3849); both.
+                // (`CSK_EVIL_SKILL` is not defined.)
+                if (j.life_time as i32) % 15 == 0 && ctx.is_hero(j.target) {
+                    ctx.attack_character_range(j.skill, j.position, 150.0, j.weapon as i32, j.pk_key);
+                    ctx.spin_monsters_in_tornado(j.position, 150.0);
+                }
             } else if sub == 19 {
                 ctx.create_effect(MODEL_SKULL, j.position, j.angle, j.light, 0, None, -1, 0, 0, 0.0);
             }

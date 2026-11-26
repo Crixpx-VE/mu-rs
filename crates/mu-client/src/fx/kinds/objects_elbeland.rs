@@ -102,7 +102,7 @@ fn elbeland(o: &mut MapObject, ctx: &mut Ctx) {
     // (`sound.rs` doesn't yet see as "playing" what it requested in this same frame).
     if let Some((id, not_in_safe_zone)) = sound
         && !(not_in_safe_zone && hero_in_safe_zone(ctx))
-        && !ctx.sounds.contains(&id)
+        && !ctx.sound_requested(id)
     {
         ctx.play_sound(id);
     }

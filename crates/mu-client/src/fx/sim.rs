@@ -40,14 +40,20 @@ pub struct FxWorld {
     /// Map objects with effect code (registered by `objects.rs`).
     pub map_objects: Vec<MapObject>,
     /// Sounds requested during the ticks (`PlayBuffer`); played by `sound.rs`.
-    pub sounds: Vec<&'static str>,
+    pub sounds: Vec<FxSound>,
     /// Effect model files for the kinds (`Models[]`).
     pub models: super::model_data::ModelData,
     /// `CharacterAttribute->Skill[]`: the hero's skills by slot, once the client knows them.
     pub hero_skills: Vec<i32>,
-    /// Damage requests the hero's projectiles would send (`AttackCharacterRange`); for the combat
-    /// protocol, which does not exist yet. Kept to the last 64.
+    /// Damage requests the hero's projectiles send (`AttackCharacterRange`); combat.rs sends them as
+    /// `AreaSkillHit`. Kept to the last 64.
     pub attack_requests: Vec<AttackRequest>,
+    /// `CharacterMachine->PacketSerial` (see [`Ctx::packet_serial`]).
+    pub packet_serial: u8,
+    /// `Hero->CurrentSkill` (the selected slot), kept up to date by skills.rs.
+    pub hero_current_skill: i32,
+    /// Changes to characters requested by the effects; applied by `fx::apply_actor_requests`.
+    pub actor_requests: Vec<ActorRequest>,
 }
 
 impl FxWorld {
@@ -169,6 +175,9 @@ pub fn step(
         models,
         hero_skills,
         attack_requests,
+        packet_serial,
+        hero_current_skill,
+        actor_requests,
         ..
     } = world;
     let mut ctx = Ctx {
@@ -191,6 +200,9 @@ pub fn step(
         models,
         hero_skills,
         attack_requests,
+        packet_serial,
+        hero_current_skill: *hero_current_skill,
+        actor_requests,
         free,
         depth: 0,
     };
@@ -300,6 +312,9 @@ pub fn step(
     }
     let overflow = ctx.attack_requests.len().saturating_sub(64);
     ctx.attack_requests.drain(..overflow);
+    // Nobody applies them without the game (tests, other scenes): keep a bound.
+    let overflow = ctx.actor_requests.len().saturating_sub(256);
+    ctx.actor_requests.drain(..overflow);
 
     // Deletions requested during the tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`).
     for d in deletes {

@@ -153,7 +153,7 @@ fn with_ctx<R>(actors: &Actors, f: impl FnOnce(&mut Ctx) -> R) -> (R, Vec<Attack
     let mut lights = TerrainLights::default();
     let (mut spawns, mut deletes, mut requests) = (Vec::new(), Vec::new(), Vec::new());
     let positions = std::collections::HashMap::new();
-    let FxWorld { rng, sprites, earthquake, next_effect_id, sounds, models, .. } = &mut world;
+    let FxWorld { rng, sprites, earthquake, next_effect_id, sounds, models, packet_serial, actor_requests, .. } = &mut world;
     let mut ctx = Ctx {
         rng,
         world_time: 0.0,
@@ -174,6 +174,9 @@ fn with_ctx<R>(actors: &Actors, f: impl FnOnce(&mut Ctx) -> R) -> (R, Vec<Attack
         models,
         hero_skills: &[],
         attack_requests: &mut requests,
+        packet_serial,
+        hero_current_skill: 0,
+        actor_requests,
         free: [10, 10, 10],
         depth: 0,
     };
@@ -205,6 +208,23 @@ fn check_character_range_like_the_original() {
     // Dead characters do not count.
     actors.map.get_mut(&monster).unwrap().dead = true;
     assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, 0)).0);
+}
+
+/// `SpinMonstersInTornado` (MuMain ZzzEffect.cpp:106-116): live, visible, not dying monsters in
+/// reach; no players or NPCs.
+#[test]
+fn spin_monsters_in_tornado_picks_the_monsters_in_reach() {
+    let (mut actors, _) = actors();
+    let (near, far, npc, dead) = (Entity::from_bits(1 << 32 | 5), Entity::from_bits(1 << 32 | 6), Entity::from_bits(1 << 32 | 7), Entity::from_bits(1 << 32 | 8));
+    actors.map.insert(near, character(KIND_MONSTER, 7, 13000.0));
+    actors.map.insert(far, character(KIND_MONSTER, 8, 13300.0));
+    actors.map.insert(npc, character(KIND_NPC, 9, 13010.0));
+    actors.map.insert(dead, Actor { dead: true, ..character(KIND_MONSTER, 10, 13020.0) });
+    let (spun, _) = with_ctx(&actors, |c| {
+        c.spin_monsters_in_tornado(Vec3::new(13050.0, 12800.0, 0.0), 150.0);
+        c.actor_requests.clone()
+    });
+    assert_eq!(spun, vec![ActorRequest { actor: near, change: ActorChange::Spin }]);
 }
 
 /// `AttackCharacterRange` (ZzzEffect.cpp:108-189): monsters, or the player with the PK key.

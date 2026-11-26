@@ -1233,8 +1233,10 @@ fn send_attack_requests(mut world: ResMut<crate::fx::FxWorld>, mut attack: ResMu
     }
     for r in std::mem::take(&mut world.attack_requests) {
         let skill = r.skill.max(0) as u16;
-        // The packet's serial is a fresh `MakeSkillSerialNumber`; each target carries the serial the
-        // skill was cast with (`o->m_bySkillSerialNum`).
+        // The packet's serial is a fresh `MakeSkillSerialNumber(&Serial)`, which overwrites the
+        // effect's `Serial` (`r.serial`, its `o->Weapon = PacketSerial`) with the next global one
+        // (ZzzInterface.cpp:4628-4637); each target carries the serial the skill was cast with
+        // (`o->m_bySkillSerialNum`).
         let serial = attack.next_serial();
         let skill_serial = attack.area_serials.get(&skill).copied().unwrap_or(0);
         let targets = r.keys.iter().map(|&k| (k as u16, skill_serial)).collect();

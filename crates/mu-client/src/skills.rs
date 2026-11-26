@@ -555,6 +555,10 @@ fn receive(
     mut skills: ResMut<HeroSkills>,
     mut world: ResMut<crate::fx::FxWorld>,
 ) {
+    // `Hero->CurrentSkill` for the effects (Fire Scream hits with it, ZzzEffect.cpp:6773-6779).
+    if world.hero_current_skill != skills.current as i32 {
+        world.hero_current_skill = skills.current as i32;
+    }
     let Some(table) = table else { return };
     let mut changed = false;
     for m in from.read() {

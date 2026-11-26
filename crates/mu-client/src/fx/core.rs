@@ -696,6 +696,46 @@ pub struct AttackRequest {
     pub keys: Vec<i32>,
 }
 
+/// A change the effects make to a character. The original writes `CharactersClient[]` directly;
+/// here actors are read-only snapshots, so the change is queued in [`Ctx::actor_requests`] and
+/// applied by the character systems (`fx::apply_actor_requests`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ActorChange {
+    /// `c->StormTime = 10` (`SpinMonstersInTornado`, MuMain ZzzEffect.cpp:106-116): the monster
+    /// spins for 10 ticks (`PushingCharacter`). Monsters that must not turn are skipped by
+    /// monsters.rs (`CanSpinInTornado`).
+    Spin,
+    /// `SetPlayerStop(c)`: back to the standing action.
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActorRequest {
+    pub actor: Entity,
+    pub change: ActorChange,
+}
+
+/// A sound request of the effects (`PlayBuffer` / `StopBuffer`), for `sound.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxSound {
+    /// `PlayBuffer(id)`.
+    Play(&'static str),
+    /// `PlayBuffer(id, o)`.
+    Object(&'static str),
+    /// `PlayBuffer(id, NULL, true)`.
+    Loop(&'static str),
+    /// `StopBuffer(id, true)`.
+    Stop(&'static str),
+}
+
+impl FxSound {
+    pub fn id(&self) -> &'static str {
+        match *self {
+            Self::Play(id) | Self::Object(id) | Self::Loop(id) | Self::Stop(id) => id,
+        }
+    }
+}
+
 /// Deletions requested during a tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`). The
 /// original deletes at once; here they are applied when the tick ends.
 #[derive(Clone, Copy, Debug)]
@@ -734,8 +774,8 @@ pub struct Ctx<'a> {
     pub next_effect_id: &'a mut u32,
     /// `gMapManager.WorldActive`: current map in the original's numbering (Lorencia = 0).
     pub world_active: i32,
-    /// `PlayBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
-    pub sounds: &'a mut Vec<&'static str>,
+    /// `PlayBuffer` / `StopBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
+    pub sounds: &'a mut Vec<FxSound>,
     /// Live effects at tick start (for `SearchEffect` and friends).
     pub effects: &'a [EffectInfo],
     /// Deletions requested this tick (applied when it ends).
@@ -749,6 +789,13 @@ pub struct Ctx<'a> {
     pub hero_skills: &'a [i32],
     /// `SendRequestMagicAttack` calls of this tick (`AttackCharacterRange`).
     pub attack_requests: &'a mut Vec<AttackRequest>,
+    /// `CharacterMachine->PacketSerial` (ZzzInfomation.h:68): a `BYTE` the hero's skills and some
+    /// projectiles step and copy into `o->Weapon`, which becomes `AttackCharacterRange`'s `Serial`.
+    pub packet_serial: &'a mut u8,
+    /// `Hero->CurrentSkill`: the hero's selected skill slot (what `Fire Scream` hits with).
+    pub hero_current_skill: i32,
+    /// Changes to characters requested this tick (see [`ActorChange`]).
+    pub actor_requests: &'a mut Vec<ActorRequest>,
     /// Free slots left this tick in `Particles[]`, `Joints[]` and `Effects[]` (the original creates
     /// nothing, and runs no creation code, when the pool is full).
     pub free: [usize; 3],
@@ -763,7 +810,29 @@ impl Ctx<'_> {
 
     /// `PlayBuffer(id)`.
     pub fn play_sound(&mut self, id: &'static str) {
-        self.sounds.push(id);
+        self.sounds.push(FxSound::Play(id));
+    }
+
+    /// `PlayBuffer(id, o)`: bound to an object, so it does not restart while it plays
+    /// (`sound::PlayKind::Object`; the client has no 3D sound, so the object's position is not used).
+    pub fn play_sound_object(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Object(id));
+    }
+
+    /// `PlayBuffer(id, NULL, true)`: loops until stopped.
+    pub fn play_sound_loop(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Loop(id));
+    }
+
+    /// `StopBuffer(id, true)`. `sound.rs` applies the stops of a frame before its plays, so
+    /// `StopBuffer(id); PlayBuffer(id)` restarts the sound, like the original.
+    pub fn stop_sound(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Stop(id));
+    }
+
+    /// Whether `PlayBuffer(id)` was already requested this tick.
+    pub fn sound_requested(&self, id: &'static str) -> bool {
+        self.sounds.contains(&FxSound::Play(id))
     }
 
     /// `rand_fps_check(n)`: true 1 in `n` ticks (always if n ≤ 1).
@@ -956,6 +1025,48 @@ impl Ctx<'_> {
         self.hero_skills.iter().take(64).position(|&s| s == skill).unwrap_or(0) as i32
     }
 
+    /// `CharacterMachine->PacketSerial` (read: `o->Weapon = PacketSerial`).
+    pub fn packet_serial(&self) -> i32 {
+        *self.packet_serial as i32
+    }
+
+    /// `CharacterMachine->PacketSerial++` (a `BYTE`: wraps at 256). Returns the value before the
+    /// increment, like the post-increment the original copies into `o->Weapon`.
+    pub fn next_packet_serial(&mut self) -> i32 {
+        let s = *self.packet_serial;
+        *self.packet_serial = s.wrapping_add(1);
+        s as i32
+    }
+
+    /// Queues a change to a character (see [`ActorChange`]).
+    pub fn change_actor(&mut self, actor: Entity, change: ActorChange) {
+        self.actor_requests.push(ActorRequest { actor, change });
+    }
+
+    /// `SpinMonstersInTornado(position, range)` (MuMain ZzzEffect.cpp:106-116): every live,
+    /// visible, not dying monster within `range` (2D) spins. MuMain moved this out of
+    /// `AttackCharacterRange` (Main 5.2 ZzzEffect.cpp:142-158 set `StormTime` on the hit
+    /// characters of Twister / Evil Spirit), and only monsters spin there.
+    pub fn spin_monsters_in_tornado(&mut self, position: Vec3, range: f32) {
+        let hits: Vec<Entity> = self
+            .characters()
+            .into_iter()
+            .filter(|(_, o)| {
+                let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
+                o.kind == KIND_MONSTER && o.live && o.visible && !o.dead && dx * dx + dy * dy <= range * range
+            })
+            .map(|(e, _)| e)
+            .collect();
+        for e in hits {
+            self.change_actor(e, ActorChange::Spin);
+        }
+    }
+
+    /// `o == &Hero->Object` for an effect's owner or target.
+    pub fn is_hero(&self, t: Option<Target>) -> bool {
+        self.hero.is_some_and(|h| t == Some(Target::Actor(h)))
+    }
+
     /// `CharacterAttribute->Skill[index]`: the hero's skill in that slot (0 if unknown).
     pub fn hero_skill(&self, index: i32) -> i32 {
         usize::try_from(index).ok().and_then(|i| self.hero_skills.get(i)).copied().unwrap_or(0)
@@ -979,8 +1090,9 @@ impl Ctx<'_> {
             let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
             let distance = (dx * dx + dy * dy).sqrt();
             if distance <= range && (o.kind == KIND_MONSTER || (o.kind == KIND_PLAYER && (o.key == pk_key || damage_chr))) {
-                // TODO(original): Twister / Evil Spirit set `c->StormTime = 10` on the victim
-                // (ZzzEffect.cpp:142-158): no client-side victim state yet.
+                // Main 5.2 sets `c->StormTime = 10` here for Twister / Evil Spirit
+                // (ZzzEffect.cpp:142-158); MuMain does it in `SpinMonstersInTornado`, called by the
+                // tornado effects themselves ([`Ctx::spin_monsters_in_tornado`]).
                 keys.push(o.key);
                 if keys.len() >= 5 {
                     break;

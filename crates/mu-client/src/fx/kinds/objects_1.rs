@@ -485,11 +485,11 @@ fn warp_step(e: &mut Effect, ctx: &mut Ctx) {
 
 // --- BITMAP_FLAME (effect): burning ground ------------------------------------------------------------
 
-fn flame_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn flame_create(e: &mut Effect, ctx: &mut Ctx) {
     match e.sub_type {
         0 => {
             e.life_time = 40.0;
-            // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+            e.weapon = ctx.packet_serial();
         }
         1 | 2 => {
             e.life_time = 10.0;
@@ -522,8 +522,12 @@ fn flame_step(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_effect(ty, e.position, e.angle, e.light, 0, None, -1, 0, 0, 0.0);
             let light = Vec3::new(lum * 1.0, lum * 0.4, lum * 0.0);
             ctx.add_terrain_light(e.position.x, e.position.y, light, 3.0);
-            // TODO(original): if Owner == Hero and (int)LifeTime % 20 == 0 → LifeTime = (LifeTime/20)·19.9
-            // and AttackCharacterRange(Skill, Position, 150, Weapon, PKKey) (network).
+            // Main 5.2 ZzzEffect.cpp:8796-8798 (MuMain MoveHandlers.cpp:1832-1836 also sets
+            // `LifeTime = (LifeTime / 20) · 19.9` so its sub-tick frames do not hit twice; with
+            // whole 25 Hz ticks that is not needed). `MoveEffect` runs before `LifeTime -= 1`.
+            if ctx.is_hero(e.owner) && (e.life_time as i32) % 20 == 0 {
+                ctx.attack_character_range(e.skill, e.position, 150.0, e.weapon, e.pk_key);
+            }
         }
         1 | 2 => {
             for j in 0..18 {
