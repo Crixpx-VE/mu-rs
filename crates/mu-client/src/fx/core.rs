@@ -332,6 +332,8 @@ pub struct Joint {
     pub scroll: JointScroll,
     /// Free slots for each type's code (what the original kept in assorted fields).
     pub user: [f32; 4],
+    /// `TargetIndex[5]`: characters a trail chains to (`BITMAP_JOINT_THUNDER` 15).
+    pub targets: Vec<Entity>,
     pub live: bool,
 }
 
@@ -368,6 +370,7 @@ impl Joint {
             tails: Vec::new(),
             scroll: JointScroll::None,
             user: [0.0; 4],
+            targets: Vec::new(),
             live: true,
         }
     }
@@ -1073,7 +1076,7 @@ impl Ctx<'_> {
 
     /// Characters in a fixed order (the original walks `CharactersClient[]` by slot; here by
     /// server key, then entity).
-    fn characters(&self) -> Vec<(Entity, &Actor)> {
+    pub fn characters(&self) -> Vec<(Entity, &Actor)> {
         let mut v: Vec<(Entity, &Actor)> = self.actors.iter().map(|(e, a)| (*e, a)).collect();
         v.sort_by_key(|(e, a)| (a.key, e.to_bits()));
         v

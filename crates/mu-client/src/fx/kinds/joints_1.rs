@@ -1858,8 +1858,20 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 80.0;
             j.max_tails = 0;
             j.multi_use = 0.0;
-            // TODO(original): stores in TargetIndex[] the live, visible monsters within ≤ 400 (other
-            // than Target); there is no monster list, so none are found.
+            // `TargetIndex[]`: the live, visible monsters within 400 (2D) other than Target, at most 5
+            // (MuMain ZzzEffectJoint.cpp:1349-1362; Main 5.2 wrote one past the end of the array).
+            let (pos, target) = (j.position, j.target);
+            j.targets = ctx
+                .characters()
+                .into_iter()
+                .filter(|(e, to)| {
+                    let (dx, dy) = (pos.x - to.position.x, pos.y - to.position.y);
+                    (dx * dx + dy * dy).sqrt() <= 400.0 && to.live && !to.dead && to.kind == KIND_MONSTER && to.visible && target != Some(Target::Actor(*e))
+                })
+                .map(|(e, _)| e)
+                .take(5)
+                .collect();
+            j.multi_use = j.targets.len() as f32;
             j.weapon = j.multi_use * 15.0;
             j.multi_use = 0.0;
             j.start_position = j.target_position + Vec3::new(0.0, 0.0, 150.0);
@@ -2119,8 +2131,28 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
         ctx.create_joint(BITMAP_JOINT_THUNDER, j.position, j.start_position, j.angle, 0, None, 10.0);
         // (`Light` is uninitialized in the original)
         ctx.create_particle(BITMAP_ENERGY, j.position, j.angle, j.light, 0, 1.0, None);
-        // TODO(original): bolts from StartPosition+100 chained to each monster in
-        // TargetIndex[] (one per 15 of MultiUse) if still alive and visible; there is no monster list.
+        // Bolts from StartPosition + 100 chained to each monster of `TargetIndex[]` (one more every
+        // 15 of MultiUse) still alive and visible (MuMain ZzzEffectJoint.cpp:5094-5118).
+        let mut from = j.start_position + Vec3::new(0.0, 0.0, 100.0);
+        let mut i = 0;
+        while (i as f32) < j.multi_use {
+            if i % 15 == 0
+                && let Some(to) = j.targets.get(i / 15).and_then(|e| ctx.actors.get(e))
+                && to.live
+                && !to.dead
+                && to.kind == KIND_MONSTER
+                && to.visible
+            {
+                j.target_position = to.position + Vec3::new(0.0, 0.0, 100.0);
+                let mut angle = j.angle;
+                angle.z = create_angle(j.position.x, j.position.y, j.target_position.x, j.target_position.y);
+                let tp = j.target_position;
+                ctx.create_joint(BITMAP_JOINT_THUNDER, from, tp, angle, 0, None, 50.0);
+                ctx.create_joint(BITMAP_JOINT_THUNDER, from, tp, angle, 0, None, 10.0);
+                from = tp;
+            }
+            i += 1;
+        }
         if j.multi_use < j.weapon && (j.life_time as i32) % 2 == 0 {
             j.multi_use += 1.0;
         }
