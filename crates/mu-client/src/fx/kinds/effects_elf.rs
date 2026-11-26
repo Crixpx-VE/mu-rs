@@ -116,9 +116,10 @@ fn world_rot(ctx: &Ctx) -> f32 {
     (ctx.world_time() as i32) as f32 * 0.1
 }
 
-/// `o->EyeLeft` → `user[0..3]`. TODO(original): trails that follow `o` read `Target->EyeLeft`; the
-/// engine only exposes the effect's position to them.
+/// `o->EyeLeft` (also in `user[0..3]`, which this file reads); the trails that follow `o` read it
+/// through `Effect::eye_left`.
 fn set_eye_left(e: &mut Effect, p: Vec3) {
+    e.eye_left = p;
     e.user[0] = p.x;
     e.user[1] = p.y;
     e.user[2] = p.z;
@@ -244,9 +245,8 @@ fn check_client_arrow(e: &mut Effect, ctx: &mut Ctx) {
                 _ => {
                     e.live = false;
                     // PlayBuffer(SOUND_ATTACK01+5+rand()%4, o).
-                    // TODO(original): the sound is positioned at `o`; `play_sound` is not positional.
                     let n = ctx.rand() % 4;
-                    ctx.play_sound(SOUND_MISSILE_HIT[n as usize]);
+                    ctx.play_sound_object(SOUND_MISSILE_HIT[n as usize]);
                     if bomb_or_holy(e) {
                         common::create_bomb(ctx, e.position, true, 0);
                     }
@@ -714,7 +714,7 @@ fn crossbow_create(e: &mut Effect, ctx: &mut Ctx) {
         e.user[ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
 /// ZzzEffect.cpp:11819.
@@ -764,11 +764,11 @@ fn holy_create(e: &mut Effect, ctx: &mut Ctx) {
             ctx.create_joint(BITMAP_FLARE, e.start_position, e.start_position, angle, sub, me(e), 50.0);
         }
     }
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
-/// ZzzEffect.cpp:11848; the common tail (18092) moves `StartPosition`, not `Position`.
-/// TODO(original): its trails follow `o->StartPosition`; the engine only exposes `Position`.
+/// ZzzEffect.cpp:11848; the common tail (18092) moves `StartPosition`, not `Position`. Its
+/// `BITMAP_FLARE` 11/25 trails follow that `StartPosition` (`Ctx::target_start_position`).
 fn holy_step(e: &mut Effect, ctx: &mut Ctx) {
     let lum = luminosity(e, ctx);
     if e.sub_type == 1 {
@@ -879,7 +879,7 @@ fn arrow_create(e: &mut Effect, ctx: &mut Ctx) {
         e.angle.y = rf(ctx, 360);
         ctx.create_joint_ex(BITMAP_FLARE + 1, e.position, e.position, e.angle, 15, me(e), 50.0, 40, 0);
     }
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
 /// `MODEL_MULTI_SHOT1..3`: ZzzEffect.cpp:7208-7222, plus the `PlayAnimation(Velocity/6)` that
@@ -1184,7 +1184,7 @@ fn tanker_hit_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_ARROW_BOMB --------------------------------------------------------------------------------
 
 /// ZzzEffect.cpp:1980.
-fn bomb_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn bomb_create(e: &mut Effect, ctx: &mut Ctx) {
     e.velocity = 1.0;
     e.life_time = 30.0;
     arrow_offset(e);
@@ -1197,7 +1197,7 @@ fn bomb_create(e: &mut Effect, _ctx: &mut Ctx) {
         e.user[ATTACK_POINT] = 0.0;
         e.kind = 1;
     }
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
 /// ZzzEffect.cpp:12141.
@@ -1242,7 +1242,7 @@ fn drill_create(e: &mut Effect, ctx: &mut Ctx) {
         e.direction = Vec3::new(0.0, -70.0, 0.0);
         set_eye_left(e, e.position);
         ctx.create_joint(BITMAP_JOINT_ENERGY, e.position, e.position, e.angle, 5, me(e), 100.0);
-        // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+        e.weapon = ctx.packet_serial();
     }
 }
 
@@ -1294,7 +1294,7 @@ fn impact_create(e: &mut Effect, ctx: &mut Ctx) {
     e.position += rotate(e.angle, Vec3::new(-10.0, -80.0, 200.0));
     e.angle.x = -30.0;
     ctx.create_joint_ex(BITMAP_FLASH, e.position, e.position, e.angle, 4, me(e), 40.0, 50, 0);
-    // TODO(original): o->Weapon = CharacterMachine->PacketSerial (network).
+    e.weapon = ctx.packet_serial();
 }
 
 /// ZzzEffect.cpp:14714.
@@ -1472,12 +1472,12 @@ fn magic1_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_MAGIC2 ------------------------------------------------------------------------------------
 
 /// ZzzEffect.cpp:2185.
-fn magic2_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn magic2_create(e: &mut Effect, ctx: &mut Ctx) {
     e.blend_mesh = 0;
     e.life_time = 20.0;
     e.direction = Vec3::new(0.0, -60.0, 0.0);
     if e.sub_type == 2 {
-        // TODO(original): o->Weapon = CharacterMachine->PacketSerial++ (network).
+        e.weapon = ctx.next_packet_serial();
     }
 }
 
@@ -1638,7 +1638,7 @@ mod tests {
         let mut world = shoot(MODEL_ARROW_HOLY, 1, 1, hero);
         assert!(run(&mut world, &actors, 30).is_some(), "the holy arrow must hit");
         assert!(has_particle(&world, BITMAP_EXPLOTION), "no explosion");
-        assert!(world.sounds.iter().any(|s| s.starts_with("SOUND_ATTACK_MISSILE_HIT")), "{:?}", world.sounds);
+        assert!(world.sounds.iter().any(|s| s.id().starts_with("SOUND_ATTACK_MISSILE_HIT")), "{:?}", world.sounds);
         assert!(world.attack_requests.iter().any(|r| r.keys == vec![MONSTER_KEY]));
     }
 

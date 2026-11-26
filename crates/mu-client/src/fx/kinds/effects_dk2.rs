@@ -75,7 +75,7 @@ fn create_fury(e: &mut Effect, ctx: &mut Ctx) {
     e.head_angle.x += 80.0;
     e.head_angle.z += 180.0;
     e.gravity = 50.0;
-    // TODO(combat): o->Weapon = CharacterMachine->PacketSerial++ (the attack serial).
+    e.weapon = ctx.next_packet_serial();
 }
 
 /// ZzzEffect.cpp:10016-10241.
@@ -250,8 +250,7 @@ fn draw_fury(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     let Some(actor) = common::owner_actor(e.owner, ctx.actors) else { return };
     let Some((model, level)) = actor.weapon else { return };
     // `RequestTerrainLight + o->Light` (0.3 after ItemObjectAttribute).
-    // TODO(original): no terrain light at draw time; approximated with 0.7 (as RenderWheelWeapon).
-    let light = Vec3::splat(0.7 + 0.3);
+    let light = ctx.terrain_light(e.position.x, e.position.y) + Vec3::splat(0.3);
     super::effects_dk1::render_weapon(out, ctx, model, level, e.position, e.angle, super::effects_dk1::weapon_scale(model), light, e.alpha);
 }
 

@@ -332,6 +332,8 @@ pub struct Joint {
     pub scroll: JointScroll,
     /// Free slots for each type's code (what the original kept in assorted fields).
     pub user: [f32; 4],
+    /// `TargetIndex[5]`: characters a trail chains to (`BITMAP_JOINT_THUNDER` 15).
+    pub targets: Vec<Entity>,
     pub live: bool,
 }
 
@@ -368,6 +370,7 @@ impl Joint {
             tails: Vec::new(),
             scroll: JointScroll::None,
             user: [0.0; 4],
+            targets: Vec::new(),
             live: true,
         }
     }
@@ -404,6 +407,8 @@ pub struct Effect {
     pub start_position: Vec3,
     pub angle: Vec3,
     pub head_angle: Vec3,
+    /// `o->EyeLeft` (a point some effects keep for the trails that follow them).
+    pub eye_left: Vec3,
     pub direction: Vec3,
     pub light: Vec3,
     pub alpha: f32,
@@ -452,6 +457,7 @@ impl Effect {
             start_position: position,
             angle,
             head_angle: Vec3::ZERO,
+            eye_left: Vec3::ZERO,
             direction: Vec3::ZERO,
             light,
             alpha: 1.0,
@@ -680,6 +686,33 @@ pub struct EffectInfo {
     pub pk_key: i32,
     pub kind: i32,
     pub skill: i32,
+    pub light: Vec3,
+    pub alpha: f32,
+    pub start_position: Vec3,
+    pub head_angle: Vec3,
+    pub eye_left: Vec3,
+}
+
+impl EffectInfo {
+    pub fn of(e: &Effect) -> Self {
+        Self {
+            id: e.id,
+            ty: e.ty,
+            sub_type: e.sub_type,
+            owner: e.owner,
+            position: e.position,
+            angle: e.angle,
+            life_time: e.life_time,
+            pk_key: e.pk_key,
+            kind: e.kind,
+            skill: e.skill,
+            light: e.light,
+            alpha: e.alpha,
+            start_position: e.start_position,
+            head_angle: e.head_angle,
+            eye_left: e.eye_left,
+        }
+    }
 }
 
 /// `SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)` that
@@ -694,6 +727,46 @@ pub struct AttackRequest {
     pub serial: i32,
     /// `c->Key` of each character hit (at most 5).
     pub keys: Vec<i32>,
+}
+
+/// A change the effects make to a character. The original writes `CharactersClient[]` directly;
+/// here actors are read-only snapshots, so the change is queued in [`Ctx::actor_requests`] and
+/// applied by the character systems (`fx::apply_actor_requests`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ActorChange {
+    /// `c->StormTime = 10` (`SpinMonstersInTornado`, MuMain ZzzEffect.cpp:106-116): the monster
+    /// spins for 10 ticks (`PushingCharacter`). Monsters that must not turn are skipped by
+    /// monsters.rs (`CanSpinInTornado`).
+    Spin,
+    /// `SetPlayerStop(c)`: back to the standing action.
+    Stop,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ActorRequest {
+    pub actor: Entity,
+    pub change: ActorChange,
+}
+
+/// A sound request of the effects (`PlayBuffer` / `StopBuffer`), for `sound.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FxSound {
+    /// `PlayBuffer(id)`.
+    Play(&'static str),
+    /// `PlayBuffer(id, o)`.
+    Object(&'static str),
+    /// `PlayBuffer(id, NULL, true)`.
+    Loop(&'static str),
+    /// `StopBuffer(id, true)`.
+    Stop(&'static str),
+}
+
+impl FxSound {
+    pub fn id(&self) -> &'static str {
+        match *self {
+            Self::Play(id) | Self::Object(id) | Self::Loop(id) | Self::Stop(id) => id,
+        }
+    }
 }
 
 /// Deletions requested during a tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`). The
@@ -734,8 +807,8 @@ pub struct Ctx<'a> {
     pub next_effect_id: &'a mut u32,
     /// `gMapManager.WorldActive`: current map in the original's numbering (Lorencia = 0).
     pub world_active: i32,
-    /// `PlayBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
-    pub sounds: &'a mut Vec<&'static str>,
+    /// `PlayBuffer` / `StopBuffer`: requested sounds (`SOUND_*`), played by `sound.rs`.
+    pub sounds: &'a mut Vec<FxSound>,
     /// Live effects at tick start (for `SearchEffect` and friends).
     pub effects: &'a [EffectInfo],
     /// Deletions requested this tick (applied when it ends).
@@ -749,6 +822,13 @@ pub struct Ctx<'a> {
     pub hero_skills: &'a [i32],
     /// `SendRequestMagicAttack` calls of this tick (`AttackCharacterRange`).
     pub attack_requests: &'a mut Vec<AttackRequest>,
+    /// `CharacterMachine->PacketSerial` (ZzzInfomation.h:68): a `BYTE` the hero's skills and some
+    /// projectiles step and copy into `o->Weapon`, which becomes `AttackCharacterRange`'s `Serial`.
+    pub packet_serial: &'a mut u8,
+    /// `Hero->CurrentSkill`: the hero's selected skill slot (what `Fire Scream` hits with).
+    pub hero_current_skill: i32,
+    /// Changes to characters requested this tick (see [`ActorChange`]).
+    pub actor_requests: &'a mut Vec<ActorRequest>,
     /// Free slots left this tick in `Particles[]`, `Joints[]` and `Effects[]` (the original creates
     /// nothing, and runs no creation code, when the pool is full).
     pub free: [usize; 3],
@@ -763,7 +843,29 @@ impl Ctx<'_> {
 
     /// `PlayBuffer(id)`.
     pub fn play_sound(&mut self, id: &'static str) {
-        self.sounds.push(id);
+        self.sounds.push(FxSound::Play(id));
+    }
+
+    /// `PlayBuffer(id, o)`: bound to an object, so it does not restart while it plays
+    /// (`sound::PlayKind::Object`; the client has no 3D sound, so the object's position is not used).
+    pub fn play_sound_object(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Object(id));
+    }
+
+    /// `PlayBuffer(id, NULL, true)`: loops until stopped.
+    pub fn play_sound_loop(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Loop(id));
+    }
+
+    /// `StopBuffer(id, true)`. `sound.rs` applies the stops of a frame before its plays, so
+    /// `StopBuffer(id); PlayBuffer(id)` restarts the sound, like the original.
+    pub fn stop_sound(&mut self, id: &'static str) {
+        self.sounds.push(FxSound::Stop(id));
+    }
+
+    /// Whether `PlayBuffer(id)` was already requested this tick.
+    pub fn sound_requested(&self, id: &'static str) -> bool {
+        self.sounds.contains(&FxSound::Play(id))
     }
 
     /// `rand_fps_check(n)`: true 1 in `n` ticks (always if n ≤ 1).
@@ -808,6 +910,50 @@ impl Ctx<'_> {
 
     pub fn hero_actor(&self) -> Option<&Actor> {
         self.actors.get(&self.hero?)
+    }
+
+    /// The state of a live effect (`Effects[]` as the original reads it through `o->Target` /
+    /// `o->Owner`): as it was at the start of the tick, or as it was created during this tick.
+    /// `None` for the effect whose creation code is running (it is not in `Effects[]` yet here).
+    pub fn effect_state(&self, id: u32) -> Option<EffectInfo> {
+        self.effects.iter().find(|e| e.id == id).copied().or_else(|| {
+            self.spawns.iter().rev().find_map(|s| match s {
+                Spawn::Effect(e) if e.id == id => Some(EffectInfo::of(e)),
+                _ => None,
+            })
+        })
+    }
+
+    /// `o->Target->Light` / `o->Owner->Light`: a character's body light or an effect's light.
+    pub fn target_light(&self, t: Option<Target>) -> Option<Vec3> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.light),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.light),
+        }
+    }
+
+    /// `o->Target->Alpha`.
+    pub fn target_alpha(&self, t: Option<Target>) -> Option<f32> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.alpha),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.alpha),
+        }
+    }
+
+    /// `o->Target->StartPosition`.
+    pub fn target_start_position(&self, t: Option<Target>) -> Option<Vec3> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.start_position),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.start_position),
+        }
+    }
+
+    /// `o->Target->Owner` of an effect target (characters have no owner here).
+    pub fn target_owner(&self, t: Option<Target>) -> Option<Target> {
+        match t? {
+            Target::Actor(_) => None,
+            Target::Effect(id) => self.effect_state(id)?.owner,
+        }
     }
 
     /// Position of the followed target (character or effect).
@@ -930,7 +1076,7 @@ impl Ctx<'_> {
 
     /// Characters in a fixed order (the original walks `CharactersClient[]` by slot; here by
     /// server key, then entity).
-    fn characters(&self) -> Vec<(Entity, &Actor)> {
+    pub fn characters(&self) -> Vec<(Entity, &Actor)> {
         let mut v: Vec<(Entity, &Actor)> = self.actors.iter().map(|(e, a)| (*e, a)).collect();
         v.sort_by_key(|(e, a)| (a.key, e.to_bits()));
         v
@@ -956,6 +1102,48 @@ impl Ctx<'_> {
         self.hero_skills.iter().take(64).position(|&s| s == skill).unwrap_or(0) as i32
     }
 
+    /// `CharacterMachine->PacketSerial` (read: `o->Weapon = PacketSerial`).
+    pub fn packet_serial(&self) -> i32 {
+        *self.packet_serial as i32
+    }
+
+    /// `CharacterMachine->PacketSerial++` (a `BYTE`: wraps at 256). Returns the value before the
+    /// increment, like the post-increment the original copies into `o->Weapon`.
+    pub fn next_packet_serial(&mut self) -> i32 {
+        let s = *self.packet_serial;
+        *self.packet_serial = s.wrapping_add(1);
+        s as i32
+    }
+
+    /// Queues a change to a character (see [`ActorChange`]).
+    pub fn change_actor(&mut self, actor: Entity, change: ActorChange) {
+        self.actor_requests.push(ActorRequest { actor, change });
+    }
+
+    /// `SpinMonstersInTornado(position, range)` (MuMain ZzzEffect.cpp:106-116): every live,
+    /// visible, not dying monster within `range` (2D) spins. MuMain moved this out of
+    /// `AttackCharacterRange` (Main 5.2 ZzzEffect.cpp:142-158 set `StormTime` on the hit
+    /// characters of Twister / Evil Spirit), and only monsters spin there.
+    pub fn spin_monsters_in_tornado(&mut self, position: Vec3, range: f32) {
+        let hits: Vec<Entity> = self
+            .characters()
+            .into_iter()
+            .filter(|(_, o)| {
+                let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
+                o.kind == KIND_MONSTER && o.live && o.visible && !o.dead && dx * dx + dy * dy <= range * range
+            })
+            .map(|(e, _)| e)
+            .collect();
+        for e in hits {
+            self.change_actor(e, ActorChange::Spin);
+        }
+    }
+
+    /// `o == &Hero->Object` for an effect's owner or target.
+    pub fn is_hero(&self, t: Option<Target>) -> bool {
+        self.hero.is_some_and(|h| t == Some(Target::Actor(h)))
+    }
+
     /// `CharacterAttribute->Skill[index]`: the hero's skill in that slot (0 if unknown).
     pub fn hero_skill(&self, index: i32) -> i32 {
         usize::try_from(index).ok().and_then(|i| self.hero_skills.get(i)).copied().unwrap_or(0)
@@ -979,8 +1167,9 @@ impl Ctx<'_> {
             let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
             let distance = (dx * dx + dy * dy).sqrt();
             if distance <= range && (o.kind == KIND_MONSTER || (o.kind == KIND_PLAYER && (o.key == pk_key || damage_chr))) {
-                // TODO(original): Twister / Evil Spirit set `c->StormTime = 10` on the victim
-                // (ZzzEffect.cpp:142-158): no client-side victim state yet.
+                // Main 5.2 sets `c->StormTime = 10` here for Twister / Evil Spirit
+                // (ZzzEffect.cpp:142-158); MuMain does it in `SpinMonstersInTornado`, called by the
+                // tornado effects themselves ([`Ctx::spin_monsters_in_tornado`]).
                 keys.push(o.key);
                 if keys.len() >= 5 {
                     break;
@@ -1243,11 +1432,29 @@ pub struct DrawCtx<'a> {
     pub world_active: i32,
     /// Effect model files already loaded by the simulation.
     pub models: &'a super::model_data::ModelData,
+    /// The map and this tick's terrain lights, for `RequestTerrainLight` while drawing.
+    pub terrain: Option<(&'a Terrain, &'a TerrainLights)>,
+    /// `g_pOption->GetRenderLevel()` (0 to 4, `options::GameOptions::render_level`).
+    pub render_level: u8,
 }
 
 impl DrawCtx<'_> {
     pub fn tex(&self, id: i32) -> Option<TexInfo> {
         (self.tex_info)(id)
+    }
+
+    /// `b->BodyLight` of `RenderObject` for an effect (MuMain ZzzObject.cpp:272-285): the terrain
+    /// light plus `o->Light`, the terrain light at a tenth without `LightEnable`.
+    /// (`RequestModelTerrainLight` is `RequestTerrainLight` without MuMain's per-pixel lights.)
+    pub fn body_light(&self, e: &Effect) -> Vec3 {
+        let t = self.terrain_light(e.position.x, e.position.y);
+        if e.light_enable { t + e.light } else { t * 0.1 + e.light }
+    }
+
+    /// `RequestTerrainLight(x, y)` with x, y in MU (`terrain::request_terrain_light`); (0, 0, 0)
+    /// without a map, like the original off the terrain.
+    pub fn terrain_light(&self, x: f32, y: f32) -> Vec3 {
+        self.terrain.map_or(Vec3::ZERO, |(t, l)| crate::terrain::request_terrain_light(t, l, x, y))
     }
 
     /// The bones of an effect's own model in its (interpolated) pose, if the simulation has

@@ -183,7 +183,7 @@ impl Mob {
     /// How a player who has it in view sees it right now.
     pub fn scope(&self) -> ScopeMonster {
         let (tx, ty) = self.path.back().copied().unwrap_or((self.x, self.y));
-        ScopeMonster { id: self.id, number: self.number, x: self.x, y: self.y, target_x: tx, target_y: ty, rotation: self.dir }
+        ScopeMonster { id: self.id, number: self.number, x: self.x, y: self.y, target_x: tx, target_y: ty, rotation: self.dir, effects: Vec::new() }
     }
 
     /// How long the step to `to` takes (`MoveSpeed` times the distance, `Monster.GetStepDelay`).

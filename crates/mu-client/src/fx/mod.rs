@@ -56,6 +56,7 @@ impl Plugin for FxPlugin {
                 let _ = images.add(textures::white_image());
             })
             .add_systems(FixedUpdate, (sim::gather_actors, sim::tick).chain())
+            .add_systems(Update, apply_actor_requests)
             .add_systems(
                 PostUpdate,
                 (draw::collect, draw::render_quads, models::render_models)
@@ -71,8 +72,38 @@ pub fn reset(mut world: ResMut<FxWorld>, mut actors: ResMut<sim::Actors>) {
     let next_effect_id = world.next_effect_id;
     let models = std::mem::take(&mut world.models);
     let hero_skills = std::mem::take(&mut world.hero_skills);
-    *world = FxWorld { next_effect_id, models, hero_skills, ..default() };
+    // `CharacterMachine` lives on across maps (`PacketSerial` is only zeroed by its `Init`).
+    let (packet_serial, hero_current_skill) = (world.packet_serial, world.hero_current_skill);
+    *world = FxWorld { next_effect_id, models, hero_skills, packet_serial, hero_current_skill, ..default() };
     *actors = sim::Actors::default();
+}
+
+/// Applies the changes the effects asked of characters ([`core::ActorChange`]) during the ticks.
+pub fn apply_actor_requests(
+    mut world: ResMut<FxWorld>,
+    mut monsters: Query<&mut crate::monsters::Monster>,
+    mut heroes: Query<&mut crate::character::Player>,
+) {
+    use core::ActorChange;
+    for r in std::mem::take(&mut world.actor_requests) {
+        match r.change {
+            ActorChange::Spin => {
+                if let Ok(mut m) = monsters.get_mut(r.actor) {
+                    m.spin_in_tornado();
+                }
+            }
+            ActorChange::Stop => {
+                // `SetPlayerStop(Hero)`: the standing action of its current gear.
+                if let Ok(mut p) = heroes.get_mut(r.actor)
+                    && !p.dead
+                {
+                    p.casting = None;
+                    p.action = p.stop;
+                    p.frame = 0.0;
+                }
+            }
+        }
+    }
 }
 
 /// Request an effect from outside the engine (characters, map objects): created on the next tick.

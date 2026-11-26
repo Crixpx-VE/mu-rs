@@ -190,10 +190,15 @@ enum Eye {
 
 /// `o->Target->EyeLeft`...
 fn eye(ctx: &Ctx, t: Option<Target>, which: Eye) -> Option<Vec3> {
-    // TODO(original): EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/SetTrailLeft/Right are
-    // filled by each specific monster's draw code; `Actor` does not have them yet (they are 0).
-    let _ = (ctx, t, which);
-    None
+    match (t?, which) {
+        // An effect's `EyeLeft` (the arrows and traces that set it; one that never set it is
+        // followed by its position, as before, instead of the map origin).
+        (Target::Effect(id), Eye::Left) => ctx.effect_state(id).map(|e| e.eye_left).filter(|p| *p != Vec3::ZERO),
+        // TODO(original): a character's EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/
+        // SetTrailLeft/Right are filled by each specific monster's draw code; `Actor` does not
+        // have them yet (they are 0). The other eyes of effects are not used by their trails.
+        _ => None,
+    }
 }
 
 /// `UpdateJointTargetPosition(o, eyePos)`: to the eye if it exists; otherwise to the target position.
@@ -944,7 +949,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
     j.render_type = JointRender::AlphaBlendMinus;
     match j.sub_type {
         0 => {
-            // TODO(original): Weapon = CharacterMachine->PacketSerial.
+            j.weapon = ctx.packet_serial() as f32;
             j.velocity = 70.0;
             j.life_time = 49.0;
             j.max_tails = 6;
@@ -997,7 +1002,7 @@ fn create_spirit(j: &mut Joint, ctx: &mut Ctx) {
         }
         5 => {
             j.render_type = JointRender::AlphaBlend;
-            // TODO(original): Weapon = CharacterMachine->PacketSerial.
+            j.weapon = ctx.packet_serial() as f32;
             j.velocity = 30.0;
             j.life_time = 49.0;
             j.max_tails = 12;
@@ -1183,7 +1188,14 @@ fn move_spirit(j: &mut Joint, ctx: &mut Ctx) {
                 ctx.create_effect(MODEL_LASER, j.position, j.angle, j.light, laser_sub, None, -1, 0, 0, 0.0);
                 // TODO(original): in Battle Castle, inside a no-attack zone, Velocity = 0 and
                 // LifeTime /= 5 (and nothing else this tick).
-                // TODO(original): every 15 ticks, if the target is the hero, SpinMonstersInTornado(150).
+                // Every 15 ticks on the hero: Main 5.2 `AttackCharacterRange(Skill, Position, 150,
+                // Weapon, PKKey, m_bySkillSerialNum)` (ZzzEffectJoint.cpp:3782-3788), MuMain
+                // `SpinMonstersInTornado(Position, 150)` (ZzzEffectJoint.cpp:3843-3849); both.
+                // (`CSK_EVIL_SKILL` is not defined.)
+                if (j.life_time as i32) % 15 == 0 && ctx.is_hero(j.target) {
+                    ctx.attack_character_range(j.skill, j.position, 150.0, j.weapon as i32, j.pk_key);
+                    ctx.spin_monsters_in_tornado(j.position, 150.0);
+                }
             } else if sub == 19 {
                 ctx.create_effect(MODEL_SKULL, j.position, j.angle, j.light, 0, None, -1, 0, 0, 0.0);
             }
@@ -1846,8 +1858,20 @@ fn create_thunder(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 80.0;
             j.max_tails = 0;
             j.multi_use = 0.0;
-            // TODO(original): stores in TargetIndex[] the live, visible monsters within ≤ 400 (other
-            // than Target); there is no monster list, so none are found.
+            // `TargetIndex[]`: the live, visible monsters within 400 (2D) other than Target, at most 5
+            // (MuMain ZzzEffectJoint.cpp:1349-1362; Main 5.2 wrote one past the end of the array).
+            let (pos, target) = (j.position, j.target);
+            j.targets = ctx
+                .characters()
+                .into_iter()
+                .filter(|(e, to)| {
+                    let (dx, dy) = (pos.x - to.position.x, pos.y - to.position.y);
+                    (dx * dx + dy * dy).sqrt() <= 400.0 && to.live && !to.dead && to.kind == KIND_MONSTER && to.visible && target != Some(Target::Actor(*e))
+                })
+                .map(|(e, _)| e)
+                .take(5)
+                .collect();
+            j.multi_use = j.targets.len() as f32;
             j.weapon = j.multi_use * 15.0;
             j.multi_use = 0.0;
             j.start_position = j.target_position + Vec3::new(0.0, 0.0, 150.0);
@@ -2107,8 +2131,28 @@ fn move_thunder(j: &mut Joint, ctx: &mut Ctx) {
         ctx.create_joint(BITMAP_JOINT_THUNDER, j.position, j.start_position, j.angle, 0, None, 10.0);
         // (`Light` is uninitialized in the original)
         ctx.create_particle(BITMAP_ENERGY, j.position, j.angle, j.light, 0, 1.0, None);
-        // TODO(original): bolts from StartPosition+100 chained to each monster in
-        // TargetIndex[] (one per 15 of MultiUse) if still alive and visible; there is no monster list.
+        // Bolts from StartPosition + 100 chained to each monster of `TargetIndex[]` (one more every
+        // 15 of MultiUse) still alive and visible (MuMain ZzzEffectJoint.cpp:5094-5118).
+        let mut from = j.start_position + Vec3::new(0.0, 0.0, 100.0);
+        let mut i = 0;
+        while (i as f32) < j.multi_use {
+            if i % 15 == 0
+                && let Some(to) = j.targets.get(i / 15).and_then(|e| ctx.actors.get(e))
+                && to.live
+                && !to.dead
+                && to.kind == KIND_MONSTER
+                && to.visible
+            {
+                j.target_position = to.position + Vec3::new(0.0, 0.0, 100.0);
+                let mut angle = j.angle;
+                angle.z = create_angle(j.position.x, j.position.y, j.target_position.x, j.target_position.y);
+                let tp = j.target_position;
+                ctx.create_joint(BITMAP_JOINT_THUNDER, from, tp, angle, 0, None, 50.0);
+                ctx.create_joint(BITMAP_JOINT_THUNDER, from, tp, angle, 0, None, 10.0);
+                from = tp;
+            }
+            i += 1;
+        }
         if j.multi_use < j.weapon && (j.life_time as i32) % 2 == 0 {
             j.multi_use += 1.0;
         }

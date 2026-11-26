@@ -17,12 +17,11 @@
 //! action speeds of `SetAttackSpeed` (`ZzzCharacter.cpp` 893-901). MuMain (`MoveHandlers.cpp`) matches.
 //!
 //! Engine gaps (each one has a `TODO(original)` where it is used):
-//! - `CharacterAttribute->AttackSpeed` (the Rage Fighter action speeds): [`hero_attack_speed`] = 0.
-//! - Writes to the owner (`o->Owner->Velocity += ..`): not possible on actor snapshots. The owner
-//!   angle shake of the wolf heads is reproduced locally (the original restores it in the same block).
+//! - `o->Owner->Velocity += ..`: there is no `ActorChange` for it (the client's characters have no
+//!   `o->Velocity` of their own, and the Rage Fighter skills are not cast yet). The owner angle
+//!   shake of the wolf heads is reproduced locally (the original restores it in the same block).
 //! - Where the original dereferences `o->Owner` without checking it (it would crash), a missing
 //!   owner character kills the effect.
-//! - `StopBuffer` does not exist: only the `PlayBuffer` is requested.
 //! - The owner's pose at Dragon Kick's sub-frames (needs `PriorAction`/`PriorAnimationFrame`).
 //!
 //! Without the game data (tests) the model-dependent parts fall back: action lengths are unknown
@@ -81,9 +80,9 @@ fn int_life(x: f32) -> f32 {
     x as i32 as f32
 }
 
-/// `CharacterAttribute->AttackSpeed` (the hero's). TODO(original): not available here; 0.
+/// `CharacterAttribute->AttackSpeed` (the hero's, from combat.rs's `SetAttackSpeed`).
 fn hero_attack_speed(_ctx: &Ctx) -> f32 {
-    0.0
+    crate::combat::hero_speeds().0 as f32
 }
 
 /// `Models[MODEL_PLAYER].Actions[a].PlaySpeed` of a Rage Fighter skill action as set by
@@ -151,14 +150,6 @@ fn ground_dir(ctx: &Ctx, pos: Vec3, from: Vec3) -> Vec3 {
     let p = Vec3::new(pos.x, pos.y, ctx.terrain_height(pos.x, pos.y));
     let f = Vec3::new(from.x, from.y, ctx.terrain_height(from.x, from.y));
     (p - f).normalize_or_zero()
-}
-
-/// `o->Owner->StartPosition` (set by `CMonkSystem` for the Dark Side dummies, MonkSystem.cpp:689/766;
-/// its owners are characters, MonkSystem.cpp:702/782).
-/// TODO(original): an effect owner's `StartPosition` is not visible to other effects; the drift
-/// direction then stays zero.
-fn owner_start_position(a: Option<&Actor>) -> Option<Vec3> {
-    a.map(|a| a.start_position)
 }
 
 /// `switch(rand()%3)`: `BITMAP_FIRE_HIK1` / `BITMAP_FIRE_CURSEDLICH` / `BITMAP_FIRE_HIK3` with the
@@ -337,7 +328,7 @@ fn sbumb_move(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_particle(BITMAP_SBUMB, Vec3::new(x, y, z), e.angle, light, 0, scale * e.scale, e.owner);
     }
     if matches!(life(e), 15 | 9 | 6) {
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_THRUST_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_THRUST_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_THRUST_ATTACK");
     }
 }
@@ -387,7 +378,7 @@ fn down_dummy_move(e: &mut Effect, ctx: &mut Ctx, right: bool) {
     if e.animation_frame >= hit_frame && e.life_time > 50.0 {
         let Some(t) = owner_target_position(e, ctx) else { return };
         common::create_bomb3(ctx, t, 3, 0.9);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_STAMP_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_STAMP_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_STAMP_ATTACK");
         e.life_time = 40.0;
     }
@@ -435,7 +426,7 @@ fn swordeff_move(e: &mut Effect, ctx: &mut Ctx) {
         ctx.create_effect(MODEL_WOLF_HEAD_EFFECT2, e.position, e.angle, e.light, 3, e.owner, -1, 0, 0, 0.0);
         let Some(t) = owner_target_position(e, ctx) else { return };
         ctx.create_effect(BITMAP_DAMAGE1, t, angle, light, 0, e.owner, -1, 0, 0, 1.4);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_GIANTSWING_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         e.life_time = 45.0;
     }
@@ -455,7 +446,7 @@ fn swordeff_move(e: &mut Effect, ctx: &mut Ctx) {
 
         let Some(t) = owner_target_position(e, ctx) else { return };
         ctx.create_effect(BITMAP_SHINY + 4, t, e.angle, light, 0, e.owner, -1, 0, 0, 1.9);
-        // TODO(original): StopBuffer(SOUND_RAGESKILL_GIANTSWING_ATTACK, true) first.
+        ctx.stop_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         ctx.play_sound("SOUND_RAGESKILL_GIANTSWING_ATTACK");
         e.life_time = 20.0;
     }
@@ -482,7 +473,7 @@ fn shockwave01_create(e: &mut Effect, ctx: &mut Ctx) {
         3 => {
             e.velocity = rage_speed(ctx, SPEED_DARKSIDE_READY) * 2.0;
             e.life_time = int_life(5.0 / e.velocity);
-            let from = owner_start_position(ctx.actor(e.owner));
+            let from = ctx.target_start_position(e.owner);
             let dir = from.map_or(Vec3::ZERO, |f| ground_dir(ctx, e.position, f)) * 30.0;
             e.start_position = dir;
             e.position += dir * 5.0;
@@ -490,7 +481,7 @@ fn shockwave01_create(e: &mut Effect, ctx: &mut Ctx) {
         4 => {
             e.velocity = 0.6;
             e.life_time = 12.0;
-            let from = owner_start_position(ctx.actor(e.owner));
+            let from = ctx.target_start_position(e.owner);
             let dir = from.map_or(Vec3::ZERO, |f| ground_dir(ctx, e.position, f)) * 30.0;
             e.start_position = dir;
             e.position += dir.normalize_or_zero() * 150.0;

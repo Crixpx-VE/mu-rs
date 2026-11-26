@@ -684,7 +684,10 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
         }
         3 => {
             if j.target.is_some() {
-                // TODO(original): Light = Target->Light (the target is an effect; its light is missing).
+                // `Light = Target->Light` (unchanged if the target is the effect being created).
+                if let Some(l) = ctx.target_light(j.target) {
+                    j.light = l;
+                }
             } else {
                 j.light = v(0.5, 0.0, 0.0);
             }
@@ -739,7 +742,10 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.tex_type = BITMAP_JOINT_SPIRIT;
             // DescribeJoint draws it subtractive.
             j.render_type = JointRender::AlphaBlendMinus;
-            // TODO(original): StartPosition = Target->Owner->Position (the target's owner is missing).
+            // `StartPosition = Target->Owner->Position`.
+            if let Some(p) = ctx.target_position(ctx.target_owner(j.target)) {
+                j.start_position = p;
+            }
         }
         16 => {
             j.light = v(1.0, 1.0, 0.0);
@@ -752,7 +758,10 @@ fn spear_create(j: &mut Joint, ctx: &mut Ctx) {
             j.life_time = 100.0;
             j.max_tails = 20;
             j.tex_type = BITMAP_JOINT_SPIRIT;
-            // TODO(original): StartPosition = Target->Owner->Position (the target's owner is missing).
+            // `StartPosition = Target->Owner->Position`.
+            if let Some(p) = ctx.target_position(ctx.target_owner(j.target)) {
+                j.start_position = p;
+            }
         }
         _ => {}
     }
@@ -773,9 +782,9 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
             let rate1 = ((j.life_time - 10.0) / 10.0).clamp(0.0, 1.0);
             let rate2 = 1.0 - rate1;
             let magic = magic_screw(ctx, slot(j) * 17721, 1.4) + j.target_position;
-            // TODO(original): TargetPos = Target->m_vPosSword; approximated with the weapon bone.
+            // `TargetPos = Target->m_vPosSword` (set by the character's skill in progress).
             let sword = match ctx.actor(j.target) {
-                Some(a) => a.bone_world(a.weapon_bone, Vec3::ZERO),
+                Some(a) => a.pos_sword,
                 None => ctx.target_position(j.target).unwrap_or(j.position),
             };
             j.position = sword * rate2 + magic * rate1;
@@ -793,8 +802,12 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
             }
             j.direction.x = ((j.life_time - j.direction.y) * 0.05).sin() * 3.0;
             j.position.x += j.direction.x;
-            // TODO(original): Light = Target->Light · fAlpha, with fAlpha by Target->LifeTime
-            // (> 50: (100 − life) / 40; otherwise life / 10; max 1). The target effect's state is missing.
+            // `Light = Target->Light · fAlpha`, `fAlpha` by `Target->LifeTime` (> 50: (100 − life) / 40;
+            // otherwise life / 10; at most 1).
+            if let Some(t) = match j.target { Some(Target::Effect(id)) => ctx.effect_state(id), _ => None } {
+                let alpha = if t.life_time > 50.0 { (100.0 - t.life_time) / 40.0 } else { t.life_time / 10.0 }.min(1.0);
+                j.light = t.light * alpha;
+            }
         }
         5 | 6 | 7 => {
             // No generic advance (velocity 0 anyway).
@@ -858,9 +871,14 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                 }
             }
             if sub == 4 || sub == 9 {
-                // TODO(original): only stays alive while HasDefenseAura(Target) (Defense /
-                // HelpNpc buffs without Cloaking); without a buff system it's assumed active and whoever
-                // created it must kill it when the buff ends.
+                // Only while `HasDefenseAura(Target)`: Defense or HelpNpc, without Cloaking
+                // (MuMain ZzzEffectJoint.cpp:2858-2862, 4498-4510; the buffs come from buffs.rs).
+                let aura = ctx.actor(j.target).is_some_and(|a| (a.has_buff(eBuff_Defense) || a.has_buff(eBuff_HelpNpc)) && !a.has_buff(eBuff_Cloaking));
+                if !aura {
+                    j.life_time = 0.0;
+                    j.live = false;
+                    return;
+                }
                 j.life_time = 100.0;
             }
 
@@ -937,7 +955,9 @@ fn spear_step(j: &mut Joint, ctx: &mut Ctx) {
                 15 => {
                     if j.target.is_some() {
                         j.life_time = 100.0;
-                        // TODO(original): Light = (Target->Alpha, Target->Alpha, Target->Alpha).
+                        if let Some(a) = ctx.target_alpha(j.target) {
+                            j.light = Vec3::splat(a);
+                        }
                         j.position = tp;
                     }
                 }
@@ -987,7 +1007,9 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
                 j.life_time = 50.0;
                 j.direction.z = (ctx.rand() % 250 + 200) as f32 / 100.0;
             }
-            // TODO(original): Light = Target->Light (the character's light is missing).
+            if let Some(l) = ctx.target_light(j.target) {
+                j.light = l;
+            }
         }
         20 => {
             if j.target.is_none() {
@@ -1017,7 +1039,9 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
                 j.life_time = 50.0;
                 j.direction.z = (ctx.rand() % 250 + 200) as f32 / 100.0;
             }
-            // TODO(original): Light = Target->Light.
+            if let Some(l) = ctx.target_light(j.target) {
+                j.light = l;
+            }
         }
         14 | 15 => {
             j.render_type = JointRender::AlphaBlendOther;
@@ -1125,7 +1149,9 @@ fn flare_create(j: &mut Joint, ctx: &mut Ctx) {
                 } else {
                     j.life_time = 110.0;
                     j.max_tails = 200;
-                    // TODO(original): Light = Target->Light.
+                    if let Some(l) = ctx.target_light(j.target) {
+                        j.light = l;
+                    }
                 }
                 j.direction.x = (ctx.rand() % 360) as f32;
                 j.direction.y = -2.0 * rad.sin();
@@ -1454,9 +1480,10 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         };
         j.position = j.target_position + dir * f_circle;
 
-        // 11/25 use Target->StartPosition. TODO(original): the target's state is missing; its
-        // position is used. Without a target (the original would crash) TargetPosition is used.
-        let tpos = ctx.target_position(j.target).unwrap_or(j.target_position);
+        // 11/25 use `Target->StartPosition` (MuMain ZzzEffectJoint.cpp:5748). Without a target (the
+        // original would crash) TargetPosition is used.
+        let tstart = if homing { ctx.target_start_position(j.target) } else { None };
+        let tpos = tstart.or(ctx.target_position(j.target)).unwrap_or(j.target_position);
         for k in 0..3 {
             let wobble = 25.0 * ((idx as f64 * 51231.0 + k as f64 * 3711.0 + frame / 10.0) * 0.01).cos() as f32;
             let last = (100.0 - f_pos) * (tpos[k] + wobble);
@@ -1482,9 +1509,9 @@ fn flare_move(j: &mut Joint, ctx: &mut Ctx) {
         if sub == 45 && j.life_time <= 1.0 {
             if let Some(a) = ctx.actor(j.target) {
                 let (p, ang) = (a.position, a.angle);
-                // TODO(original): with Target->Light (the character's light is missing).
-                ctx.create_effect(MODEL_CHANGE_UP_EFF, p, ang, Vec3::ONE, 1, j.target, -1, 0, 0, 0.0);
-                ctx.create_effect(MODEL_CHANGE_UP_CYLINDER, p, ang, Vec3::ONE, 1, j.target, -1, 0, 0, 0.0);
+                let l = a.light;
+                ctx.create_effect(MODEL_CHANGE_UP_EFF, p, ang, l, 1, j.target, -1, 0, 0, 0.0);
+                ctx.create_effect(MODEL_CHANGE_UP_CYLINDER, p, ang, l, 1, j.target, -1, 0, 0, 0.0);
             }
         }
         if sub != 47 {
@@ -1692,7 +1719,9 @@ fn flare1_create(j: &mut Joint, ctx: &mut Ctx) {
         }
         3 => {
             j.scale = 20.0;
-            // TODO(original): Light = Target->Light (the target effect's light is missing).
+            if let Some(l) = ctx.target_light(j.target) {
+                j.light = l;
+            }
         }
         _ => {}
     }
@@ -1975,7 +2004,8 @@ fn flare1_step(j: &mut Joint, ctx: &mut Ctx) {
         19 | 20 => {
             // Without a target the original would crash: left as is.
             if let Some(tpos) = ctx.target_position(j.target) {
-                let tstart = j.start_position;
+                // `Target->Position − Target->StartPosition` (MuMain ZzzEffectJoint.cpp:6199-6200).
+                let tstart = ctx.target_start_position(j.target).unwrap_or(j.start_position);
                 let pos = (tpos - tstart) / 3.0;
                 j.target_position = tstart;
                 let mat = j.angle;
@@ -1997,12 +2027,16 @@ fn flare1_step(j: &mut Joint, ctx: &mut Ctx) {
             // 0-4, 10, 11...: draws three tails per tick along the target's path.
             if target_live(ctx, j.target) {
                 let tpos = ctx.target_position(j.target).unwrap_or(j.target_position);
-                // TODO(original): Target->StartPosition and Target->HeadAngle (see above).
-                let tstart = j.start_position;
+                // `Target->StartPosition` and `Target->HeadAngle` (MuMain ZzzEffectJoint.cpp:6257-6266);
+                // a character target has no `HeadAngle` here (zero).
+                let tstart = ctx.target_start_position(j.target).unwrap_or(j.start_position);
                 let pos = (tpos - tstart) / 3.0;
                 j.target_position = tstart;
                 let mat = j.angle;
-                let mut ang = Vec3::ZERO;
+                let mut ang = match j.target {
+                    Some(Target::Effect(id)) => ctx.effect_state(id).map_or(Vec3::ZERO, |t| t.head_angle),
+                    _ => Vec3::ZERO,
+                };
                 ang.y += j.velocity - 90.0;
                 for _ in 0..3 {
                     ang.y += 30.0;

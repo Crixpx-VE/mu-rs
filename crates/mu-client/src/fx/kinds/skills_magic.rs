@@ -5,7 +5,7 @@
 //! buffs, and the Energy Ball/Fire Ball/Power Wave monsters use too.
 //!
 //! TODO(original): the buffs' state changes on the target (`g_CharacterRegisterBuff`), the hit blood
-//! (`tc->Hit`, 4687-4698), the arrows (`CreateArrows`, 4637-4673), `PacketSerial` and
+//! (`tc->Hit`, 4687-4698), the arrows (`CreateArrows`, 4637-4673), the
 //! `m_bySkillSerialNum` on the joints, `AddWaterWave` in Hellas.
 
 use bevy::math::Vec3;
@@ -105,6 +105,14 @@ fn skill_ground(c: &Cast, ctx: &Ctx) -> Vec3 {
     Vec3::new(p.x, p.y, ctx.terrain_height(p.x, p.y))
 }
 
+/// `if (c == Hero) ++CharacterMachine->PacketSerial;` after the area spells' effects
+/// (MuMain ZzzCharacter.cpp:4469-4472, 4488-4491, 4505-4508, 4586-4589, 4597-4600, 4618-4621).
+fn hero_packet_serial(ctx: &mut Ctx, owner: Option<Target>) {
+    if ctx.is_hero(owner) {
+        ctx.next_packet_serial();
+    }
+}
+
 fn finish(c: &mut Cast, ctx: &mut Ctx) {
     let owner = Some(Target::Actor(c.owner));
     let Some(o) = ctx.actor(owner).cloned() else { return };
@@ -127,6 +135,7 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
             ctx.create_effect(MODEL_FIRE, pos, o.angle, l, 6, None, 0, 0, 0, 0.0);
             ctx.create_effect(MODEL_FIRE, pos, o.angle, l, 6, None, 0, 0, 0, 0.0);
             ctx.play_sound("SOUND_DEATH_POISON1");
+            hero_packet_serial(ctx, owner);
         }
         _ if s == BLAST_FREEZE || up(ICE_UP).contains(&s) => {
             let target = skill_ground(c, ctx);
@@ -135,11 +144,13 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
                 pos.z += (ctx.rand() % 50) as f32 * i as f32;
                 ctx.create_effect(MODEL_BLIZZARD, pos, o.angle, light, 0, None, i + 1, 0, 0, 0.0);
             }
+            hero_packet_serial(ctx, owner);
             ctx.play_sound("SOUND_SUDDEN_ICE1");
         }
         FLAME => {
             let pos = skill_ground(c, ctx);
             ctx.create_effect(BITMAP_FLAME, pos, o.angle, o.light, 0, owner, pk_key, 0, ctx.find_hot_key(FLAME), 0.0);
+            hero_packet_serial(ctx, owner);
             ctx.play_sound("SOUND_FLAME");
         }
         STORM => {
@@ -155,10 +166,12 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
             let pos = skill_ground(c, ctx);
             ctx.create_effect(MODEL_SKILL_BLAST, pos, o.angle, o.light, 0, owner, pk_key, 0, hot_key, 0.0);
             ctx.create_effect(MODEL_SKILL_BLAST, pos, o.angle, o.light, 0, owner, pk_key, 0, hot_key, 0.0);
+            hero_packet_serial(ctx, owner);
         }
         INFERNO => {
             crate::fx::kinds::common::create_inferno(ctx, o.position, 0);
             ctx.create_effect(MODEL_SKILL_INFERNO, o.position, o.angle, o.light, 0, owner, pk_key, 0, ctx.find_hot_key(INFERNO), 0.0);
+            hero_packet_serial(ctx, owner);
         }
         _ if s == EVIL || up(EVIL_SPIRIT_UP).contains(&s) || up(EVIL_SPIRIT_UP_M).contains(&s) => {
             let mut pos = o.position;
@@ -168,6 +181,7 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
                 ctx.create_joint_ex(BITMAP_JOINT_SPIRIT, pos, o.position, angle, 0, owner, 80.0, pk_key, hot_key);
                 ctx.create_joint(BITMAP_JOINT_SPIRIT, pos, o.position, angle, 0, owner, 20.0);
             }
+            hero_packet_serial(ctx, owner);
             ctx.play_sound("SOUND_EVIL");
         }
         _ => {}

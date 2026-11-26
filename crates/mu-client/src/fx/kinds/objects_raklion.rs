@@ -110,7 +110,7 @@ fn visual_luminosity(ctx: &mut Ctx) {
 
 /// Requests a sound from a single-channel buffer: several objects in the same tick are one request.
 fn play_once(ctx: &mut Ctx, id: &'static str) {
-    if !ctx.sounds.contains(&id) {
+    if !ctx.sound_requested(id) {
         ctx.play_sound(id);
     }
 }

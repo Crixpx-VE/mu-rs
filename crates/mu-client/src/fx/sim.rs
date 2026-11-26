@@ -40,14 +40,22 @@ pub struct FxWorld {
     /// Map objects with effect code (registered by `objects.rs`).
     pub map_objects: Vec<MapObject>,
     /// Sounds requested during the ticks (`PlayBuffer`); played by `sound.rs`.
-    pub sounds: Vec<&'static str>,
+    pub sounds: Vec<FxSound>,
     /// Effect model files for the kinds (`Models[]`).
     pub models: super::model_data::ModelData,
     /// `CharacterAttribute->Skill[]`: the hero's skills by slot, once the client knows them.
     pub hero_skills: Vec<i32>,
-    /// Damage requests the hero's projectiles would send (`AttackCharacterRange`); for the combat
-    /// protocol, which does not exist yet. Kept to the last 64.
+    /// Damage requests the hero's projectiles send (`AttackCharacterRange`); combat.rs sends them as
+    /// `AreaSkillHit`. Kept to the last 64.
     pub attack_requests: Vec<AttackRequest>,
+    /// `CharacterMachine->PacketSerial` (see [`Ctx::packet_serial`]).
+    pub packet_serial: u8,
+    /// `Hero->CurrentSkill` (the selected slot), kept up to date by skills.rs.
+    pub hero_current_skill: i32,
+    /// Changes to characters requested by the effects; applied by `fx::apply_actor_requests`.
+    pub actor_requests: Vec<ActorRequest>,
+    /// `o->m_sTargetIndex` of each character that has one (set by combat.rs), for `Actor::target`.
+    pub actor_targets: HashMap<Entity, Entity>,
 }
 
 impl FxWorld {
@@ -87,10 +95,27 @@ pub struct Actors {
 #[derive(Component, Clone)]
 pub struct ActorState(pub Actor);
 
-pub fn gather_actors(mut actors: ResMut<Actors>, world: Res<FxWorld>, q: Query<(Entity, &ActorState, Has<crate::character::Player>)>) {
+pub fn gather_actors(
+    mut actors: ResMut<Actors>,
+    world: Res<FxWorld>,
+    buffs: Option<Res<crate::buffs::Buffs>>,
+    hero_key: Option<Res<crate::remote::HeroKey>>,
+    q: Query<(Entity, &ActorState, Has<crate::character::Player>)>,
+) {
     actors.map.clear();
     for (e, s, is_hero) in &q {
         let mut a = s.0.clone();
+        if let Some(t) = world.actor_targets.get(&e) {
+            a.target = Some(*t);
+        }
+        // `g_isCharacterBuff`: what the server said of this object (buffs.rs).
+        let key = if is_hero { hero_key.as_ref().map(|k| k.0 as i32) } else { (a.key >= 0).then_some(a.key) };
+        if let (Some(b), Some(key)) = (buffs.as_ref(), key) {
+            let list = b.of(key as u16);
+            if !list.is_empty() {
+                a.buffs = std::sync::Arc::new(list.to_vec());
+            }
+        }
         // `m_vPosSword`: computed by the character's skill in progress.
         if let Some(c) = world.casts.iter().find(|c| c.owner == e) {
             a.pos_sword = c.pos_sword;
@@ -141,7 +166,7 @@ pub fn step(
     let effect_infos: Vec<EffectInfo> = world
         .effects
         .iter()
-        .map(|e| EffectInfo { id: e.id, ty: e.ty, sub_type: e.sub_type, owner: e.owner, position: e.position, angle: e.angle, life_time: e.life_time, pk_key: e.pk_key, kind: e.kind, skill: e.skill })
+        .map(EffectInfo::of)
         .collect();
     let mut deletes: Vec<Delete> = Vec::new();
     let pending: Vec<Spawn> = std::mem::take(&mut world.pending);
@@ -169,6 +194,9 @@ pub fn step(
         models,
         hero_skills,
         attack_requests,
+        packet_serial,
+        hero_current_skill,
+        actor_requests,
         ..
     } = world;
     let mut ctx = Ctx {
@@ -191,6 +219,9 @@ pub fn step(
         models,
         hero_skills,
         attack_requests,
+        packet_serial,
+        hero_current_skill: *hero_current_skill,
+        actor_requests,
         free,
         depth: 0,
     };
@@ -300,6 +331,9 @@ pub fn step(
     }
     let overflow = ctx.attack_requests.len().saturating_sub(64);
     ctx.attack_requests.drain(..overflow);
+    // Nobody applies them without the game (tests, other scenes): keep a bound.
+    let overflow = ctx.actor_requests.len().saturating_sub(256);
+    ctx.actor_requests.drain(..overflow);
 
     // Deletions requested during the tick (`DeleteEffect`, `DeleteJoint`, `DeleteParticle`).
     for d in deletes {

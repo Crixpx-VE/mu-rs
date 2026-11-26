@@ -84,7 +84,7 @@ fn rf(ctx: &mut Ctx, n: i32) -> f32 {
 /// `PlayBuffer(id)` from `MoveObject`: every object requests it each tick, but the sound does
 /// not restart while playing; requesting it once per tick is enough.
 fn play_once_per_tick(ctx: &mut Ctx, id: &'static str) {
-    if !ctx.sounds.contains(&id) {
+    if !ctx.sound_requested(id) {
         ctx.play_sound(id);
     }
 }

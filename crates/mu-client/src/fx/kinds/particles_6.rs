@@ -191,10 +191,14 @@ fn ag_addition_step(p: &mut Particle, ctx: &mut Ctx) {
     }
     p.position = temp_pos;
 
-    // TODO(original): when it dies and the target still has the eBuff_AG_Addition buff
-    // (g_isCharacterBuff), create another BITMAP_AG_ADDITION_EFFECT of the same subtype at Temp_Pos with
-    // o->Angle, o->Light, scale 1.0 and the same Target (it also computes an unused _Scale).
-    // The buff system is missing.
+    // When it dies and the target still has `eBuff_AG_Addition`, another one of the same subtype
+    // (MuMain ZzzEffectParticle.cpp:8864-8873; the unused `_Scale` still takes a rand()).
+    if !p.live && ctx.actor(p.target).is_some_and(|a| a.has_buff(eBuff_AG_Addition)) {
+        let _scale = (ctx.rand() % 20) as f32 + 20.0;
+        if (0..=2).contains(&p.sub_type) {
+            ctx.create_particle(BITMAP_AG_ADDITION_EFFECT, temp_pos, p.angle, p.light, p.sub_type, 1.0, p.target);
+        }
+    }
 }
 
 // --- BITMAP_SBUMB ---------------------------------------------------------------------------------

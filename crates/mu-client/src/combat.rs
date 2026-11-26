@@ -75,6 +75,11 @@ pub fn set_attack_speed(attack: u16, magic: u16) {
     MAGIC_SPEED.store(magic as u32, Ordering::Relaxed);
 }
 
+/// `CharacterAttribute->AttackSpeed` and `MagicSpeed` as [`set_attack_speed`] last stored them.
+pub fn hero_speeds() -> (u16, u16) {
+    (ATTACK_SPEED.load(Ordering::Relaxed) as u16, MAGIC_SPEED.load(Ordering::Relaxed) as u16)
+}
+
 /// The `PlaySpeed` `SetAttackSpeed` gives an attack or skill action of `player.bmd` (frames per tick),
 /// or `None` for the actions it does not touch.
 pub fn attack_play_speed(a: usize) -> Option<f32> {
@@ -710,6 +715,14 @@ fn server_combat(
                 } else {
                     None
                 };
+                // `so->m_sTargetIndex = TargetIndex` for Killing Blow (MuMain WSclient.cpp:5127-5133);
+                // Chain Drive and Beast Uppercut copy `TargetCharacter` in `AttackStage`
+                // (ZzzCharacter.cpp:3031-3038), the same target. The effects read it as `Actor::target`.
+                if let (Some(e), Some(t)) = (caster, target_entity)
+                    && matches!(*skill, 260 | 551 | 554 | 261 | 552 | 555 | 262 | 558)
+                {
+                    world.actor_targets.insert(e, t);
+                }
                 // `sc->Skill = MagicNumber` and `AttackTime = 1`: the skill's per-tick and release code.
                 if let Some(e) = caster {
                     start_cast(&mut world, e, *skill, target_entity.map(crate::fx::Target::Actor), Vec3::new(tpos.x * MU_SCALE, tpos.y * MU_SCALE, 0.0));
@@ -1438,8 +1451,10 @@ fn send_attack_requests(mut world: ResMut<crate::fx::FxWorld>, mut attack: ResMu
     }
     for r in std::mem::take(&mut world.attack_requests) {
         let skill = r.skill.max(0) as u16;
-        // The packet's serial is a fresh `MakeSkillSerialNumber`; each target carries the serial the
-        // skill was cast with (`o->m_bySkillSerialNum`).
+        // The packet's serial is a fresh `MakeSkillSerialNumber(&Serial)`, which overwrites the
+        // effect's `Serial` (`r.serial`, its `o->Weapon = PacketSerial`) with the next global one
+        // (ZzzInterface.cpp:4628-4637); each target carries the serial the skill was cast with
+        // (`o->m_bySkillSerialNum`).
         let serial = attack.next_serial();
         let skill_serial = attack.area_serials.get(&skill).copied().unwrap_or(0);
         let targets = r.keys.iter().map(|&k| (k as u16, skill_serial)).collect();

@@ -34,10 +34,6 @@ pub fn register(r: &mut Registry) {
 /// `MAX_ITEM_INDEX`: items per group.
 const MAX_ITEM_INDEX: i32 = 512;
 
-/// `g_pOption->GetRenderLevel()` for the weapon glow.
-/// TODO(engine): `DrawCtx` does not carry the option; this is its default (options.rs:59).
-const RENDER_LEVEL: u8 = 4;
-
 /// `ItemObjectAttribute(o)` on the effect drawn as a weapon (ZzzObject.cpp:5306-5309): scale 0.8,
 /// 0.7 for `MODEL_SPEAR..=MODEL_STAFF+13`.
 pub(super) fn weapon_scale(model: i32) -> f32 {
@@ -67,7 +63,7 @@ pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level
     let (blend_mesh, hidden_mesh) = item_object_meshes(&item);
     // `num_meshes` only matters for the inventory armour textures (`body.rs`), never a weapon.
     let item_ctx = ItemCtx { hide_skin: false, num_meshes: 0, white_light: false };
-    for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), RENDER_LEVEL, &item_ctx) {
+    for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), ctx.render_level, &item_ctx) {
         // A pass whose texture has no `BITMAP_*` id here is skipped rather than drawn with the
         // wrong texture (only the inventory armour skins, never a weapon).
         let texture = match pass.texture {
@@ -111,9 +107,9 @@ fn bitmap_id(b: mu_data::objects::render::Bitmap) -> Option<i32> {
 // --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------
 
 /// ZzzEffect.cpp:2039-2042.
-fn wheel1_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn wheel1_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 5.0;
-    // TODO(combat): CharacterMachine->PacketSerial++ (the attack serial; no combat protocol yet).
+    ctx.next_packet_serial();
 }
 
 /// ZzzEffect.cpp:9887-9889.
@@ -127,9 +123,9 @@ fn wheel1_step(e: &mut Effect, ctx: &mut Ctx) {
 // --- MODEL_SKILL_WHEEL2 (Twisting Slash: the spinning ghost sword) ---------------------------------
 
 /// ZzzEffect.cpp:2043-2046.
-fn wheel2_create(e: &mut Effect, _ctx: &mut Ctx) {
+fn wheel2_create(e: &mut Effect, ctx: &mut Ctx) {
     e.life_time = 25.0;
-    // TODO(combat): o->Weapon = CharacterMachine->PacketSerial (the attack serial).
+    e.weapon = ctx.packet_serial();
     // user[0] = Direction[2] of the previous tick; user[1] = Angle[2] after the tick (to interpolate when drawing).
     e.user[0] = e.direction.z;
     e.user[1] = e.angle.z;
@@ -225,9 +221,7 @@ fn wheel2_draw(e: &Effect, ctx: &DrawCtx, out: &mut DrawList) {
     // `ItemObjectAttribute`: scale 0.8 (0.7 for spears through staffs), light 0.3, frame 0.
     let scale = weapon_scale(model);
     // `RequestTerrainLight + o->Light(0.3)`.
-    // TODO(original): no terrain light at draw time; approximated with 0.7.
-    const TERRAIN_LIGHT: f32 = 0.7;
-    let light = Vec3::splat(TERRAIN_LIGHT + 0.3);
+    let light = ctx.terrain_light(e.position.x, e.position.y) + Vec3::splat(0.3);
     // `Alpha` = `o->Alpha` saved before `ItemObjectAttribute`.
     render_weapon(out, ctx, model, level, position, angle, scale, light, e.alpha);
 }

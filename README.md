@@ -46,7 +46,7 @@ percentage measures what is listed, not the whole original game.
   - [x] Ambient sounds and music of every map
   - [x] Fixed 25 Hz game logic with interpolation (smooth at any frame rate)
   - [x] Effects engine (particles, trails, sprites, effect models)
-  - [ ] All effect types of the original (all 576 registered; some still partial, see `fx/kinds/mod.rs`)
+  - [ ] All effect types of the original (all 576 registered with their hits, sounds, buffs and target state; what is left waits for Castle Siege / event state, water waves, object blurs and some character state, see `fx/kinds/mod.rs`)
   - [x] Dragon invasion event (visual)
 - **Login and characters**
   - [x] Title and loading screens

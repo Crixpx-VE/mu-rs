@@ -1297,7 +1297,7 @@ fn skura_step(e: &mut Effect, ctx: &mut Ctx) {
                 let mut pos = owner.bone_world(20, Vec3::ZERO);
                 pos.z += 70.0;
                 ctx.create_sprite(BITMAP_SHINY + 1, pos, 1.8, e.light, -ctx.world_time() * 0.08, 0);
-                // TODO(original): StopBuffer(SOUND_CHERRYBLOSSOM_EFFECT1, true) before playing it again.
+                ctx.stop_sound("SOUND_CHERRYBLOSSOM_EFFECT1");
                 ctx.play_sound("SOUND_CHERRYBLOSSOM_EFFECT1");
             }
             // b->PlayAnimation(..., Velocity / 3) (ZzzEffect.cpp:15141; its result is not read).
@@ -1321,8 +1321,8 @@ fn skura_draw(e: &Effect, _ctx: &DrawCtx, out: &mut DrawList) {
 fn trace_create(e: &mut Effect, ctx: &mut Ctx) {
     if e.sub_type == 0 {
         e.life_time = 50.0;
-        // `o->EyeLeft = Position` → user[0..3].
-        // TODO(original): the trail reads `Target->EyeLeft`; the engine only exposes the position.
+        // `o->EyeLeft = Position` (also in user[0..3]); the trail reads it as `Target->EyeLeft`.
+        e.eye_left = e.position;
         e.user[0] = e.position.x;
         e.user[1] = e.position.y;
         e.user[2] = e.position.z;
