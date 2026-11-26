@@ -7,6 +7,7 @@
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
 use std::path::Path;
+use std::sync::Arc;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::PrimitiveTopology;
@@ -14,10 +15,10 @@ use bevy::prelude::*;
 use mu_data::bmd::{self, Bmd};
 use mu_data::objects::render::{ObjectDraw, Saw};
 use mu_data::texture::AlphaKind;
-use mu_data::{fs, path, texture};
+use mu_data::{fs, path};
 
 use crate::Args;
-use crate::terrain::{LoadedTerrain, MU_SCALE, to_bevy_image};
+use crate::terrain::{LoadedTerrain, MU_SCALE};
 
 /// `player.bmd` animations (the original `PLAYER_*` enum).
 pub mod action {
@@ -452,10 +453,10 @@ fn cast_skill(
 /// Skeleton + pieces, shared by the animation.
 #[derive(Component)]
 pub struct Skinned {
-    skeleton: Bmd,
+    skeleton: Arc<Bmd>,
     /// (piece model, mesh index, Bevy mesh being updated)
     parts: Vec<(usize, usize, Handle<Mesh>)>,
-    models: Vec<Bmd>,
+    models: Vec<Arc<Bmd>>,
     /// The weapons (`Weapon[0]` right hand, `Weapon[1]` left hand or shield) and their meshes.
     weapons: Vec<Linked>,
     /// The wings (`Wing`), with their own animation.
@@ -469,7 +470,7 @@ pub struct Skinned {
 /// A model drawn on a bone of the character (`RenderLinkObject`, ZzzCharacter.cpp:6401-6790): a
 /// weapon or the wings.
 struct Linked {
-    model: Bmd,
+    model: Arc<Bmd>,
     meshes: Vec<(usize, Handle<Mesh>)>,
     item: mu_data::items::Item,
     /// `Weapon[hand]`: 0 right, 1 left (the wings: 0).
@@ -556,7 +557,7 @@ impl Skinned {
 
     /// The body piece meshes, without the weapon: (piece model, mesh index).
     pub fn body_meshes(&self) -> impl Iterator<Item = (&Bmd, usize)> + '_ {
-        self.parts.iter().map(|(model, mesh, _)| (&self.models[*model], *mesh))
+        self.parts.iter().map(|(model, mesh, _)| (&*self.models[*model], *mesh))
     }
 }
 
@@ -636,7 +637,7 @@ pub fn load_character_dressed(
 ) -> Option<CharacterModel> {
     let dir = args.data.join("Player");
     let mut glow = crate::hero_dress::GlowBuilder::default();
-    let skeleton = match fs::read(&dir, "player.bmd").and_then(|b| bmd::read(&b)) {
+    let skeleton = match crate::file_cache::bmd(&dir, "player.bmd") {
         Ok(s) => s,
         Err(e) => {
             error!("no se pudo cargar player.bmd: {e}");
@@ -665,14 +666,14 @@ pub fn load_character_dressed(
                 (dir.clone(), dir.clone(), own.unwrap_or_else(|| format!("{part}Class{:02}.bmd", class.skin_file())))
             }
         };
-        let Ok(class_model) = fs::read(&cdir, &name).and_then(|b| bmd::read(&b)) else {
+        let Ok(class_model) = crate::file_cache::bmd(&cdir, &name) else {
             warn!("falta la pieza {name}");
             continue;
         };
         // The equipment piece (if any and readable) instead of the class piece.
         let equipped = dress.and_then(|d| d.parts[k].as_ref()).and_then(|(path, item)| {
             let (pdir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
-            Some((fs::read(&pdir, file).and_then(|b| bmd::read(&b)).ok()?, pdir, *item))
+            Some((crate::file_cache::bmd(&pdir, file).ok()?, pdir, *item))
         });
         let (model, pdir, item) = match equipped {
             Some((m, pdir, item)) => (m, pdir, Some(item)),
@@ -730,11 +731,11 @@ pub fn load_character_dressed(
     let linked_from = body_materials.len();
     let item_dir = args.data.join("Item");
     let knight = class == crate::account::Class::Knight;
-    let read = |path: &std::path::Path| -> Option<(Bmd, std::path::PathBuf)> {
+    let read = |path: &std::path::Path| -> Option<(Arc<Bmd>, std::path::PathBuf)> {
         let (dir, file) = (args.data.join(path.parent()?), path.file_name()?.to_str()?);
-        Some((fs::read(&dir, file).and_then(|b| bmd::read(&b)).ok()?, dir))
+        Some((crate::file_cache::bmd(&dir, file).ok()?, dir))
     };
-    let mut wanted: Vec<(Bmd, std::path::PathBuf, mu_data::items::Item, usize, bool)> = Vec::new();
+    let mut wanted: Vec<(Arc<Bmd>, std::path::PathBuf, mu_data::items::Item, usize, bool)> = Vec::new();
     match dress {
         Some(d) => {
             for (hand, w) in d.weapons.iter().enumerate() {
@@ -745,7 +746,7 @@ pub fn load_character_dressed(
                 }
             }
         }
-        None if knight => match fs::read(&item_dir, WEAPON_FILE).and_then(|b| bmd::read(&b)) {
+        None if knight => match crate::file_cache::bmd(&item_dir, WEAPON_FILE) {
             Ok(m) => wanted.push((m, item_dir.clone(), mu_data::items::Item::new(0, 1), 0, false)),
             Err(_) => warn!("falta el arma Item/{WEAPON_FILE}"),
         },
@@ -758,7 +759,7 @@ pub fn load_character_dressed(
         }
         r.map(|(m, dir)| (m, dir, *item, 0, true))
     });
-    let mut link = |(model, _model_dir, item, hand, glows): (Bmd, std::path::PathBuf, mu_data::items::Item, usize, bool)| {
+    let mut link = |(model, _model_dir, item, hand, glows): (Arc<Bmd>, std::path::PathBuf, mu_data::items::Item, usize, bool)| {
         let dir = linked_texture_dir(&args.data, &item);
         // `RenderPartObjectEffect(..., Level << 3, Option1, false, ...)` (ZzzCharacter.cpp:6789): no
         // `ExtOption` (no ancient glow) for linked models, and the wings' `Option1` is never set
@@ -1189,14 +1190,15 @@ fn scripted_walk(
 }
 
 pub(crate) fn part_material(dir: &Path, texture_name: &str, images: &mut Assets<Image>) -> crate::model_light::ModelMaterial {
-    let tex = texture::load(dir, &bmd::texture_file_name(texture_name)).ok();
+    // Decoded and uploaded once for every character (file_cache.rs).
+    let tex = crate::file_cache::texture(dir, &bmd::texture_file_name(texture_name), images);
     // Like objects: alpha test and depth, as in the original.
-    let alpha_mode = match tex.as_ref().map(|t| t.alpha_kind()) {
+    let alpha_mode = match tex.as_ref().map(|t| t.1) {
         Some(AlphaKind::Cutout | AlphaKind::Blend) => AlphaMode::Mask(crate::objects::ALPHA_REF),
         _ => AlphaMode::Opaque,
     };
     let base = StandardMaterial {
-        base_color_texture: tex.map(|t| images.add(to_bevy_image(&t))),
+        base_color_texture: tex.map(|t| t.0),
         unlit: true,
         cull_mode: None,
         alpha_mode,
@@ -1803,7 +1805,7 @@ mod tests {
             let model = bmd::read(&raw).unwrap();
             for hand in 0..2 {
                 for back in [false, true] {
-                    let l = Linked { model: model.clone(), meshes: vec![], item, hand, clock: Default::default() };
+                    let l = Linked { model: Arc::new(model.clone()), meshes: vec![], item, hand, clock: Default::default() };
                     let wb = weapon_bones(&l, &bones, back);
                     let mut lo = [f32::MAX; 3];
                     let mut hi = [f32::MIN; 3];

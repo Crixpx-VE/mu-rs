@@ -58,6 +58,7 @@ mod mainframe;
 mod market_window;
 mod minimap;
 mod net;
+mod file_cache;
 mod map_fade;
 mod model_light;
 mod monsters;

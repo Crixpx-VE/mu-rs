@@ -99,7 +99,7 @@ impl GlowBuilder {
             .get(base)
             .map_or((None, false), |b| (b.base.base_color_texture.clone(), !matches!(b.base.alpha_mode, AlphaMode::Opaque)));
         let info = MeshInfo { index, texture_index: m.texture_index as i32, script: bmd::texture_script(&m.texture), has_alpha };
-        let bitmap = |b| self.bitmaps.entry(b).or_insert_with(|| crate::objects::load_bitmap(data, b, images)).clone();
+        let bitmap = |b| self.bitmaps.entry(b).or_insert_with(|| crate::file_cache::bitmap(data, b, images)).clone();
         let looks = item_draw::mesh_passes(&passes, draw, &info, own.as_ref(), false, bitmap, materials, 0.0);
         looks
             .into_iter()

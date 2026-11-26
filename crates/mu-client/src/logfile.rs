@@ -82,8 +82,42 @@ impl Plugin for LogFilePlugin {
         if !app.is_plugin_added::<FrameTimeDiagnosticsPlugin>() {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default());
         }
-        app.add_systems(Startup, log_start).add_systems(Update, log_status);
+        app.add_systems(Startup, log_start).add_systems(Update, log_status).add_systems(Last, log_hitches);
     }
+}
+
+/// A frame this long (seconds) in game is logged: a hitch the player feels.
+const HITCH_SECS: f32 = 0.08;
+
+/// Each slow frame in game, with what grew in it (new meshes and images mean something was
+/// loaded; new entities, that something appeared), at most once a second.
+fn log_hitches(
+    time: Res<Time<Real>>,
+    scene: Res<State<crate::scene::GameScene>>,
+    entities: &bevy::ecs::entity::Entities,
+    meshes: Res<Assets<Mesh>>,
+    images: Res<Assets<Image>>,
+    // Counts at the end of the last frame, what grew during it, and when a hitch was last logged.
+    mut last: Local<([i64; 3], [i64; 3], f32)>,
+) {
+    let counts = [entities.len() as i64, meshes.len() as i64, images.len() as i64];
+    let (before, grew_last_frame, logged) = *last;
+    *last = (counts, [0, 1, 2].map(|i| counts[i] - before[i]), logged);
+    // `delta` is measured when this frame starts: it is the length of the previous frame, the
+    // one `grew_last_frame` describes.
+    let now = time.elapsed_secs();
+    if *scene.get() != crate::scene::GameScene::Game || time.delta_secs() < HITCH_SECS || now - logged < 1.0 {
+        return;
+    }
+    last.2 = now;
+    let [e, m, i] = grew_last_frame;
+    info!(
+        "fotograma lento: {:.0} ms | entidades {} ({e:+}), mallas {} ({m:+}), imágenes {} ({i:+})",
+        time.delta_secs() * 1000.0,
+        before[0],
+        before[1],
+        before[2]
+    );
 }
 
 fn log_start(args: Res<crate::Args>) {

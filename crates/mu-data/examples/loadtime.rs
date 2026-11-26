@@ -10,6 +10,15 @@ use mu_data::{bmd, fs, objects, terrain, texture};
 fn main() {
     let mut args = std::env::args().skip(1);
     let data = PathBuf::from(args.next().expect("Data folder"));
+    // What every character that appears reads (character.rs `load_character_dressed`).
+    let t = Instant::now();
+    let player = fs::read(&data.join("Player"), "player.bmd").and_then(|b| bmd::read(&b));
+    let read_ms = t.elapsed().as_secs_f64() * 1000.0;
+    if let Ok(p) = &player {
+        let t = Instant::now();
+        let _ = p.bone_matrices(0, 0);
+        println!("player.bmd: read {read_ms:.1} ms, {} actions, one pose {:.2} ms", p.actions.len(), t.elapsed().as_secs_f64() * 1000.0);
+    }
     for world in args.map(|w| w.parse::<u16>().expect("world number")) {
         measure(&data, world);
     }
