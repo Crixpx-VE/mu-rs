@@ -685,6 +685,14 @@ fn server_combat(
             ServerMessage::Respawn(_) => {
                 dying.0.remove(&hero_key.0);
             }
+            // A key back in scope is a new `CreateCharacter` (the respawned monster reuses its
+            // index): its old corpse timer must not make it vanish.
+            ServerMessage::AddMonstersToScope(list) => {
+                list.iter().for_each(|s| _ = dying.0.remove(&(s.id & OBJECT_ID_MASK)));
+            }
+            ServerMessage::AddCharactersToScope(list) => {
+                list.iter().for_each(|s| _ = dying.0.remove(&(s.id & OBJECT_ID_MASK)));
+            }
             _ => {}
         }
     }

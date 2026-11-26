@@ -1164,6 +1164,11 @@ fn animate(
         };
         if let Some(mut actor) = actor {
             actor.0 = actor_state(&m, &bones, h);
+            // Character-shaped ones carry `c->Weapon[0]` on the player skeleton's right hand.
+            if let Some(s) = skinned {
+                actor.0.weapon = s.fx_weapon();
+                actor.0.weapon_bone = crate::character::RIGHT_HAND_BONE;
+            }
         }
         // `Skinned::pose` adds every piece to the shadow: without one it is left hidden.
         if m.shadow || skinned.is_none() {

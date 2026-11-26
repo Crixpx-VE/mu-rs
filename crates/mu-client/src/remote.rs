@@ -486,6 +486,8 @@ pub(crate) fn animate(
                 bones: std::sync::Arc::new(bones),
                 action: r.action,
                 frame: r.frame,
+                weapon: skinned.fx_weapon(),
+                weapon_bone: crate::character::RIGHT_HAND_BONE,
                 light: r.light,
                 safe_zone: safe,
                 ..Default::default()

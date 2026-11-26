@@ -68,13 +68,17 @@ pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level
     // `num_meshes` only matters for the inventory armour textures (`body.rs`), never a weapon.
     let item_ctx = ItemCtx { hide_skin: false, num_meshes: 0, white_light: false };
     for ItemPass { pass, light: pass_light, .. } in item_passes(&item, light.to_array(), RENDER_LEVEL, &item_ctx) {
-        // TODO(fx): `ModelDraw::texture` takes a `BITMAP_*` id and there is no mapping from
-        // `render::Bitmap` yet, so the per-item calls that swap the texture (`BITMAP_CHROME`...)
-        // are skipped here instead of being drawn with the wrong texture.
-        if pass.texture.is_some() {
-            continue;
-        }
+        // A pass whose texture has no `BITMAP_*` id here is skipped rather than drawn with the
+        // wrong texture (only the inventory armour skins, never a weapon).
+        let texture = match pass.texture {
+            None => -1,
+            Some(b) => match bitmap_id(b) {
+                Some(id) => id,
+                None => continue,
+            },
+        };
         let mut d = ModelDraw::new(model, position, angle, scale);
+        d.texture = texture;
         d.light = Vec3::from_array(pass_light.at(ctx.world_time));
         d.render_flags = pass.flags;
         d.alpha = if pass.flags & (RENDER_CHROME2 | RENDER_CHROME4) != 0 { 1.0 } else { pass.alpha.unwrap_or(alpha) };
@@ -86,6 +90,22 @@ pub(super) fn render_weapon(out: &mut DrawList, ctx: &DrawCtx, model: i32, level
         }
         out.models.push(d);
     }
+}
+
+/// The `BITMAP_*` id of a texture `RenderPartObjectBody` swaps in (`mu_data::objects::render::Bitmap`).
+/// `None` for the ones the effect textures table does not hold (the per-file inventory skins,
+/// the map caustics and `BITMAP_CHROME8`, which only some maps load).
+fn bitmap_id(b: mu_data::objects::render::Bitmap) -> Option<i32> {
+    use mu_data::objects::render::Bitmap;
+    Some(match b {
+        Bitmap::Chrome => BITMAP_CHROME,
+        Bitmap::Chrome2 => BITMAP_CHROME2,
+        Bitmap::Chrome3 => BITMAP_CHROME3,
+        Bitmap::Chrome6 => BITMAP_CHROME6,
+        Bitmap::Chrome7 => BITMAP_CHROME7,
+        Bitmap::Shiny => BITMAP_SHINY,
+        Bitmap::Chrome8 | Bitmap::Water | Bitmap::File { .. } => return None,
+    })
 }
 
 // --- MODEL_SKILL_WHEEL1 (Twisting Slash: the emitter) ----------------------------------------------

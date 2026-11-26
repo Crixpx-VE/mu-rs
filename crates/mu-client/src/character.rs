@@ -456,6 +456,10 @@ pub struct Skinned {
     weapons: Vec<Linked>,
     /// The wings (`Wing`), with their own animation.
     wing: Option<Linked>,
+    /// `c->Weapon[0]` as an item, whether drawn or not: what the skills copy into `o->Weapon` /
+    /// `o->WeaponLevel` (ZzzCharacter.cpp:3953-3985, 4220-4221) and the effects draw
+    /// (`RenderWheelWeapon`, `RenderFuryStrike`, ZzzEffect.cpp:18182, 18212).
+    right_weapon: Option<mu_data::items::Item>,
 }
 
 /// A model drawn on a bone of the character (`RenderLinkObject`, ZzzCharacter.cpp:6401-6790): a
@@ -523,6 +527,12 @@ impl Skinned {
     /// Carries a weapon (for the sword trail).
     pub fn has_weapon(&self) -> bool {
         !self.weapons.is_empty()
+    }
+
+    /// `c->Weapon[0].Type` / `.Level` for the effects engine (`Actor::weapon`): the item model
+    /// (`MODEL_ITEM + group * MAX_ITEM_INDEX + index`) and its level.
+    pub fn fx_weapon(&self) -> Option<(i32, u8)> {
+        self.right_weapon.map(|i| (crate::fx::core::MODEL_ITEM + i.group as i32 * 512 + i.index as i32, i.level))
     }
 
     /// Frames of animation `action` of `player.bmd` (0 if missing).
@@ -807,8 +817,12 @@ pub fn load_character_dressed(
     };
     let weapons: Vec<Linked> = wanted.into_iter().map(&mut link).collect();
     let wing = wing.map(&mut link);
+    let right_weapon = match dress {
+        Some(d) => d.weapons[0].as_ref().map(|(_, item)| *item),
+        None => weapons.iter().find(|w| w.hand == 0).map(|w| w.item),
+    };
     Some(CharacterModel {
-        skinned: Skinned { skeleton, parts, models, weapons, wing },
+        skinned: Skinned { skeleton, parts, models, weapons, wing, right_weapon },
         children,
         materials: body_materials,
         bones,
@@ -914,7 +928,7 @@ fn spawn_player(
         gear: Gear::default(),
         dead: false,
     };
-    let actor = actor_state(&player, &bones, terrain.as_deref());
+    let actor = actor_state(&player, &skinned, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
     let mut e = commands.spawn((
         Name::new("Jugador"),
@@ -934,7 +948,6 @@ fn spawn_player(
 
 /// Initial Dark Knight weapon: the short sword (`MODEL_SWORD + 1` = `Item/Sword02.bmd`).
 const WEAPON_FILE: &str = "Sword02.bmd";
-const WEAPON_MODEL: i32 = crate::fx::core::MODEL_SWORD + 1;
 /// `Weapon[0].LinkBone`: the right hand of `player.bmd`.
 pub const RIGHT_HAND_BONE: usize = 33;
 
@@ -1119,7 +1132,7 @@ pub fn in_safe_zone(pos: Vec2, terrain: Option<&LoadedTerrain>) -> bool {
 }
 
 /// Character snapshot for the effects engine (MU position, rotation, bones, weapon).
-fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>) -> crate::fx::ActorState {
+fn actor_state(p: &Player, s: &Skinned, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>) -> crate::fx::ActorState {
     let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
     crate::fx::ActorState(crate::fx::Actor {
         ty: crate::fx::core::MODEL_PLAYER,
@@ -1129,7 +1142,7 @@ fn actor_state(p: &Player, bones: &[bmd::Mat34], terrain: Option<&LoadedTerrain>
         bones: std::sync::Arc::new(bones.to_vec()),
         action: p.action,
         frame: p.frame,
-        weapon: Some((WEAPON_MODEL, 0)),
+        weapon: s.fx_weapon(),
         weapon_bone: RIGHT_HAND_BONE,
         live: true,
         pos_sword: Vec3::ZERO,
@@ -1634,7 +1647,7 @@ fn animate(
         };
         let bones = s.pose(p.action, p.frame, links, &mut meshes, &mut sh);
         sh.finish(shadow, &mut meshes, visibility.get_mut(shadow.1).ok());
-        *actor = actor_state(&p, &bones, terrain.as_deref());
+        *actor = actor_state(&p, s, &bones, terrain.as_deref());
     }
 }
 
