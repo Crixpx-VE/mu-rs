@@ -14,7 +14,7 @@
 //!
 //! Not yet (each marked where it goes): mounts and pets in the animation choices, Castle Siege /
 //! Chaos Castle / Blood Castle rules, auto-attack, potions used when mana is short
-//! (`SendRequestUse`), the party skills on other players, Multi-Shot, Chaotic Diseier and the
+//! (`SendRequestUse`), the party skills on other players, `ReloadArrow`, Chaotic Diseier and the
 //! Summoner's curses, the release effects of the non-Dark-Knight skills (the
 //! `switch` on `g_iLimitAttackTime`, ZzzCharacter.cpp:3932-5070, beyond what `fx` registers).
 //!
@@ -197,6 +197,57 @@ fn bow_type(gear: &Gear) -> Option<bool> {
         [Some(r), _] if r.group == BOW && r.index >= 8 && r.index != 15 => Some(true),
         _ => None,
     }
+}
+
+/// `SetPlayerBow` (MuMain WSclient.cpp:4084-4136) on foot: only elves, not in a safe zone, by the
+/// bow they hold. TODO(original): Fenrir, Uniria and Dinorant (mounts are not drawn yet).
+pub fn player_bow_action(class: Class, gear: &Gear, safe_zone: bool) -> Option<usize> {
+    if class != Class::Elf || safe_zone {
+        return None;
+    }
+    let a = match bow_type(gear)? {
+        false if gear.wings => ids::PLAYER_ATTACK_FLY_BOW,
+        false => ids::PLAYER_ATTACK_BOW,
+        true if gear.wings => ids::PLAYER_ATTACK_FLY_CROSSBOW,
+        true => ids::PLAYER_ATTACK_CROSSBOW,
+    };
+    Some(a as usize)
+}
+
+/// `CheckArrow` (MuMain ZzzInterface.cpp:1217-1239): a crossbow needs bolts on the left hand, a bow
+/// arrows on the right, with durability left. `equipment` is `Equipment[WEAPON_RIGHT/LEFT]`.
+/// TODO(original): `ReloadArrow` (it equips more from the inventory when they run out).
+fn check_arrow(gear: &Gear, equipment: [Option<mu_data::items::Item>; 2]) -> bool {
+    use mu_data::items::group::BOW;
+    let has = |i: Option<mu_data::items::Item>, index: u16| i.is_some_and(|i| i.group == BOW && i.index == index && i.durability > 0);
+    match bow_type(gear) {
+        // `ITEM_BOLT` on the left.
+        Some(true) => has(equipment[1], 7),
+        // `ITEM_ARROWS` on the right.
+        Some(false) => has(equipment[0], 15),
+        None => true,
+    }
+}
+
+/// The effects of Multi-Shot, made by the hero's `AttackElf` on casting (MuMain ClassAttack.cpp:358-404)
+/// and by `ReceiveMagicContinue` for another player (WSclient.cpp:5483-5532): two `MODEL_MULTI_SHOT3`
+/// and two `MODEL_MULTI_SHOT2` 20 ahead, three `MODEL_MULTI_SHOT1` on the archer and the
+/// `MODEL_BLADE_SKILL` (subtype 1) that follows it, behind and above. `position` in MU units,
+/// `angle` the MU heading in degrees.
+pub fn multi_shot_fx(world: &mut crate::fx::FxWorld, owner: Entity, position: Vec3, angle: f32) {
+    use crate::fx::core::rotate;
+    let angle = Vec3::new(0.0, 0.0, angle);
+    let light = Vec3::new(0.8, 0.9, 1.6);
+    let ahead = position + rotate(angle, Vec3::new(0.0, 20.0, 0.0));
+    for (ty, at, n) in [(ids::MODEL_MULTI_SHOT3, ahead, 2), (ids::MODEL_MULTI_SHOT1, position, 3), (ids::MODEL_MULTI_SHOT2, ahead, 2)] {
+        for _ in 0..n {
+            crate::fx::request_effect(world, ty, at, angle, light, 0, None);
+        }
+    }
+    // TODO(original): its `PKKey` is the archer's index in `CharactersClient`, used only by the
+    // arrows `MODEL_BLADE_SKILL` would shoot (`CreateArrow`, not ported).
+    let behind = position + rotate(angle, Vec3::new(0.0, -120.0, 145.0));
+    crate::fx::request_effect(world, ids::MODEL_BLADE_SKILL, behind, angle, light, 1, Some(crate::fx::Target::Actor(owner)));
 }
 
 /// The swing sound of `SetPlayerAttack` at frame 0 (ZzzCharacter.cpp:1171-1206) for a player.
@@ -849,6 +900,15 @@ fn server_combat(
                     if let Some(a) = remote_area_action(*skill, r.class(), attack.rng.rand()) {
                         r.set_action(a);
                     }
+                    // `case AT_SKILL_MULTI_SHOT` (MuMain WSclient.cpp:5483-5532).
+                    if *skill == MULTI_SHOT {
+                        let pos = r.position();
+                        let safe = crate::character::in_safe_zone(pos, terrain.as_deref());
+                        if let Some(a) = player_bow_action(r.class(), r.gear(), safe) {
+                            r.set_action(a);
+                        }
+                        multi_shot_fx(&mut world, e, mu(pos), facing.to_degrees());
+                    }
                     Some(e)
                 } else if let Some((e, mo)) = monsters.iter().find(|(_, m)| m.key == src) {
                     let a = if attack.sword_count.is_multiple_of(3) { MonsterAction::Attack1 } else { MonsterAction::Attack2 };
@@ -1011,6 +1071,8 @@ pub fn remote_area_action(skill: u16, class: Class, rand: i32) -> Option<usize> 
         67 => ids::PLAYER_SKILL_VITALITY,
         // Bows: `SetPlayerAttack` (the bow actions need the caster's gear: remote.rs knows it).
         24 | 490..=494 | 52 | 54 => return None,
+        // Multi-Shot: `SetPlayerBow` with its gear (`server_combat`).
+        235 => return None,
         _ => return Some(player_magic_action(class, rand)),
     };
     Some(a as usize)
@@ -1235,6 +1297,7 @@ fn set_action(p: &mut Player, a: usize) {
 const NOVA: u16 = ids::AT_SKILL_NOVA as u16;
 const NOVA_BEGIN: u16 = ids::AT_SKILL_NOVA_BEGIN as u16;
 const COMBO: u16 = ids::AT_SKILL_COMBO as u16;
+const MULTI_SHOT: u16 = ids::AT_SKILL_MULTI_SHOT as u16;
 
 // --- The hero's skills (`Attack`) --------------------------------------------------------------------
 
@@ -1251,6 +1314,8 @@ pub struct CastContext<'w> {
     inv: Res<'w, crate::inventory::Inventory>,
     gate: Res<'w, crate::gate::GateState>,
     real: Res<'w, Time<Real>>,
+    world: ResMut<'w, crate::fx::FxWorld>,
+    actors: Res<'w, crate::fx::sim::Actors>,
 }
 
 /// How a skill goes to the server.
@@ -1284,6 +1349,8 @@ pub enum Anim {
     None,
     Magic,
     Attack,
+    /// `SetPlayerBow`.
+    Bow,
     Action(i32),
 }
 
@@ -1350,6 +1417,8 @@ pub fn plan(skill: u16, class: Class) -> Option<Plan> {
         77 if class == Class::Elf => p(Send::MagicSelf, Anim::Action(ids::PLAYER_RUSH1), 0.0, false, false),
         24 | 52 if class == Class::Elf => p(cont(false, false, false, Tpos::Zero, true, false), Anim::Attack, 1.0, false, true),
         54 if class == Class::Elf => p(cont(false, true, true, Tpos::Back, true, false), Anim::Attack, 1.0, false, true),
+        // Multi-Shot (MuMain ClassAttack.cpp:324-407): within reach only, no walk.
+        235 if class == Class::Elf => p(cont(false, true, true, Tpos::Back, true, false), Anim::Bow, 1.0, false, true),
         51 if class == Class::Elf => p(Send::MagicTarget, Anim::Attack, 1.0, true, true),
         46 if class == Class::Elf => p(Send::MagicTarget, Anim::Action(ids::PLAYER_ATTACK_BOW_UP), 1.0, true, true),
         // AttackWizard's Summoner part (6138-6346) and UseSkillSummon (2403-2553).
@@ -1541,6 +1610,18 @@ fn cast_skill(
             return;
         }
     }
+    let multi_shot = skill == MULTI_SHOT && plan.anim == Anim::Bow;
+    if multi_shot {
+        // `case AT_SKILL_MULTI_SHOT` (MuMain ClassAttack.cpp:326-331): arrows and a bow, then it
+        // faces the point even when out of reach.
+        if !check_arrow(&p.gear, [ctx.inv.equipment[0], ctx.inv.equipment[1]]) || bow_type(&p.gear).is_none() {
+            return;
+        }
+        let d = point - p.pos;
+        if d.length() > 1e-3 {
+            p.facing = d.x.atan2(-d.y);
+        }
+    }
     let hero_tile = (p.pos.x as i32, p.pos.y as i32);
     let target_tile = (point.x as i32, point.y as i32);
     let summon_target = matches!(skill, 214..=216 | 540..=544 | 550..=554);
@@ -1580,8 +1661,8 @@ fn cast_skill(
     let (a256, a255, back) = angle_bytes(deg);
     let connected = net.connected();
     // `LetHeroStop` (`UseSkill*`) and the one-tile `SendCharacterMove` some casts send first (Twisting
-    // Slash, Power Slash, Flame Strike, Gigantic Storm, Lightning Shock).
-    let stops = needs_target || matches!(crate::skills::base_skill(skill), 41 | 56 | 236 | 237 | 230);
+    // Slash, Power Slash, Flame Strike, Gigantic Storm, Lightning Shock, Multi-Shot).
+    let stops = needs_target || matches!(crate::skills::base_skill(skill), 41 | 56 | 236 | 237 | 230 | 235);
     if connected && stops {
         let dir = crate::character::facing_direction(p.facing);
         net.send(ClientMessage::Walk { source_x: hero_tile.0 as u8, source_y: hero_tile.1 as u8, rotation: dir, directions: Vec::new() });
@@ -1648,7 +1729,19 @@ fn cast_skill(
             }
             play(p, a);
         }
+        Anim::Bow => {
+            if let Some(a) = player_bow_action(class, &p.gear, safe) {
+                play(p, a);
+            }
+        }
         Anim::Action(a) => play(p, a as usize),
+    }
+    if multi_shot {
+        let h = terrain.map_or(0.0, |t| t.0.height_at(p.pos.x, p.pos.y));
+        if let Some(e) = ctx.actors.hero {
+            multi_shot_fx(&mut ctx.world, e, Vec3::new(p.pos.x * MU_SCALE, p.pos.y * MU_SCALE, h), p.facing.to_degrees());
+        }
+        sound.play("SOUND_SKILL_MULTI_SHOT");
     }
     p.path.clear();
 }
@@ -1938,6 +2031,53 @@ mod tests {
         assert_eq!((release.range_k, release.walk, release.face), (0.0, false, false));
         assert!(plan(NOVA, Class::Elf).is_none());
         assert!(!allowed_in_safe_zone(NOVA) && !allowed_in_safe_zone(NOVA_BEGIN));
+    }
+
+    /// Multi-Shot (MuMain ClassAttack.cpp:324-407): elves only, within reach without walking, the
+    /// bow action of the bow held (none in a safe zone), and only with arrows or bolts left.
+    #[test]
+    fn multi_shot_rules() {
+        use mu_data::items::Item;
+        let p = plan(MULTI_SHOT, Class::Elf).unwrap();
+        assert_eq!(p.send, Send::Continue { at_target: false, angle255: true, dest: true, tpos: Tpos::Back, target_key: true, serial: false });
+        assert_eq!((p.anim, p.range_k, p.walk), (Anim::Bow, 1.0, false));
+        assert!(plan(MULTI_SHOT, Class::Wizard).is_none());
+        let with = |item: Item, wings: bool| {
+            let mut w = [None, None];
+            if item.index >= 8 { w[0] = Some(item) } else { w[1] = Some(item) }
+            Gear { weapons: w, two_hand: false, wings }
+        };
+        let bow = with(Item::new(4, 0), false);
+        let crossbow = with(Item::new(4, 8), true);
+        assert_eq!(player_bow_action(Class::Elf, &bow, false), Some(ids::PLAYER_ATTACK_BOW as usize));
+        assert_eq!(player_bow_action(Class::Elf, &crossbow, false), Some(ids::PLAYER_ATTACK_FLY_CROSSBOW as usize));
+        assert_eq!(player_bow_action(Class::Elf, &bow, true), None);
+        assert_eq!(player_bow_action(Class::Knight, &bow, false), None);
+        let ammo = |index: u16, durability: u8| Some(Item { durability, ..Item::new(4, index) });
+        assert!(check_arrow(&bow, [ammo(15, 50), bow.weapons[1]]));
+        assert!(!check_arrow(&bow, [ammo(15, 0), bow.weapons[1]]), "no arrows left");
+        assert!(!check_arrow(&bow, [None, bow.weapons[1]]));
+        assert!(check_arrow(&crossbow, [crossbow.weapons[0], ammo(7, 1)]));
+        assert!(!check_arrow(&crossbow, [crossbow.weapons[0], ammo(15, 9)]), "arrows are no bolts");
+    }
+
+    /// The effects `multi_shot_fx` asks for: 2 + 3 + 2 shots and the blade that follows the archer.
+    #[test]
+    fn multi_shot_effects() {
+        let mut world = crate::fx::FxWorld::default();
+        let archer = Entity::from_bits(1 << 32 | 3);
+        multi_shot_fx(&mut world, archer, Vec3::new(100.0, 100.0, 0.0), 90.0);
+        let types: Vec<(i32, Option<crate::fx::Target>)> = world
+            .pending
+            .iter()
+            .filter_map(|s| match s {
+                crate::fx::core::Spawn::Effect(e) => Some((e.ty, e.owner)),
+                _ => None,
+            })
+            .collect();
+        let n = |ty: i32| types.iter().filter(|(t, _)| *t == ty).count();
+        assert_eq!((n(ids::MODEL_MULTI_SHOT1), n(ids::MODEL_MULTI_SHOT2), n(ids::MODEL_MULTI_SHOT3)), (3, 2, 2));
+        assert_eq!(types.last(), Some(&(ids::MODEL_BLADE_SKILL, Some(crate::fx::Target::Actor(archer)))));
     }
 
     /// `DeadCharacter` with `m_byDieType == AT_SKILL_NOVA`: the corpse slides away from its killer,

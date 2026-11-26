@@ -116,6 +116,11 @@ impl RemotePlayer {
         self.class
     }
 
+    /// Its weapons and wings.
+    pub fn gear(&self) -> &crate::character::Gear {
+        &self.gear
+    }
+
     /// `SetAction`: a new action from its first frame; it stops walking (combat.rs).
     pub fn set_action(&mut self, a: usize) {
         self.action = a;
