@@ -54,6 +54,8 @@ pub struct FxWorld {
     pub hero_current_skill: i32,
     /// Changes to characters requested by the effects; applied by `fx::apply_actor_requests`.
     pub actor_requests: Vec<ActorRequest>,
+    /// `o->m_sTargetIndex` of each character that has one (set by combat.rs), for `Actor::target`.
+    pub actor_targets: HashMap<Entity, Entity>,
 }
 
 impl FxWorld {
@@ -103,6 +105,9 @@ pub fn gather_actors(
     actors.map.clear();
     for (e, s, is_hero) in &q {
         let mut a = s.0.clone();
+        if let Some(t) = world.actor_targets.get(&e) {
+            a.target = Some(*t);
+        }
         // `g_isCharacterBuff`: what the server said of this object (buffs.rs).
         let key = if is_hero { hero_key.as_ref().map(|k| k.0 as i32) } else { (a.key >= 0).then_some(a.key) };
         if let (Some(b), Some(key)) = (buffs.as_ref(), key) {

@@ -621,6 +621,14 @@ fn server_combat(
                 } else {
                     None
                 };
+                // `so->m_sTargetIndex = TargetIndex` for Killing Blow (MuMain WSclient.cpp:5127-5133);
+                // Chain Drive and Beast Uppercut copy `TargetCharacter` in `AttackStage`
+                // (ZzzCharacter.cpp:3031-3038), the same target. The effects read it as `Actor::target`.
+                if let (Some(e), Some(t)) = (caster, target_entity)
+                    && matches!(*skill, 260 | 551 | 554 | 261 | 552 | 555 | 262 | 558)
+                {
+                    world.actor_targets.insert(e, t);
+                }
                 // `sc->Skill = MagicNumber` and `AttackTime = 1`: the skill's per-tick and release code.
                 if let Some(e) = caster {
                     start_cast(&mut world, e, *skill, target_entity.map(crate::fx::Target::Actor), Vec3::new(tpos.x * MU_SCALE, tpos.y * MU_SCALE, 0.0));
