@@ -2,9 +2,10 @@
 
 ## OpenMU
 
-Network packet layouts and Season 6 monster spawn data were taken from
-[OpenMU](https://github.com/MUnique/OpenMU) (`src/Network/Packets/*.xml`,
-`src/Persistence/Initialization`). OpenMU is distributed under the MIT licence:
+Network packet layouts and the Season 6 monster definitions and spawns in `crates/mu-server/datos`
+were taken from [OpenMU](https://github.com/MUnique/OpenMU) (`src/Network/Packets/*.xml`,
+`src/Persistence/Initialization`, see `tools/gen_spawns.py`). OpenMU is distributed under the MIT
+licence:
 
 ```
 Copyright 2017 MUnique
@@ -24,13 +25,6 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ```
-
-## Season 6 server data
-
-Monster spawn positions in `crates/mu-server/datos` merge OpenMU's data with the public
-Season 6 server files of [ProjectRebirthMu/Server](https://github.com/ProjectRebirthMu/Server) and
-[32bitsarg/MuOnline-Season6-Louis-Update31](https://github.com/32bitsarg/MuOnline-Season6-Louis-Update31)
-(only what at least two sources agree on, see `tools/gen_spawns.py`).
 
 ## Reference projects
 

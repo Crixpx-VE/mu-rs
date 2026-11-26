@@ -185,17 +185,15 @@ explains which sources it reads.
 
 | Project | Used for |
 |---|---|
-| [LouisEmulator/Main5.2](https://github.com/LouisEmulator/Main5.2) | Original Season 6 client source: the primary reference for behaviour, formulas and tables |
-| [sven-n/MuMain](https://github.com/sven-n/MuMain) | Modernised fork of the client: second reference, names and data where Main 5.2 is incomplete |
-| [MUnique/OpenMU](https://github.com/MUnique/OpenMU) | Open-source server: protocol, game rules, map spawns; our test server |
-| [ProjectRebirthMu/Server](https://github.com/ProjectRebirthMu/Server) | Season 6 server data (`Monster.txt`, `MonsterSetBase.txt`) |
-| [32bitsarg/MuOnline-Season6-Louis-Update31](https://github.com/32bitsarg/MuOnline-Season6-Louis-Update31) | Season 6 server data (monster spawns per map) |
+| [sven-n/MuMain](https://github.com/sven-n/MuMain) | Season 6 client source (latest master): the client reference for behaviour, formulas and tables |
+| [MUnique/OpenMU](https://github.com/MUnique/OpenMU) | Open-source server (latest master): the only server reference: protocol, game rules, monsters and spawns; our test server |
+| [LouisEmulator/Main5.2](https://github.com/LouisEmulator/Main5.2) | Legacy: original Season 6 client source, the earlier primary reference; many older code comments cite it and some generators still read it |
 | [xulek/muonline](https://github.com/xulek/muonline) | C# / MonoGame client: inspiration for structure and file formats |
 | [afrokick/muonlinejs](https://github.com/afrokick/muonlinejs) | Web client: inspiration for file formats and data |
 | [Bevy](https://github.com/bevyengine/bevy) | Game engine |
 
-Monster spawns in `crates/mu-server/datos` are what at least two of OpenMU, ProjectRebirthMu and
-Louis agree on (`tools/gen_spawns.py`).
+The monster definitions and spawns in `crates/mu-server/datos` are OpenMU's Season 6 data
+(`tools/gen_spawns.py`).
 
 ## Contributing
 
@@ -291,10 +289,12 @@ por ejemplo, `python tools/gen_monsters.py`. Cada script explica qué fuentes le
 
 ### Referencias e inspiración
 
-Las de la tabla de arriba ([References and inspiration](#references-and-inspiration)): el código
-del cliente original Main 5.2 (la referencia principal), MuMain (la segunda), OpenMU (protocolo,
-reglas y nuestro servidor de pruebas), los datos de servidor de ProjectRebirthMu y Louis, y los
-clientes xulek/muonline y muonlinejs como inspiración.
+Las de la tabla de arriba ([References and inspiration](#references-and-inspiration)): MuMain
+(la referencia del cliente), OpenMU (la única referencia del servidor: protocolo, reglas, monstruos
+y apariciones, y nuestro servidor de pruebas), ambos en su última versión de master, Main 5.2 como
+fuente antigua (muchos comentarios viejos la citan y algunos generadores aún la leen), y los
+clientes xulek/muonline y muonlinejs como inspiración. Los monstruos y apariciones de
+`crates/mu-server/datos` son los datos de Season 6 de OpenMU (`tools/gen_spawns.py`).
 
 ### Contribuir
 

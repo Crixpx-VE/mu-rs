@@ -2,8 +2,8 @@
 //! data (`datos/Monster.txt`) and how they roam.
 //!
 //! - NPCs (section 0 of `MonsterSetBase`): on their tile, facing their direction, standing still.
-//! - Zones (section 1): `Count` monsters on random walkable, non-safe-zone tiles
-//!   of the zone.
+//! - Zones (section 1): `Count` monsters on random tiles of the zone where they may spawn (walkable and
+//!   outside the safe zone for monsters; see `free_tile`).
 //! - Single spawns (section 2): on their tile.
 //!
 //! Roaming follows OpenMU's `BasicMonsterIntelligence.TickWithoutTargetAsync`: every `AttackSpeed`
@@ -34,6 +34,8 @@ const MAX_STEPS: usize = game::MAX_WALK_STEPS;
 pub struct Info {
     pub number: u16,
     pub name: String,
+    /// OpenMU's `NpcObjectKind`: `Monster`, `PassiveNpc`, `Guard`, `Trap`, `Gate`, `Statue`...
+    pub kind: String,
     pub level: u16,
     pub move_range: u8,
     pub view_range: u8,
@@ -43,8 +45,17 @@ pub struct Info {
     pub attack_speed: u32,
 }
 
-/// `Monster.txt`: `Index Rate "Name" Level MaxLife MaxMana DamageMin DamageMax Defense MagicDefense
-/// AttackRate DefenseRate MoveRange AttackType AttackRange ViewRange MoveSpeed AttackSpeed RegenTime ...`.
+impl Info {
+    /// OpenMU's `NonPlayerCharacter.CanSpawnInSafezone`: everything but monsters and traps.
+    pub fn can_spawn_in_safezone(&self) -> bool {
+        self.kind != "Monster" && self.kind != "Trap"
+    }
+}
+
+/// `Monster.txt` (written by `tools/gen_spawns.py` from OpenMU's `MonsterDefinition`s, see its header):
+/// `Number "Name" Kind Level MaxHealth MinDamage MaxDamage Defense AttackRate DefenseRate MoveRange
+/// AttackRange ViewRange MoveDelay AttackDelay RespawnDelay Attribute IceRes PoisonRes LightningRes FireRes Skill`,
+/// delays in milliseconds.
 pub fn parse_monster_txt(text: &str) -> HashMap<u16, Info> {
     let mut out = HashMap::new();
     for line in text.lines() {
@@ -53,22 +64,23 @@ pub fn parse_monster_txt(text: &str) -> HashMap<u16, Info> {
         if a == b {
             continue;
         }
-        let head: Vec<&str> = line[..a].split_whitespace().collect();
-        let nums: Vec<i64> = line[b + 1..].split_whitespace().filter_map(|w| w.parse().ok()).collect();
-        let Some(number) = head.first().and_then(|w| w.parse::<u16>().ok()) else { continue };
-        if nums.len() < 16 {
+        let Ok(number) = line[..a].trim().parse::<u16>() else { continue };
+        let rest: Vec<&str> = line[b + 1..].split_whitespace().collect();
+        if rest.len() < 13 {
             continue;
         }
+        let Ok(nums) = rest[1..13].iter().map(|w| w.parse::<f64>()).collect::<Result<Vec<_>, _>>() else { continue };
         out.insert(
             number,
             Info {
                 number,
                 name: line[a + 1..b].to_string(),
-                level: nums[0] as u16,
-                move_range: nums[9].clamp(0, 255) as u8,
-                view_range: nums[12].clamp(0, 255) as u8,
-                move_speed: nums[13].max(0) as u32,
-                attack_speed: nums[14].max(0) as u32,
+                kind: rest[0].to_string(),
+                level: nums[0].clamp(0.0, u16::MAX as f64) as u16,
+                move_range: nums[7].clamp(0.0, 255.0) as u8,
+                view_range: nums[9].clamp(0.0, 255.0) as u8,
+                move_speed: nums[10].max(0.0) as u32,
+                attack_speed: nums[11].max(0.0) as u32,
             },
         );
     }
@@ -241,7 +253,7 @@ impl Mobs {
                     break;
                 }
                 let (x, y) = if row.section == 1 {
-                    match free_tile(t, (row.x1, row.y1, row.x2, row.y2), &mut rng) {
+                    match free_tile(t, (row.x1, row.y1, row.x2, row.y2), info, &mut rng) {
                         Some(p) => p,
                         None => continue,
                     }
@@ -383,12 +395,15 @@ fn monster_can_stand(t: &Grid, x: u8, y: u8) -> bool {
     t.walkable(x as usize, y as usize) && t.attribute(x as usize, y as usize) & attr::SAFE_ZONE == 0
 }
 
-/// A random tile of the zone where a monster can stand.
-fn free_tile(t: &Grid, (x1, y1, x2, y2): (u8, u8, u8, u8), rng: &mut Rng) -> Option<(u8, u8)> {
+/// A random tile of the zone where `info` may spawn (OpenMU `NonPlayerCharacter.IsValidSpawnPoint`): not on
+/// the safe zone unless [`Info::can_spawn_in_safezone`], and walkable for monsters and guards (the ones that walk).
+fn free_tile(t: &Grid, (x1, y1, x2, y2): (u8, u8, u8, u8), info: &Info, rng: &mut Rng) -> Option<(u8, u8)> {
     let (w, h) = (x2 as u64 - x1 as u64 + 1, y2 as u64 - y1 as u64 + 1);
+    let needs_walkable = info.kind == "Monster" || info.kind == "Guard";
     for _ in 0..100 {
         let (x, y) = (x1 + (rng.next() % w) as u8, y1 + (rng.next() % h) as u8);
-        if monster_can_stand(t, x, y) {
+        let safe = t.attribute(x as usize, y as usize) & attr::SAFE_ZONE != 0;
+        if (info.can_spawn_in_safezone() || !safe) && (!needs_walkable || t.walkable(x as usize, y as usize)) {
             return Some((x, y));
         }
     }
@@ -470,9 +485,14 @@ mod tests {
     fn lee_monster_txt() {
         let infos = parse_monster_txt(include_str!("../datos/Monster.txt"));
         let bull = &infos[&0];
-        assert_eq!(bull.name, "Bull Fighter");
+        assert_eq!((bull.name.as_str(), bull.kind.as_str()), ("Bull Fighter", "Monster"));
         assert_eq!((bull.level, bull.move_range, bull.view_range, bull.move_speed, bull.attack_speed), (6, 3, 5, 400, 1600));
         assert_eq!(infos[&3].name, "Spider");
+        // NPCs too (OpenMU's NpcInitialization), with no walking values.
+        let zyro = &infos[&568];
+        assert_eq!((zyro.name.as_str(), zyro.kind.as_str(), zyro.move_range), ("Wandering Merchant Zyro", "PassiveNpc", 0));
+        assert!(zyro.can_spawn_in_safezone() && !bull.can_spawn_in_safezone());
+        assert_eq!(infos[&100].kind, "Trap");
     }
 
     #[test]
@@ -481,6 +501,9 @@ mod tests {
         // The Lorencia trainer, a spider zone and nothing from other sections.
         assert!(rows.contains(&SpawnRow { section: 0, number: 226, map: 0, range: 0, x1: 122, y1: 110, x2: 122, y2: 110, dir: 3, count: 1 }));
         assert!(rows.iter().any(|r| r.section == 1 && r.number == 3 && r.map == 0 && (r.x1, r.y1, r.x2, r.y2) == (180, 90, 226, 244) && r.count == 45));
+        // OpenMU-only NPCs: Wandering Merchant Zyro in Lorencia and Devias.
+        assert!(rows.contains(&SpawnRow { section: 0, number: 568, map: 0, range: 0, x1: 131, y1: 139, x2: 131, y2: 139, dir: 2, count: 1 }));
+        assert!(rows.iter().any(|r| r.section == 0 && r.number == 568 && r.map == 2 && (r.x1, r.y1) == (225, 52)));
         assert!(rows.iter().all(|r| r.section <= 2));
         let lorencia: u32 = rows.iter().filter(|r| r.map == 0).map(|r| r.count as u32).sum();
         assert!(lorencia > 300, "{lorencia}");
