@@ -17,7 +17,7 @@ DEFINED = {
     "NEW_PROTOCOL_SYSTEM", "FOR_WORK", "ENABLE_EDIT", "CSK_LH_DEBUG_CONSOLE", "CSK_DEBUG_MAP_ATTRIBUTE",
     "CSK_DEBUG_RENDER_BOUNDINGBOX", "CSK_DEBUG_MAP_PATHFINDING", "WIN32", "_WINDOWS", "_LANGUAGE_FOREIGN",
     "_LANGUAGE_ENG", "NDEBUG",
-    # Off in Main 5.2, but the code is there and the S6 servers (OpenMU, Louis, Rebirth) spawn these
+    # Off in Main 5.2, but the code is there and the S6 server (OpenMU) spawns these
     # monsters and NPCs: Karutan (MuMain enables them too, Defined_Global.h:33-34), the timed quest NPCs
     # (566-568) and David (579).
     "ASG_ADD_MAP_KARUTAN", "ASG_ADD_KARUTAN_MONSTERS", "ASG_ADD_KARUTAN_NPC", "ASG_ADD_TIME_LIMIT_QUEST_NPC",

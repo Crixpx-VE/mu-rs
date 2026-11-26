@@ -45,7 +45,7 @@ are never committed.
 
 - `crates/mu-data/src/monsters/table.rs` ← `tools/gen_monsters.py`
 - `crates/mu-client/src/fx/tables/*` ← `tools/gen_fx_tables.py`
-- `crates/mu-server/datos/{Monster,MonsterSetBase}.txt`, `diferencias.txt` ← `tools/gen_spawns.py`
+- `crates/mu-server/datos/{Monster,MonsterSetBase}.txt` ← `tools/gen_spawns.py`
 
 Change the generator, run it (`python tools/<script>.py`), and check that the diff only contains
 what you expected. Commit the generator and its output together.
