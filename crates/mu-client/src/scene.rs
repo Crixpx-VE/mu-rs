@@ -81,6 +81,12 @@ pub struct LoadStep {
     then: Option<GameScene>,
     /// In-game map change ([`change_map`]): without the loading screen.
     map_change: bool,
+    /// When the current step's frame started, and each finished step's time (for the log).
+    step_started: Option<std::time::Instant>,
+    timings: Vec<(Step, u128)>,
+    /// Frames after the load whose time is still logged (the first ones upload the new meshes
+    /// and textures and build their pipelines).
+    frames_after: u8,
 }
 
 impl LoadStep {
@@ -110,6 +116,8 @@ pub fn load_world(args: &mut Args, load: &mut LoadStep, world: u16, with_player:
     load.index = Some(0);
     load.then = Some(then);
     load.map_change = false;
+    load.step_started = Some(std::time::Instant::now());
+    load.timings.clear();
     info!("cargando World{world}");
 }
 
@@ -157,8 +165,16 @@ fn advance_load(
     args: Res<Args>,
     scene: Res<State<GameScene>>,
     clock: Res<TitleClock>,
+    real: Res<Time<Real>>,
 ) {
-    let Some(i) = load.index else { return };
+    let Some(i) = load.index else {
+        // The first frames after the load, for the log.
+        if load.frames_after > 0 {
+            load.frames_after -= 1;
+            info!("fotograma tras la carga: {:.0} ms", real.delta_secs() * 1000.0);
+        }
+        return;
+    };
     if args.hold_title && *scene.get() == GameScene::Title && i + 1 >= load.steps.len() / 2 {
         return;
     }
@@ -168,10 +184,20 @@ fn advance_load(
         load.index = Some(load.steps.len());
         return;
     }
+    // This step's frame (its systems plus drawing the previous frame).
+    let now = std::time::Instant::now();
+    if let (Some(step), Some(started)) = (load.steps.get(i).copied(), load.step_started) {
+        load.timings.push((step, now.duration_since(started).as_millis()));
+    }
+    load.step_started = Some(now);
     if i + 1 < load.steps.len() {
         load.index = Some(i + 1);
     } else {
         load.index = None;
+        let steps: Vec<String> = load.timings.iter().map(|(s, ms)| format!("{s:?} {ms}")).collect();
+        let total: u128 = load.timings.iter().map(|t| t.1).sum();
+        info!("World{} cargado en {total} ms ({})", args.world, steps.join(", "));
+        load.frames_after = 3;
         if let Some(then) = load.then.take() {
             next.set(then);
         }

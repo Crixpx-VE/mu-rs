@@ -17,7 +17,8 @@
 //! - **Click** on an allowed destination (on release): `SendRequestMoveMap(GetMoveCommandKey(), index)`
 //!   and the window closes.
 //! - **Reply**: `MapChanged`. On a map change the new map is loaded at the given tile (without
-//!   the loading screen: the original loads at once with `LoadWorld`) and, when done,
+//!   the loading screen: the original loads at once with `LoadWorld`; here after a fade to black,
+//!   map_fade.rs) and, when done,
 //!   `ClientReadyAfterMapChange` (`SendRequestFinishLoading`) is sent. On the same map the other
 //!   players are cleared (`ClearCharacters`), the character is placed and the reply goes out right
 //!   away. Players of the new map arrive later with `AddCharactersToScope` (remote.rs).
@@ -32,7 +33,7 @@ use mu_protocol::game::{ClientMessage, ServerMessage};
 
 use crate::Args;
 use crate::account::Class;
-use crate::scene::{GameScene, LoadStep};
+use crate::scene::GameScene;
 use crate::sound::SoundQueue;
 
 pub struct MoveWindowPlugin;
@@ -355,7 +356,7 @@ fn inside(c: Vec2, x: i32, y: i32, w: i32, h: i32) -> bool {
 
 /// `ClientReadyAfterMapChange` must be sent once the map finishes loading.
 #[derive(Resource, Default)]
-pub(crate) struct MapChangePending(bool);
+pub(crate) struct MapChangePending(pub(crate) bool);
 
 fn load_list(args: Res<Args>, mut commands: Commands) {
     let list = mu_data::warps::load(&args.data).unwrap_or_else(|e| {
@@ -535,10 +536,8 @@ pub(crate) fn net_messages(
     mut w: ResMut<MoveWindow>,
     mut info: Option<ResMut<crate::account::HeroInfo>>,
     scene: Res<State<GameScene>>,
-    mut args: ResMut<Args>,
-    mut load: ResMut<LoadStep>,
-    mut next: ResMut<NextState<GameScene>>,
-    mut pending: ResMut<MapChangePending>,
+    args: Res<Args>,
+    mut map_fade: ResMut<crate::map_fade::MapFade>,
     mut players: Query<&mut crate::character::Player>,
     remotes: Query<(Entity, &crate::shadow::Shadow), With<crate::remote::RemotePlayer>>,
     mut game_ui: ResMut<crate::options::GameUi>,
@@ -580,9 +579,12 @@ pub(crate) fn net_messages(
                 }
                 let world = map + 1;
                 if world != args.world {
-                    crate::scene::change_map(&mut args, &mut load, world);
-                    next.set(GameScene::Loading);
-                    pending.0 = true;
+                    // `LoadWorld` once the screen is black (map_fade.rs); meanwhile the hero stands.
+                    for mut p in &mut players {
+                        p.path.clear();
+                        p.operate = None;
+                    }
+                    map_fade.out(world, real.elapsed_secs_f64());
                 } else {
                     for (e, shadow) in &remotes {
                         commands.entity(e).despawn();

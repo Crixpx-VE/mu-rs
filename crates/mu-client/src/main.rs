@@ -58,6 +58,7 @@ mod mainframe;
 mod market_window;
 mod minimap;
 mod net;
+mod map_fade;
 mod model_light;
 mod monsters;
 mod move_window;
@@ -286,7 +287,7 @@ fn main() {
         .add_plugins((model_light::ModelLightPlugin, logfile::LogFilePlugin, shadow::ShadowPlugin, sound::SoundPlugin, scene::ScenePlugin, login::LoginPlugin, charselect::CharSelectPlugin, login_ui::LoginUiPlugin, options::OptionsPlugin, cursor::CursorPlugin, operate::OperatePlugin))
         .add_plugins((net::NetPlugin, remote::RemotePlugin, fish::FishPlugin, water_terrain::WaterTerrainPlugin))
         .add_plugins(minimap::MiniMapPlugin)
-        .add_plugins(move_window::MoveWindowPlugin)
+        .add_plugins((move_window::MoveWindowPlugin, map_fade::MapFadePlugin))
         .add_plugins(gate::GatePlugin)
         .add_plugins(names::NamesPlugin)
         .add_plugins(chat::ChatPlugin)

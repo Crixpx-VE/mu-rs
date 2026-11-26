@@ -443,8 +443,10 @@ fn pointer_over_ui(
     (npc_dialogue, market): (Res<crate::npc_dialogue::NpcDialogueWindow>, Res<crate::market_window::MarketWindow>),
     (skills, skill_table): (Res<crate::skills::HeroSkills>, Option<Res<crate::skills::Skills>>),
     mut over: ResMut<PointerOverUi>,
+    map_fade: Res<crate::map_fade::MapFade>,
 ) {
-    let on_bar = windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
+    // Going black before a map change (map_fade.rs): the whole screen is taken.
+    let on_bar = map_fade.blocks() || windows.single().ok().and_then(cursor_virtual).is_some_and(|c| {
         (c.y >= FRAME_TOP && (0.0..640.0).contains(&c.x))
             || game_ui.blocks(c)
             || move_window.blocks(c)
