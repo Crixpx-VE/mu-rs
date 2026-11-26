@@ -6,13 +6,16 @@ automatically. The rules matter more than the code style: follow them even if a 
 
 ## 1. Be faithful to the original, never guess
 
-- **Primary reference: Main 5.2** (original Season 6 client source,
-  [LouisEmulator/Main5.2](https://github.com/LouisEmulator/Main5.2)). Formulas, timings, scales,
-  animation speeds, colours and packet layouts come from there, translated as they are.
-- **Secondary: MuMain** ([sven-n/MuMain](https://github.com/sven-n/MuMain)), only where Main 5.2 is
-  incomplete or disabled. Say so in a comment.
-- **Server behaviour: OpenMU** ([MUnique/OpenMU](https://github.com/MUnique/OpenMU)); server data
-  also from ProjectRebirthMu and Louis S6 (see README).
+- **Client reference: MuMain** ([sven-n/MuMain](https://github.com/sven-n/MuMain), latest master).
+  Formulas, timings, scales, animation speeds, colours and packet layouts come from there,
+  translated as they are.
+- **Main 5.2** ([LouisEmulator/Main5.2](https://github.com/LouisEmulator/Main5.2)) is no longer a
+  reference for new work. Where MuMain and Main 5.2 differ, MuMain wins. Existing Main 5.2
+  citations in the code stay until that code is touched (then re-check it against MuMain), and
+  the generators that still read Main 5.2 (`tools/cparse.py`, `tools/gen_fx_tables.py`) keep
+  working as they are.
+- **Server behaviour and data: OpenMU only** ([MUnique/OpenMU](https://github.com/MUnique/OpenMU),
+  latest master): game rules, monster definitions and spawns.
 - **Cite the source** of every non-obvious number or rule in a comment: `ZzzCharacter.cpp:13464`,
   `GMKarutan1.cpp:371`, `OpenMU GameLogic/...`. Reviewers check them.
 - If no reference says what to do, **stop and say so** instead of inventing a value. A visible
@@ -33,8 +36,10 @@ crates/mu-launcher   launcher and update server
 tools/               Python generators (read the references, write Rust tables)
 ```
 
-References live **outside** the repo, in `../referencias/<name>` (`Main5.2`, `MuMain`, `OpenMU`,
-`xulek-muonline`, `muonlinejs`, `datos-servidor-s6/{rebirth,louis}`). They are never committed.
+References live **outside** the repo, in `../referencias/<name>`: `MuMain` (client) and `OpenMU`
+(server), both on latest master. `Main5.2` is kept only for the generators that still read it and
+to check older citations; `xulek-muonline` and `muonlinejs` are inspiration, not references. They
+are never committed.
 
 ## 3. Generated files: do not edit by hand
 
