@@ -17,7 +17,8 @@
 //! view; then each `--npc-paso <step>` is sent in order, one second apart:
 //! `lista` (AvailableQuestsRequest), `buff` (NpcBuffRequest), `unirse:<gens>` (GensJoin), `dejar`
 //! (GensLeave), `premio:<gens>` (GensReward), `mision:<quest hex>:<line>` (QuestSelect),
-//! `estado:<quest>:<state>` (LegacyQuestStateSet), `cerrar` (CloseNpc).
+//! `estado:<quest>:<state>` (LegacyQuestStateSet), `cerrar` (CloseNpc), `mercado`
+//! (EnterMarketPlaceRequest, Julia's warp to and from Loren Market).
 //! `--hex` also prints the raw bytes of every packet that arrives; `--andar x,y` first walks in a
 //! straight line to that tile (8 steps per `Walk`).
 
@@ -710,6 +711,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .map(|quest| ClientMessage::QuestSelect { quest, selected: n(2) }),
                         "estado" => Some(ClientMessage::LegacyQuestState { quest: n(1), state: n(2) }),
                         "cerrar" => Some(ClientMessage::CloseNpc),
+                        "mercado" => Some(ClientMessage::EnterMarketPlace),
                         _ => None,
                     };
                     match msg {
