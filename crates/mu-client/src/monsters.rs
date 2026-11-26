@@ -74,6 +74,9 @@ pub enum MonsterOrder {
     Turn { key: u16, direction: u8 },
     /// The corpse's `o->Alpha` and how far it sank (`DeadCharacter`, combat.rs).
     Corpse { key: u16, alpha: f32, sink: f32 },
+    /// The corpse thrown by Nova / Combo (`DeadCharacter`, combat.rs): turned to `facing` (MU
+    /// radians) if given and moved `delta` tiles.
+    Thrown { key: u16, facing: Option<f32>, delta: Vec2 },
     Despawn { key: u16 },
 }
 
@@ -86,6 +89,7 @@ impl MonsterOrder {
             | Self::Walk { key, .. }
             | Self::Turn { key, .. }
             | Self::Corpse { key, .. }
+            | Self::Thrown { key, .. }
             | Self::Despawn { key } => *key,
         }
     }
@@ -135,6 +139,9 @@ impl Monsters<'_> {
     }
     pub fn corpse(&mut self, key: u16, alpha: f32, sink: f32) {
         self.orders.write(MonsterOrder::Corpse { key, alpha, sink });
+    }
+    pub fn thrown(&mut self, key: u16, facing: Option<f32>, delta: Vec2) {
+        self.orders.write(MonsterOrder::Thrown { key, facing, delta });
     }
 }
 
@@ -1003,6 +1010,16 @@ fn apply(
                     if m.key == key && !gone.contains(&e) {
                         m.alpha = alpha;
                         m.sink = sink;
+                    }
+                }
+            }
+            MonsterOrder::Thrown { key, facing, delta } => {
+                for (e, mut m, _) in &mut monsters {
+                    if m.key == key && !gone.contains(&e) {
+                        if let Some(f) = facing {
+                            m.facing = f;
+                        }
+                        m.pos += delta;
                     }
                 }
             }

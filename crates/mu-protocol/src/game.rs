@@ -898,6 +898,9 @@ pub enum ServerMessage {
     LevelUp(crate::combat::LevelUp),
     /// `ReceiveMonsterSkill` (C1 69): a monster used its skill `skill` on `target`.
     MonsterSkillAnimation { skill: u16, attacker: u16, target: u16 },
+    /// `ReceiveSkillCount` (C1 BA): the loading stage of `id`'s skill `skill` (Nova). OpenMU's
+    /// `SkillStageUpdate`.
+    SkillStage { id: u16, skill: u8, stage: u8 },
     /// `ReceiveCreateItemViewport` (C2 20, WSclient.cpp:5558-5586): items (and zen) lying on the
     /// ground that came into view. OpenMU's `ItemsDropped` and `MoneyDropped` (one zen drop per packet).
     ItemsDropped(Vec<DroppedItem>),

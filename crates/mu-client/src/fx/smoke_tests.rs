@@ -225,6 +225,29 @@ fn spin_monsters_in_tornado_picks_the_monsters_in_reach() {
     assert_eq!(spun, vec![ActorRequest { actor: near, change: ActorChange::Spin }]);
 }
 
+/// Nova's charge (`MoveCharacterVisual`, MuMain ZzzCharacter.cpp:5736-5757): `m_bySkillCount + 1`
+/// lights on each even bone below 40 and the three `CreateForce` trails, every tick; nothing standing.
+#[test]
+fn nova_charge_lights_the_bones() {
+    let registry = registry();
+    let (mut actors, hero) = actors();
+    let mut lights = TerrainLights::default();
+    let count = |world: &FxWorld| {
+        let lights = world.particles.iter().filter(|p| p.ty == BITMAP_LIGHT && p.sub_type == 6).count();
+        let force = world.joints.iter().filter(|j| j.ty == BITMAP_JOINT_HEALING && j.sub_type == 8).count();
+        (lights, force)
+    };
+    let mut world = FxWorld::default();
+    sim::step(&mut world, &registry, &actors, None, &mut lights, 0.0, 0);
+    assert_eq!(count(&world), (0, 0));
+    let a = actors.map.get_mut(&hero).unwrap();
+    a.action = crate::fx::tables::ids::PLAYER_SKILL_HELL_BEGIN as usize;
+    a.skill_count = 2;
+    let mut world = FxWorld::default();
+    sim::step(&mut world, &registry, &actors, None, &mut lights, 0.0, 0);
+    assert_eq!(count(&world), (20 * 3, 3));
+}
+
 /// `AttackCharacterRange` (MuMain ZzzEffect.cpp:118-121): stubbed, the client never reports hits,
 /// not even with a monster right there.
 #[test]

@@ -53,6 +53,8 @@
 //! server → client  MonsterSkillAnimation (ReceiveMonsterSkill)
 //!                                               C1 0A 69 <skill u16 BE> 00 <attacker u16 LE>
 //!                                                        <target u16 LE>
+//! server → client  SkillStage (ReceiveSkillCount, MuMain WSclient.h:801-807)
+//!                                               C1 07 BA <id u16 BE> <skill> <stage>
 //! ```
 //!
 //! The high bit of the ids (`Key >> 15`) means something in some of them (the original's
@@ -331,6 +333,13 @@ pub(crate) fn encode_server(m: &ServerMessage) -> Option<Vec<u8>> {
             put_le(&mut p, 8, *target);
             p
         }
+        ServerMessage::SkillStage { id, skill, stage } => {
+            let mut p = zeroed(7, &[0xBA]);
+            put_be(&mut p, 3, *id);
+            p[5] = *skill;
+            p[6] = *stage;
+            p
+        }
         _ => return None,
     })
 }
@@ -446,6 +455,7 @@ pub(crate) fn decode_server(p: &Packet<'_>) -> Option<ServerMessage> {
             })
         }
         (0x69, _) => ServerMessage::MonsterSkillAnimation { skill: be(d, 3)?, attacker: le(d, 6)?, target: le(d, 8)? },
+        (0xBA, _) => ServerMessage::SkillStage { id: be(d, 3)?, skill: *d.get(5)?, stage: *d.get(6)? },
         _ => return None,
     })
 }
@@ -606,6 +616,16 @@ mod tests {
             ServerMessage::decode(&[0xC1, 0x09, 0x18, 0x02, 0x62, 0x07, 0x78, 0x02, 0x00]),
             Some(ServerMessage::ObjectAnimation { id: 610, direction: 7, action: crate::game::action::ATTACK1, target: 512 })
         );
+    }
+
+    /// OpenMU's `SendSkillStageUpdateAsync(attackerId, stage, 58)` (NovaSkillStartPlugin): id 0x0200,
+    /// Nova Start, stage 3.
+    #[test]
+    fn skill_stage_bytes() {
+        let wire = [0xC1, 0x07, 0xBA, 0x02, 0x00, 0x3A, 0x03];
+        let m = ServerMessage::SkillStage { id: 0x0200, skill: 58, stage: 3 };
+        assert_eq!(ServerMessage::decode(&wire), Some(m.clone()));
+        assert_eq!(m.encode(), wire);
     }
 
     #[test]

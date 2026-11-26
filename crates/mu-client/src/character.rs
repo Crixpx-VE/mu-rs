@@ -328,6 +328,8 @@ pub struct Player {
     pub dead: bool,
     /// `o->Alpha` / `o->AlphaTarget` / `o->Teleport` and the corpse sinking (combat.rs).
     pub fade: crate::combat::Fade,
+    /// `o->m_bySkillCount`: the Nova stage the server reported (combat.rs).
+    pub skill_count: u8,
 }
 
 /// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
@@ -540,6 +542,11 @@ impl Skinned {
     /// Frames of animation `action` of `player.bmd` (0 if missing).
     pub fn action_frames(&self, action: usize) -> usize {
         self.skeleton.actions.get(action).map_or(0, |a| a.frames)
+    }
+
+    /// `Bones[i].Dummy` of the skeleton, for the effects engine.
+    pub fn dummy_bones(&self) -> std::sync::Arc<Vec<bool>> {
+        std::sync::Arc::new(self.skeleton.bones.iter().map(|b| b.dummy).collect())
     }
 
     /// The bones of pose `action`/`frame` (the same ones [`Skinned::pose`] uses).
@@ -932,6 +939,7 @@ fn spawn_player(
         // `ReceiveJoinMapServer` / `ReceiveTeleport` to another map: `o->Alpha = 0` (MuMain
         // WSclient.cpp:1325, 2475), so it fades in (`Alpha(o)`).
         fade: crate::combat::Fade::appearing(),
+        skill_count: 0,
     };
     let actor = actor_state(&player, &skinned, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
@@ -1145,12 +1153,14 @@ fn actor_state(p: &Player, s: &Skinned, bones: &[bmd::Mat34], terrain: Option<&L
         angle: Vec3::new(0.0, 0.0, p.facing.to_degrees()),
         scale: p.class.game_scale(),
         bones: std::sync::Arc::new(bones.to_vec()),
+        dummy_bones: s.dummy_bones(),
         action: p.action,
         frame: p.frame,
         weapon: s.fx_weapon(),
         weapon_bone: RIGHT_HAND_BONE,
         live: true,
         pos_sword: Vec3::ZERO,
+        skill_count: p.skill_count,
         ..Default::default()
     })
 }
@@ -1641,7 +1651,14 @@ fn animate(
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
             p.frame = p.frame.min((frames - 1.0).max(0.0));
         }
-        if p.casting.is_some() || action::emote(p.action) {
+        if p.action == ids::PLAYER_SKILL_HELL_BEGIN as usize {
+            // Nova's charge: a `Loop` action held on its last key (MuMain ZzzBMD.cpp:1177-1183) that
+            // `PlayerStopAnimationSetting` restarts instead of standing (ZzzCharacter.cpp:3477, 3485-3488).
+            let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
+            if p.frame >= frames {
+                p.frame = 0.0;
+            }
+        } else if p.casting.is_some() || action::emote(p.action) {
             let frames = s.skeleton.actions.get(p.action).map_or(1, |a| a.frames) as f32;
             if p.frame >= frames - 1.0 {
                 p.casting = None;

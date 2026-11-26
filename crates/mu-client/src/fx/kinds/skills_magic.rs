@@ -32,6 +32,7 @@ const DEFENSE: i32 = 27;
 const ATTACK: i32 = 28;
 const BLAST_POISON: i32 = 38;
 const BLAST_FREEZE: i32 = 39;
+const NOVA: i32 = 40;
 /// `AT_SKILL_HELL_FIRE_UP`, `EVIL_SPIRIT_UP`, `ICE_UP`, `HEAL_UP`, `DEF_POWER_UP`, `ATT_POWER_UP`,
 /// `BLAST_UP`, `EVIL_SPIRIT_UP_M` (each +0..4).
 const HELL_FIRE_UP: i32 = 440;
@@ -57,6 +58,45 @@ pub fn register(r: &mut Registry) {
     for s in all {
         r.skill(s, k);
     }
+    r.skill(NOVA, SkillKind { stage: Some(nova_stage), finish: Some(finish) });
+}
+
+/// `AttackStage`'s `case AT_SKILL_NOVA` (MuMain ZzzCharacter.cpp:2841-2846): the release fires at
+/// frame 14 of `PLAYER_SKILL_HELL_START` at the latest (`AttackTime` usually gets there first).
+fn nova_stage(c: &mut Cast, ctx: &mut Ctx) {
+    let Some(o) = ctx.actor(Some(Target::Actor(c.owner))) else { return };
+    if o.frame >= 14.0 && o.ty == MODEL_PLAYER && o.action as i32 == PLAYER_SKILL_HELL_START {
+        c.attack_time = LIMIT_ATTACK_TIME;
+    }
+}
+
+/// The Nova charge of `MoveCharacterVisual`'s `MODEL_PLAYER` case (MuMain ZzzCharacter.cpp:5721-5757),
+/// every tick for a drawn player in `PLAYER_SKILL_HELL_BEGIN` or `PLAYER_SKILL_HELL_START` (the
+/// `rand_fps_check(1)` of the second is once per tick): `m_bySkillCount + 1` lights on every other
+/// non-dummy bone below 40, growing with the stage, and `CreateForce` toward its feet.
+pub fn character_visual(e: bevy::prelude::Entity, o: &Actor, ctx: &mut Ctx) {
+    if o.ty != MODEL_PLAYER || !o.visible {
+        return;
+    }
+    let a = o.action as i32;
+    if a != PLAYER_SKILL_HELL_BEGIN && a != PLAYER_SKILL_HELL_START {
+        return;
+    }
+    if !o.bones.is_empty() {
+        let light = Vec3::new(0.3, 0.3, 1.0);
+        // `Vector(-15.f, 0.f, 0.f, p)` (5722).
+        let p = Vec3::new(-15.0, 0.0, 0.0);
+        let count = o.skill_count as i32;
+        for i in (0..40).step_by(2) {
+            if i < o.bones.len() && !o.is_dummy_bone(i) {
+                let position = o.bone_world(i, p);
+                for _ in 0..count + 1 {
+                    ctx.create_particle(BITMAP_LIGHT, position, o.angle, light, 6, 1.3 + count as f32 * 0.08, None);
+                }
+            }
+        }
+    }
+    crate::fx::kinds::common::create_force(ctx, Some(Target::Actor(e)), o.position);
 }
 
 /// `IsAttackAction`: a player in `PLAYER_ATTACK_FIST..=PLAYER_RIDE_SKILL`, a monster in
@@ -128,6 +168,12 @@ fn finish(c: &mut Cast, ctx: &mut Ctx) {
             ctx.create_effect(MODEL_CIRCLE, o.position, o.angle, o.light, 0, owner, pk_key, 0, hot_key, 0.0);
             ctx.create_effect(MODEL_CIRCLE_LIGHT, o.position, o.angle, o.light, 0, None, -1, 0, 0, 0.0);
             ctx.play_sound("SOUND_HELLFIRE");
+        }
+        // MuMain ZzzCharacter.cpp:4453-4457.
+        NOVA => {
+            ctx.create_effect(MODEL_CIRCLE, o.position, o.angle, o.light, 1, owner, -1, 0, 0, 0.0);
+            ctx.stop_sound("SOUND_NUKE1");
+            ctx.play_sound("SOUND_NUKE2");
         }
         BLAST_POISON => {
             let pos = skill_ground(c, ctx);

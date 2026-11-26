@@ -264,15 +264,15 @@ pub fn create_healing(e: &Effect, ctx: &mut Ctx) {
     }
 }
 
-/// `CreateForce(o, Pos)` (ZzzEffect.cpp:215): three healing trails (subtype 8) toward `pos`,
-/// following the effect itself.
-pub fn create_force(e: &Effect, ctx: &mut Ctx, pos: Vec3) {
+/// `CreateForce(o, Pos)` (MuMain ZzzEffect.cpp:146-160): three healing trails (subtype 8) toward
+/// `pos`, following `o` (a character or an effect).
+pub fn create_force(ctx: &mut Ctx, o: Option<Target>, pos: Vec3) {
     let p = Vec3::new(0.0, -500.0, 0.0);
     for _ in 0..3 {
         let angle = Vec3::new(rf(ctx, 90), 0.0, rf(ctx, 360));
         let mut position = pos - rotate(angle, p);
         position.z += 120.0;
-        ctx.create_joint(BITMAP_JOINT_HEALING, position, pos, angle, 8, Some(Target::Effect(e.id)), 10.0);
+        ctx.create_joint(BITMAP_JOINT_HEALING, position, pos, angle, 8, o, 10.0);
     }
 }
 

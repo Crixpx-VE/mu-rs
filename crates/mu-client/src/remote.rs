@@ -97,6 +97,8 @@ pub struct RemotePlayer {
     sword_count: u32,
     /// `o->Alpha` / `o->AlphaTarget` (teleport, corpse fading) and the alpha its materials have now.
     pub(crate) fade: crate::combat::Fade,
+    /// `o->m_bySkillCount`: its Nova stage (combat.rs).
+    pub(crate) skill_count: u8,
 }
 
 impl RemotePlayer {
@@ -119,6 +121,18 @@ impl RemotePlayer {
         self.action = a;
         self.frame = 0.0;
         self.path.clear();
+    }
+
+    /// `SetAction` as the original does it: an action already playing keeps its frame.
+    pub fn keep_or_set_action(&mut self, a: usize) {
+        if self.action != a {
+            self.set_action(a);
+        }
+    }
+
+    /// A corpse thrown by Nova / Combo (`DeadCharacter`, combat.rs): `delta` tiles.
+    pub(crate) fn push(&mut self, delta: Vec2) {
+        self.pos += delta;
     }
 
     pub fn set_facing(&mut self, facing: f32) {
@@ -226,6 +240,7 @@ fn apply(
                         look,
                         sword_count: 0,
                         fade: Default::default(),
+                        skill_count: 0,
                     };
                     // `case 1: CreateTeleportEnd(o)` (MuMain WSclient.cpp:2804-2809): it just teleported.
                     if look.pose == 1 {
@@ -470,7 +485,11 @@ pub(crate) fn animate(
 ) {
     let Some(terrain) = terrain else { return };
     for (mut r, skinned, shadow, selectable, actor) in &mut q {
-        r.frame += crate::character::play_speed(r.action) * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
+        use crate::fx::tables::ids::PLAYER_SKILL_HELL_BEGIN;
+        let nova_charge = r.action == PLAYER_SKILL_HELL_BEGIN as usize;
+        // `CharacterAnimation` halves the Nova charge (MuMain ZzzCharacter.cpp:2483-2486).
+        let speed = crate::character::play_speed(r.action) * if nova_charge { 0.5 } else { 1.0 };
+        r.frame += speed * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         // An emote ends: standing (`PlayerStopAnimationSetting`). Same for an action `player.bmd`
         // lacks (any number from the server).
         let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
@@ -479,6 +498,11 @@ pub(crate) fn animate(
         let ends = crate::character::action::emote(r.action) || crate::combat::is_attack_action(r.action) || r.action == crate::fx::tables::ids::PLAYER_SHOCK as usize;
         if r.action == crate::fx::tables::ids::PLAYER_DIE1 as usize {
             r.frame = r.frame.min((frames - 1.0).max(0.0));
+        } else if nova_charge && frames > 0.0 {
+            // A `Loop` action `PlayerStopAnimationSetting` restarts (ZzzCharacter.cpp:3477, 3485-3488).
+            if r.frame >= frames {
+                r.frame = 0.0;
+            }
         } else if frames == 0.0 || (ends && r.frame >= frames - 1.0) {
             r.action = r.stop_for(safe);
             r.frame = 0.0;
@@ -507,12 +531,14 @@ pub(crate) fn animate(
                 angle: Vec3::new(0.0, 0.0, r.facing.to_degrees()),
                 scale: r.class.game_scale(),
                 bones: std::sync::Arc::new(bones),
+                dummy_bones: skinned.dummy_bones(),
                 action: r.action,
                 frame: r.frame,
                 weapon: skinned.fx_weapon(),
                 weapon_bone: crate::character::RIGHT_HAND_BONE,
                 light: r.light,
                 safe_zone: safe,
+                skill_count: r.skill_count,
                 ..Default::default()
             };
         }

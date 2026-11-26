@@ -14,13 +14,19 @@
 //!
 //! Not yet (each marked where it goes): mounts and pets in the animation choices, Castle Siege /
 //! Chaos Castle / Blood Castle rules, auto-attack, potions used when mana is short
-//! (`SendRequestUse`), the party skills on other players, Nova's charge, Multi-Shot, Chaotic
-//! Diseier and the Summoner's curses, the release effects of the non-Dark-Knight skills (the
+//! (`SendRequestUse`), the party skills on other players, Multi-Shot, Chaotic Diseier and the
+//! Summoner's curses, the release effects of the non-Dark-Knight skills (the
 //! `switch` on `g_iLimitAttackTime`, ZzzCharacter.cpp:3932-5070, beyond what `fx` registers).
 //!
 //! Characters' `o->Alpha` ([`Fade`]): the wizard's Teleport fades out and back in
 //! (`CreateTeleportBegin/End`), corpses fade and sink (`DeadCharacter`), and the hero fades in on
 //! entering a map. The materials follow it through `model_light::set_alpha`.
+//!
+//! Nova (MuMain): holding the right button sends `AT_SKILL_NOVA_BEGIN` and loops
+//! `PLAYER_SKILL_HELL_BEGIN`; letting go (or a left click) sends `AT_SKILL_NOVA`. The server counts
+//! the stages, hits when it gets the release (or after the last stage) and echoes both skills; the
+//! ring and its sound come with the release's echo. A corpse killed by Nova or Combo is thrown away
+//! from its killer.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -49,6 +55,7 @@ impl Plugin for CombatPlugin {
             .add_systems(OnExit(GameScene::Game), (crate::scene::despawn::<PointsRoot>, |mut p: ResMut<Points>, mut d: ResMut<Dying>| {
                 p.0.clear();
                 d.0.clear();
+                d.1.clear();
             }))
             .add_systems(FixedUpdate, (move_points, (dying_tick, fade_tick).chain()).run_if(in_state(GameScene::Game)))
             .add_systems(
@@ -108,6 +115,9 @@ pub fn attack_play_speed(a: usize) -> Option<f32> {
         _ if a == ids::PLAYER_SKILL_FLASH => 0.40 + m2,
         _ if a == ids::PLAYER_SKILL_INFERNO => 0.60 + m2,
         _ if a == ids::PLAYER_SKILL_HELL => 0.50 + m2,
+        // MuMain ZzzCharacter.cpp:1002, 1064.
+        _ if a == ids::PLAYER_SKILL_HELL_BEGIN => 0.50 + m2,
+        _ if a == ids::PLAYER_SKILL_HELL_START => 0.30,
         _ if a == ids::PLAYER_RIDE_SKILL => 0.30 + m2,
         _ if a == ids::PLAYER_ATTACK_STRIKE => 0.25 + a1,
         _ if a == ids::PLAYER_ATTACK_RUSH => 0.3 + a1,
@@ -239,6 +249,9 @@ pub struct HeroAttack {
     /// `g_dwLatestMagicTick`.
     last_magic: Option<Instant>,
     rng: Rng,
+    /// `MouseRButtonPress`: frames the right button has been held since Nova's charge started
+    /// (0 = not charging).
+    nova_press: u32,
 }
 
 impl HeroAttack {
@@ -252,9 +265,10 @@ impl HeroAttack {
     }
 }
 
-/// `SendRequestMagic` is throttled to one per 300 ms except Nova (`Type == 40`, wsclientinline.h:513-525).
+/// `SendRequestMagic` is throttled to one per 300 ms except Nova's release and the Rage Fighter's
+/// Chain Drive / Dark Side (`Type == 40 || 263 || 261`, MuMain ZzzInterface.cpp:1112-1123).
 fn magic_allowed(last: &mut Option<Instant>, skill: u16, now: Instant) -> bool {
-    if skill == 40 || last.is_none_or(|t| now.duration_since(t) > Duration::from_millis(300)) {
+    if matches!(skill, 40 | 263 | 261) || last.is_none_or(|t| now.duration_since(t) > Duration::from_millis(300)) {
         *last = Some(now);
         true
     } else {
@@ -439,10 +453,50 @@ fn gain_exp(exp: u32, info: Option<&mut crate::account::HeroInfo>, chat: &mut cr
 /// death animation (`SetPlayerDie`); `DeadCharacter` (2996-3033) fades it from `Rot >= 1` (50 ticks) and
 /// sets `Live = false` when the alpha is gone (100 ticks).
 #[derive(Resource, Default)]
-struct Dying(HashMap<u16, u32>);
+struct Dying(HashMap<u16, u32>, HashMap<u16, Knock>);
+
+impl Dying {
+    fn forget(&mut self, key: u16) {
+        self.0.remove(&key);
+        self.1.remove(&key);
+    }
+}
 
 const DIE_AT: u32 = 15;
 const GONE_AT: u32 = 100;
+
+/// `m_byDieType` `AT_SKILL_NOVA` / `AT_SKILL_COMBO`: `ReceiveDie` turns the corpse toward its killer
+/// and gives it `Velocity` and `Direction` (MuMain WSclient.cpp:6055-6079); while `c->Dead < 15`
+/// `DeadCharacter` throws it away from the killer (ZzzCharacter.cpp:3285-3300).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Knock {
+    /// `o->Direction[1]`.
+    direction: f32,
+    /// `o->Velocity`.
+    velocity: f32,
+    /// `o->HeadAngle[2]` (= `o->Angle[2]`, toward the killer), in degrees.
+    angle: f32,
+    /// `m_byDieType == AT_SKILL_NOVA` (the blue lights, 3302-3312).
+    nova: bool,
+}
+
+impl Knock {
+    /// `Velocity = (rand() % 5 + 10) * 0.1`, then `Direction = (0, rand() % 15 + 40, 0)`.
+    fn new(rand_velocity: i32, rand_direction: i32, angle: f32, nova: bool) -> Self {
+        Self { direction: (rand_direction % 15) as f32 + 40.0, velocity: ((rand_velocity % 5) as f32 + 10.0) * 0.1, angle, nova }
+    }
+
+    /// One tick of the throw: `Direction[1] -= Velocity; Velocity += 1` (not below 0), then
+    /// `MoveParticle(o, HeadAngle)`. Returns the move in MU units.
+    fn tick(&mut self) -> Vec2 {
+        self.direction -= self.velocity;
+        self.velocity += 1.0;
+        if self.direction < 0.0 {
+            self.direction = 0.0;
+        }
+        crate::fx::core::rotate(Vec3::new(0.0, 0.0, self.angle), Vec3::new(0.0, self.direction, 0.0)).truncate()
+    }
+}
 
 /// `DeadCharacter` (MuMain ZzzCharacter.cpp:3220-3257) at `c->Dead` = `t`: `Rot += 0.02` per tick; from
 /// `Rot >= 1` the alpha is `1 - (Rot - 1)` and, while it is at least 0.01, the body sinks 0.4 per tick.
@@ -643,6 +697,7 @@ fn server_combat(
     mut world: ResMut<crate::fx::FxWorld>,
     mut sound: ResMut<crate::sound::SoundQueue>,
     mut selectables: Query<&mut crate::names::Selectable>,
+    args: Res<crate::Args>,
 ) {
     let height = |p: Vec2| terrain.as_ref().map_or(0.0, |t| t.0.height_at(p.x, p.y));
     let mu = |p: Vec2| Vec3::new(p.x * MU_SCALE, p.y * MU_SCALE, height(p));
@@ -666,7 +721,10 @@ fn server_combat(
                             monsters_orders.set_action(key, MonsterAction::Shock);
                         }
                     } else if let Some((_, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == key) {
-                        r.set_action(ids::PLAYER_SHOCK as usize);
+                        // Not while charging Nova (MuMain ZzzCharacter.cpp:1396-1400).
+                        if r.pose_state().0 != ids::PLAYER_SKILL_HELL_BEGIN as usize {
+                            r.set_action(ids::PLAYER_SHOCK as usize);
+                        }
                     }
                 }
                 hit_points(&mut points, mu(pos), *damage, *damage_type, *shield_damage, is_hero);
@@ -723,8 +781,34 @@ fn server_combat(
                     world.actor_targets.insert(e, t);
                 }
                 // `sc->Skill = MagicNumber` and `AttackTime = 1`: the skill's per-tick and release code.
-                if let Some(e) = caster {
+                // Nova's start sets no `AttackTime` (MuMain WSclient.cpp:4932-4936).
+                if let Some(e) = caster.filter(|_| *skill != NOVA_BEGIN) {
                     start_cast(&mut world, e, *skill, target_entity.map(crate::fx::Target::Actor), Vec3::new(tpos.x * MU_SCALE, tpos.y * MU_SCALE, 0.0));
+                }
+                // `case AT_SKILL_NOVA_BEGIN` / `case AT_SKILL_NOVA` (MuMain WSclient.cpp:4932-4948): the
+                // charge (with `SOUND_NUKE1`, stage 0) and the release, for the hero too.
+                if matches!(*skill, NOVA_BEGIN | NOVA) {
+                    let a = if *skill == NOVA_BEGIN { ids::PLAYER_SKILL_HELL_BEGIN } else { ids::PLAYER_SKILL_HELL_START } as usize;
+                    if src == hero_key.0 {
+                        for (_, mut p) in &mut heroes {
+                            set_action(&mut p, a);
+                            if *skill == NOVA_BEGIN {
+                                p.skill_count = 0;
+                            }
+                        }
+                        if *skill == NOVA {
+                            // `MouseRButtonPop/Push/MouseRButton = false; MouseRButtonPress = 0`.
+                            attack.nova_press = 0;
+                        }
+                    } else if let Some((_, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == src) {
+                        r.keep_or_set_action(a);
+                        if *skill == NOVA_BEGIN {
+                            r.skill_count = 0;
+                        }
+                    }
+                    if *skill == NOVA_BEGIN {
+                        sound.play("SOUND_NUKE1");
+                    }
                 }
                 if *skill == 3 {
                     // AT_SKILL_THUNDER: `PlayBuffer(SOUND_THUNDER01)` (3840-3845).
@@ -780,9 +864,40 @@ fn server_combat(
                 }
             }
             // `ReceiveDie` (WSclient.cpp:5494-5556): `Dead = true`, `Movement = false`.
-            ServerMessage::ObjectKilled { killed, .. } => {
+            ServerMessage::ObjectKilled { killed, skill, killer } => {
                 let key = killed & OBJECT_ID_MASK;
                 dying.0.entry(key).or_insert(1);
+                // `m_byDieType`: Nova and Combo throw the corpse away from the killer (MuMain
+                // WSclient.cpp:6034-6079), except in Blood Castle and Chaos Castle, where it falls
+                // (`FallingStartCharacter`). TODO(original): that fall.
+                let world_active = args.world as i32 - 1;
+                let castle = crate::names::in_chaos_castle(args.world) || (11..=17).contains(&world_active) || world_active == 52;
+                if matches!(*skill, NOVA | COMBO) && !castle {
+                    let killer = killer & OBJECT_ID_MASK;
+                    let pos_of = |k: u16| {
+                        if k == hero_key.0 {
+                            heroes.iter().next().map(|(_, p)| p.pos)
+                        } else {
+                            monsters.iter().find(|(_, m)| m.key == k).map(|(_, m)| m.pos).or_else(|| remotes.iter().find(|(_, r)| r.id == k).map(|(_, r)| r.position()))
+                        }
+                    };
+                    if let (Some(from), Some(to)) = (pos_of(key), pos_of(killer)) {
+                        // `o->Angle[2] = CreateAngle2D(o->Position, to->Position)`; `HeadAngle = Angle`.
+                        let angle = crate::fx::core::create_angle(from.x, from.y, to.x, to.y);
+                        let (rv, rd) = (attack.rng.rand(), attack.rng.rand());
+                        dying.1.insert(key, Knock::new(rv, rd, angle, *skill == NOVA));
+                        let facing = angle.to_radians();
+                        if key == hero_key.0 {
+                            for (_, mut p) in &mut heroes {
+                                p.facing = facing;
+                            }
+                        } else if let Some((_, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == key) {
+                            r.set_facing(facing);
+                        } else {
+                            monsters_orders.thrown(key, Some(facing), Vec2::ZERO);
+                        }
+                    }
+                }
                 // `c->Dead`: no longer picked by the mouse (`SelectCharacter` skips the dead).
                 let entity = monsters.iter().find(|(_, m)| m.key == key).map(|(e, _)| e).or_else(|| remotes.iter().find(|(_, r)| r.id == key).map(|(e, _)| e));
                 if let Some(mut s) = entity.and_then(|e| selectables.get_mut(e).ok()) {
@@ -809,14 +924,28 @@ fn server_combat(
             }
             ServerMessage::Respawn(_) => {
                 dying.0.remove(&hero_key.0);
+                dying.1.remove(&hero_key.0);
             }
             // A key back in scope is a new `CreateCharacter` (the respawned monster reuses its
             // index): its old corpse timer must not make it vanish.
             ServerMessage::AddMonstersToScope(list) => {
-                list.iter().for_each(|s| _ = dying.0.remove(&(s.id & OBJECT_ID_MASK)));
+                list.iter().for_each(|s| dying.forget(s.id & OBJECT_ID_MASK));
             }
             ServerMessage::AddCharactersToScope(list) => {
-                list.iter().for_each(|s| _ = dying.0.remove(&(s.id & OBJECT_ID_MASK)));
+                list.iter().for_each(|s| dying.forget(s.id & OBJECT_ID_MASK));
+            }
+            // `ReceiveSkillCount` (MuMain WSclient.cpp:5778-5794): only `AT_SKILL_NOVA` sets the stage;
+            // `AT_SKILL_NOVA_BEGIN` does nothing. (OpenMU reports the stages as skill 58, so with it
+            // the charge does not grow, as in MuMain.)
+            ServerMessage::SkillStage { id, skill, stage } if *skill as u16 == NOVA => {
+                let key = id & OBJECT_ID_MASK;
+                if key == hero_key.0 {
+                    for (_, mut p) in &mut heroes {
+                        p.skill_count = *stage;
+                    }
+                } else if let Some((_, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == key) {
+                    r.skill_count = *stage;
+                }
             }
             _ => {}
         }
@@ -888,6 +1017,7 @@ pub fn remote_area_action(skill: u16, class: Class, rand: i32) -> Option<usize> 
 }
 
 /// The dead: the death action at 15 ticks, gone at 100 (monsters and other players).
+#[allow(clippy::too_many_arguments)]
 fn dying_tick(
     mut commands: Commands,
     mut dying: ResMut<Dying>,
@@ -895,9 +1025,42 @@ fn dying_tick(
     mut monsters_orders: Monsters,
     mut remotes: Query<(Entity, &mut crate::remote::RemotePlayer, &crate::shadow::Shadow)>,
     mut heroes: Query<&mut Player>,
+    mut world: ResMut<crate::fx::FxWorld>,
+    actors: Res<crate::fx::sim::Actors>,
 ) {
     let mut gone = Vec::new();
-    for (&key, t) in dying.0.iter_mut() {
+    let Dying(timers, knocks) = &mut *dying;
+    for (&key, t) in timers.iter_mut() {
+        // `DeadCharacter` runs with `c->Dead` before this tick's `Dead += 1` (MuMain
+        // ZzzCharacter.cpp:4082-4094).
+        let dead = *t;
+        if let Some(k) = knocks.get_mut(&key) {
+            if dead < 15 {
+                let d = k.tick() / MU_SCALE;
+                if key == hero_key.0 {
+                    for mut p in &mut heroes {
+                        p.pos += d;
+                    }
+                } else if let Some((_, mut r, _)) = remotes.iter_mut().find(|(_, r, _)| r.id == key) {
+                    r.push(d);
+                } else {
+                    monsters_orders.thrown(key, None, d);
+                }
+            }
+            // Ten blue lights on random bones (of the first 32) every tick (3302-3312).
+            if k.nova && dead <= 30 {
+                let actor = if key == hero_key.0 { actors.hero.and_then(|e| actors.map.get(&e)) } else { actors.map.values().find(|a| a.key == key as i32) };
+                if let Some(o) = actor {
+                    use crate::fx::core::{BITMAP_LIGHT, Particle, Spawn};
+                    for _ in 0..10 {
+                        let bone = (world.rng.rand() % 32) as usize;
+                        let position = o.bone_world(bone, Vec3::ZERO);
+                        let scale = 0.5 + (world.rng.rand() % 100) as f32 / 50.0;
+                        world.pending.push(Spawn::Particle(Particle::new(BITMAP_LIGHT, position, o.angle, Vec3::new(0.3, 0.3, 1.0), 5, scale, None)));
+                    }
+                }
+            }
+        }
         *t += 1;
         if *t == DIE_AT {
             if key == hero_key.0 {
@@ -934,7 +1097,9 @@ fn dying_tick(
         }
     }
     for key in gone {
-        dying.0.remove(&key);
+        timers.remove(&key);
+        // `m_byDieType = 0` (3250).
+        knocks.remove(&key);
         if let Some((e, _, shadow)) = remotes.iter().find(|(_, r, _)| r.id == key) {
             commands.entity(e).despawn();
             commands.entity(shadow.1).despawn();
@@ -996,7 +1161,7 @@ fn hero_action(
         attack.target = None;
         if !m.dead && !safe {
             let t = TargetInfo { entity: target, key: m.key, pos: m.pos, monster: true };
-            cast_skill(&mut attack, &mut p, slot, Some(t), m.pos, &mut cast_ctx, &mut net, &mut sound, terrain.as_deref(), true);
+            cast_skill(&mut attack, &mut p, slot, None, Some(t), m.pos, &mut cast_ctx, &mut net, &mut sound, terrain.as_deref(), true);
         }
         return;
     }
@@ -1050,10 +1215,26 @@ pub fn hero_teleport_end(p: &mut Player, world: &mut crate::fx::FxWorld, sound: 
 fn play(p: &mut Player, a: usize) {
     p.action = a;
     p.frame = 0.0;
-    let speed = attack_play_speed(a).unwrap_or_else(|| crate::character::play_speed(a));
+    let mut speed = attack_play_speed(a).unwrap_or_else(|| crate::character::play_speed(a));
+    // `CharacterAnimation` halves Nova's charge (MuMain ZzzCharacter.cpp:2483-2486).
+    if a == ids::PLAYER_SKILL_HELL_BEGIN as usize {
+        speed /= 2.0;
+    }
     p.casting = Some(speed * crate::fx::sim::TICKS_PER_SECOND);
     p.path.clear();
 }
+
+/// `SetAction(o, a)` on the hero: an action already playing keeps its frame.
+fn set_action(p: &mut Player, a: usize) {
+    if p.action != a || p.casting.is_none() {
+        play(p, a);
+    }
+}
+
+/// `AT_SKILL_NOVA` (the release), `AT_SKILL_NOVA_BEGIN` (the charge) and `AT_SKILL_COMBO`.
+const NOVA: u16 = ids::AT_SKILL_NOVA as u16;
+const NOVA_BEGIN: u16 = ids::AT_SKILL_NOVA_BEGIN as u16;
+const COMBO: u16 = ids::AT_SKILL_COMBO as u16;
 
 // --- The hero's skills (`Attack`) --------------------------------------------------------------------
 
@@ -1083,6 +1264,9 @@ pub enum Send {
     Continue { at_target: bool, angle255: bool, dest: bool, tpos: Tpos, target_key: bool, serial: bool },
     /// The wizard's Teleport: `SendEnterGateRequest(0, TargetX, TargetY)` (MuMain ClassAttack.cpp:1518-1588).
     Teleport,
+    /// Nova (MuMain ClassAttack.cpp:1162-1183): the charge `SendRequestMagic(AT_SKILL_NOVA_BEGIN,
+    /// HeroKey)`, the release `SendRequestMagic(AT_SKILL_NOVA, getTargetCharacterKey or HeroKey)`.
+    Nova { begin: bool },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1135,6 +1319,9 @@ pub fn plan(skill: u16, class: Class) -> Option<Plan> {
         // `SetPlayerTeleport`: `PLAYER_SKILL_TELEPORT` (MuMain ZzzCharacter.cpp:1374-1385); no range
         // check on the client (the server decides).
         6 if wizardish => p(Send::Teleport, Anim::Action(ids::PLAYER_SKILL_TELEPORT), 0.0, false, false),
+        // Nova: no range, no turn (MuMain ClassAttack.cpp:1162-1183).
+        58 if wizardish => p(Send::Nova { begin: true }, Anim::Action(ids::PLAYER_SKILL_HELL_BEGIN), 0.0, false, false),
+        40 if wizardish => p(Send::Nova { begin: false }, Anim::Action(ids::PLAYER_SKILL_HELL_START), 0.0, false, false),
         1 | 2 | 3 | 17 | 11 | 7 | 4 | 45 if wizardish => p(Send::MagicTarget, Anim::Magic, 1.0, true, true),
         73 if wizardish => p(Send::MagicTarget, Anim::Action(ids::PLAYER_ATTACK_DEATH_CANNON), 1.0, true, true),
         13 if wizardish => p(cont(true, false, false, Tpos::Zero, true, false), Anim::Magic, 1.0, true, true),
@@ -1209,16 +1396,56 @@ fn hero_cast(
     mut ctx: CastContext,
 ) {
     let Ok(mut p) = heroes.single_mut() else { return };
-    // `(MouseRButtonPush || MouseRButton) && !(MouseLButtonPush || MouseLButton) && !c->Movement`.
-    if !buttons.pressed(MouseButton::Right) || buttons.pressed(MouseButton::Left) || !p.path.is_empty() || over_ui.0 || p.dead {
+    // A left click on the UI drops the right button's state (MuMain ZzzInterface.cpp:2627-2635).
+    if over_ui.0 && buttons.just_pressed(MouseButton::Left) {
+        attack.nova_press = 0;
+        return;
+    }
+    if p.dead {
         return;
     }
     let Ok(window) = windows.single() else { return };
-    if crate::mainframe::cursor_virtual(window).is_none_or(|c| c.y >= 429.0) {
-        return;
-    }
-    // The player must be standing (6864-6886).
-    if p.casting.is_some() || !crate::character::action::standing(p.action) {
+    let slot = ctx.skills.current;
+    let current = ctx.skills.skill(slot);
+    let skill = if attack.nova_press != 0 {
+        // Charging Nova (`MouseRButtonPress != 0`, 2660-2675): released (`MouseRButtonPop`) or a left
+        // click (`SkillKeyPush`), Nova goes; otherwise it keeps counting.
+        if !buttons.pressed(MouseButton::Right) || (current == NOVA && buttons.just_pressed(MouseButton::Left)) {
+            attack.nova_press = 0;
+            current
+        } else {
+            attack.nova_press += 1;
+            return;
+        }
+    } else {
+        // `(MouseRButtonPush || MouseRButton) && !(MouseLButtonPush || MouseLButton) && !c->Movement`.
+        if !buttons.pressed(MouseButton::Right) || buttons.pressed(MouseButton::Left) || !p.path.is_empty() || over_ui.0 {
+            return;
+        }
+        if crate::mainframe::cursor_virtual(window).is_none_or(|c| c.y >= 429.0) {
+            return;
+        }
+        if current == NOVA {
+            // Nova starts charging (2678-2688): not while teleporting, not without its energy.
+            if !matches!(p.fade.teleport, Teleport::None | Teleport::End) {
+                return;
+            }
+            let (gear, _) = crate::skills::hero_gear(ctx.hero.as_deref(), ctx.info.as_deref(), &ctx.eq, &ctx.inv);
+            let energy = ctx.table.as_ref().and_then(|t| t.0.get(NOVA)).map_or(0, |d| d.required_energy(false, false));
+            if (gear.stats.energy as i32) < energy {
+                return;
+            }
+            attack.nova_press = 1;
+            p.skill_count = 0;
+            NOVA_BEGIN
+        } else {
+            current
+        }
+    };
+    // `IsSkillActionReady` (MuMain SkillExecution.cpp:190-217, 316-321): standing, or charging Nova.
+    let ready = p.action == ids::PLAYER_SKILL_HELL_BEGIN as usize || (p.casting.is_none() && crate::character::action::standing(p.action));
+    if !ready {
+        attack.nova_press = 0;
         return;
     }
     // `SelectedCharacter`: a monster, or a player with Ctrl (`CheckAttack`, 1693-1813).
@@ -1236,18 +1463,20 @@ fn hero_cast(
         let ray = cam.viewport_to_world(tf, window.cursor_position()?).ok()?;
         crate::character::raycast_terrain(&t.0, ray)
     });
-    let Some(point) = target.map(|t| t.pos).or(ground) else { return };
-    let slot = ctx.skills.current;
-    cast_skill(&mut attack, &mut p, slot, target, point, &mut ctx, &mut net, &mut sound, terrain.as_deref(), false);
+    // Nova's release needs no point (it goes off where the hero stands).
+    let Some(point) = target.map(|t| t.pos).or(ground).or((skill == NOVA).then_some(p.pos)) else { return };
+    cast_skill(&mut attack, &mut p, slot, Some(skill), target, point, &mut ctx, &mut net, &mut sound, terrain.as_deref(), false);
 }
 
 /// The common part of `Attack` and the class functions: the checks, then the request and the action.
-/// `arrived`: called from `Action` after a `MOVEMENT_SKILL` walk (no new walk then).
+/// `skill`: what `Attack` casts instead of the slot's skill (Nova's charge); `arrived`: called from
+/// `Action` after a `MOVEMENT_SKILL` walk (no new walk then).
 #[allow(clippy::too_many_arguments)]
 fn cast_skill(
     attack: &mut HeroAttack,
     p: &mut Player,
     slot: usize,
+    skill: Option<u16>,
     target: Option<TargetInfo>,
     point: Vec2,
     ctx: &mut CastContext,
@@ -1257,11 +1486,12 @@ fn cast_skill(
     arrived: bool,
 ) {
     let Some(table) = ctx.table.as_ref() else { return };
-    let skill = ctx.skills.skill(slot);
+    let skill = skill.unwrap_or_else(|| ctx.skills.skill(slot));
     if skill == 0 {
         return;
     }
     let Some(def) = table.0.get(skill).cloned() else { return };
+    let nova_def = table.0.get(NOVA).cloned();
     let class = p.class;
     let (gear, _) = crate::skills::hero_gear(ctx.hero.as_deref(), ctx.info.as_deref(), &ctx.eq, &ctx.inv);
     // `DemendConditionCheckSkill` (6776) and the grey-icon checks.
@@ -1276,7 +1506,27 @@ fn cast_skill(
         debug!("habilidad {skill} ({}) sin lanzar todavía", def.name);
         return;
     };
-    if !arrived {
+    if !arrived && matches!(plan.send, Send::Nova { .. }) {
+        // `CheckMana(Skill)` (MuMain SkillExecution.cpp:169-188), then `AttackWizard`'s own checks with
+        // Nova's mana and AG (none for the release) in its order: energy, mana, AG (which also ends
+        // the charge) and `CheckSkillDelay` of the slot (ClassAttack.cpp:1109-1157).
+        // TODO(original): drink a mana potion when short (`FindManaItemIndex` + `SendRequestUse`).
+        if def.mana as u32 > ctx.stats.mp || def.ability as u32 > ctx.stats.ag {
+            return;
+        }
+        let Some(n) = nova_def else { return };
+        let ag = if skill == NOVA { 0 } else { n.ability as u32 };
+        if (gear.stats.energy as i32) < def.required_energy(false, false) || n.mana as u32 > ctx.stats.mp {
+            return;
+        }
+        if ag > ctx.stats.ag {
+            attack.nova_press = 0;
+            return;
+        }
+        if !ctx.skills.check_delay(slot, Some(&n), gear.stats.charisma) {
+            return;
+        }
+    } else if !arrived {
         // The class functions' checks, in their order: mana (TODO(original): drink a potion,
         // `SendRequestUse`), AG, `CheckSkillDelay` (which already starts the cooldown) and the energy
         // (AttackElf 4651-4677, AttackKnight 5057-5137, AttackWizard 5655-5706).
@@ -1372,6 +1622,16 @@ fn cast_skill(
             true
         }
         Send::Teleport => teleport(p, target_tile, ctx, net, terrain),
+        Send::Nova { begin } => {
+            // TODO(original): `getTargetCharacterKey`'s PvP rules (duel, guild war, PK); a player
+            // picked with Ctrl stands in for them, as for the other skills.
+            let key = if begin { ctx.hero_key.0 } else { target.filter(|t| !t.monster).map_or(ctx.hero_key.0, |t| t.key) };
+            let ok = magic_allowed(&mut attack.last_magic, skill, Instant::now());
+            if ok && connected {
+                net.send(ClientMessage::TargetedSkill { skill, target: key });
+            }
+            ok
+        }
     };
     if !sent {
         return;
@@ -1399,10 +1659,22 @@ fn cast_skill(
 /// safe zone, nobody there) and not while changing map; then face the point and
 /// `SendEnterGateRequest(0, TargetX, TargetY)`. The fade-out starts when the server echoes the skill
 /// (`ReceiveMagic` → `CreateTeleportBegin`), the fade-in with its `MapChanged` (`CreateTeleportEnd`).
-/// TODO(original): the stun/sleep checks and their removal (the client does not track buffs yet), and
-/// Nova's release (`HeroPriorSkill == AT_SKILL_NOVA`: Nova is not ported yet).
-fn teleport(p: &mut Player, target: (i32, i32), ctx: &CastContext, net: &mut crate::net::Net, terrain: Option<&LoadedTerrain>) -> bool {
-    if ctx.inv.picked.is_some() || p.action == ids::PLAYER_SKILL_TELEPORT as usize || !p.fade.can_teleport() {
+/// The first Teleport after switching from Nova (`HeroPriorSkill == AT_SKILL_NOVA`, 1528-1537) sends
+/// Nova's release on the hero instead and plays the charge.
+/// TODO(original): the stun/sleep checks and their removal (the client does not track buffs yet).
+fn teleport(p: &mut Player, target: (i32, i32), ctx: &mut CastContext, net: &mut crate::net::Net, terrain: Option<&LoadedTerrain>) -> bool {
+    if ctx.inv.picked.is_some() {
+        return false;
+    }
+    if ctx.skills.prior == NOVA {
+        ctx.skills.prior = crate::skills::skill::TELEPORT;
+        if net.connected() {
+            net.send(ClientMessage::TargetedSkill { skill: NOVA, target: ctx.hero_key.0 });
+        }
+        set_action(p, ids::PLAYER_SKILL_HELL_BEGIN as usize);
+        return false;
+    }
+    if p.action == ids::PLAYER_SKILL_TELEPORT as usize || !p.fade.can_teleport() {
         return false;
     }
     let Some(t) = terrain else { return false };
@@ -1647,7 +1919,42 @@ mod tests {
         assert!(magic_allowed(&mut last, 17, t));
         assert!(!magic_allowed(&mut last, 17, t + Duration::from_millis(200)));
         assert!(magic_allowed(&mut last, 40, t + Duration::from_millis(250)), "Nova is never throttled");
+        assert!(magic_allowed(&mut last, 263, t + Duration::from_millis(260)), "nor Chain Drive");
+        assert!(magic_allowed(&mut last, 261, t + Duration::from_millis(270)), "nor Dark Side");
+        assert!(!magic_allowed(&mut last, 58, t + Duration::from_millis(280)), "Nova's charge is");
         assert!(magic_allowed(&mut last, 17, t + Duration::from_millis(600)));
+    }
+
+    /// Nova (MuMain ClassAttack.cpp:1162-1183): the charge goes to the hero with
+    /// `PLAYER_SKILL_HELL_BEGIN`, the release with `PLAYER_SKILL_HELL_START`; wizards only, at any range.
+    #[test]
+    fn nova_plan() {
+        let begin = plan(NOVA_BEGIN, Class::Wizard).unwrap();
+        assert_eq!(begin.send, Send::Nova { begin: true });
+        assert_eq!(begin.anim, Anim::Action(ids::PLAYER_SKILL_HELL_BEGIN));
+        let release = plan(NOVA, Class::Gladiator).unwrap();
+        assert_eq!(release.send, Send::Nova { begin: false });
+        assert_eq!(release.anim, Anim::Action(ids::PLAYER_SKILL_HELL_START));
+        assert_eq!((release.range_k, release.walk, release.face), (0.0, false, false));
+        assert!(plan(NOVA, Class::Elf).is_none());
+        assert!(!allowed_in_safe_zone(NOVA) && !allowed_in_safe_zone(NOVA_BEGIN));
+    }
+
+    /// `DeadCharacter` with `m_byDieType == AT_SKILL_NOVA`: the corpse slides away from its killer,
+    /// slower every tick, and stops.
+    #[test]
+    fn nova_corpse_is_thrown_away() {
+        // The killer straight to the -Y side of the corpse: the corpse faces it (`CreateAngle` 0)
+        // and goes toward +Y.
+        let angle = crate::fx::core::create_angle(0.0, 0.0, 0.0, -100.0);
+        // rand() 2 and 7: `Velocity` 1.2, `Direction[1]` 47.
+        let mut k = Knock::new(2, 7, angle, true);
+        assert!((k.velocity - 1.2).abs() < 1e-5 && k.direction == 47.0, "{k:?}");
+        let first = k.tick();
+        assert!((first.y - 45.8).abs() < 1e-3 && first.x.abs() < 1e-3, "{first:?}");
+        let total: Vec2 = first + (1..14).map(|_| k.tick()).sum::<Vec2>();
+        assert!(total.y > 200.0 && total.y < 300.0, "{total:?}");
+        assert_eq!(k.tick(), Vec2::ZERO, "it has stopped");
     }
 
     #[test]
@@ -1696,6 +2003,10 @@ mod tests {
         assert!((attack_play_speed(ids::PLAYER_ATTACK_SWORD_RIGHT1 as usize).unwrap() - (0.25 + 0.1)).abs() < 1e-5);
         assert!((attack_play_speed(ids::PLAYER_SKILL_HAND1 as usize).unwrap() - (0.29 + 0.1)).abs() < 1e-5);
         assert!(attack_play_speed(ids::PLAYER_STOP_MALE as usize).is_none());
+        // Nova (MuMain ZzzCharacter.cpp:1002, 1064): the charge follows the magic speed, the release
+        // does not.
+        assert!((attack_play_speed(ids::PLAYER_SKILL_HELL_BEGIN as usize).unwrap() - (0.50 + 0.1)).abs() < 1e-5);
+        assert!((attack_play_speed(ids::PLAYER_SKILL_HELL_START as usize).unwrap() - 0.30).abs() < 1e-5);
     }
 
     #[test]

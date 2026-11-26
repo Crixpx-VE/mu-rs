@@ -255,6 +255,11 @@ pub fn step(
     }
     casts.retain(|c| c.live);
 
+    // `MoveCharacterVisual` (MuMain ZzzCharacter.cpp:5559): what characters create around themselves.
+    for (&e, a) in actors.map.iter() {
+        super::kinds::skills_magic::character_visual(e, a, &mut ctx);
+    }
+
     // Weapon trails (`MoveBlurs`).
     for b in world_blurs.iter_mut() {
         b.age();
