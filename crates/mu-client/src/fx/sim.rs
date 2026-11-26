@@ -45,9 +45,6 @@ pub struct FxWorld {
     pub models: super::model_data::ModelData,
     /// `CharacterAttribute->Skill[]`: the hero's skills by slot, once the client knows them.
     pub hero_skills: Vec<i32>,
-    /// Damage requests the hero's projectiles send (`AttackCharacterRange`); combat.rs sends them as
-    /// `AreaSkillHit`. Kept to the last 64.
-    pub attack_requests: Vec<AttackRequest>,
     /// `CharacterMachine->PacketSerial` (see [`Ctx::packet_serial`]).
     pub packet_serial: u8,
     /// `Hero->CurrentSkill` (the selected slot), kept up to date by skills.rs.
@@ -193,7 +190,6 @@ pub fn step(
         sounds,
         models,
         hero_skills,
-        attack_requests,
         packet_serial,
         hero_current_skill,
         actor_requests,
@@ -218,7 +214,6 @@ pub fn step(
         registry,
         models,
         hero_skills,
-        attack_requests,
         packet_serial,
         hero_current_skill: *hero_current_skill,
         actor_requests,
@@ -329,8 +324,6 @@ pub fn step(
             _ => {}
         }
     }
-    let overflow = ctx.attack_requests.len().saturating_sub(64);
-    ctx.attack_requests.drain(..overflow);
     // Nobody applies them without the game (tests, other scenes): keep a bound.
     let overflow = ctx.actor_requests.len().saturating_sub(256);
     ctx.actor_requests.drain(..overflow);

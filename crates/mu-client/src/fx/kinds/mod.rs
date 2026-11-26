@@ -11,8 +11,8 @@
 //! `HeadAngle`, an effect's `EyeLeft`), the buffs the server reports (buffs.rs), `m_sTargetIndex`
 //! of the Rage Fighter skills, the hero's attack/magic speeds, the terrain light and render level
 //! while drawing, and the changes to characters that have a channel (`ActorChange`: the tornado
-//! spin, `SetPlayerStop`) are in. MuMain's `AttackCharacterRange` is an empty stub; the hits are
-//! kept (Main 5.2) because OpenMU still takes them (`AreaSkillHitHandlerPlugIn`).
+//! spin, `SetPlayerStop`) are in. `AttackCharacterRange` is MuMain's empty stub: the client never
+//! reports area hits, the server finds them (no client can choose its victims).
 //!
 //! What remains is marked `TODO(original)` in the kinds:
 //! - left for later on purpose: Castle Siege, Kanturu, Crywolf and other event or server state

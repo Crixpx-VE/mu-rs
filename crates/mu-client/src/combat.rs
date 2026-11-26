@@ -6,7 +6,8 @@
 //! `ReceiveDie`, `ReceiveDieExp`, `ReceiveLife`, `ReceiveMana`, `ReceiveRevival`), with
 //! `CreatePoint`/`MovePoints`/`RenderPoints` (ZzzEffectPoint.cpp) for the numbers.
 //!
-//! The client only *asks* (`Hit`, `TargetedSkill`, `AreaSkill`, `AreaSkillHit`); damage, mana, AG,
+//! The client only *asks* (`Hit`, `TargetedSkill`, `AreaSkill`); it never says whom an area skill
+//! hit (MuMain stubs `AttackCharacterRange`: the server finds the targets); damage, mana, AG,
 //! life and deaths come from the server, as in the original. The hero's own skill effects start
 //! when the server echoes the skill (`ReceiveMagic` / `ReceiveMagicContinue` set `AttackTime = 1`),
 //! like the original; the animation starts at once on the click.
@@ -52,7 +53,7 @@ impl Plugin for CombatPlugin {
             .add_systems(FixedUpdate, (move_points, (dying_tick, fade_tick).chain()).run_if(in_state(GameScene::Game)))
             .add_systems(
                 Update,
-                (stats_from_server, server_combat, hero_action, hero_cast, send_attack_requests)
+                (stats_from_server, server_combat, hero_action, hero_cast)
                     .chain()
                     .after(crate::character::HeroWalk)
                     .run_if(in_state(GameScene::Game)),
@@ -235,8 +236,6 @@ pub struct HeroAttack {
     sword_count: u32,
     /// `g_byLastSkillSerialNumber` (1..50, ZzzInterface.cpp:4626-4637).
     serial: u8,
-    /// The serial each area skill was last cast with (`o->m_bySkillSerialNum`), for its hits.
-    area_serials: HashMap<u16, u8>,
     /// `g_dwLatestMagicTick`.
     last_magic: Option<Instant>,
     rng: Rng,
@@ -1358,7 +1357,6 @@ fn cast_skill(
             let dest = if dest { dest_value(hero_tile, target_tile) } else { 0 };
             let key = if summon_target { target.map_or(0xFFFF, |t| t.key) } else if target_key { tkey(target) } else { 0xFFFF };
             let serial = if serial { attack.next_serial() } else { 0 };
-            attack.area_serials.insert(skill, serial);
             if connected {
                 net.send(ClientMessage::AreaSkill {
                     skill,
@@ -1440,27 +1438,6 @@ fn send_walk(net: &mut crate::net::Net, path: &[(usize, usize)]) {
     let directions: Vec<u8> = tiles.windows(2).filter_map(|w| mu_protocol::game::direction_between(w[0], w[1])).collect();
     if let (Some(&(sx, sy)), Some(&first)) = (tiles.first(), directions.first()) {
         net.send(ClientMessage::Walk { source_x: sx, source_y: sy, rotation: first, directions });
-    }
-}
-
-/// `AttackCharacterRange` → `SendRequestMagicAttack(Skill, x, y, Serial, Count, Key, SkillSerial)`
-/// (ZzzEffect.cpp:170-185, wsclientinline.h:583-600): the hits the hero's effects found.
-fn send_attack_requests(mut world: ResMut<crate::fx::FxWorld>, mut attack: ResMut<HeroAttack>, mut net: ResMut<crate::net::Net>) {
-    if world.attack_requests.is_empty() {
-        return;
-    }
-    for r in std::mem::take(&mut world.attack_requests) {
-        let skill = r.skill.max(0) as u16;
-        // The packet's serial is a fresh `MakeSkillSerialNumber(&Serial)`, which overwrites the
-        // effect's `Serial` (`r.serial`, its `o->Weapon = PacketSerial`) with the next global one
-        // (ZzzInterface.cpp:4628-4637); each target carries the serial the skill was cast with
-        // (`o->m_bySkillSerialNum`).
-        let serial = attack.next_serial();
-        let skill_serial = attack.area_serials.get(&skill).copied().unwrap_or(0);
-        let targets = r.keys.iter().map(|&k| (k as u16, skill_serial)).collect();
-        if net.connected() {
-            net.send(ClientMessage::AreaSkillHit { skill, x: r.x.clamp(0, 255) as u8, y: r.y.clamp(0, 255) as u8, serial, targets });
-        }
     }
 }
 

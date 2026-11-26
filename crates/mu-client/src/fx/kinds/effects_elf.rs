@@ -1629,17 +1629,14 @@ mod tests {
         assert!(has_particle(&world, BITMAP_EXPLOTION), "no explosion");
     }
 
-    /// The hero's arrow (`Kind` 1, owner = Hero) asks for the damage with `AttackCharacterRange`
-    /// and stops with a hit sound; the holy arrow (it does not move its `Position`) also explodes
-    /// (ZzzEffect.cpp:6896-6901).
+    /// The hero's arrow (`Kind` 1, owner = Hero) only stops on a hit `AttackCharacterRange` reports,
+    /// and MuMain's never reports one (ZzzEffect.cpp:118-121, 5726): the server decides the damage
+    /// and the arrow flies on past the monster.
     #[test]
-    fn hero_holy_arrow_hits_explodes_and_sounds() {
+    fn hero_holy_arrow_flies_on_past_the_monster() {
         let (actors, hero) = scene(Some(HERO_AT.y - 50.0));
         let mut world = shoot(MODEL_ARROW_HOLY, 1, 1, hero);
-        assert!(run(&mut world, &actors, 30).is_some(), "the holy arrow must hit");
-        assert!(has_particle(&world, BITMAP_EXPLOTION), "no explosion");
-        assert!(world.sounds.iter().any(|s| s.id().starts_with("SOUND_ATTACK_MISSILE_HIT")), "{:?}", world.sounds);
-        assert!(world.attack_requests.iter().any(|r| r.keys == vec![MONSTER_KEY]));
+        assert_eq!(run(&mut world, &actors, 5), None, "the hero's arrow does not stop on the monster");
     }
 
     /// The same holy arrow shot by someone else (`Kind` 0, SubType 1) stops without exploding.
@@ -1660,7 +1657,5 @@ mod tests {
         assert_eq!(run(&mut world, &actors, 12), None, "the piercing arrow must not stop");
         let e = world.effects.iter().find(|e| e.id == 1).expect("alive");
         assert!(e.position.y < HERO_AT.y - 500.0, "{:?}", e.position);
-        // It did hit the monster on the way (and started the `AttackPoint[0]` countdown).
-        assert!(world.attack_requests.iter().any(|r| r.skill == AT_SKILL_PIERCING && r.keys == vec![MONSTER_KEY]));
     }
 }

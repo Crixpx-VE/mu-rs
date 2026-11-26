@@ -131,8 +131,7 @@ fn check_client_arrow(e: &mut Effect, ctx: &mut Ctx) {
     // PKKey, AttackPoint[0]) (ZzzEffect.cpp:6773-6779; the result is unused). Its `Serial` never
     // reaches the packet (`MakeSkillSerialNumber` overwrites it, ZzzInterface.cpp:4628-4637), so
     // the hero's `Object.Weapon` is passed as 0. (MuMain's `AttackCharacterRange` is an empty stub,
-    // MuMain ZzzEffect.cpp:118-121; the hits are kept because OpenMU still takes them,
-    // AreaSkillHitHandlerPlugIn.cs.)
+    // MuMain ZzzEffect.cpp:118-121: nothing is reported, the server finds the hits.)
     if e.ty == MODEL_DARK_SCREAM {
         ctx.attack_character_range(ctx.hero_current_skill, e.position, 100.0, 0, e.pk_key);
     }

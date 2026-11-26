@@ -147,11 +147,11 @@ fn every_joint_kind_runs() {
 }
 
 /// Runs `f` with a `Ctx` over `actors` (hero = `hero`).
-fn with_ctx<R>(actors: &Actors, f: impl FnOnce(&mut Ctx) -> R) -> (R, Vec<AttackRequest>) {
+fn with_ctx<R>(actors: &Actors, f: impl FnOnce(&mut Ctx) -> R) -> R {
     let registry = registry();
     let mut world = FxWorld::default();
     let mut lights = TerrainLights::default();
-    let (mut spawns, mut deletes, mut requests) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut spawns, mut deletes) = (Vec::new(), Vec::new());
     let positions = std::collections::HashMap::new();
     let FxWorld { rng, sprites, earthquake, next_effect_id, sounds, models, packet_serial, actor_requests, .. } = &mut world;
     let mut ctx = Ctx {
@@ -173,15 +173,13 @@ fn with_ctx<R>(actors: &Actors, f: impl FnOnce(&mut Ctx) -> R) -> (R, Vec<Attack
         registry: &registry,
         models,
         hero_skills: &[],
-        attack_requests: &mut requests,
         packet_serial,
         hero_current_skill: 0,
         actor_requests,
         free: [10, 10, 10],
         depth: 0,
     };
-    let r = f(&mut ctx);
-    (r, requests)
+    f(&mut ctx)
 }
 
 fn character(kind: i32, key: i32, x: f32) -> Actor {
@@ -196,18 +194,18 @@ fn check_character_range_like_the_original() {
     actors.map.insert(monster, character(KIND_MONSTER, 7, 13000.0));
     let at = |x: f32| Vec3::new(x, 12800.0, 50.0);
     // A monster 50 away counts; 150 away does not.
-    assert!(with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, 0)).0);
-    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13150.0), None, 100.0, 0)).0);
+    assert!(with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, 0)));
+    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13150.0), None, 100.0, 0)));
     // Not the owner.
-    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), Some(Target::Actor(monster)), 100.0, 0)).0);
+    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), Some(Target::Actor(monster)), 100.0, 0)));
     // `Kind` skips that kind.
-    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, KIND_MONSTER)).0);
+    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, KIND_MONSTER)));
     // The hero (at 12800) only counts for `KIND_MONSTER` checks.
-    assert!(!with_ctx(&actors, |c| c.check_character_range(at(12810.0), None, 50.0, 0)).0);
-    assert!(with_ctx(&actors, |c| c.check_character_range(at(12810.0), None, 50.0, KIND_MONSTER)).0);
+    assert!(!with_ctx(&actors, |c| c.check_character_range(at(12810.0), None, 50.0, 0)));
+    assert!(with_ctx(&actors, |c| c.check_character_range(at(12810.0), None, 50.0, KIND_MONSTER)));
     // Dead characters do not count.
     actors.map.get_mut(&monster).unwrap().dead = true;
-    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, 0)).0);
+    assert!(!with_ctx(&actors, |c| c.check_character_range(at(13050.0), None, 100.0, 0)));
 }
 
 /// `SpinMonstersInTornado` (MuMain ZzzEffect.cpp:106-116): live, visible, not dying monsters in
@@ -220,26 +218,19 @@ fn spin_monsters_in_tornado_picks_the_monsters_in_reach() {
     actors.map.insert(far, character(KIND_MONSTER, 8, 13300.0));
     actors.map.insert(npc, character(KIND_NPC, 9, 13010.0));
     actors.map.insert(dead, Actor { dead: true, ..character(KIND_MONSTER, 10, 13020.0) });
-    let (spun, _) = with_ctx(&actors, |c| {
+    let spun = with_ctx(&actors, |c| {
         c.spin_monsters_in_tornado(Vec3::new(13050.0, 12800.0, 0.0), 150.0);
         c.actor_requests.clone()
     });
     assert_eq!(spun, vec![ActorRequest { actor: near, change: ActorChange::Spin }]);
 }
 
-/// `AttackCharacterRange` (ZzzEffect.cpp:108-189): monsters, or the player with the PK key.
+/// `AttackCharacterRange` (MuMain ZzzEffect.cpp:118-121): stubbed, the client never reports hits,
+/// not even with a monster right there.
 #[test]
-fn attack_character_range_collects_the_keys() {
+fn attack_character_range_reports_nothing() {
     let (mut actors, _) = actors();
     actors.map.insert(Entity::from_bits(1 << 32 | 5), character(KIND_MONSTER, 7, 13000.0));
-    actors.map.insert(Entity::from_bits(1 << 32 | 6), character(KIND_PLAYER, 9, 13010.0));
-    actors.map.insert(Entity::from_bits(1 << 32 | 8), character(KIND_NPC, 11, 13020.0));
     let at = Vec3::new(13000.0, 12800.0, 0.0);
-    let (hit, req) = with_ctx(&actors, |c| c.attack_character_range(0, at, 100.0, 3, -1));
-    assert!(hit);
-    assert_eq!(req, vec![AttackRequest { skill: 0, x: 130, y: 128, serial: 3, keys: vec![7] }]);
-    let (_, req) = with_ctx(&actors, |c| c.attack_character_range(0, at, 100.0, 3, 9));
-    assert_eq!(req[0].keys, vec![7, 9]);
-    let (hit, req) = with_ctx(&actors, |c| c.attack_character_range(0, at + Vec3::X * 500.0, 100.0, 3, -1));
-    assert!(!hit && req.is_empty());
+    assert!(!with_ctx(&actors, |c| c.attack_character_range(0, at, 100.0, 3, -1)));
 }

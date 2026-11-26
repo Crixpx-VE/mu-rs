@@ -715,20 +715,6 @@ impl EffectInfo {
     }
 }
 
-/// `SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)` that
-/// `AttackCharacterRange` would send (ZzzEffect.cpp:170-185). Collected for the combat protocol.
-#[derive(Clone, Debug, PartialEq)]
-pub struct AttackRequest {
-    /// `AT_SKILL_*`.
-    pub skill: i32,
-    /// Tile of the hit.
-    pub x: i32,
-    pub y: i32,
-    pub serial: i32,
-    /// `c->Key` of each character hit (at most 5).
-    pub keys: Vec<i32>,
-}
-
 /// A change the effects make to a character. The original writes `CharactersClient[]` directly;
 /// here actors are read-only snapshots, so the change is queued in [`Ctx::actor_requests`] and
 /// applied by the character systems (`fx::apply_actor_requests`).
@@ -820,8 +806,6 @@ pub struct Ctx<'a> {
     pub models: &'a mut super::model_data::ModelData,
     /// `CharacterAttribute->Skill[]`: the hero's skill list by slot (empty until the client gets it).
     pub hero_skills: &'a [i32],
-    /// `SendRequestMagicAttack` calls of this tick (`AttackCharacterRange`).
-    pub attack_requests: &'a mut Vec<AttackRequest>,
     /// `CharacterMachine->PacketSerial` (ZzzInfomation.h:68): a `BYTE` the hero's skills and some
     /// projectiles step and copy into `o->Weapon`, which becomes `AttackCharacterRange`'s `Serial`.
     pub packet_serial: &'a mut u8,
@@ -1149,49 +1133,15 @@ impl Ctx<'_> {
         usize::try_from(index).ok().and_then(|i| self.hero_skills.get(i)).copied().unwrap_or(0)
     }
 
-    /// `AttackCharacterRange(Index, Position, Range, Serial, PKKey, SkillSerialNum)`
-    /// (ZzzEffect.cpp:108-189): the hero's projectile hits up to 5 monsters (or the player whose
-    /// key is `pk_key`) within `range`; the request it would send is queued in
-    /// [`Ctx::attack_requests`]. Returns whether anything was hit.
-    pub fn attack_character_range(&mut self, index: i32, position: Vec3, range: f32, serial: i32, pk_key: i32) -> bool {
-        let skill = self.hero_skill(index);
-        // TODO(original): in Castle Siege during the battle (`InBattleCastle() &&
-        // IsBattleCastleStart()`, ZzzEffect.cpp:116-124) nothing is hit inside `TW_NOATTACKZONE`
-        // and players count as enemies (`DamageChr`). There is no siege state yet.
-        let damage_chr = false;
-        let mut keys = Vec::new();
-        for (e, o) in self.characters() {
-            if !o.live || !o.visible || Some(e) == self.hero || o.dead {
-                continue;
-            }
-            let (dx, dy) = (position.x - o.position.x, position.y - o.position.y);
-            let distance = (dx * dx + dy * dy).sqrt();
-            if distance <= range && (o.kind == KIND_MONSTER || (o.kind == KIND_PLAYER && (o.key == pk_key || damage_chr))) {
-                // Main 5.2 sets `c->StormTime = 10` here for Twister / Evil Spirit
-                // (ZzzEffect.cpp:142-158); MuMain does it in `SpinMonstersInTornado`, called by the
-                // tornado effects themselves ([`Ctx::spin_monsters_in_tornado`]).
-                keys.push(o.key);
-                if keys.len() >= 5 {
-                    break;
-                }
-            }
-        }
-        if keys.is_empty() {
-            return false;
-        }
-        // Multi Shot sends nothing (ZzzEffect.cpp:178-184).
-        if skill != AT_SKILL_MULTI_SHOT {
-            // SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)
-            // (ZzzEffect.cpp:172-182): combat.rs sends what is queued here as `AreaSkillHit`.
-            self.attack_requests.push(AttackRequest {
-                skill,
-                x: (position.x / 100.0) as i32,
-                y: (position.y / 100.0) as i32,
-                serial,
-                keys,
-            });
-        }
-        true
+    /// `AttackCharacterRange(Index, Position, Range, Serial, PKKey, SkillSerialNum)`: MuMain
+    /// (ZzzEffect.cpp:118-121) stubs it, `return false; // we don't send this packet anymore`. The
+    /// client no longer says whom its projectiles hit (Main 5.2 sent `SendRequestMagicAttack` with
+    /// up to 5 keys): the server works out the area hits itself, so a modified client cannot pick
+    /// its victims. OpenMU agrees: it only takes client hits for `AreaSkillExplicitHits` skills
+    /// (`AreaSkillHitAction.cs:19-25`), and none of its Season 6 skills is one.
+    /// The tornado spin Main 5.2 did here is `spin_monsters_in_tornado` (MuMain).
+    pub fn attack_character_range(&mut self, _index: i32, _position: Vec3, _range: f32, _serial: i32, _pk_key: i32) -> bool {
+        false
     }
 
     // --- Effect models (`Models[o->Type]`) ---------------------------------------------------------
