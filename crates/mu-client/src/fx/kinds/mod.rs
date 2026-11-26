@@ -4,24 +4,33 @@
 //! Coverage (Main 5.2 with the Rage Fighter code, as MuMain): every `case` type of
 //! `CreateParticle`/`MoveParticles` (98), `CreateJoint`/`MoveJoint` (31) and
 //! `CreateEffect`/`MoveEffect` (447) is registered; `fx::smoke_tests` runs them all.
-//! Client-side hits (`CheckCharacterRange`, `CheckClientArrow`, `CheckTargetRange`, the range
-//! test of `AttackCharacterRange`), effect models' own bones/vertices/action lengths, the
-//! `RENDER_*` modes and the per-map models are in. What remains is marked in the kinds and waits
-//! for systems outside the effects engine:
-//! - `TODO(combat)`: `CharacterMachine->PacketSerial` and `Object.Weapon` (the hits queued in
-//!   `FxWorld::attack_requests` are sent by combat.rs as `AreaSkillHit`; skills.rs fills
-//!   `FxWorld::hero_skills`);
-//! - data the client does not track yet (the plumbing reads it): buffs, `m_sTargetIndex`,
-//!   `m_bySkillCount`, attack/magic speed, a character owner's `LifeTime`, prior action/frame for
-//!   sub-frame poses, terrain light and the render-level option while drawing;
-//! - writes to characters (`o->Owner->Alpha/Angle/Velocity`, `SetPlayerStop`, shock actions):
-//!   actors are read-only snapshots;
-//! - object blurs on effects (`CreateObjectBlur`/`RemoveObjectBlurs`), water waves and water-surface
-//!   marks (`AddWaterWave`, `RenderWaterTerrain`), `StopBuffer`, positional sounds, Castle Siege and
-//!   Kanturu event state, joints or map objects as effect owners, `RenderPartObjectEdge` bone scale,
-//!   `RENDER_OIL` and `RENDER_DOPPELGANGER` culling;
-//! - `MODEL_BOSS_ATTACK`, `MODEL_BLOOD` and `MODEL_MONSTER01+64`: no `.bmd` is loaded for them in
-//!   either reference.
+//! Client-side hits (`CheckCharacterRange`, `CheckClientArrow`, `CheckTargetRange`,
+//! `AttackCharacterRange` with `CharacterMachine->PacketSerial` as `o->Weapon`), effect models' own
+//! bones/vertices/action lengths, the `RENDER_*` modes, the per-map models, sounds (`PlayBuffer`
+//! with an object, looping, `StopBuffer`), the targets' state (light, alpha, `StartPosition`,
+//! `HeadAngle`, an effect's `EyeLeft`), the buffs the server reports (buffs.rs), `m_sTargetIndex`
+//! of the Rage Fighter skills, the hero's attack/magic speeds, the terrain light and render level
+//! while drawing, and the changes to characters that have a channel (`ActorChange`: the tornado
+//! spin, `SetPlayerStop`) are in. MuMain's `AttackCharacterRange` is an empty stub; the hits are
+//! kept (Main 5.2) because OpenMU still takes them (`AreaSkillHitHandlerPlugIn`).
+//!
+//! What remains is marked `TODO(original)` in the kinds:
+//! - left for later on purpose: Castle Siege, Kanturu, Crywolf and other event or server state
+//!   (`battleCastle::*`, `IsMayaScene`, the catapult); water waves and water-surface marks
+//!   (`AddWaterWave`, `RenderWaterTerrain`); object blurs (`CreateObjectBlur`/`RemoveObjectBlurs`);
+//!   `MODEL_BOSS_ATTACK`, `MODEL_BLOOD` and `MODEL_MONSTER01+64` (no `.bmd` in either reference);
+//! - character state the client does not have: the monsters' eye/trail points (`EyeLeft`...,
+//!   filled by their draw code), `PriorAction`/`PriorAnimationFrame` for sub-frame poses, a
+//!   character's `LifeTime`, mounts and pets (`m_iChaIndex`, Fenrir), `getTargetCharacterKey`
+//!   (PvP, duel and guild-war state), `m_bySkillSerialNum` on trails, the frustum `Visible`;
+//! - character changes without a channel yet: `o->Owner->Alpha` (character materials have no
+//!   alpha), `o->Owner->Velocity`, `HiddenMesh` of a followed object, moving another effect;
+//! - engine gaps: joints or map objects as effect owners, the type of a followed effect, the
+//!   "dummy" effects' models animated by trails, some `DescribeJoint` / `RenderParticles` draw
+//!   details, texture sizes in the simulation, the effect being created as a target (its state
+//!   is only visible from the next tick);
+//! - the character side of skills that are not cast yet (arrows, the Rage Fighter skills, buffs
+//!   given by the casts, the monsters' own projectiles).
 
 pub mod common;
 pub mod particles_1;

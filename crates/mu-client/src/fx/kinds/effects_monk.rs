@@ -17,8 +17,9 @@
 //! action speeds of `SetAttackSpeed` (`ZzzCharacter.cpp` 893-901). MuMain (`MoveHandlers.cpp`) matches.
 //!
 //! Engine gaps (each one has a `TODO(original)` where it is used):
-//! - Writes to the owner (`o->Owner->Velocity += ..`): not possible on actor snapshots. The owner
-//!   angle shake of the wolf heads is reproduced locally (the original restores it in the same block).
+//! - `o->Owner->Velocity += ..`: there is no `ActorChange` for it (the client's characters have no
+//!   `o->Velocity` of their own, and the Rage Fighter skills are not cast yet). The owner angle
+//!   shake of the wolf heads is reproduced locally (the original restores it in the same block).
 //! - Where the original dereferences `o->Owner` without checking it (it would crash), a missing
 //!   owner character kills the effect.
 //! - The owner's pose at Dragon Kick's sub-frames (needs `PriorAction`/`PriorAnimationFrame`).
