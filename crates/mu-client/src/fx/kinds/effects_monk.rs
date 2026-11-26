@@ -151,14 +151,6 @@ fn ground_dir(ctx: &Ctx, pos: Vec3, from: Vec3) -> Vec3 {
     (p - f).normalize_or_zero()
 }
 
-/// `o->Owner->StartPosition` (set by `CMonkSystem` for the Dark Side dummies, MonkSystem.cpp:689/766;
-/// its owners are characters, MonkSystem.cpp:702/782).
-/// TODO(original): an effect owner's `StartPosition` is not visible to other effects; the drift
-/// direction then stays zero.
-fn owner_start_position(a: Option<&Actor>) -> Option<Vec3> {
-    a.map(|a| a.start_position)
-}
-
 /// `switch(rand()%3)`: `BITMAP_FIRE_HIK1` / `BITMAP_FIRE_CURSEDLICH` / `BITMAP_FIRE_HIK3` with the
 /// given subtypes.
 fn fire(ctx: &mut Ctx, pos: Vec3, angle: Vec3, light: Vec3, subs: [i32; 3], scale: f32) {
@@ -480,7 +472,7 @@ fn shockwave01_create(e: &mut Effect, ctx: &mut Ctx) {
         3 => {
             e.velocity = rage_speed(ctx, SPEED_DARKSIDE_READY) * 2.0;
             e.life_time = int_life(5.0 / e.velocity);
-            let from = owner_start_position(ctx.actor(e.owner));
+            let from = ctx.target_start_position(e.owner);
             let dir = from.map_or(Vec3::ZERO, |f| ground_dir(ctx, e.position, f)) * 30.0;
             e.start_position = dir;
             e.position += dir * 5.0;
@@ -488,7 +480,7 @@ fn shockwave01_create(e: &mut Effect, ctx: &mut Ctx) {
         4 => {
             e.velocity = 0.6;
             e.life_time = 12.0;
-            let from = owner_start_position(ctx.actor(e.owner));
+            let from = ctx.target_start_position(e.owner);
             let dir = from.map_or(Vec3::ZERO, |f| ground_dir(ctx, e.position, f)) * 30.0;
             e.start_position = dir;
             e.position += dir.normalize_or_zero() * 150.0;

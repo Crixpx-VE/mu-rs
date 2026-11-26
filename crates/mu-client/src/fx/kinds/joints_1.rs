@@ -190,10 +190,15 @@ enum Eye {
 
 /// `o->Target->EyeLeft`...
 fn eye(ctx: &Ctx, t: Option<Target>, which: Eye) -> Option<Vec3> {
-    // TODO(original): EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/SetTrailLeft/Right are
-    // filled by each specific monster's draw code; `Actor` does not have them yet (they are 0).
-    let _ = (ctx, t, which);
-    None
+    match (t?, which) {
+        // An effect's `EyeLeft` (the arrows and traces that set it; one that never set it is
+        // followed by its position, as before, instead of the map origin).
+        (Target::Effect(id), Eye::Left) => ctx.effect_state(id).map(|e| e.eye_left).filter(|p| *p != Vec3::ZERO),
+        // TODO(original): a character's EyeLeft/EyeRight/EyeLeft2/EyeRight2/EyeLeft3/EyeRight3/
+        // SetTrailLeft/Right are filled by each specific monster's draw code; `Actor` does not
+        // have them yet (they are 0). The other eyes of effects are not used by their trails.
+        _ => None,
+    }
 }
 
 /// `UpdateJointTargetPosition(o, eyePos)`: to the eye if it exists; otherwise to the target position.

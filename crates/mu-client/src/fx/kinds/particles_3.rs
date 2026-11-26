@@ -1053,8 +1053,10 @@ fn step_spark1(p: &mut Particle, ctx: &mut Ctx) {
             p.position = p.start_position + p.velocity;
             p.start_position = p.position;
             if p.sub_type == 4 {
-                // TODO(original): Position += Target->Position - Target->StartPosition (how far the
-                // emitting effect has moved); the Ctx does not expose effects' start positions.
+                // `Position += Target->Position - Target->StartPosition` (how far the emitter moved).
+                if let (Some(tp), Some(ts)) = (ctx.target_position(p.target), ctx.target_start_position(p.target)) {
+                    p.position += tp - ts;
+                }
             }
         }
         3 => p.scale *= 0.8,

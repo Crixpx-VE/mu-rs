@@ -404,6 +404,8 @@ pub struct Effect {
     pub start_position: Vec3,
     pub angle: Vec3,
     pub head_angle: Vec3,
+    /// `o->EyeLeft` (a point some effects keep for the trails that follow them).
+    pub eye_left: Vec3,
     pub direction: Vec3,
     pub light: Vec3,
     pub alpha: f32,
@@ -452,6 +454,7 @@ impl Effect {
             start_position: position,
             angle,
             head_angle: Vec3::ZERO,
+            eye_left: Vec3::ZERO,
             direction: Vec3::ZERO,
             light,
             alpha: 1.0,
@@ -680,6 +683,33 @@ pub struct EffectInfo {
     pub pk_key: i32,
     pub kind: i32,
     pub skill: i32,
+    pub light: Vec3,
+    pub alpha: f32,
+    pub start_position: Vec3,
+    pub head_angle: Vec3,
+    pub eye_left: Vec3,
+}
+
+impl EffectInfo {
+    pub fn of(e: &Effect) -> Self {
+        Self {
+            id: e.id,
+            ty: e.ty,
+            sub_type: e.sub_type,
+            owner: e.owner,
+            position: e.position,
+            angle: e.angle,
+            life_time: e.life_time,
+            pk_key: e.pk_key,
+            kind: e.kind,
+            skill: e.skill,
+            light: e.light,
+            alpha: e.alpha,
+            start_position: e.start_position,
+            head_angle: e.head_angle,
+            eye_left: e.eye_left,
+        }
+    }
 }
 
 /// `SendRequestMagicAttack(Skill, x, y, Serial, Count, DamageKey, SkillSerialNum)` that
@@ -877,6 +907,50 @@ impl Ctx<'_> {
 
     pub fn hero_actor(&self) -> Option<&Actor> {
         self.actors.get(&self.hero?)
+    }
+
+    /// The state of a live effect (`Effects[]` as the original reads it through `o->Target` /
+    /// `o->Owner`): as it was at the start of the tick, or as it was created during this tick.
+    /// `None` for the effect whose creation code is running (it is not in `Effects[]` yet here).
+    pub fn effect_state(&self, id: u32) -> Option<EffectInfo> {
+        self.effects.iter().find(|e| e.id == id).copied().or_else(|| {
+            self.spawns.iter().rev().find_map(|s| match s {
+                Spawn::Effect(e) if e.id == id => Some(EffectInfo::of(e)),
+                _ => None,
+            })
+        })
+    }
+
+    /// `o->Target->Light` / `o->Owner->Light`: a character's body light or an effect's light.
+    pub fn target_light(&self, t: Option<Target>) -> Option<Vec3> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.light),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.light),
+        }
+    }
+
+    /// `o->Target->Alpha`.
+    pub fn target_alpha(&self, t: Option<Target>) -> Option<f32> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.alpha),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.alpha),
+        }
+    }
+
+    /// `o->Target->StartPosition`.
+    pub fn target_start_position(&self, t: Option<Target>) -> Option<Vec3> {
+        match t? {
+            Target::Actor(e) => self.actors.get(&e).map(|a| a.start_position),
+            Target::Effect(id) => self.effect_state(id).map(|e| e.start_position),
+        }
+    }
+
+    /// `o->Target->Owner` of an effect target (characters have no owner here).
+    pub fn target_owner(&self, t: Option<Target>) -> Option<Target> {
+        match t? {
+            Target::Actor(_) => None,
+            Target::Effect(id) => self.effect_state(id)?.owner,
+        }
     }
 
     /// Position of the followed target (character or effect).

@@ -116,9 +116,10 @@ fn world_rot(ctx: &Ctx) -> f32 {
     (ctx.world_time() as i32) as f32 * 0.1
 }
 
-/// `o->EyeLeft` → `user[0..3]`. TODO(original): trails that follow `o` read `Target->EyeLeft`; the
-/// engine only exposes the effect's position to them.
+/// `o->EyeLeft` (also in `user[0..3]`, which this file reads); the trails that follow `o` read it
+/// through `Effect::eye_left`.
 fn set_eye_left(e: &mut Effect, p: Vec3) {
+    e.eye_left = p;
     e.user[0] = p.x;
     e.user[1] = p.y;
     e.user[2] = p.z;
@@ -766,8 +767,8 @@ fn holy_create(e: &mut Effect, ctx: &mut Ctx) {
     e.weapon = ctx.packet_serial();
 }
 
-/// ZzzEffect.cpp:11848; the common tail (18092) moves `StartPosition`, not `Position`.
-/// TODO(original): its trails follow `o->StartPosition`; the engine only exposes `Position`.
+/// ZzzEffect.cpp:11848; the common tail (18092) moves `StartPosition`, not `Position`. Its
+/// `BITMAP_FLARE` 11/25 trails follow that `StartPosition` (`Ctx::target_start_position`).
 fn holy_step(e: &mut Effect, ctx: &mut Ctx) {
     let lum = luminosity(e, ctx);
     if e.sub_type == 1 {

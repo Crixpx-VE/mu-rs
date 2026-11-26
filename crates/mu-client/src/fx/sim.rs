@@ -161,7 +161,7 @@ pub fn step(
     let effect_infos: Vec<EffectInfo> = world
         .effects
         .iter()
-        .map(|e| EffectInfo { id: e.id, ty: e.ty, sub_type: e.sub_type, owner: e.owner, position: e.position, angle: e.angle, life_time: e.life_time, pk_key: e.pk_key, kind: e.kind, skill: e.skill })
+        .map(EffectInfo::of)
         .collect();
     let mut deletes: Vec<Delete> = Vec::new();
     let pending: Vec<Spawn> = std::mem::take(&mut world.pending);
