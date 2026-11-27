@@ -150,20 +150,34 @@ pub fn dress_from_appearance(look: &Appearance, data: &ItemData, render_level: u
 
 /// What changes the stand and walk animations of a character dressed from its appearance.
 pub fn gear_from_appearance(look: &Appearance, data: &ItemData) -> Gear {
-    let weapons = [look_slot::WEAPON_RIGHT, look_slot::WEAPON_LEFT].map(|s| look.equipment[s].map(|v| appearance_item(&v)));
-    gear(weapons, look.equipment[look_slot::WING].is_some(), data)
+    let item = |s: usize| look.equipment[s].map(|v| appearance_item(&v));
+    let weapons = [look_slot::WEAPON_RIGHT, look_slot::WEAPON_LEFT].map(item);
+    let wing = item(look_slot::WING);
+    Gear {
+        wing: wing.map(|w| (w.group, w.index)),
+        gloves_level: item(look_slot::GLOVES).map(|i| i.level),
+        boots_level: item(look_slot::BOOTS).map(|i| i.level),
+        ..gear(weapons, wing.is_some(), data)
+    }
 }
 
 /// The same for the hero, from its inventory (`SetCharacterClass`, ZzzCharacter.cpp:11814-11841).
 fn gear_from_inventory(inv: &Inventory, data: &ItemData) -> Gear {
-    let weapons = [slot::WEAPON_RIGHT, slot::WEAPON_LEFT].map(|s| inv.equipment[s as usize]);
-    gear(weapons, inv.equipment[slot::WING as usize].is_some(), data)
+    let item = |s: u8| inv.equipment[s as usize];
+    let weapons = [slot::WEAPON_RIGHT, slot::WEAPON_LEFT].map(item);
+    let wing = item(slot::WING);
+    Gear {
+        wing: wing.map(|w| (w.group, w.index)),
+        gloves_level: item(slot::GLOVES).map(|i| i.level),
+        boots_level: item(slot::BOOTS).map(|i| i.level),
+        ..gear(weapons, wing.is_some(), data)
+    }
 }
 
 /// `ItemAttribute[Weapon[0].Type].TwoHand` is the only attribute `SetPlayerStop` / `SetPlayerWalk` read.
 pub fn gear(weapons: [Option<Item>; 2], wings: bool, data: &ItemData) -> Gear {
     let two_hand = weapons[0].and_then(|w| data.attr(&w)).is_some_and(|a| a.two_hand);
-    Gear { weapons, two_hand, wings }
+    Gear { weapons, two_hand, wings, ..Gear::default() }
 }
 
 #[allow(clippy::too_many_arguments)]

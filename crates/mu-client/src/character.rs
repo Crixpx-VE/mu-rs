@@ -98,8 +98,6 @@ pub fn facing_direction(facing: f32) -> u8 {
     (((deg + 22.5) / 360.0 * 8.0 + 1.0) as u32 % 8) as u8
 }
 
-/// Tiles per second when walking.
-const WALK_SPEED: f32 = 3.6;
 /// Animation frames per second.
 const ANIM_FPS: f32 = 8.0;
 
@@ -129,6 +127,80 @@ pub struct Gear {
     pub weapons: [Option<mu_data::items::Item>; 2],
     pub two_hand: bool,
     pub wings: bool,
+    /// `Wing.Type` as (group, index): some wings fly faster (`CharacterMoveSpeed`).
+    pub wing: Option<(u8, u16)>,
+    /// `BodyPart[BODYPART_GLOVES].Level` / `BodyPart[BODYPART_BOOTS].Level` (`None` = not worn):
+    /// at +5 or more the character runs (`SetPlayerWalk`, ZzzCharacter.cpp:536-539).
+    pub gloves_level: Option<u8>,
+    pub boots_level: Option<u8>,
+}
+
+/// `c->Run` from which a character runs (ZzzCharacter.cpp:689, 698, 712, 6348).
+pub const RUN_TICKS: f32 = 40.0;
+
+/// Atlans, Hellas and Doppelganger 3 (`WD_7ATLANSE`, `InHellas` = `WD_24HELLAS..=WD_24HELLAS_END`
+/// and `WD_24HELLAS_7`, `WD_67DOPPLEGANGER3`; MapManager.h:19-60, MapManager.cpp:1448-1457): outside
+/// a safe zone everyone swims, and the gloves instead of the boots make them run.
+pub fn swim_world(world: i32) -> bool {
+    world == 7 || (24..=29).contains(&world) || world == 36 || world == 67
+}
+
+/// `CMapManager::InChaosCastle` (MapManager.cpp:1413-1425).
+pub fn in_chaos_castle(world: i32) -> bool {
+    (18..=23).contains(&world) || world == 53
+}
+
+/// Whether walking makes `c->Run` grow (`SetPlayerWalk`, ZzzCharacter.cpp:532-552): outside a safe
+/// zone, the Magic Gladiator, Dark Lord and Rage Fighter always; the others with boots (gloves in
+/// the swimming maps) of +5 or more. `hero` is the hero's own equipment: the original also checks
+/// `CharacterMachine->Equipment` (the hero's boots and gloves) for every character (:540-545).
+/// TODO: Fenrir (`MODEL_HORN_OF_FENRIR`) also makes it grow; mounts are not tracked yet.
+pub fn run_grows(class: crate::account::Class, gear: &Gear, hero: &Gear, world: i32) -> bool {
+    use crate::account::Class;
+    let plus5 = |l: Option<u8>| l.is_some_and(|l| l >= 5);
+    let feet = |g: &Gear| if swim_world(world) { plus5(g.gloves_level) } else { plus5(g.boots_level) };
+    matches!(class, Class::Gladiator | Class::Lord | Class::Fighter) || feet(gear) || feet(hero)
+}
+
+/// `CharacterMoveSpeed` (ZzzCharacter.cpp:6293-6378) for a player without a mount: MU units per
+/// tick (100 per tile), and the `c->Run` it sets. With wings outside a safe zone 15 (16 for the
+/// Wings of Dragon and the Wing of Storm, `MODEL_WING+5` / `+36`), already running; otherwise 12
+/// walking and 15 running; Chaos Castle runs at 15. TODO: the mounts' speeds (Fenrir 15-19, Dark
+/// Horse 17, Uniria and Dinorant 15) and the Freeze / Blow of Destruction slowdowns.
+pub fn move_speed(gear: &Gear, run: &mut f32, safe_zone: bool, world: i32) -> f32 {
+    use mu_data::items::group::WING;
+    let mut speed = if gear.wings && !safe_zone {
+        *run = RUN_TICKS;
+        if matches!(gear.wing, Some((WING, 5 | 36))) { 16.0 } else { 15.0 }
+    } else if *run < RUN_TICKS {
+        12.0
+    } else {
+        15.0
+    };
+    if in_chaos_castle(world) {
+        *run = RUN_TICKS;
+        speed = 15.0;
+    }
+    speed
+}
+
+/// One frame of walking for `c->Run` and the speed: `SetPlayerWalk` every tick (`Run += 1` while
+/// it may grow, 0 in a safe zone), then `CharacterMoveSpeed`. Returns tiles per second.
+pub fn walk_step(
+    class: crate::account::Class,
+    gear: &Gear,
+    hero: &Gear,
+    run: &mut f32,
+    safe_zone: bool,
+    world: i32,
+    dt: f32,
+) -> f32 {
+    if safe_zone {
+        *run = 0.0;
+    } else if *run < RUN_TICKS && run_grows(class, gear, hero, world) {
+        *run = (*run + dt * crate::fx::sim::TICKS_PER_SECOND).min(RUN_TICKS);
+    }
+    move_speed(gear, run, safe_zone, world) * crate::fx::sim::TICKS_PER_SECOND / MU_SCALE
 }
 
 impl Gear {
@@ -155,11 +227,18 @@ impl Gear {
     }
 }
 
-/// `SetPlayerStop` (ZzzCharacter.cpp:233-361) for a player without a mount.
+/// `SetPlayerStop` (ZzzCharacter.cpp:308-470) for a player without a mount, away from the
+/// swimming maps (character select).
 pub fn stand_action(class: crate::account::Class, gear: &Gear, safe_zone: bool) -> usize {
+    stand_action_at(class, gear, safe_zone, -1)
+}
+
+/// `SetPlayerStop` on map `world` (`WorldActive`): in the swimming maps it floats outside a safe
+/// zone like a flier (ZzzCharacter.cpp:370-371).
+pub fn stand_action_at(class: crate::account::Class, gear: &Gear, safe_zone: bool, world: i32) -> usize {
     use crate::fx::tables::ids;
     use mu_data::items::group::*;
-    if gear.flies(safe_zone) {
+    if gear.flies(safe_zone) || (swim_world(world) && !safe_zone) {
         let a = if gear.bow() == Some(true) { ids::PLAYER_STOP_FLY_CROSSBOW } else { ids::PLAYER_STOP_FLY };
         return a as usize;
     }
@@ -184,17 +263,28 @@ pub fn stand_action(class: crate::account::Class, gear: &Gear, safe_zone: bool) 
     a as usize
 }
 
-/// `SetPlayerWalk` (ZzzCharacter.cpp:576-662) for a player without a mount, walking (`Run` < 40).
-/// TODO: running (`c->Run` >= 40, `PLAYER_RUN*`, ZzzCharacter.cpp:418-440 and 663-718) is not ported.
+/// `SetPlayerWalk` (ZzzCharacter.cpp:676-818) for a player without a mount, walking (`Run` < 40),
+/// away from the swimming maps.
 pub fn walk_action_with(class: crate::account::Class, gear: &Gear, safe_zone: bool) -> usize {
+    walk_action_at(class, gear, safe_zone, -1, false)
+}
+
+/// `SetPlayerWalk` on map `world`, `running` once `c->Run` reached 40 (ZzzCharacter.cpp:676-818).
+pub fn walk_action_at(class: crate::account::Class, gear: &Gear, safe_zone: bool, world: i32, running: bool) -> usize {
     use crate::fx::tables::ids;
     use mu_data::items::group::*;
     if gear.flies(safe_zone) {
         let a = if gear.bow() == Some(true) { ids::PLAYER_FLY_CROSSBOW } else { ids::PLAYER_FLY };
         return a as usize;
     }
+    if swim_world(world) && !safe_zone {
+        return if running { ids::PLAYER_RUN_SWIM } else { ids::PLAYER_WALK_SWIM } as usize;
+    }
     if !gear.armed(safe_zone) {
-        return walk_action(class);
+        return if running { ids::PLAYER_RUN as usize } else { walk_action(class) };
+    }
+    if running {
+        return run_action(class, gear);
     }
     let a = match gear.weapons[0].map(|w| (w.group, w.index)) {
         Some((SWORD..=MACE, _)) if !gear.two_hand => ids::PLAYER_WALK_SWORD,
@@ -210,6 +300,31 @@ pub fn walk_action_with(class: crate::account::Class, gear: &Gear, safe_zone: bo
             Some(false) => ids::PLAYER_WALK_BOW,
             Some(true) => ids::PLAYER_WALK_CROSSBOW,
             None => return walk_action(class),
+        },
+    };
+    a as usize
+}
+
+/// `SetPlayerWalk` running with a weapon (ZzzCharacter.cpp:762-815).
+fn run_action(class: crate::account::Class, gear: &Gear) -> usize {
+    use crate::fx::tables::ids;
+    use mu_data::items::group::*;
+    let melee = |w: Option<mu_data::items::Item>| w.is_some_and(|w| (SWORD..=MACE).contains(&w.group));
+    let a = match gear.weapons[0].map(|w| (w.group, w.index)) {
+        Some((SWORD..=MACE, _)) if melee(gear.weapons[1]) => {
+            if class == crate::account::Class::Fighter { ids::PLAYER_RUN } else { ids::PLAYER_RUN_TWO_SWORD }
+        }
+        Some((SWORD..=MACE, _)) if !gear.two_hand => ids::PLAYER_RUN_SWORD,
+        // `MODEL_DARK_REIGN_BLADE`, `MODEL_EXPLOSION_BLADE`, `MODEL_SWORD_DANCER`, `MODEL_RUNE_BLADE`.
+        Some((SWORD, 21 | 23 | 25 | 31)) => ids::PLAYER_RUN_TWO_HAND_SWORD_TWO,
+        Some((SWORD..=MACE, _)) => ids::PLAYER_RUN_TWO_HAND_SWORD,
+        Some((STAFF, 14..=20)) => ids::PLAYER_RUN_WAND,
+        Some((STAFF, _)) if !gear.two_hand => ids::PLAYER_RUN_SWORD,
+        Some((STAFF, _)) | Some((SPEAR, _)) => ids::PLAYER_RUN_SPEAR,
+        _ => match gear.bow() {
+            Some(false) => ids::PLAYER_RUN_BOW,
+            Some(true) => ids::PLAYER_RUN_CROSSBOW,
+            None => ids::PLAYER_RUN,
         },
     };
     a as usize
@@ -256,10 +371,20 @@ pub fn play_speed(a: usize) -> f32 {
     } else if (ids::PLAYER_WALK_MALE..=ids::PLAYER_WALK_CROSSBOW).contains(&a) {
         0.33
     } else if a == ids::PLAYER_WALK_WAND {
-        // `SetPlayerWalk` (ZzzCharacter.cpp:490).
+        // `SetPlayerWalk` (ZzzCharacter.cpp:597).
         0.44
-    } else if a == ids::PLAYER_FLY || a == ids::PLAYER_FLY_CROSSBOW || a == ids::PLAYER_WALK_TWO_HAND_SWORD_TWO {
-        // `PLAYER_WALK_MALE..=PLAYER_RUN_RIDE_WEAPON` at 0.3 (ZzzOpenData.cpp:340-341, 373).
+    } else if a == ids::PLAYER_RUN_WAND {
+        // ZzzCharacter.cpp:598.
+        0.76
+    } else if a == ids::PLAYER_WALK_SWIM {
+        // ZzzOpenData.cpp:144 (outside the range `SetPlayerWalk` sets).
+        0.35
+    } else if (ids::PLAYER_RUN..=ids::PLAYER_RUN_RIDE_WEAPON).contains(&a) {
+        // The runs, the swim run and the flights: 0.34 from the first `SetPlayerWalk`
+        // (ZzzCharacter.cpp:574-579), which rewrites the shared model's speeds.
+        0.34
+    } else if a == ids::PLAYER_WALK_TWO_HAND_SWORD_TWO || a == ids::PLAYER_RUN_TWO_HAND_SWORD_TWO {
+        // ZzzOpenData.cpp:173, 373.
         0.3
     } else if a == ids::PLAYER_HEALING1 || a == ids::PLAYER_HEALING_FEMALE1 {
         0.2
@@ -273,9 +398,21 @@ pub fn play_speed(a: usize) -> f32 {
     }
 }
 
-/// Animation speed in frames per second.
-fn action_fps(a: usize) -> f32 {
-    play_speed(a) * crate::fx::sim::TICKS_PER_SECOND
+/// [`play_speed`] for a character of `class`: `SetPlayerWalk` gives the Rage Fighter's walks 0.32
+/// and its runs and flights 0.28 (ZzzCharacter.cpp:557-580; the original writes them into the
+/// shared model, so the last character to walk decides for everyone).
+pub fn play_speed_for(class: crate::account::Class, a: usize) -> f32 {
+    use crate::fx::tables::ids;
+    let i = a as i32;
+    if class == crate::account::Class::Fighter {
+        if (ids::PLAYER_WALK_MALE..=ids::PLAYER_WALK_CROSSBOW).contains(&i) {
+            return 0.32;
+        }
+        if (ids::PLAYER_RUN..=ids::PLAYER_RUN_RIDE_WEAPON).contains(&i) && i != ids::PLAYER_RUN_WAND {
+            return 0.28;
+        }
+    }
+    play_speed(a)
 }
 
 /// The mouse drives the character (to order the systems that read what is under the mouse).
@@ -331,6 +468,8 @@ pub struct Player {
     pub fade: crate::combat::Fade,
     /// `o->m_bySkillCount`: the Nova stage the server reported (combat.rs).
     pub skill_count: u8,
+    /// `c->Run`: ticks walked toward running ([`walk_step`]); back to 0 when it stops.
+    pub run: f32,
 }
 
 /// `JumpTime` after `ReceiveMovePosition` (C1 15, WSclient.cpp:1673): the tile changes at once
@@ -958,6 +1097,7 @@ fn spawn_player(
         // WSclient.cpp:1325, 2475), so it fades in (`Alpha(o)`).
         fade: crate::combat::Fade::appearing(),
         skill_count: 0,
+        run: 0.0,
     };
     let actor = actor_state(&player, &skinned, &bones, terrain.as_deref());
     let shadow = crate::shadow::spawn(&mut commands, &mut meshes, &shadow_material);
@@ -1550,8 +1690,10 @@ pub(crate) fn raycast_terrain(t: &mu_data::terrain::Terrain, ray: Ray3d) -> Opti
     None
 }
 
+#[allow(clippy::too_many_arguments)]
 fn walk(
     time: Res<Time>,
+    args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     operates: Res<crate::operate::Operates>,
     mut sound: ResMut<crate::sound::SoundQueue>,
@@ -1568,7 +1710,15 @@ fn walk(
             jump = None;
         }
         let had_path = !p.path.is_empty();
-        let mut budget = WALK_SPEED * time.delta_secs();
+        let world = args.world as i32 - 1;
+        let mut budget = if had_path {
+            let (class, gear, safe) = (p.class, p.gear, in_safe_zone(p.pos, terrain.as_deref()));
+            walk_step(class, &gear, &gear, &mut p.run, safe, world, time.delta_secs()) * time.delta_secs()
+        } else {
+            // `SetPlayerStop` (ZzzCharacter.cpp:310).
+            p.run = 0.0;
+            0.0
+        };
         while budget > 0.0 {
             let Some(&(nx, ny)) = p.path.front() else { break };
             let target = Vec2::new(nx as f32 + 0.5, ny as f32 + 0.5);
@@ -1588,7 +1738,9 @@ fn walk(
             }
         }
         let safe = in_safe_zone(p.pos, terrain.as_deref());
-        (p.stop, p.walk) = (stand_action(p.class, &p.gear, safe), walk_action_with(p.class, &p.gear, safe));
+        let running = p.run >= RUN_TICKS;
+        (p.stop, p.walk) =
+            (stand_action_at(p.class, &p.gear, safe, world), walk_action_at(p.class, &p.gear, safe, world, running));
         // Sitting or leaning stays until walking again; an emote, until it ends (`animate`).
         let action = if !p.path.is_empty() {
             p.walk
@@ -1650,15 +1802,8 @@ fn animate(
     for (entity, mut p, s, mut actor, shadow) in &mut q {
         weapon_blur(entity, &p, s, terrain.as_deref(), &mut world, *render_frame);
         let before = p.frame;
-        // `SetPlayerWalk`: the Rage Fighter walks at 0.32 instead of 0.33.
-        // `SetPlayerWalk` (ZzzCharacter.cpp:444-451): only `PLAYER_WALK_MALE..=PLAYER_WALK_CROSSBOW`.
         use crate::fx::tables::ids;
-        let walking = (ids::PLAYER_WALK_MALE as usize..=ids::PLAYER_WALK_CROSSBOW as usize).contains(&p.action);
-        let fps = if p.class == crate::account::Class::Fighter && p.action == p.walk && walking {
-            0.32 * crate::fx::sim::TICKS_PER_SECOND
-        } else {
-            action_fps(p.action)
-        };
+        let fps = play_speed_for(p.class, p.action) * crate::fx::sim::TICKS_PER_SECOND;
         p.frame += p.casting.unwrap_or(fps) * time.delta_secs();
         if p.action == p.walk && !flying(p.action) {
             footsteps(&p, before, s, terrain.as_deref(), args.world as i32 - 1, &mut sound);
@@ -1763,7 +1908,7 @@ mod tests {
         let two_handed = |w: &Item| matches!((w.group, w.index), (0, 21) | (0, 18) | (3, 5) | (5, 10));
         let gear = |r: Option<(u8, u16)>, l: Option<(u8, u16)>| {
             let weapons = [r.map(|(g, i)| Item::new(g, i)), l.map(|(g, i)| Item::new(g, i))];
-            Gear { weapons, two_hand: weapons[0].is_some_and(|w| two_handed(&w)), wings: false }
+            Gear { weapons, two_hand: weapons[0].is_some_and(|w| two_handed(&w)), ..Gear::default() }
         };
         let stand = |class, r, l| stand_action(class, &gear(r, l), false) as i32;
         assert_eq!(stand(Class::Knight, None, None), ids::PLAYER_STOP_MALE);
@@ -1801,6 +1946,58 @@ mod tests {
         assert_eq!(walk_action_with(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_FLY_CROSSBOW as usize);
         assert_eq!(stand_action(Class::Elf, &winged(Some((4, 9))), false), ids::PLAYER_STOP_FLY_CROSSBOW as usize);
         assert_eq!(walk_action_with(Class::Knight, &winged(None), true), ids::PLAYER_WALK_MALE as usize);
+
+        // Running (`c->Run` >= 40, ZzzCharacter.cpp:762-815) and swimming (:687-693).
+        let run = |class, r, l| walk_action_at(class, &gear(r, l), false, 0, true) as i32;
+        assert_eq!(run(Class::Knight, None, None), ids::PLAYER_RUN);
+        assert_eq!(run(Class::Knight, Some((0, 1)), None), ids::PLAYER_RUN_SWORD);
+        assert_eq!(run(Class::Knight, Some((0, 1)), Some((0, 2))), ids::PLAYER_RUN_TWO_SWORD);
+        assert_eq!(run(Class::Fighter, Some((0, 1)), Some((0, 2))), ids::PLAYER_RUN);
+        assert_eq!(run(Class::Knight, Some((0, 21)), None), ids::PLAYER_RUN_TWO_HAND_SWORD_TWO);
+        assert_eq!(run(Class::Knight, Some((0, 18)), None), ids::PLAYER_RUN_TWO_HAND_SWORD);
+        assert_eq!(run(Class::Knight, Some((3, 2)), None), ids::PLAYER_RUN_SPEAR);
+        assert_eq!(run(Class::Wizard, Some((5, 10)), None), ids::PLAYER_RUN_SPEAR);
+        assert_eq!(run(Class::Summoner, Some((5, 14)), None), ids::PLAYER_RUN_WAND);
+        assert_eq!(run(Class::Elf, None, Some((4, 3))), ids::PLAYER_RUN_BOW);
+        assert_eq!(walk_action_at(Class::Knight, &gear(None, None), false, 7, false), ids::PLAYER_WALK_SWIM as usize);
+        assert_eq!(walk_action_at(Class::Knight, &gear(None, None), false, 7, true), ids::PLAYER_RUN_SWIM as usize);
+        assert_eq!(stand_action_at(Class::Knight, &gear(None, None), false, 7), ids::PLAYER_STOP_FLY as usize);
+        assert_eq!(stand_action_at(Class::Knight, &gear(None, None), true, 7), ids::PLAYER_STOP_MALE as usize);
+    }
+
+    /// `c->Run` and `CharacterMoveSpeed` (ZzzCharacter.cpp:532-552, 6293-6378).
+    #[test]
+    fn running() {
+        use crate::account::Class;
+        let plain = Gear::default();
+        // A Dark Knight without +5 boots walks at 12 forever; with them it runs at 15 after 40 ticks.
+        let mut run = 0.0;
+        for _ in 0..100 {
+            let tiles_per_s = walk_step(Class::Knight, &plain, &plain, &mut run, false, 0, 0.04);
+            assert!((tiles_per_s - 3.0).abs() < 1e-4);
+        }
+        let boots = Gear { boots_level: Some(5), ..plain };
+        let mut run = 0.0;
+        let speeds: Vec<f32> = (0..45).map(|_| walk_step(Class::Knight, &boots, &plain, &mut run, false, 0, 0.04)).collect();
+        assert!((speeds[38] - 3.0).abs() < 1e-4 && (speeds[44] - 3.75).abs() < 1e-4, "{speeds:?}");
+        // The Magic Gladiator always gets there; a safe zone starts over.
+        let mut run = 0.0;
+        for _ in 0..40 {
+            walk_step(Class::Gladiator, &plain, &plain, &mut run, false, 0, 0.04);
+        }
+        assert_eq!(run, RUN_TICKS);
+        walk_step(Class::Gladiator, &plain, &plain, &mut run, true, 0, 0.04);
+        assert_eq!(run, 0.0);
+        // Wings: 15 at once, 16 for the Wings of Dragon; in a safe zone they walk.
+        let wings = |i| Gear { wings: true, wing: Some((12, i)), ..plain };
+        let mut run = 0.0;
+        assert!((walk_step(Class::Knight, &wings(1), &plain, &mut run, false, 0, 0.04) - 3.75).abs() < 1e-4);
+        assert!((walk_step(Class::Knight, &wings(5), &plain, &mut run, false, 0, 0.04) - 4.0).abs() < 1e-4);
+        let mut run = 0.0;
+        assert!((walk_step(Class::Knight, &wings(5), &plain, &mut run, true, 0, 0.04) - 3.0).abs() < 1e-4);
+        // In the swimming maps the gloves count instead of the boots.
+        assert!(run_grows(Class::Knight, &Gear { gloves_level: Some(7), ..plain }, &plain, 7));
+        assert!(!run_grows(Class::Knight, &boots, &plain, 7));
     }
 
     /// A dual-wielding Dark Knight (testgmDk: 0/19 and 0/22) with its swords on the back: both stay

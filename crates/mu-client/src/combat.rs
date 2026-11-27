@@ -2060,7 +2060,7 @@ mod tests {
         let with = |item: Item, wings: bool| {
             let mut w = [None, None];
             if item.index >= 8 { w[0] = Some(item) } else { w[1] = Some(item) }
-            Gear { weapons: w, two_hand: false, wings }
+            Gear { weapons: w, two_hand: false, wings, ..Gear::default() }
         };
         let bow = with(Item::new(4, 0), false);
         let crossbow = with(Item::new(4, 8), true);
@@ -2147,7 +2147,7 @@ mod tests {
     #[test]
     fn attack_actions() {
         use mu_data::items::Item;
-        let gear = |r: Option<Item>, l: Option<Item>, two: bool| Gear { weapons: [r, l], two_hand: two, wings: false };
+        let gear = |r: Option<Item>, l: Option<Item>, two: bool| Gear { weapons: [r, l], two_hand: two, ..Gear::default() };
         assert_eq!(player_attack_action(&gear(None, None, false), 0, 0), ids::PLAYER_ATTACK_FIST as usize);
         let sword = Some(Item::new(0, 1));
         assert_eq!(player_attack_action(&gear(sword, None, false), 1, 0), ids::PLAYER_ATTACK_SWORD_RIGHT1 as usize + 1);

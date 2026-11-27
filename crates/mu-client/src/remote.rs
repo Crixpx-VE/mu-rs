@@ -99,6 +99,8 @@ pub struct RemotePlayer {
     pub(crate) fade: crate::combat::Fade,
     /// `o->m_bySkillCount`: its Nova stage (combat.rs).
     pub(crate) skill_count: u8,
+    /// `c->Run` (`character::walk_step`).
+    run: f32,
 }
 
 impl RemotePlayer {
@@ -155,13 +157,14 @@ impl RemotePlayer {
     }
 
     /// `SetPlayerStop`: unarmed in a safe zone; outside, flying with wings or by its weapons.
-    fn stop_for(&self, safe_zone: bool) -> usize {
-        crate::character::stand_action(self.class, &self.gear, safe_zone)
+    fn stop_for(&self, safe_zone: bool, world: i32) -> usize {
+        crate::character::stand_action_at(self.class, &self.gear, safe_zone, world)
     }
 
-    /// `SetPlayerWalk`, the same way.
-    fn walk_for(&self, safe_zone: bool) -> usize {
-        crate::character::walk_action_with(self.class, &self.gear, safe_zone)
+    /// `SetPlayerWalk`, the same way, running once `c->Run` reached 40.
+    fn walk_for(&self, safe_zone: bool, world: i32) -> usize {
+        let running = self.run >= crate::character::RUN_TICKS;
+        crate::character::walk_action_at(self.class, &self.gear, safe_zone, world, running)
     }
 }
 
@@ -171,9 +174,6 @@ fn weapons_on_back(action: usize, safe_zone: bool) -> bool {
     use crate::fx::tables::ids;
     safe_zone || (ids::PLAYER_GREETING1 as usize..=ids::PLAYER_SALUTE1 as usize).contains(&action)
 }
-
-/// Tiles per second when walking (same as the player).
-const WALK_SPEED: f32 = 3.6;
 
 #[allow(clippy::too_many_arguments)]
 fn apply(
@@ -214,7 +214,7 @@ fn apply(
                     let class = Class::from_index(game::base_class_index(look.class));
                     let gear = crate::hero_dress::gear_from_appearance(&look, &data);
                     let safe = crate::character::in_safe_zone(Vec2::new(c.x as f32, c.y as f32), Some(&terrain));
-                    let stand = crate::character::stand_action(class, &gear, safe);
+                    let stand = crate::character::stand_action_at(class, &gear, safe, args.world as i32 - 1);
                     let dress = crate::hero_dress::dress_from_appearance(&look, &data, opts.render_level);
                     let Some(model) = crate::character::load_character_dressed(&args, class, stand, Some(&dress), &mut meshes, &mut materials, &mut images)
                     else {
@@ -246,6 +246,7 @@ fn apply(
                         sword_count: 0,
                         fade: Default::default(),
                         skill_count: 0,
+                        run: 0.0,
                     };
                     // `case 1: CreateTeleportEnd(o)` (MuMain WSclient.cpp:2804-2809): it just teleported.
                     if look.pose == 1 {
@@ -328,7 +329,8 @@ fn apply(
                 match crate::character::action::for_at(action, r.class.female()) {
                     Some(a) => {
                         // `SetAction` does not restart the current action.
-                        let a = a.unwrap_or(r.stop_for(crate::character::in_safe_zone(r.pos, Some(&terrain))));
+                        let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
+                        let a = a.unwrap_or(r.stop_for(safe, args.world as i32 - 1));
                         if a != r.action {
                             r.action = a;
                             r.frame = 0.0;
@@ -370,7 +372,7 @@ fn apply(
                 // Standing, it takes the stand of its new gear (`SetPlayerStop` runs every tick).
                 r.gear = crate::hero_dress::gear_from_appearance(&r.look, &data);
                 if crate::character::action::standing(r.action) {
-                    r.action = r.stop_for(crate::character::in_safe_zone(r.pos, Some(&terrain)));
+                    r.action = r.stop_for(crate::character::in_safe_zone(r.pos, Some(&terrain)), args.world as i32 - 1);
                 }
                 r.materials = model.materials;
                 r.light = Vec3::splat(-1.0);
@@ -411,11 +413,16 @@ fn remote_transform(r: &RemotePlayer, terrain: &LoadedTerrain) -> Transform {
 
 fn walk(
     time: Res<Time>,
+    args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut commands: Commands,
     mut q: Query<(Entity, &mut RemotePlayer, &mut Transform, Option<&mut crate::character::Jump>)>,
+    heroes: Query<&crate::character::Player>,
 ) {
     let Some(terrain) = terrain else { return };
+    let world = args.world as i32 - 1;
+    // `SetPlayerWalk` also reads the hero's own boots and gloves for every character.
+    let hero_gear = heroes.iter().next().map(|p| p.gear).unwrap_or_default();
     for (entity, mut r, mut tf, jump) in &mut q {
         // A new walk ends the glide (it starts from the tile).
         if let Some(mut j) = jump {
@@ -432,7 +439,15 @@ fn walk(
                 }
             }
         }
-        let mut budget = WALK_SPEED * time.delta_secs();
+        let mut budget = if r.path.is_empty() {
+            // `SetPlayerStop` (ZzzCharacter.cpp:310).
+            r.run = 0.0;
+            0.0
+        } else {
+            let (class, gear, safe) = (r.class, r.gear, crate::character::in_safe_zone(r.pos, Some(&terrain)));
+            let dt = time.delta_secs();
+            crate::character::walk_step(class, &gear, &hero_gear, &mut r.run, safe, world, dt) * dt
+        };
         while budget > 0.0 {
             let Some(&(nx, ny)) = r.path.front() else { break };
             let target = Vec2::new(nx as f32 + 0.5, ny as f32 + 0.5);
@@ -458,11 +473,11 @@ fn walk(
             || r.action == crate::fx::tables::ids::PLAYER_DIE1 as usize;
         let safe = crate::character::in_safe_zone(r.pos, Some(&terrain));
         let action = if !r.path.is_empty() {
-            r.walk_for(safe)
+            r.walk_for(safe, world)
         } else if keep {
             r.action
         } else {
-            r.stop_for(safe)
+            r.stop_for(safe, world)
         };
         if action != r.action {
             r.action = action;
@@ -476,6 +491,7 @@ fn walk(
 #[allow(clippy::type_complexity)]
 pub(crate) fn animate(
     time: Res<Time>,
+    args: Res<Args>,
     terrain: Option<Res<LoadedTerrain>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ModelMaterial>>,
@@ -489,11 +505,12 @@ pub(crate) fn animate(
     mut visibility: Query<&mut Visibility, Without<RemotePlayer>>,
 ) {
     let Some(terrain) = terrain else { return };
+    let world = args.world as i32 - 1;
     for (mut r, skinned, shadow, selectable, actor) in &mut q {
         use crate::fx::tables::ids::PLAYER_SKILL_HELL_BEGIN;
         let nova_charge = r.action == PLAYER_SKILL_HELL_BEGIN as usize;
         // `CharacterAnimation` halves the Nova charge (MuMain ZzzCharacter.cpp:2483-2486).
-        let speed = crate::character::play_speed(r.action) * if nova_charge { 0.5 } else { 1.0 };
+        let speed = crate::character::play_speed_for(r.class, r.action) * if nova_charge { 0.5 } else { 1.0 };
         r.frame += speed * crate::fx::sim::TICKS_PER_SECOND * time.delta_secs();
         // An emote ends: standing (`PlayerStopAnimationSetting`). Same for an action `player.bmd`
         // lacks (any number from the server).
@@ -509,7 +526,7 @@ pub(crate) fn animate(
                 r.frame = 0.0;
             }
         } else if frames == 0.0 || (ends && r.frame >= frames - 1.0) {
-            r.action = r.stop_for(safe);
+            r.action = r.stop_for(safe, world);
             r.frame = 0.0;
         }
         let ground = terrain.0.height_at(r.pos.x, r.pos.y);
