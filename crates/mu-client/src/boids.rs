@@ -147,6 +147,9 @@ struct Part {
     entity: Entity,
     mesh_index: usize,
     texture: i16,
+    /// Texture script `_R`: the mesh is its own `BlendMesh`, drawn additive (`IsMeshGlowing`,
+    /// `RenderScriptedMesh`, ZzzBMD.cpp:2628-2639). Elbeland's tornado (`wind_R`) is one.
+    bright: bool,
     mesh: Handle<Mesh>,
     material: Handle<ModelMaterial>,
 }
@@ -171,7 +174,9 @@ fn spawn_body(
         .spawn((Name::new(name), Transform::default(), Visibility::Hidden, crate::scene::WorldEntity))
         .with_children(|p| {
             for (mi, tex) in model.textures.iter().enumerate() {
-                if mi as i32 == model.hidden_mesh {
+                let script = bmd::texture_script(&model.bmd.meshes[mi].texture);
+                // `IsMeshHidden` (ZzzBMD.cpp:2622): `HiddenMesh` or texture script `_H`.
+                if mi as i32 == model.hidden_mesh || script.is_some_and(|s| s.hidden) {
                     continue;
                 }
                 let posed = model.bmd.pose(mi, 0, 0);
@@ -193,7 +198,8 @@ fn spawn_body(
                 };
                 let material = materials.add(model_material(base, ModelLight::unlit()));
                 let entity = p.spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone()))).id();
-                parts.push(Part { entity, mesh_index: mi, texture: model.bmd.meshes[mi].texture_index, mesh, material });
+                let bright = script.is_some_and(|s| s.bright);
+                parts.push(Part { entity, mesh_index: mi, texture: model.bmd.meshes[mi].texture_index, bright, mesh, material });
             }
         })
         .id();
@@ -629,7 +635,7 @@ pub(crate) fn draw_objs(
         if body.shown != Some(key) {
             body.shown = Some(key);
             for part in &body.parts {
-                let additive = o.blend_mesh <= -2 || (o.blend_mesh >= 0 && part.texture as i32 == o.blend_mesh);
+                let additive = part.bright || o.blend_mesh <= -2 || (o.blend_mesh >= 0 && part.texture as i32 == o.blend_mesh);
                 // With alpha < 1 the original blends with an alpha test (> 0.25): below that it's invisible.
                 let show = additive || alpha >= 0.99 || alpha > crate::objects::ALPHA_REF;
                 if let Ok((_, mut vis)) = q.get_mut(part.entity) {

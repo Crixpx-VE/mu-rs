@@ -765,8 +765,10 @@ fn server_combat(
                 };
                 let Some(pos) = pos else { continue };
                 // `if (MonsterIndex == 275) ...; else if (rand() % 2 == 0) SetPlayerShock(c, Damage)`;
-                // `SetPlayerShock` only acts with `Hit > 0` (ZzzCharacter.cpp:1256-1347).
-                if !is_hero && attack.rng.rand() % 2 == 0 && *damage > 0 {
+                // `SetPlayerShock` only acts with `Hit > 0`, and never on a dying character
+                // (`if (c->Dead > 0) return`, ZzzCharacter.cpp:1387-1402): a late hit would make
+                // the corpse get up and fall again.
+                if !is_hero && attack.rng.rand() % 2 == 0 && *damage > 0 && !dying.0.contains_key(&key) {
                     if let Some((_, mo)) = monsters.iter().find(|(_, m)| m.key == key) {
                         if mo.number != 275 {
                             monsters_orders.set_action(key, MonsterAction::Shock);
