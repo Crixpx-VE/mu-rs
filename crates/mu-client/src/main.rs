@@ -34,6 +34,7 @@ mod charselect;
 mod chat;
 mod chat_log;
 mod clipboard;
+mod cloth;
 mod buffs;
 mod combat;
 mod cursor;
@@ -290,6 +291,7 @@ fn main() {
         .add_plugins(minimap::MiniMapPlugin)
         .add_plugins((move_window::MoveWindowPlugin, map_fade::MapFadePlugin))
         .add_plugins(gate::GatePlugin)
+        .add_plugins(cloth::ClothPlugin)
         .add_plugins(names::NamesPlugin)
         .add_plugins(chat::ChatPlugin)
         .add_plugins(char_info::CharInfoPlugin)

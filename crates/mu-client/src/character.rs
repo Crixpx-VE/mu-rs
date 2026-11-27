@@ -465,6 +465,10 @@ pub struct Skinned {
     /// `o->WeaponLevel` (ZzzCharacter.cpp:3953-3985, 4220-4221) and the effects draw
     /// (`RenderWheelWeapon`, `RenderFuryStrike`, ZzzEffect.cpp:18182, 18212).
     right_weapon: Option<mu_data::items::Item>,
+    /// What decides its cloth capes (`UpdateCloakCloth`), `None` for whole-body models.
+    cloak: Option<crate::cloth::CloakGear>,
+    /// The bones of the last [`Skinned::pose`] (the cloth hangs from them).
+    last_bones: std::sync::Mutex<Arc<Vec<bmd::Mat34>>>,
 }
 
 /// A model drawn on a bone of the character (`RenderLinkObject`, ZzzCharacter.cpp:6401-6790): a
@@ -526,7 +530,14 @@ impl Skinned {
                 }
             }
         }
+        *self.last_bones.lock().unwrap_or_else(|e| e.into_inner()) = Arc::new(bones.clone());
         bones
+    }
+
+    /// The bones of the last pose and what decides the cloth capes (cloth.rs).
+    pub fn cloak(&self) -> Option<(crate::cloth::CloakGear, Arc<Vec<bmd::Mat34>>)> {
+        let bones = self.last_bones.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        self.cloak.map(|g| (g, bones))
     }
 
     /// Carries a weapon (for the sword trail).
@@ -831,8 +842,15 @@ pub fn load_character_dressed(
         Some(d) => d.weapons[0].as_ref().map(|(_, item)| *item),
         None => weapons.iter().find(|w| w.hand == 0).map(|w| w.item),
     };
+    // `CloakOf` (ZzzCharacter.cpp:9001-9013) needs a player-shaped character: not a whole-body model.
+    let cloak = whole_body.is_none().then(|| crate::cloth::CloakGear {
+        class,
+        wing: dress.and_then(|d| d.wing.as_ref()).map(|(_, item)| (item.group, item.index)),
+        class_armor: dress.is_none_or(|d| d.parts[1].is_none() && d.class_parts[1].is_none()),
+    });
+    let last_bones = std::sync::Mutex::new(std::sync::Arc::new(bones.clone()));
     Some(CharacterModel {
-        skinned: Skinned { skeleton, parts, models, weapons, wing, right_weapon },
+        skinned: Skinned { skeleton, parts, models, weapons, wing, right_weapon, cloak, last_bones },
         children,
         materials: body_materials,
         bones,
@@ -865,8 +883,7 @@ fn drawn_weapon(item: &mu_data::items::Item) -> bool {
 
 /// Wings `RenderLinkObject` draws: the capes made of cloth (`MODEL_HELPER+30`, `MODEL_WING+49`,
 /// `MODEL_WING+135` and `MODEL_WING+130`, ZzzCharacter.cpp:6418-6427) return at once; they are drawn
-/// by `RenderCloth` (ZzzCharacter.cpp:9340-9470). TODO: the cloth capes are not ported yet (nor the
-/// cloth part of the Cape of Emperor and the Cloak of Overrule).
+/// as cloth only (cloth.rs, with the cloth part of the Cape of Emperor and the Cloak of Overrule).
 fn drawn_wing(item: &mu_data::items::Item) -> bool {
     use mu_data::items::group::*;
     !matches!((item.group, item.index), (HELPER, 30) | (WING, 49 | 130 | 135))

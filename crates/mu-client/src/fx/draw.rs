@@ -156,7 +156,7 @@ pub fn mu_to_bevy(v: Vec3) -> Vec3 {
 }
 
 /// Original color (multiplied in sRGB) → linear. Like `PackABGR`, clamped to [0, 1].
-fn linear(c: [f32; 4]) -> [f32; 4] {
+pub(crate) fn linear(c: [f32; 4]) -> [f32; 4] {
     let f = |v: f32| v.clamp(0.0, 1.0).powf(2.2);
     [f(c[0]), f(c[1]), f(c[2]), c[3].clamp(0.0, 1.0)]
 }

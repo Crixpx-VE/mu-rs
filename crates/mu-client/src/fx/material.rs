@@ -12,7 +12,7 @@
 //! | `LightMap`  | `EnableLightMap`         | ZERO, SRC_COLOR (multiply)             | write       |
 //! | `Shadow`    | `RenderBodyShadow`       | SRC_ALPHA, ONE_MINUS_SRC_ALPHA         | write, never paints the same point twice |
 //!
-//! Back-face culling is always off (the original disables it in almost every mode).
+//! Back-face culling is off (the original disables it in almost every mode) unless `cull_back`.
 //!
 //! Per-material overrides used by `BMD::RenderMesh` (ZzzBMD.cpp:937-1354, see `models.rs`):
 //! - `untextured`: `DisableTexture` (`RENDER_COLOR`, `RENDER_BRIGHT` without `RENDER_TEXTURE`): the
@@ -95,11 +95,22 @@ pub struct FxMaterial {
     pub depth_write: Option<bool>,
     /// `DisableDepthTest`: always passes the depth test.
     pub no_depth_test: bool,
+    /// `EnableCullFace`: back faces are not drawn. Only `DisableAlphaBlend` turns it on
+    /// (ZzzOpenglUtil.cpp:272-282); the cloth drawn that way uses it (cloth.rs).
+    pub cull_back: bool,
 }
 
 impl FxMaterial {
     pub fn new(texture: Option<Handle<Image>>, blend: Blend) -> Self {
-        Self { params: FxParams::default(), texture, blend, untextured: false, depth_write: None, no_depth_test: false }
+        Self {
+            params: FxParams::default(),
+            texture,
+            blend,
+            untextured: false,
+            depth_write: None,
+            no_depth_test: false,
+            cull_back: false,
+        }
     }
 
     /// Whether this material writes depth.
@@ -115,11 +126,18 @@ pub struct FxMaterialKey {
     untextured: bool,
     depth_write: bool,
     no_depth_test: bool,
+    cull_back: bool,
 }
 
 impl From<&FxMaterial> for FxMaterialKey {
     fn from(m: &FxMaterial) -> Self {
-        Self { blend: m.blend, untextured: m.untextured, depth_write: m.writes_depth(), no_depth_test: m.no_depth_test }
+        Self {
+            blend: m.blend,
+            untextured: m.untextured,
+            depth_write: m.writes_depth(),
+            no_depth_test: m.no_depth_test,
+            cull_back: m.cull_back,
+        }
     }
 }
 
@@ -158,7 +176,7 @@ impl Material for FxMaterial {
         use bevy::render::render_resource::CompareFunction;
         let k = key.bind_group_data;
         let blend = k.blend;
-        descriptor.primitive.cull_mode = None;
+        descriptor.primitive.cull_mode = k.cull_back.then_some(bevy::render::render_resource::Face::Back);
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(k.depth_write);
             if blend == Blend::Shadow {
