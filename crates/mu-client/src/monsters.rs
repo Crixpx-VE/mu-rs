@@ -811,6 +811,7 @@ fn actor_state(m: &Monster, bones: &[bmd::Mat34], height: f32) -> crate::fx::Act
         dead: m.dead,
         light: m.light.max(Vec3::ZERO),
         velocity: m.play_speed(),
+        bbox_max: Vec3::from_array(bounding_box(m.def).1),
         ..Default::default()
     }
 }

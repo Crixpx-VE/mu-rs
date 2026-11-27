@@ -140,6 +140,9 @@ pub struct Actor {
     pub skill_count: u8,
     /// `c->SafeZone`.
     pub safe_zone: bool,
+    /// `o->BoundingBoxMax`: `PlayerBoxMax` (40, 40, 120) for players, the model's box for
+    /// monsters (ZzzCharacter.cpp:12728-12733).
+    pub bbox_max: Vec3,
 }
 
 impl Default for Actor {
@@ -170,6 +173,7 @@ impl Default for Actor {
             buffs: Arc::new(Vec::new()),
             skill_count: 0,
             safe_zone: false,
+            bbox_max: Vec3::new(40.0, 40.0, 120.0),
         }
     }
 }

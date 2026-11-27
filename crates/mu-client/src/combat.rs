@@ -811,7 +811,20 @@ fn server_combat(
                     .and_then(|e| monsters.get(e).map(|(_, m)| m.pos).ok().or_else(|| remotes.get(e).map(|(_, r)| r.position()).ok()))
                     .unwrap_or_default();
                 let caster = if src == hero_key.0 {
-                    heroes.iter().next().map(|(e, _)| e)
+                    // The cases of `ReceiveMagic` that set the action for the hero too (on foot): the
+                    // Dark Lord's strikes (WSclient.cpp:4432-4467, 4631-4646) and hand skills
+                    // (4648-4665, 4860-4877). The others are already playing from `cast_skill`.
+                    let a = match *skill {
+                        60 | 61 | 66 | 74 => Some(ids::PLAYER_ATTACK_STRIKE),
+                        64 | 75 => Some(ids::PLAYER_SKILL_HAND1),
+                        _ => None,
+                    };
+                    heroes.iter_mut().next().map(|(e, mut p)| {
+                        if let Some(a) = a {
+                            set_action(&mut p, a as usize);
+                        }
+                        e
+                    })
                 } else if let Some((e, mut r)) = remotes.iter_mut().find(|(_, r)| r.id == src) {
                     if let Some(a) = remote_magic_action(*skill, r.class(), attack.rng.rand()) {
                         r.set_action(a);
@@ -1041,7 +1054,7 @@ pub fn remote_magic_action(skill: u16, class: Class, rand: i32) -> Option<usize>
         43 | 460..=464 => ids::PLAYER_ATTACK_DEATHSTAB,
         44 => ids::PLAYER_ATTACK_RUSH,
         73 => ids::PLAYER_ATTACK_DEATH_CANNON,
-        60 | 61 | 74 | 520..=524 | 78 | 525..=529 => ids::PLAYER_ATTACK_STRIKE,
+        60 | 61 | 66 | 74 | 520..=524 | 78 | 525..=529 => ids::PLAYER_ATTACK_STRIKE,
         48 | 470..=474 | 67 | 69 | 70 | 72 => ids::PLAYER_SKILL_VITALITY,
         68 | 71 => ids::PLAYER_ATTACK_REMOVAL,
         64 | 75 => ids::PLAYER_SKILL_HAND1,
